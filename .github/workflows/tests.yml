@@ -1,0 +1,198 @@
+# ==============================================================================
+# TESTS
+# ==============================================================================
+name: Tests
+
+# ==============================================================================
+# TRIGGERS
+# ==============================================================================
+on:
+    push:
+        branches: [ master ]
+    pull_request:
+        types: [ opened, synchronize, reopened, ready_for_review ]
+    workflow_dispatch:
+
+# ==============================================================================
+# CONCURRENCY
+# ==============================================================================
+concurrency:
+    group: tests-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+# ==============================================================================
+# PERMISSIONS
+# ==============================================================================
+permissions:
+    contents: read
+    id-token: write
+
+# ==============================================================================
+# DEFAULTS
+# ==============================================================================
+defaults:
+    run:
+        shell: bash
+
+jobs:
+
+    # ==========================================================================
+    # JOB: PHP TESTS
+    # ==========================================================================
+    php:
+        name: Test / PHP ${{ matrix.php }}
+        runs-on: ubuntu-latest
+
+        strategy:
+            fail-fast: false
+            matrix:
+                php: [ 8.3, 8.4, 8.5 ]
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            -   name: Setup PHP
+                uses: sinemacula/.github/.github/actions/setup-php@v1.13.0
+                with:
+                    php-version: ${{ matrix.php }}
+
+            -   name: PHPUnit
+                run: composer test:coverage
+
+            -   name: Publish code coverage
+                if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.php == '8.3' }}
+                uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2
+                with:
+                    oidc: true
+                    files: clover.xml
+
+    # ==========================================================================
+    # JOB: LARAVEL TESTS
+    # ==========================================================================
+    laravel:
+        name: Test / Laravel ${{ matrix.laravel.label }}
+        runs-on: ubuntu-latest
+
+        strategy:
+            fail-fast: false
+            matrix:
+                laravel:
+                    -   constraint: ^12.40
+                        label: 12
+                    -   constraint: ^13.3
+                        label: 13
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            -   name: Setup PHP
+                uses: sinemacula/.github/.github/actions/setup-php@v1.13.0
+                with:
+                    php-version: 8.3
+
+            -   name: Pin Laravel version
+                env:
+                    LARAVEL_CONSTRAINT: ${{ matrix.laravel.constraint }}
+                run: composer update --with="laravel/framework:${LARAVEL_CONSTRAINT}" --prefer-dist --no-interaction --no-progress
+
+            -   name: PHPUnit
+                run: composer test
+
+    # ==========================================================================
+    # JOB: DATABASE TESTS (MySQL + PostgreSQL)
+    # ==========================================================================
+    integration:
+        name: Integration / ${{ matrix.database }}
+        runs-on: ubuntu-latest
+
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    -   database: mysql
+                        image: mysql:8.4
+                        db_driver: mysql
+                        db_port: 3306
+                        db_username: root
+                        db_password: password
+                        data_dir: /var/lib/mysql
+                        health_cmd: mysqladmin ping -h 127.0.0.1
+                    -   database: pgsql
+                        image: postgres:17
+                        db_driver: pgsql
+                        db_port: 5432
+                        db_username: postgres
+                        db_password: password
+                        data_dir: /var/lib/postgresql/data
+                        health_cmd: pg_isready -h 127.0.0.1 -U postgres -d laravel_audit_log_test
+
+        # One service per leg. Declaring both starts both on every leg, so each
+        # was pulling and booting an engine it never connects to. Each image
+        # ignores the other's variables, so one block configures either. Both
+        # probes go over the loopback address rather than a socket, since an
+        # engine that initialises behind a temporary local server answers a
+        # socket probe before the server the tests will actually reach is up.
+        # The data directory is held in memory: the database is thrown away
+        # with the job, so syncing every write to disk only slows the tests.
+        services:
+            database:
+                image: ${{ matrix.image }}
+                env:
+                    MYSQL_ROOT_PASSWORD: password
+                    MYSQL_DATABASE: laravel_audit_log_test
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: password
+                    POSTGRES_DB: laravel_audit_log_test
+                ports:
+                    - ${{ matrix.db_port }}:${{ matrix.db_port }}
+                options: >-
+                    --tmpfs ${{ matrix.data_dir }}
+                    --health-cmd="${{ matrix.health_cmd }}"
+                    --health-interval=10s
+                    --health-timeout=5s
+                    --health-retries=5
+                    --health-start-period=30s
+                    --health-start-interval=5s
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            -   name: Setup PHP
+                uses: sinemacula/.github/.github/actions/setup-php@v1.13.0
+                with:
+                    php-version: 8.3
+                    extensions: pdo_mysql, pdo_pgsql
+
+            # Tests create, empty and drop the same tables, so each paratest
+            # worker runs against a database of its own, which the test case
+            # creates from its TEST_TOKEN. The performance suite times its
+            # timeboxes, so it runs on its own, serially, as it does locally.
+            -   name: Database Tests
+                env:
+                    DB_CONNECTION: ${{ matrix.db_driver }}
+                    DB_HOST: 127.0.0.1
+                    DB_PORT: ${{ matrix.db_port }}
+                    DB_DATABASE: laravel_audit_log_test
+                    DB_USERNAME: ${{ matrix.db_username }}
+                    DB_PASSWORD: ${{ matrix.db_password }}
+                run: vendor/bin/paratest --exclude-testsuite Performance
+
+            -   name: Database Performance Tests
+                env:
+                    DB_CONNECTION: ${{ matrix.db_driver }}
+                    DB_HOST: 127.0.0.1
+                    DB_PORT: ${{ matrix.db_port }}
+                    DB_DATABASE: laravel_audit_log_test
+                    DB_USERNAME: ${{ matrix.db_username }}
+                    DB_PASSWORD: ${{ matrix.db_password }}
+                run: vendor/bin/phpunit --testsuite Performance
+

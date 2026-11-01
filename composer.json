@@ -1,0 +1,136 @@
+{
+    "name": "sinemacula/laravel-audit-log",
+    "type": "library",
+    "description": "Event-driven audit logging of user activity for Laravel 12 and 13: automatic capture of authentication events, a manual capture API, and a pluggable store with a database default.",
+    "keywords": [
+        "sine macula",
+        "laravel",
+        "audit",
+        "audit log",
+        "activity log"
+    ],
+    "license": "Apache-2.0",
+    "authors": [
+        {
+            "name": "Ben Carey",
+            "email": "bdmc@sinemacula.co.uk"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^12.40|^13.3"
+    },
+    "require-dev": {
+        "brianium/paratest": "^7.20",
+        "doctrine/coding-standard": "^14.0",
+        "friendsofphp/php-cs-fixer": "^3.95.19",
+        "infection/infection": "^0.33.2",
+        "larastan/larastan": "^3.9",
+        "mockery/mockery": "^1.6",
+        "orchestra/testbench": "^10.2|^11.0",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpdoc-parser": "^2.3",
+        "phpstan/phpstan": "^2.1",
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "phpstan/phpstan-mockery": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "phpunit/phpunit": "^12.5",
+        "sinemacula/coding-standards-laravel": "^1.6.2",
+        "slevomat/coding-standard": "^8.28",
+        "squizlabs/php_codesniffer": "^3.13.6 || ^4.0.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "SineMacula\\Laravel\\AuditLog\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "check": [
+            "qlty check"
+        ],
+        "format": [
+            "qlty fmt"
+        ],
+        "smells": [
+            "qlty smells"
+        ],
+        "test": [
+            "@php vendor/bin/paratest"
+        ],
+        "test:coverage": [
+            "@php vendor/bin/paratest --coverage-clover=clover.xml"
+        ],
+        "test:unit": [
+            "@php vendor/bin/paratest --testsuite Unit"
+        ],
+        "test:unit:coverage": [
+            "@php vendor/bin/paratest --testsuite Unit --coverage-clover=clover.xml"
+        ],
+        "test:feature": [
+            "@php vendor/bin/paratest --testsuite Feature"
+        ],
+        "test:feature:coverage": [
+            "@php vendor/bin/paratest --testsuite Feature --coverage-clover=clover.xml"
+        ],
+        "test:integration": [
+            "@php vendor/bin/paratest --testsuite Integration"
+        ],
+        "test:integration:coverage": [
+            "@php vendor/bin/paratest --testsuite Integration --coverage-clover=clover.xml"
+        ],
+        "test:performance": [
+            "@php vendor/bin/phpunit --testsuite Performance"
+        ],
+        "test:performance:coverage": [
+            "@php vendor/bin/phpunit --testsuite Performance --coverage-clover=clover.xml"
+        ],
+        "test:mutation": [
+            "@php -d memory_limit=-1 vendor/bin/infection --configuration=infection.json5 --test-framework-options=\"--do-not-fail-on-warning --do-not-fail-on-phpunit-warning\" --only-covering-test-cases --threads=max --git-diff-lines --git-diff-base=origin/master --map-source-class-to-test --min-msi=90 --min-covered-msi=90 --ignore-msi-with-no-mutations"
+        ],
+        "test:mutation:full": [
+            "@php -d memory_limit=-1 vendor/bin/infection --configuration=infection.full.json5 --test-framework-options=\"--do-not-fail-on-warning --do-not-fail-on-phpunit-warning\" --only-covering-test-cases --threads=max"
+        ]
+    },
+    "scripts-descriptions": {
+        "check": "Run static analysis and lint checks via qlty.",
+        "format": "Format codebase using qlty.",
+        "smells": "Report code smells (duplication, complexity) via qlty.",
+        "test": "Run all PHPUnit test suites in parallel using Paratest.",
+        "test:coverage": "Run all PHPUnit test suites with clover coverage report.",
+        "test:unit": "Run the Unit test suite in parallel using Paratest.",
+        "test:unit:coverage": "Run the Unit test suite with clover coverage report.",
+        "test:feature": "Run the Feature test suite in parallel using Paratest.",
+        "test:feature:coverage": "Run the Feature test suite with clover coverage report.",
+        "test:integration": "Run the Integration test suite in parallel using Paratest.",
+        "test:integration:coverage": "Run the Integration test suite with clover coverage report.",
+        "test:performance": "Run the Performance test suite for query and write budget contracts.",
+        "test:performance:coverage": "Run the Performance test suite with clover coverage report.",
+        "test:mutation": "Run the Infection mutation-testing gate against the MSI thresholds.",
+        "test:mutation:full": "Run the full Infection mutation suite without MSI thresholds."
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "infection/extension-installer": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SineMacula\\Laravel\\AuditLog\\AuditLogServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
