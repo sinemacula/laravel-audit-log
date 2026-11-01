@@ -106,7 +106,8 @@ final class AuditRecordTest extends TestCase
 
         self::assertSame(['fromPending', 'toArray'], $methods);
         self::assertSame(['fromPending'], array_values(array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $static)));
-        self::assertSame('self', (string) $reflection->getMethod('fromPending')->getReturnType());
+        // PHP 8.5 reports a `self` return type by the class it names.
+        self::assertContains((string) $reflection->getMethod('fromPending')->getReturnType(), ['self', AuditRecord::class]);
     }
 
     /**
