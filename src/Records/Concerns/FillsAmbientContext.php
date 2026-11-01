@@ -103,12 +103,11 @@ trait FillsAmbientContext
     {
         $this->assertUsable();
 
-        if ($actor === null || $this->isGiven('actor')) {
+        if (!$this->claims('actor', $actor !== null)) {
             return;
         }
 
         $this->actor = $actor;
-        $this->give('actor');
     }
 
     /**
@@ -126,12 +125,11 @@ trait FillsAmbientContext
     {
         $this->assertUsable();
 
-        if ($principal === null || $this->isGiven('principal')) {
+        if (!$this->claims('principal', $principal !== null)) {
             return;
         }
 
         $this->principal = $principal;
-        $this->give('principal');
     }
 
     /**
@@ -149,12 +147,11 @@ trait FillsAmbientContext
     {
         $this->assertUsable();
 
-        if ($tenant === null || $this->isGiven('tenant')) {
+        if (!$this->claims('tenant', $tenant !== null)) {
             return;
         }
 
         $this->tenant = $tenant;
-        $this->give('tenant');
     }
 
     /**
@@ -179,12 +176,11 @@ trait FillsAmbientContext
 
         self::checkIdentifier($guard, self::GUARD_MAX_CHARACTERS, 'A guard name');
 
-        if ($this->isGiven('guard')) {
+        if (!$this->claims('guard', true)) {
             return;
         }
 
         $this->guard = $guard;
-        $this->give('guard');
     }
 
     /**
@@ -210,12 +206,11 @@ trait FillsAmbientContext
 
         self::checkIdentifier($sessionId, self::SESSION_MAX_CHARACTERS, 'A session reference');
 
-        if ($this->isGiven('session')) {
+        if (!$this->claims('session', true)) {
             return;
         }
 
         $this->sessionId = $sessionId;
-        $this->give('session');
     }
 
     /**
@@ -245,17 +240,15 @@ trait FillsAmbientContext
             self::checkTraceId($traceId);
         }
 
-        if ($requestId !== null && !$this->isGiven('request')) {
+        if ($this->claims('request', $requestId !== null)) {
             $this->requestId = $requestId;
-            $this->give('request');
         }
 
-        if ($traceId === null || $this->isGiven('trace')) {
+        if (!$this->claims('trace', $traceId !== null)) {
             return;
         }
 
         $this->traceId = $traceId;
-        $this->give('trace');
     }
 
     /**
@@ -282,17 +275,15 @@ trait FillsAmbientContext
 
         $userAgent = $userAgent === null ? '' : TextSanitizer::clean($userAgent, self::USER_AGENT_MAX_BYTES);
 
-        if ($ip !== null && !$this->isGiven('ip')) {
+        if ($this->claims('ip', $ip !== null)) {
             $this->ip = $ip;
-            $this->give('ip');
         }
 
-        if ($userAgent === '' || $this->isGiven('user_agent')) {
+        if (!$this->claims('user_agent', $userAgent !== '')) {
             return;
         }
 
         $this->userAgent = $userAgent;
-        $this->give('user_agent');
     }
 
     /**
@@ -310,12 +301,11 @@ trait FillsAmbientContext
     {
         $this->assertUsable();
 
-        if ($this->isGiven('origin')) {
+        if (!$this->claims('origin', true)) {
             return;
         }
 
         $this->origin = $origin;
-        $this->give('origin');
     }
 
     /**
@@ -351,6 +341,25 @@ trait FillsAmbientContext
     private function give(string $field): void
     {
         $this->given[$field] = true;
+    }
+
+    /**
+     * Claim the field for a contributor's value: when there is a value and the
+     * field was not given, mark it given and say the value should be kept.
+     *
+     * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
+     * @param  bool  $present
+     * @return bool
+     */
+    private function claims(string $field, bool $present): bool
+    {
+        if (!$present || $this->isGiven($field)) {
+            return false;
+        }
+
+        $this->give($field);
+
+        return true;
     }
 
     /**

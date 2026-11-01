@@ -270,11 +270,10 @@ final readonly class EventDefinition
      */
     public function equals(self $other): bool
     {
-        return $this->code     === $other->code
-            && $this->version  === $other->version
-            && $this->category === $other->category
-            && $this->unlisted === $other->unlisted
-            && $this->hasEqualRules($other);
+        $mine   = [$this->code, $this->version, $this->category, $this->unlisted];
+        $theirs = [$other->code, $other->version, $other->category, $other->unlisted];
+
+        return $mine === $theirs && $this->hasEqualRules($other);
     }
 
     /**
