@@ -1,0 +1,133 @@
+# Reference: https://qlty.sh/d/qlty-toml
+#
+# Code-quality configuration for both the Qlty CLI and Qlty Cloud. Lint and
+# format rules come from the shared sinemacula/coding-standards source; this
+# file wires that source in and selects the plugins relevant to a PHP
+# repository.
+config_version = "0"
+
+exclude_patterns = [
+    "*_min.*",
+    "*-min.*",
+    "*.min.*",
+    "**/build/**",
+    "**/cache/**",
+    "**/coverage/**",
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/vendor/**",
+    ".claude/**",
+    ".qlty/configs/**",
+    ".sinemacula/**",
+]
+
+test_patterns = [
+    "**/test/**",
+    "**/tests/**",
+    "**/spec/**",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*_test.*",
+    "**/*_spec.*",
+    "**/test_*.*",
+    "**/spec_*.*",
+]
+
+[runtimes.enabled]
+php = "8.3"
+
+[smells]
+mode = "comment"
+
+[[source]]
+name = "default"
+default = true
+
+[[source]]
+name = "sinemacula"
+repository = "https://github.com/sinemacula/coding-standards"
+tag = "v1.27.1"
+
+[[plugin]]
+name = "actionlint"
+
+[[plugin]]
+name = "editorconfig-checker"
+
+[[plugin]]
+name = "markdownlint"
+mode = "comment"
+
+[[plugin]]
+name = "osv-scanner"
+
+[[plugin]]
+name = "php-codesniffer"
+version = "4.0.4"
+mode = "comment"
+package_file = "composer.json"
+package_filters = ["slevomat", "dealerdirect", "sinemacula"]
+
+# phpcs 4.x returns exit code 3 when it finds issues; qlty's default
+# success_codes ([0, 1]) would treat that as a plugin failure and discard the
+# findings. This override accepts the 4.x codes. It lives here, not in the
+# shared source.toml, because a drivers table there breaks the source's
+# exported_config_paths. Only required while on phpcs 4.x.
+[plugins.definitions.php-codesniffer.drivers.lint]
+success_codes = [0, 1, 2, 3]
+
+# Held at the version the shared standard requires, with the Symfony packages
+# held on the 7.4 line: from 3.90 the fixer also accepts Symfony 8, which needs
+# PHP 8.4.1 and carries syntax an older runner cannot parse, and the sandbox
+# install ignores platform requirements. Those pins are only honoured through
+# extra_packages, which is silently ignored whenever package_file is set, so
+# this plugin declares its packages here rather than reading composer.json.
+[[plugin]]
+name = "php-cs-fixer"
+version = "3.95.27"
+extra_packages = [
+    "sinemacula/coding-standards@1.27.1",
+    "symfony/console@^7.4",
+    "symfony/event-dispatcher@^7.4",
+    "symfony/filesystem@^7.4",
+    "symfony/finder@^7.4",
+    "symfony/options-resolver@^7.4",
+    "symfony/process@^7.4",
+    "symfony/stopwatch@^7.4",
+    "symfony/string@^7.4",
+]
+
+# phpstan runs from a dedicated sandbox file that lists the analysis stack and
+# every dependency the analysed code references, so a package the code starts
+# to use is added there as well as to composer.json. With no package_filters,
+# qlty installs the whole file into the tool sandbox and phpstan resolves the
+# framework from there, with no project install or prepare step. The sandbox
+# install ignores platform requirements, so Symfony is held below 8.0: Symfony 8
+# needs PHP 8.4 and carries syntax the PHP 8.3 runner cannot parse.
+[[plugin]]
+name = "phpstan"
+version = "2.1.46"
+package_file = ".qlty/configs/composer.json"
+
+[[plugin]]
+name = "radarlint-php"
+mode = "comment"
+
+[[plugin]]
+name = "trivy"
+drivers = [
+    "config",
+    "fs-vuln",
+]
+
+[[plugin]]
+name = "trufflehog"
+
+[[plugin]]
+name = "yamllint"
+
+# Skip radarlint smell analysis on the test tree - reused fixture literals and
+# multi-branch data providers trip duplication/return-count rules without value.
+[[exclude]]
+plugins = ["radarlint-php"]
+file_patterns = ["tests/**"]
