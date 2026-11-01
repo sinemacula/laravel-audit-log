@@ -1,0 +1,47 @@
+{
+    "id": "01932b4e-8a40-7000-8000-000000000001",
+    "record_version": 1,
+    "event": "invoice.approved",
+    "event_version": 2,
+    "category": "finance",
+    "outcome": "denied",
+    "reason": "policy",
+    "actor_type": "user",
+    "actor_id": "42",
+    "subject_type": "invoice",
+    "subject_id": "inv_0042",
+    "principal_type": "team",
+    "principal_id": "7",
+    "tenant_type": "organisation",
+    "tenant_id": "org_01",
+    "credential_id": "key_01",
+    "guard": "web",
+    "session_id": "sess_ref_1",
+    "request_id": "01932b4e-8a40-7000-8000-0000000000aa",
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "correlation_id": "app:ticket-123",
+    "origin": "http",
+    "provenance": "captured",
+    "source_id": "app-eu-1",
+    "source_region": "eu-west-2",
+    "source_record_id": null,
+    "import_batch_id": null,
+    "ip": "203.0.113.7",
+    "user_agent": "Mozilla/5.0",
+    "context": {
+        "route": "invoices.approve",
+        "method": "POST"
+    },
+    "properties": {
+        "amount": "1200.00",
+        "currency": "GBP",
+        "lines": [
+            1,
+            2
+        ],
+        "_audit": {
+            "note": "Approved after review"
+        }
+    },
+    "occurred_at": "2026-10-31T23:34:56.789012Z"
+}

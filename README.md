@@ -70,6 +70,9 @@ php artisan vendor:publish --tag=audit-log-migrations
 php artisan migrate
 ```
 
+The package's tables live on the `storage.connection` connection (`AUDIT_LOG_STORAGE_CONNECTION`); the default
+connection is used when it is unset.
+
 ## Usage
 
 Record an action, with the ambient actor, guard, client and request filled in:
