@@ -12,6 +12,8 @@ use Illuminate\Support\ServiceProvider;
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
  */
 final class AuditLogServiceProvider extends ServiceProvider
 {

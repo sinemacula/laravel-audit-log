@@ -36,7 +36,7 @@ Branch from `master` using the appropriate prefix:
 This project uses [Conventional Commits](https://www.conventionalcommits.org/). Prefix your commit messages accordingly:
 
 ```text
-feat: record the impersonator alongside the actor
+feat: record the credential alongside the actor
 fix: write the audit record after the transaction commits
 test: add a write budget test for the database store
 chore: update qlty configuration

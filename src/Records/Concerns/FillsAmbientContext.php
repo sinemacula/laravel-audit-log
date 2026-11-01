@@ -1,0 +1,424 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace SineMacula\Laravel\AuditLog\Records\Concerns;
+
+use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
+use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Support\Normalised;
+use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
+use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
+
+/**
+ * The gaps a contributor fills in the pending record: the actor, principal and
+ * tenant, the guard, the session reference, the request and trace ids, the
+ * client's IP address and user agent, the origin and the context.
+ *
+ * A filler fills only a field that is neither given nor filled yet, and then
+ * marks it filled, so the first contributor to fill a field wins and none
+ * replaces an explicit value, `by(null)` included. A filler given `null`
+ * changes nothing and leaves the field open for the next. A filler of two
+ * fields treats each on its own. An explicit setter called after a filler
+ * replaces the filled value, so explicit beats contributor in either order.
+ * Every value is validated whether or not it is used, so a malformed one is
+ * refused in any order. The trait also keeps which fields are given, and the
+ * identifier and map checks the builder's other methods share.
+ *
+ * The methods sit in a trait only so the builder stays within the number of
+ * methods one class may declare; the package's contributors call them, and an
+ * application never needs to.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+trait FillsAmbientContext
+{
+    /** @var int Longest guard name, in characters: the `guard` column. */
+    private const int GUARD_MAX_CHARACTERS = 64;
+
+    /** @var int Longest session reference, in characters: the `session_id` column. */
+    private const int SESSION_MAX_CHARACTERS = 191;
+
+    /** @var int Longest request id, in characters: the `request_id` column. */
+    private const int REQUEST_MAX_CHARACTERS = 64;
+
+    /** @var int Longest IP address, in characters: the `ip` column, which also holds a hashed or encrypted form. */
+    private const int IP_MAX_CHARACTERS = 255;
+
+    /** @var int Longest user agent kept, in bytes: the `user_agent` column. */
+    private const int USER_AGENT_MAX_BYTES = 512;
+
+    /** @var string Pattern of a W3C trace id: 32 lower-case hexadecimal digits. */
+    private const string TRACE_PATTERN = '/\A[0-9a-f]{32}\z/';
+
+    /** @var string The invalid W3C trace id: every digit zero. */
+    private const string ZERO_TRACE = '00000000000000000000000000000000';
+
+    /** @var array<string, true> The fields given explicitly or filled. */
+    private array $given = [];
+
+    /** @var ?string The authentication guard the activity ran under, if known. */
+    private ?string $guard = null;
+
+    /** @var ?string An application-owned, non-secret reference to the session, if known. */
+    private ?string $sessionId = null;
+
+    /** @var ?string The request's id, if known. */
+    private ?string $requestId = null;
+
+    /** @var ?string The W3C trace id of a trusted `traceparent`, if known. */
+    private ?string $traceId = null;
+
+    /** @var ?string The client's IP address, as the contributor stores it, if known. */
+    private ?string $ip = null;
+
+    /** @var ?string The client's user agent, cleaned and capped, if known. */
+    private ?string $userAgent = null;
+
+    /** @var ?\SineMacula\Laravel\AuditLog\Records\Enums\Origin Where the activity ran, once filled. */
+    private ?Origin $origin = null;
+
+    // phpcs:disable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+
+    /** @var array<array-key, mixed> The context, normalised, as a map. */
+    private array $context = [];
+
+    // phpcs:enable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+
+    /**
+     * Fill the actor, unless one was given or filled already, `by(null)`
+     * included.
+     *
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor
+     * @return void
+     *
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillActor(?Reference $actor): void
+    {
+        $this->assertUsable();
+
+        if ($actor === null || $this->isGiven('actor')) {
+            return;
+        }
+
+        $this->actor = $actor;
+        $this->give('actor');
+    }
+
+    /**
+     * Fill the principal, unless one was given or filled already,
+     * `asPrincipal(null)` included.
+     *
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $principal
+     * @return void
+     *
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillPrincipal(?Reference $principal): void
+    {
+        $this->assertUsable();
+
+        if ($principal === null || $this->isGiven('principal')) {
+            return;
+        }
+
+        $this->principal = $principal;
+        $this->give('principal');
+    }
+
+    /**
+     * Fill the tenant, unless one was given or filled already,
+     * `forTenant(null)` included.
+     *
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
+     * @return void
+     *
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillTenant(?Reference $tenant): void
+    {
+        $this->assertUsable();
+
+        if ($tenant === null || $this->isGiven('tenant')) {
+            return;
+        }
+
+        $this->tenant = $tenant;
+        $this->give('tenant');
+    }
+
+    /**
+     * Fill the name of the authentication guard the activity ran under: 1 to 64
+     * characters, validated, never cleaned or cut.
+     *
+     * @param  ?string  $guard
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillGuard(?string $guard): void
+    {
+        $this->assertUsable();
+
+        if ($guard === null) {
+            return;
+        }
+
+        self::checkIdentifier($guard, self::GUARD_MAX_CHARACTERS, 'A guard name');
+
+        if ($this->isGiven('guard')) {
+            return;
+        }
+
+        $this->guard = $guard;
+        $this->give('guard');
+    }
+
+    /**
+     * Fill the session reference: an application-owned, non-secret reference to
+     * the session, never Laravel's session id, which is the secret its cookie
+     * carries. 1 to 191 characters, validated, never cleaned or cut.
+     *
+     * @param  ?string  $sessionId
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillSession(?string $sessionId): void
+    {
+        $this->assertUsable();
+
+        if ($sessionId === null) {
+            return;
+        }
+
+        self::checkIdentifier($sessionId, self::SESSION_MAX_CHARACTERS, 'A session reference');
+
+        if ($this->isGiven('session')) {
+            return;
+        }
+
+        $this->sessionId = $sessionId;
+        $this->give('session');
+    }
+
+    /**
+     * Fill the request id, 1 to 64 characters, and the W3C trace id of a
+     * trusted `traceparent`, 32 lower-case hexadecimal digits not all zero,
+     * each on its own: a request id already filled does not stop the trace id
+     * being filled. Both are validated, never cleaned or cut.
+     *
+     * @param  ?string  $requestId
+     * @param  ?string  $traceId
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillRequest(?string $requestId, ?string $traceId = null): void
+    {
+        $this->assertUsable();
+
+        if ($requestId !== null) {
+            self::checkIdentifier($requestId, self::REQUEST_MAX_CHARACTERS, 'A request id');
+        }
+
+        if ($traceId !== null) {
+            self::checkTraceId($traceId);
+        }
+
+        if ($requestId !== null && !$this->isGiven('request')) {
+            $this->requestId = $requestId;
+            $this->give('request');
+        }
+
+        if ($traceId === null || $this->isGiven('trace')) {
+            return;
+        }
+
+        $this->traceId = $traceId;
+        $this->give('trace');
+    }
+
+    /**
+     * Fill the client's IP address, 1 to 255 characters, validated and never
+     * cleaned or cut, and its user agent, cleaned and cut to 512 bytes, each on
+     * its own. A user agent that is empty once cleaned counts as none.
+     *
+     * @param  ?string  $ip
+     * @param  ?string  $userAgent
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillClient(?string $ip, ?string $userAgent): void
+    {
+        $this->assertUsable();
+
+        if ($ip !== null) {
+            self::checkIdentifier($ip, self::IP_MAX_CHARACTERS, 'An IP address');
+        }
+
+        $userAgent = $userAgent === null ? '' : TextSanitizer::clean($userAgent, self::USER_AGENT_MAX_BYTES);
+
+        if ($ip !== null && !$this->isGiven('ip')) {
+            $this->ip = $ip;
+            $this->give('ip');
+        }
+
+        if ($userAgent === '' || $this->isGiven('user_agent')) {
+            return;
+        }
+
+        $this->userAgent = $userAgent;
+        $this->give('user_agent');
+    }
+
+    /**
+     * Fill where the activity ran: an HTTP request, a console command or a
+     * queued job.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Origin  $origin
+     * @return void
+     *
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillOrigin(Origin $origin): void
+    {
+        $this->assertUsable();
+
+        if ($this->isGiven('origin')) {
+            return;
+        }
+
+        $this->origin = $origin;
+        $this->give('origin');
+    }
+
+    /**
+     * Fill the context, a map of names to values such as the route name, the
+     * method, the command or the job, normalised now; only the keys the context
+     * does not hold yet are added, so the first contributor to name a key wins.
+     * The contributor must never give a URL or a query string.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $context
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillContext(array $context): void
+    {
+        $this->assertUsable();
+
+        $this->context += self::mapOf(ValueNormaliser::normalise($context), 'Context is a map of names to values, not a list.');
+    }
+
+    /**
+     * Mark the field given, explicitly or by a contributor, so no contributor
+     * fills it.
+     *
+     * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
+     * @return void
+     */
+    private function give(string $field): void
+    {
+        $this->given[$field] = true;
+    }
+
+    /**
+     * Whether the field was given, explicitly or by a contributor.
+     *
+     * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
+     * @return bool
+     */
+    private function isGiven(string $field): bool
+    {
+        return $this->given[$field] ?? false;
+    }
+
+    /**
+     * Refuse an identifier that is empty, longer than its column, or not
+     * already clean text; an identifier is never cleaned or cut, because one
+     * that cleaning would change is not that identifier.
+     *
+     * @param  string  $value
+     * @param  int  $maxCharacters
+     * @param  string  $name
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function checkIdentifier(#[\SensitiveParameter] string $value, int $maxCharacters, string $name): void
+    {
+        if ($value === '' || mb_strlen($value, 'UTF-8') > $maxCharacters || !TextSanitizer::isClean($value)) {
+            throw new \InvalidArgumentException(sprintf('%s must be from 1 to %d characters, with no control characters.', $name, $maxCharacters));
+        }
+    }
+
+    /**
+     * Refuse a trace id that is not 32 lower-case hexadecimal digits, or that
+     * is all zero, which W3C Trace Context makes invalid.
+     *
+     * @param  string  $traceId
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function checkTraceId(string $traceId): void
+    {
+        if (preg_match(self::TRACE_PATTERN, $traceId) !== 1 || $traceId === self::ZERO_TRACE) {
+            throw new \InvalidArgumentException('A trace id must be 32 lower-case hexadecimal digits, not all zero.');
+        }
+    }
+
+    /**
+     * The normalised value as a map, refusing a list that is not empty with the
+     * message given.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Support\Normalised  $normalised
+     * @param  string  $message
+     * @return array<array-key, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function mapOf(Normalised $normalised, string $message): array
+    {
+        $value = $normalised->value;
+
+        if (!is_array($value) || ($value !== [] && array_is_list($value))) {
+            throw new \InvalidArgumentException($message);
+        }
+
+        return $value;
+    }
+}
