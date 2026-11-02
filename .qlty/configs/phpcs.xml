@@ -4,6 +4,7 @@
     <rule ref="SineMaculaLaravelPackage"/>
 
     <file>src</file>
+    <file>database</file>
     <file>tests</file>
 
 </ruleset>

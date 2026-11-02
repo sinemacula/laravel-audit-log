@@ -63,11 +63,11 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['*'],
             'allows'  => ['Records\Enums', 'Definitions\Enums'],
         ],
-        'the support helpers name nothing of the package but the support helpers and references' => [
+        'the support helpers name nothing of the package but the support helpers, references and the clock contract' => [
             'from'    => ['Support'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Support', 'Records\Reference'],
+            'allows'  => ['Support', 'Records\Reference', 'Contracts\Clock'],
         ],
         'the record model names nothing of the definitions but the key owners' => [
             'from'    => ['Records'],
@@ -81,11 +81,53 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Records'],
             'allows'  => ['Records\EventCode'],
         ],
-        'contracts name nothing of the package but contracts and the definitions they return' => [
+        'contracts name nothing of the package but contracts, the definitions they return, the records they take and the conflict they raise' => [
             'from'    => ['Contracts'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Contracts', 'Definitions\EventDefinition'],
+            'allows'  => ['Contracts', 'Definitions\EventDefinition', 'Records\FinalisedRecord', 'Stores\RecordConflictException'],
+        ],
+        'the records name nothing of the stores, the read model, the console or the database helpers' => [
+            'from'    => ['Records'],
+            'except'  => [],
+            'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database'],
+            'allows'  => [],
+        ],
+        'the record values name nothing of the integrity layer but the finaliser' => [
+            'from'    => ['Records'],
+            'except'  => ['Records\RecordFinaliser'],
+            'forbids' => ['Integrity'],
+            'allows'  => [],
+        ],
+        'the integrity layer names nothing of the stores, the read model, the console or the database helpers' => [
+            'from'    => ['Integrity'],
+            'except'  => [],
+            'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database'],
+            'allows'  => [],
+        ],
+        'the stores name nothing of the read model or the console' => [
+            'from'    => ['Stores'],
+            'except'  => [],
+            'forbids' => ['Models', 'Casts', 'Console'],
+            'allows'  => [],
+        ],
+        'the read model names nothing of the records, the stores, the integrity layer or the console' => [
+            'from'    => ['Models', 'Casts'],
+            'except'  => [],
+            'forbids' => ['Records', 'Stores', 'Integrity', 'Console'],
+            'allows'  => [],
+        ],
+        'the database helpers name nothing of the package but each other' => [
+            'from'    => ['Database'],
+            'except'  => [],
+            'forbids' => ['*'],
+            'allows'  => ['Database'],
+        ],
+        'only the service provider names the console' => [
+            'from'    => ['*'],
+            'except'  => ['Console', 'AuditLogServiceProvider'],
+            'forbids' => ['Console'],
+            'allows'  => [],
         ],
         'nothing names the service provider' => [
             'from'    => ['*'],
@@ -110,7 +152,7 @@ final class NamespaceDependenciesTest extends TestCase
             'allows'  => [],
         ],
         'the domain uses no facade and no application container' => [
-            'from'    => ['Records', 'Definitions', 'Support', 'Contracts'],
+            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores'],
             'except'  => [],
             'forbids' => ['Support\Facades', 'Foundation', 'Container', 'Contracts\Foundation', 'Contracts\Container'],
             'allows'  => [],
