@@ -84,6 +84,12 @@ php artisan migrate
 | `definitions.require_registered` | `false`             | `AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED` | Whether a code with no registered definition is refused, rather than taking the permissive definition.                                          |
 | `source.id`                      | `null`              | `AUDIT_LOG_SOURCE_ID`                      | The deployment records come from, 1 to 64 characters; `null` or empty for a slug of `app.name`.                                                 |
 | `source.region`                  | `null`              | `AUDIT_LOG_SOURCE_REGION`                  | The region records come from, 1 to 32 characters; `null` or empty for none.                                                                     |
+| `redaction.keys`                 | `[]`                | -                                          | More key names to redact, merged with the built-ins, which cannot be removed.                                                                   |
+| `redaction.key`                  | `null`              | `AUDIT_LOG_REDACTION_KEY`                  | The key identifiers, pseudonyms and IP hashes use, of at least 32 bytes; `null` or empty to derive it from `app.key`.                           |
+| `redaction.identifiers`          | `hash`              | `AUDIT_LOG_REDACTION_IDENTIFIERS`          | Whether a sign-in identifier is stored as a keyed hash (`hash`) or not at all (`drop`).                                                         |
+| `redaction.ip`                   | `full`              | `AUDIT_LOG_REDACTION_IP`                   | How the IP address is stored: `full`, `truncate`, `hash`, `drop` or `encrypt`.                                                                  |
+| `redaction.max_bytes`            | `16384`             | `AUDIT_LOG_REDACTION_MAX_BYTES`            | The most the encoded properties may hold, from 8192 to 16777216; the largest fields are omitted beyond it.                                      |
+| `redaction.max_context_bytes`    | `4096`              | `AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES`    | The most the encoded context may hold, from 1024 to 16777216.                                                                                   |
 
 Run `php artisan audit-log:check` in a deploy pipeline: it reports every malformed setting, missing connection, schema
 problem and unusable key at once, exits non-zero on any, and writes nothing.
@@ -150,6 +156,15 @@ $fake = AuditLog::fake();
 $this->post('/invoices/42/approve');
 
 self::assertTrue($fake->hasRecorded('invoice.approved'));
+```
+
+Secret-shaped keys are redacted everywhere, at capture. This is a heuristic: it cannot find a secret in free text or
+under an innocuous key, and an event definition, which allowlists a code's fields, is the remedy. See
+[redaction](docs/design/redaction.md) and the [threat model](docs/design/threat-model.md). A sign-in identifier is never
+a property: it is stored as a keyed hash, so failed attempts correlate without keeping the address:
+
+```php
+AuditLog::event('app.sign_in_failed')->withIdentifier($email)->failed('invalid_credentials')->record();
 ```
 
 ## Requirements

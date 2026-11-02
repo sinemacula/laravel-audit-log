@@ -53,6 +53,21 @@ final class ShippedConfigTest extends TestCase
     /** @var string Env var naming the source's region. */
     private const string SOURCE_REGION_ENV = 'AUDIT_LOG_SOURCE_REGION';
 
+    /** @var string Env var holding the redaction key. */
+    private const string REDACTION_KEY_ENV = 'AUDIT_LOG_REDACTION_KEY';
+
+    /** @var string Env var naming how a sign-in identifier is stored. */
+    private const string REDACTION_IDENTIFIERS_ENV = 'AUDIT_LOG_REDACTION_IDENTIFIERS';
+
+    /** @var string Env var naming how an IP address is stored. */
+    private const string REDACTION_IP_ENV = 'AUDIT_LOG_REDACTION_IP';
+
+    /** @var string Env var holding the budget of the properties. */
+    private const string REDACTION_MAX_BYTES_ENV = 'AUDIT_LOG_REDACTION_MAX_BYTES';
+
+    /** @var string Env var holding the budget of the context. */
+    private const string REDACTION_MAX_CONTEXT_BYTES_ENV = 'AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES';
+
     /** @var list<string> Every env var the shipped file reads. */
     private const array ENVS = [
         self::CONNECTION_ENV,
@@ -65,6 +80,11 @@ final class ShippedConfigTest extends TestCase
         self::REQUIRE_REGISTERED_ENV,
         self::SOURCE_ID_ENV,
         self::SOURCE_REGION_ENV,
+        self::REDACTION_KEY_ENV,
+        self::REDACTION_IDENTIFIERS_ENV,
+        self::REDACTION_IP_ENV,
+        self::REDACTION_MAX_BYTES_ENV,
+        self::REDACTION_MAX_CONTEXT_BYTES_ENV,
     ];
 
     /**
@@ -373,7 +393,130 @@ final class ShippedConfigTest extends TestCase
             'definitions.require_registered',
             'source.id',
             'source.region',
+            'redaction.keys',
+            'redaction.key',
+            'redaction.identifiers',
+            'redaction.ip',
+            'redaction.max_bytes',
+            'redaction.max_context_bytes',
         ], $leaves);
+    }
+
+    /**
+     * With nothing in the environment no key name is added to the built-ins.
+     *
+     * @return void
+     */
+    public function testRedactionKeysDefaultToNone(): void
+    {
+        self::assertSame([], $this->config()['redaction']['keys']);
+    }
+
+    /**
+     * With nothing in the environment there is no redaction key, which reads as
+     * deriving it from `app.key`.
+     *
+     * @return void
+     */
+    public function testTheRedactionKeyDefaultsToNone(): void
+    {
+        putenv(self::REDACTION_KEY_ENV);
+
+        self::assertNull($this->config()['redaction']['key']);
+    }
+
+    /**
+     * The redaction key is read from its env var, as it is given.
+     *
+     * @return void
+     */
+    public function testTheRedactionKeyIsReadFromTheEnvironment(): void
+    {
+        putenv(self::REDACTION_KEY_ENV . '=base64:c2VjcmV0');
+
+        self::assertSame('base64:c2VjcmV0', $this->config()['redaction']['key']);
+    }
+
+    /**
+     * With nothing in the environment a sign-in identifier is hashed.
+     *
+     * @return void
+     */
+    public function testIdentifiersDefaultToHash(): void
+    {
+        putenv(self::REDACTION_IDENTIFIERS_ENV);
+
+        self::assertSame('hash', $this->config()['redaction']['identifiers']);
+    }
+
+    /**
+     * How a sign-in identifier is stored is read from its env var.
+     *
+     * @return void
+     */
+    public function testIdentifiersAreReadFromTheEnvironment(): void
+    {
+        putenv(self::REDACTION_IDENTIFIERS_ENV . '=drop');
+
+        self::assertSame('drop', $this->config()['redaction']['identifiers']);
+    }
+
+    /**
+     * With nothing in the environment an IP address is stored in full.
+     *
+     * @return void
+     */
+    public function testTheIpDefaultsToFull(): void
+    {
+        putenv(self::REDACTION_IP_ENV);
+
+        self::assertSame('full', $this->config()['redaction']['ip']);
+    }
+
+    /**
+     * How an IP address is stored is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheIpModeIsReadFromTheEnvironment(): void
+    {
+        putenv(self::REDACTION_IP_ENV . '=truncate');
+
+        self::assertSame('truncate', $this->config()['redaction']['ip']);
+    }
+
+    /**
+     * With nothing in the environment the properties may hold 16384 bytes and
+     * the context 4096, as integers.
+     *
+     * @return void
+     */
+    public function testTheByteBudgetsHaveTheirDefaults(): void
+    {
+        putenv(self::REDACTION_MAX_BYTES_ENV);
+        putenv(self::REDACTION_MAX_CONTEXT_BYTES_ENV);
+
+        $redaction = $this->config()['redaction'];
+
+        self::assertSame(16384, $redaction['max_bytes']);
+        self::assertSame(4096, $redaction['max_context_bytes']);
+    }
+
+    /**
+     * Each byte budget is read from its own env var, raw, so a malformed one
+     * fails closed when it is read rather than casting to `0`.
+     *
+     * @return void
+     */
+    public function testTheByteBudgetsAreReadFromTheEnvironment(): void
+    {
+        putenv(self::REDACTION_MAX_BYTES_ENV . '=9000');
+        putenv(self::REDACTION_MAX_CONTEXT_BYTES_ENV . '=2000');
+
+        $redaction = $this->config()['redaction'];
+
+        self::assertSame('9000', $redaction['max_bytes']);
+        self::assertSame('2000', $redaction['max_context_bytes']);
     }
 
     /**
@@ -383,7 +526,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -391,7 +534,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}} $config */
         $config = require self::CONFIG;
 
         return $config;

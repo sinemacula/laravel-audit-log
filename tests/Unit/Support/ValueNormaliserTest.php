@@ -721,7 +721,7 @@ final class ValueNormaliserTest extends TestCase
         $normalised = ValueNormaliser::normalise(['a' => 1, "a\0" => 2]);
 
         self::assertSame(['a' => 1], $normalised->value);
-        self::assertSame(['a'], $normalised->collisions);
+        self::assertSame([['a']], $normalised->collisions);
         self::assertSame(1, $normalised->collisionCount);
     }
 
@@ -740,21 +740,149 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A collision is named by its schema path: map keys cleaned, list indices
-     * written `*`.
+     * A collision is named by its segments: map keys cleaned, list indices kept
+     * as integers.
      *
      * @return void
      */
-    public function testACollisionNamesItsSchemaPath(): void
+    public function testACollisionIsNamedByItsSegments(): void
     {
         $normalised = ValueNormaliser::normalise([
             'items' => [['x' => 1, "x\0" => 2]],
             "me\ta" => ['k' => 1, "\u{202E}k" => 2],
         ]);
 
-        self::assertSame(['items.*.x', 'me a.k'], $normalised->collisions);
+        self::assertSame([['items', 0, 'x'], ['me a', 'k']], $normalised->collisions);
         self::assertSame(2, $normalised->collisionCount);
-        self::assertSame(['*.x'], ValueNormaliser::normalise([['x' => 1, "x\0" => 2]])->collisions);
+        self::assertSame([[0, 'x']], ValueNormaliser::normalise([['x' => 1, "x\0" => 2]])->collisions);
+    }
+
+    /**
+     * A literal dot in a key stays inside its one segment, so the path cannot
+     * be mistaken for a deeper one.
+     *
+     * @return void
+     */
+    public function testALiteralDotInACollidedKeyStaysOneSegment(): void
+    {
+        self::assertSame([['a.b', 'x']], ValueNormaliser::normalise(['a.b' => ['x' => 1, "x\0" => 2]])->collisions);
+        self::assertSame([['a', 'b', 'x']], ValueNormaliser::normalise(['a' => ['b' => ['x' => 1, "x\0" => 2]]])->collisions);
+    }
+
+    /**
+     * A list index in a collision is the element's own index, as an integer, so
+     * two elements of one list are told apart.
+     *
+     * @return void
+     */
+    public function testAListIndexInACollisionIsAnInteger(): void
+    {
+        $normalised = ValueNormaliser::normalise(['items' => [['x' => 1], ['x' => 1, "x\0" => 2], [[], ['y' => 1, "y\0" => 2]]]]);
+
+        self::assertSame([['items', 1, 'x'], ['items', 2, 1, 'y']], $normalised->collisions);
+    }
+
+    /**
+     * An integer key of a map is a map key, so it is kept as its string, unlike
+     * a list index; a key that collides with one only once cleaned is named the
+     * same way.
+     *
+     * @return void
+     */
+    public function testAnIntegerMapKeyInACollisionIsAString(): void
+    {
+        self::assertSame([['5', 'x']], ValueNormaliser::normalise([5 => ['x' => 1, "x\0" => 2]])->collisions);
+        self::assertSame([['5']], ValueNormaliser::normalise([5 => 1, "5\0" => 2])->collisions);
+    }
+
+    /**
+     * A collision's keys are named as they were cleaned, at every depth, never
+     * as they were given.
+     *
+     * @return void
+     */
+    public function testACollisionPathHoldsOnlyCleanedKeys(): void
+    {
+        $normalised = ValueNormaliser::normalise(["o\0uter" => ["in\u{202E}ner" => ['k' => 1, "k\0" => 2]]]);
+
+        self::assertSame([['outer', 'inner', 'k']], $normalised->collisions);
+    }
+
+    /**
+     * A collision is still named at the deepest array kept, and a collision in
+     * an array beyond it is not met, since that array is truncated unread.
+     *
+     * @return void
+     */
+    public function testACollisionIsNamedAtTheDeepestArrayKept(): void
+    {
+        $deepest = ValueNormaliser::normalise(self::nested(7, ['x' => 1, "x\0" => 2]));
+        $beyond  = ValueNormaliser::normalise(self::nested(8, ['x' => 1, "x\0" => 2]));
+
+        self::assertSame([[...array_fill(0, 7, 'level'), 'x']], $deepest->collisions);
+        self::assertSame([], $beyond->collisions);
+        self::assertSame(0, $beyond->collisionCount);
+    }
+
+    /**
+     * Every parameter that holds a raw value, a raw key or a diagnostic is
+     * marked sensitive, on the entry point and on each helper it passes
+     * through, because `Reference::to()` can throw from inside them.
+     *
+     * @return void
+     */
+    public function testTheRawValueParametersAreSensitive(): void
+    {
+        $values = ['normalise', 'value', 'object', 'collection', 'list', 'map', 'scalar', 'backed', 'uid', 'integer', 'date', 'float', 'shortestDigits', 'readsBack'];
+        $paths  = ['value', 'collection', 'list', 'map', 'collide'];
+
+        foreach ($values as $method) {
+            self::assertTrue(self::isSensitive(ValueNormaliser::class, $method, 'value'), "{$method}() does not mark its value.");
+        }
+
+        foreach ($paths as $method) {
+            self::assertTrue(self::isSensitive(ValueNormaliser::class, $method, 'path'), "{$method}() does not mark its path.");
+            self::assertTrue(self::isSensitive(ValueNormaliser::class, $method, 'collisions'), "{$method}() does not mark its collisions.");
+        }
+
+        self::assertTrue(self::isSensitive(Normalised::class, '__construct', 'value'));
+        self::assertTrue(self::isSensitive(Normalised::class, '__construct', 'collisions'));
+    }
+
+    /**
+     * The depth and the count hold no payload, so they stay readable in a stack
+     * trace.
+     *
+     * @return void
+     */
+    public function testTheStructuralParametersAreNotSensitive(): void
+    {
+        self::assertFalse(self::isSensitive(ValueNormaliser::class, 'value', 'depth'));
+        self::assertFalse(self::isSensitive(ValueNormaliser::class, 'value', 'count'));
+    }
+
+    /**
+     * A failure from inside the normaliser leaves no value and no key in the
+     * exception's stack trace, even with every frame keeping its arguments.
+     *
+     * @return void
+     */
+    public function testAFailureLeavesNoRawValueInTheStackTrace(): void
+    {
+        $previous = ini_set('zend.exception_ignore_args', '0');
+
+        try {
+            ValueNormaliser::normalise(['planted-key' => ['planted-sibling' => 'planted-value', 'model' => new StubUser]]);
+            self::fail('Expected the unsaved model to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            $trace = print_r($exception->getTrace(), true);
+
+            self::assertStringContainsString(\SensitiveParameterValue::class, $trace);
+            self::assertStringNotContainsString('planted', $trace);
+            self::assertStringNotContainsString('planted', (string) $exception);
+        } finally {
+            ini_set('zend.exception_ignore_args', $previous === false ? '0' : $previous);
+        }
     }
 
     /**
@@ -769,7 +897,7 @@ final class ValueNormaliserTest extends TestCase
         $normalised = ValueNormaliser::normalise(self::collisions(40));
 
         self::assertCount(Normalised::MAX_COLLISIONS, $normalised->collisions);
-        self::assertSame(array_map(static fn (int $index): string => 'k' . $index, range(0, 31)), $normalised->collisions);
+        self::assertSame(array_map(static fn (int $i): array => ['k' . $i], range(0, 31)), $normalised->collisions);
         self::assertSame(40, $normalised->collisionCount);
         self::assertCount(32, ValueNormaliser::normalise(self::collisions(33))->collisions);
         self::assertCount(31, ValueNormaliser::normalise(self::collisions(31))->collisions);
@@ -845,6 +973,27 @@ final class ValueNormaliserTest extends TestCase
         }
 
         return $value;
+    }
+
+    /**
+     * Whether the method marks the parameter of that name sensitive.
+     *
+     * @param  class-string  $class
+     * @param  string  $method
+     * @param  string  $name
+     * @return bool
+     */
+    private static function isSensitive(string $class, string $method, string $name): bool
+    {
+        foreach ((new \ReflectionMethod($class, $method))->getParameters() as $parameter) {
+            if ($parameter->getName() !== $name) {
+                continue;
+            }
+
+            return $parameter->getAttributes(\SensitiveParameter::class) !== [];
+        }
+
+        self::fail("{$method}() has no parameter \${$name}.");
     }
 
     /**

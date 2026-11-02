@@ -18,9 +18,10 @@ application boots rather than discovered in the data.
   versions the payload contract, apart from the record's own version. Its category is a slug of 1 to 64 lower-case
   letters, digits or underscores starting with a letter, `general` by default (`EventDefinition::DEFAULT_CATEGORY`).
 - The category is stored on every row, so retention by category never consults the definitions when it prunes.
-- A field rule (`FieldRule`) gives a path one handling (`FieldHandling`): `retain` keeps the value as captured,
-  `redact` stores it as a marker, `pseudonymise` stores a keyed hash, `encrypt` stores it encrypted to its owner, and
-  `drop` does not store it. Every handling but `retain` is terminal: it decides the whole branch beneath its path.
+- A field rule (`FieldRule`) gives a path one handling (`FieldHandling`): `retain` keeps the value as key redaction left
+  it, each string cut to 1024 bytes, `redact` stores it as the marker `[REDACTED]`, `pseudonymise` stores a keyed hash,
+  `encrypt` stores it encrypted to its owner, and `drop` does not store it. Every handling but `retain` is terminal: it
+  decides the whole branch beneath its path.
 - A registered code drops every field no rule names: `unlisted` is `drop` by default, so one rule drops every other
   field. `->unlisted(FieldHandling::RETAIN)` keeps unlisted fields explicitly, and unlisted fields can never be
   encrypted, since an encrypted field names its owner.
@@ -32,9 +33,9 @@ application boots rather than discovered in the data.
   setting must not stop an application booting before `audit-log:check` can report it. Only a real boolean passes.
 - Every `encrypt` rule names its owner: `KeyOwner::ACTOR` (`actor`), `KeyOwner::SUBJECT` (`subject`), or the path of a
   property holding a reference. An owner path names one property, without `*`, and is never the encrypted field
-  itself. When the owner is absent or has no key, the field is dropped and diagnosed, never stored in plaintext.
-  Erasing an owner's data destroys the owner's key; the plaintext references in the record (actor and subject ids)
-  remain, and are pseudonymous rather than erased.
+  itself. When the owner is absent or has no key, or a container's canonical JSON is longer than 1024 bytes, the field is
+  dropped and diagnosed, never stored in plaintext. Erasing an owner's data destroys the owner's key; the plaintext
+  references in the record (actor and subject ids) remain, and are pseudonymous rather than erased.
 - Global redaction of secret-shaped keys runs before the field rules, and `retain` never un-redacts what it redacted.
 - Two rules for one path are refused unless they are identical, which is kept once. A rule that a terminal rule with
   fewer segments may cover is unreachable and refused, in whichever order the two are added.
@@ -48,9 +49,13 @@ application boots rather than discovered in the data.
   definition resolves `purpose` to any other handling, by a rule or by `unlisted`. The check is `accessed()`'s alone:
   only it knows a code is a disclosure, so registering such a definition is not refused and `event()` under that code
   is unaffected. An unregistered code is accepted, since the permissive default retains every field.
-- A definition describes how a payload is handled; applying the rules to a payload belongs to the redaction pipeline,
-  which never applies them to the package's own metadata (`properties._audit`). Until it lands, a record keeps its
-  payload as given.
+- A definition describes how a payload is handled, and the rules apply at capture: `Privacy\FieldPolicy` applies them to
+  the properties after key redaction and before the byte budget, and never to the context or to the package's own
+  metadata (`properties._audit`). See `redaction.md`.
+- The walker selects a rule, then transforms the value. It descends through any map or list on the way to a rule beneath
+  it, even when the ancestor's own handling is the `unlisted` default, so `retain('customer.email')` with `unlisted`
+  `drop` keeps `customer.email` and drops the rest of `customer`. An explicit terminal rule handles its whole branch,
+  and a `retain` lets a more specific rule beneath it apply. Removing list elements reindexes the list.
 
 ## Success Path
 
@@ -93,8 +98,9 @@ public function boot(): void
 - The catalogue (`EventCatalogue`) asks every case for its definition, checks them all, then registers them.
 - When a record is made, the catalogue gives its code's definition, or the permissive default for a code no one
   defined, and the record takes its event version and category from it.
-- For each field of the payload, the most specific rule matching the field or one of its ancestors decides its
-  handling; a field no rule matches takes the `unlisted` handling.
+- For each field of the payload, the most specific rule matching the field or one of its ancestors decides its handling;
+  a field no rule matches, with no rule beneath it, takes the `unlisted` handling. What each removal leaves in
+  `properties._audit.omitted` is in `redaction.md`.
 
 ## Failure / Edge Cases
 
@@ -172,7 +178,7 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
 
 ## Implementation Anchors
 
-- `src/Definitions/EventDefinition.php`: `for()`, `permissive()`, `rule()`, `unlisted()`, `ruleFor()`,
+- `src/Definitions/EventDefinition.php`: `for()`, `permissive()`, `rule()`, `unlisted()`, `ruleFor()`, `ruleBeneath()`,
   `handlingFor()`.
 - `src/Definitions/FieldRule.php`; `src/Definitions/FieldPath.php`: `parse()`, `matches()`, `compare()`,
   `mayBeBeneath()`.
@@ -183,6 +189,7 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
 - `src/Definitions/DefinitionSettings.php`: `requiresRegistered()`, `validate()`.
 - `src/Recorder.php`: `define()`, `accessed()`.
 - `src/AuditLogServiceProvider.php`: `freezeRegistrationOnceBooted()`.
+- `src/Privacy/FieldPolicy.php`: `apply()`.
 
 ## Authoritative Tests
 
@@ -192,7 +199,9 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
   `testEncryptRequiresAnOwner`, `testDefinitionsBuiltInAnyOrderAreEqual`, `testASecondRuleForAPathIsRefused`,
   `testRefusesAnUnreachableRule`, `testARuleBeneathARetainedPathIsReachable`,
   `testRulesThatOnlyShareALengthAreReachable`, `testUnlistedFieldsCannotBeEncrypted`,
-  `testThePermissiveDefaultRetainsUnlistedFields`, `testTheMostSpecificRuleWins`, `testOneRuleDropsEveryOtherField`
+  `testThePermissiveDefaultRetainsUnlistedFields`, `testTheMostSpecificRuleWins`, `testOneRuleDropsEveryOtherField`,
+  `testRuleBeneathFindsADescendantRule`, `testRuleBeneathIgnoresARuleAtOrAboveThePath`,
+  `testRuleBeneathTakesTheFirstInPathOrder`
 - `tests/Unit/Definitions/FieldPathTest.php` `testRefusesAMalformedPath`, `testRefusesMoreThanEightSegments`,
   `testRefusesAPathWithControlCharacters`, `testRefusesAPathWithAReservedSegment`, `testMatches`,
   `testComparesSpecificity`, `testMayBeBeneath`
@@ -209,13 +218,18 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
   `testRefusesAnIntegerBackedDefiningEnum`, `testDefiningAfterFreezingThrows`, `testDefinitionsAreServedAfterFreezing`,
   `testRegistrationIsRequiredPerCall`, `testAFrozenCatalogueStillServesEachCallAsAsked`, `testTheFrozenCheckComesFirst`,
   `testFreezingIsIdempotentAndReported`
+- `tests/Unit/Privacy/FieldPolicyTest.php` `testEachHandlingAtALiteralPath`, `testOneRuleDropsEveryOtherField`,
+  `testUnlistedRetainKeepsThem`, `testANestedRetainKeepsItAndDropsTheRestOfItsParent`,
+  `testAnExplicitTerminalAncestorHandlesTheWholeSubtree`, `testInheritedRetainLetsADescendantRuleApply`,
+  `testRemovingListElementsReindexesTheList`, `testTheOwnerIsTheActor`, `testTheOwnerIsTheSubject`,
+  `testTheOwnerIsAPropertyHoldingAReference`, `testANoOwnerFieldIsDroppedAndDiagnosed`
 - `tests/Unit/Definitions/DefinitionSettingsTest.php` `testDefaultsToFalse`, `testReadsTheSettingOnEveryCall`,
   `testRefusesAnythingButABoolean`, `testNoMessageHoldsTheValue`
 - `tests/Feature/RecorderTest.php` `testAnUnregisteredCodeIsRefusedWhenRegistrationIsRequired`,
   `testAMalformedRequireRegisteredFailsClosed`, `testARegisteredDisclosureDefinitionThatRetainsThePurposeIsAccepted`,
   `testARegisteredDisclosureDefinitionThatDoesNotRetainThePurposeIsRefused`,
   `testAnEnumDefinitionThatDoesNotRetainThePurposeIsRefused`, `testAnUnregisteredDisclosureCodeIsAccepted`,
-  `testDefineIsRefusedAfterBoot`
+  `testDefineIsRefusedAfterBoot`, `testARegisteredCodeDropsItsUnlistedFields`
 - `tests/Feature/Recording/AccessRecordsTest.php` `testAPurposeOfARegisteredDefinitionIsStored`
 - `tests/Feature/AuditLogServiceProviderTest.php` `testRegistrationIsFrozenOnceBooted`,
   `testRegistrationInAProvidersBootIsAccepted`, `testAMalformedSettingDoesNotStopBoot`
@@ -230,6 +244,7 @@ Update this note when any of the following change:
 - a field handling or key owner, or its stored value
 - the path grammar, its segment limit or its reserved prefix
 - how the winning rule is chosen, or which rules are unreachable
+- how the walker reaches a rule beneath a map or a list
 - what an unregistered code gets, or when it is refused
 - when definitions may be registered, or what a conflict is
 - when `definitions.require_registered` is read, or what a malformed value does

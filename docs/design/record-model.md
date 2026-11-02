@@ -46,19 +46,27 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   `subject()`, `actor()`, `hasActor()` and `isActorSettled()`. It cannot record the record, choose its timing, or read
   its properties or note. The builder's own fillers are `@internal`, and an application never calls them.
 - A filler given `null` changes nothing and leaves the field open for the next contributor; `fillContext()` adds only
-  the keys the context does not hold yet; and a malformed value is refused whether or not it would have been used.
+  the keys the context does not hold yet; and a malformed value is refused whether or not it would have been used,
+  except an IP address, which `fillClient()` takes as it comes for minimising to judge.
   `hasActor()` is false for no actor yet and for `by(null)`, which `isActorSettled()` tells apart.
 - A captured record always has an origin: `http`, `console` or `queue` (`Origin`). Its provenance is always `captured`
   (`Provenance::CAPTURED`), which says the application asserted the activity, not that the claim is true; `imported`
   belongs to records another source asserted. No public method takes a provenance, and the import fields
   (`source_record_id`, `import_batch_id`) of a captured record are `null`.
-- `properties._audit` belongs to the package: it holds the `note` and, once redaction exists, the `omitted` diagnostic.
-  A caller's key beginning `_audit`, at any depth and after its key is cleaned, is refused.
+- `properties._audit` belongs to the package: it holds `note`, `identifier_hash` and `omitted`, in that order and only
+  as present, and it is the last key of the properties. A caller's key beginning `_audit`, at any depth and after its
+  key is cleaned, is refused.
 - A note (`withNote()`) is cleaned and cut to `PendingRecord::NOTE_MAX_BYTES` (1024) bytes on a character boundary. A
   note without an owner is stored at `properties._audit.note`, after the caller's keys, in plaintext, and cannot be
   erased. A note with an owner (`KeyOwner::ACTOR`, `KeyOwner::SUBJECT`, a model or a reference) is never stored in
-  plaintext: until the pipeline that encrypts it to its owner exists, it is not stored at all. A note is free text,
-  and nothing claims it holds no personal data or secrets.
+  plaintext: it is sealed through `Contracts\FieldEncrypter`, and when the owner is absent, has no key or the encrypter
+  fails, it is dropped and counted in `properties._audit.omitted` under `_audit.note`. A note is free text, and nothing
+  claims it holds no personal data or secrets.
+- A sign-in identifier (`withIdentifier()`) is kept as given, validated not at all because it is untrusted input, and
+  held on the builder apart from the properties. At capture it becomes `properties._audit.identifier_hash`, so
+  `withProperties()` cannot spoof it and an `unlisted` `drop` cannot lose it; see `redaction.md`.
+- `AuditRecord::fromPending()` takes the minimised value (`Privacy\Minimised`), so the record's `ip`, `context` and
+  `properties` are what minimising left of the builder's, and its `user_agent` and every other field are the builder's.
 - Setting one field twice keeps the last value given (the code, the references, the outcome and reason, the note and
   its owner); `withProperties()` merges at the top level, later keys replacing earlier ones. Different calls never
   interact, so the record does not depend on the order they are made in.
@@ -73,18 +81,18 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
 
 ## Success Path
 
-- The application names a code with `event()`, then describes the activity in any order: `on()` the subject, `by()`
-  the actor, `asPrincipal()`, `forTenant()`, `usingCredential()` with a credential's id (never a secret),
-  `correlatedWith()` a namespaced id such as `app:ticket-123`, `withProperties()`, `withNote()`, and an outcome.
+- The application names a code with `event()`, then describes the activity in any order: `on()` the subject, `by()` the
+  actor, `asPrincipal()`, `forTenant()`, `usingCredential()` with a credential's id (never a secret), `correlatedWith()`
+  a namespaced id such as `app:ticket-123`, `withProperties()`, `withNote()`, `withIdentifier()`, and an outcome.
 - Each value is validated and normalised as it is given, so the builder's properties and context hold only strings,
   integers, booleans, `null`, lists and maps, and every other field a validated value.
 - Contributors fill the gaps the application left, each through a `Contribution`. The package's defaults fill the
   origin, the request and trace ids, the IP address and user agent, the actor and its guard, and the context (see
   `context-resolution.md`). The application's own, registered with `AuditLog::contribute()`, then fill whatever is left,
   such as the principal, the tenant or the session reference.
-- `record()` hands the builder to the recorder, which runs the contributors, builds the `AuditRecord` from it with the
-  code's event version and category, the time it occurred and the application's source id and region, delivers it
-  according to its timing (see `outcomes.md`) and returns it.
+- `record()` hands the builder to the recorder, which runs the contributors, minimises what they leave (see
+  `redaction.md`), builds the `AuditRecord` from that with the code's event version and category, the time it occurred
+  and the application's source id and region, delivers it according to its timing (see `outcomes.md`) and returns it.
 
 ## Failure / Edge Cases
 
@@ -95,10 +103,12 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   and the outcome is left as it was.
 - A reference type or id that is empty, longer than 191 characters or not clean text, a model without a key, or a
   model whose key is neither a string, an integer nor a UUID: `\InvalidArgumentException`.
-- A credential id, correlation id, guard name, session reference, request id, IP address or connection name that is
-  empty, too long for its column or not clean text, a correlation id with no `<namespace>:` prefix, or a trace id that
-  is not 32 lower-case hexadecimal digits or is all zero: `\InvalidArgumentException`. Identifiers are validated, never
-  cleaned or cut. A user agent is cleaned and cut to 512 bytes instead, and one that cleans to nothing is `null`.
+- A credential id, correlation id, guard name, session reference, request id or connection name that is empty, too long
+  for its column or not clean text, a correlation id with no `<namespace>:` prefix, or a trace id that is not 32
+  lower-case hexadecimal digits or is all zero: `\InvalidArgumentException`. Identifiers are validated, never cleaned or
+  cut. A user agent is cleaned and cut to 512 bytes instead, and one that cleans to nothing is `null`. An IP address is
+  never refused: one that is not valid is stored as `null` and adds `$ip` to `omitted`, so it costs the record nothing
+  (see `redaction.md`).
 - Properties or context given as a non-empty list, or properties with a key beginning `_audit` at any depth:
   `\InvalidArgumentException`, and nothing of that call is merged. `[]` adds nothing. Only the properties reserve
   `_audit`: the context keeps such keys as given.
@@ -112,8 +122,9 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   `\InvalidArgumentException`.
 - A record version other than 1 read back: `\UnexpectedValueException`.
 - A value the normaliser cannot represent is kept as a marker, never refused: `[UNSERIALISABLE]`, `[NONFINITE]` or
-  `[TRUNCATED]`. Keys that collide once cleaned keep the first value, and the collisions are counted, with the schema
-  paths of the first 32 kept and never a value.
+  `[TRUNCATED]`. Keys that collide once cleaned keep the first value. The builder counts the collisions and carries the
+  paths of the first 32 segment by segment, so a literal dot stays within its key; at capture each is counted in
+  `properties._audit.omitted` under a masked path, and neither a raw key nor a value reaches a record.
 
 ## Envelope
 
@@ -149,10 +160,10 @@ its finalisation columns. `tests/Fixtures/Records/audit-record-v1.json` is the g
 | `source_region`    | ?string | the region it was captured in                              | none is configured           |
 | `source_record_id` | ?string | the id an imported record had at its source                | always for a captured record |
 | `import_batch_id`  | ?string | the import an imported record came in                      | always for a captured record |
-| `ip`               | ?string | the client's IP address                                    | none was filled              |
+| `ip`               | ?string | the client's IP address, under `redaction.ip`              | none was filled or kept      |
 | `user_agent`       | ?string | the client's user agent, cleaned and capped                | none was filled              |
-| `context`          | ?map    | where it happened (route, command, job), normalised        | nothing was filled           |
-| `properties`       | ?map    | the caller's properties, normalised, then `_audit`         | nothing remains              |
+| `context`          | ?map    | where it happened (route, command, job), minimised         | nothing remains              |
+| `properties`       | ?map    | the caller's properties, minimised, then `_audit`          | nothing remains              |
 | `occurred_at`      | string  | when it happened, ISO-8601 UTC with microseconds           | never                        |
 
 ## Normalisation
@@ -200,6 +211,7 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 - `src/Records/Enums/Outcome.php`, `src/Records/Enums/Origin.php`, `src/Records/Enums/Provenance.php`,
   `src/Records/Enums/Timing.php`.
 - `src/Support/ValueNormaliser.php`, `src/Support/Normalised.php`, `src/Support/TextSanitizer.php`.
+- `src/Privacy/Minimised.php`, `src/Privacy/RecordMinimiser.php`: `minimise()`.
 
 ## Authoritative Tests
 
@@ -209,7 +221,7 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testOccurredAtIsUtcWithMicroseconds`, `testTheEventVersionAndCategoryAreTheCallers`,
   `testProvenanceIsCapturedAndTheImportFieldsAreNull`, `testReferencesArePairsOrAbsent`,
   `testTheNoteIsStoredUnderTheReservedMetadata`, `testAnOwnedNoteIsNeverStoredInPlaintext`,
-  `testABuilderWithoutAnOriginIsALogicError`
+  `testABuilderWithoutAnOriginIsALogicError`, `testTheRecordStoresTheMinimisedValues`
 - `tests/Unit/Records/RecordVersionTest.php` `testTheCurrentVersionIsOneAndSupported`, `testAnUnknownVersionIsRefused`
 - `tests/Unit/Records/EventCodeTest.php` `testRefusesAnInvalidCode`, `testTheLengthIsCheckedFirstAndInBytes`,
   `testRefusesTheReservedPrefix`, `testAcceptsCodesThatOnlyResembleTheReservedPrefix`
@@ -220,13 +232,20 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testToNeverReadsTheModelsAttributes`
 - `tests/Unit/Records/Concerns/DescribesTheActivityTest.php` `testByNullAndNoByGiveDifferentRecords`,
   `testWithPropertiesMergesLaterKeysOverEarlier`, `testWithPropertiesRefusesAReservedKeyAtAnyDepth`,
-  `testWithNoteSanitisesAndCapsTheText`, `testWithNoteRefusesEmptyText`, `testCorrelatedWithRefusesAnInvalidId`
+  `testWithNoteSanitisesAndCapsTheText`, `testWithNoteRefusesEmptyText`, `testCorrelatedWithRefusesAnInvalidId`,
+  `testWithIdentifierKeepsTheValueAsGiven`, `testAnIdentifierIsNotInTheProperties`,
+  `testAPropertyCannotSpoofTheIdentifierHash`
+- `tests/Unit/Privacy/RecordMinimiserTest.php` `testAPlaintextNoteGoesToTheMetadataAfterTheCallersKeys`,
+  `testAnOwnedNoteWithNoEncrypterIsDroppedAndDiagnosed`, `testAnOwnedNoteWithAnAbsentOwnerIsDroppedAndDiagnosed`,
+  `testAnOwnedNoteWithAnEncrypterStoresItsEnvelope`, `testAPropertyCollisionIsCountedAndMasked`
+- `tests/Unit/Privacy/ByteBudgetTest.php` `testMetadataComesLastInItsFixedOrder`
 - `tests/Unit/Records/Concerns/SetsTheOutcomeTest.php` `testTheOutcomeIsSuccessByDefault`,
   `testRefusesAReasonThatIsNotAMachineCode`, `testTheLastOutcomeWins`
 - `tests/Unit/Records/Concerns/ChoosesDeliveryTest.php` `testASecondDifferentTimingIsALogicError`,
   `testFailClosedAfterCommitIsALogicError`
 - `tests/Unit/Records/Concerns/FillsAmbientContextTest.php` `testAFillerNeverReplacesAGivenField`,
-  `testAnExplicitValueReplacesAFilledOne`, `testFillersRefuseValuesOutsideTheirColumns`
+  `testAnExplicitValueReplacesAFilledOne`, `testFillersRefuseValuesOutsideTheirColumns`,
+  `testFillClientRefusesNoAddress`
 - `tests/Unit/Records/ContributionTest.php` `testEachFillerFillsTheRecord`, `testAnExplicitValueIsNeverReplaced`,
   `testTheFirstContributorToFillWins`, `testAMalformedValueIsRefusedByTheBuilder`, `testReadsTheCodeAndSubject`,
   `testHasActorIsFalseForNoActorAndForByNull`, `testIsActorSettledTellsByNullFromNoActor`,
@@ -237,7 +256,8 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 - `tests/Unit/Support/ValueNormaliserTest.php` `testAModelBecomesItsReferenceNeverItsAttributes`,
   `testAModelIsNeverSerialisedOrQueried`, `testAUidOfAnotherClassIsNeverCalled`, `testAUidsStringIsSanitised`,
   `testAFiniteFloatBecomesItsShortestRoundTripString`, `testFloatsIgnoreThePrecisionSettings`,
-  `testTheNinthLevelIsTruncated`, `testCollidingKeysKeepTheFirstAndAreDiagnosed`, `testOtherValuesAreUnserialisable`
+  `testTheNinthLevelIsTruncated`, `testCollidingKeysKeepTheFirstAndAreDiagnosed`,
+  `testALiteralDotInACollidedKeyStaysOneSegment`, `testOtherValuesAreUnserialisable`
 - `tests/Unit/Support/TextSanitizerTest.php` `testRepairsInvalidUtf8`, `testStripsControlsAndBidiControls`,
   `testWhitespaceControlsBecomeSpaces`, `testCutsAtAByteCapWithoutSplittingACharacter`
 
@@ -250,6 +270,6 @@ Update this note when any of the following change:
 - the event code grammar, its length or its reserved prefix
 - the reason grammar or an identifier's length
 - a normalisation or sanitising rule, or a marker's text
-- the note cap, or where a note is stored
+- the note cap, where a note is stored, or what `properties._audit` holds
 - what the builder refuses, or when it is used up
 - what a `Contribution` can fill or read

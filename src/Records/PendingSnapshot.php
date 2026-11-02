@@ -13,8 +13,10 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  * A pending record's state at one moment, as the recorder reads it and the
  * captured record is built from it: every field given or filled, the properties
  * and context normalised (`null` when empty), the timing resolved (`null` when
- * the recorder applies its default), and the diagnostics of the property keys
- * that collided once cleaned. Only `PendingRecord` builds one.
+ * the recorder applies its default), the identifier a sign-in was attempted
+ * with, raw until it is hashed at capture, and the diagnostics of the property
+ * and context keys that collided once cleaned, which hold raw cleaned keys
+ * until they are masked. Only `PendingRecord` builds one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +53,11 @@ final readonly class PendingSnapshot
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  ?string  $connection
      * @param  bool  $failClosed
-     * @param  list<string>  $collisions
+     * @param  list<list<int|string>>  $collisions
      * @param  int  $collisionCount
+     * @param  ?string  $identifier
+     * @param  list<list<int|string>>  $contextCollisions
+     * @param  int  $contextCollisionCount
      */
     public function __construct(
 
@@ -85,9 +90,11 @@ final readonly class PendingSnapshot
         public ?string $reason,
 
         /** The properties, normalised, as a map; `null` when there are none. */
+        #[\SensitiveParameter]
         public ?array $properties,
 
         /** The note, cleaned and capped, if one was given. */
+        #[\SensitiveParameter]
         public ?string $note,
 
         /** Whose key the note is encrypted under; `null` for a plaintext note. */
@@ -105,7 +112,8 @@ final readonly class PendingSnapshot
         /** The W3C trace id of a trusted `traceparent`, if known. */
         public ?string $traceId,
 
-        /** The client's IP address, if known. */
+        /** The client's IP address as it was filled, valid or not, if known. */
+        #[\SensitiveParameter]
         public ?string $ip,
 
         /** The client's user agent, cleaned and capped, if known. */
@@ -115,6 +123,7 @@ final readonly class PendingSnapshot
         public ?Origin $origin,
 
         /** The context, normalised, as a map; `null` when there is none. */
+        #[\SensitiveParameter]
         public ?array $context,
 
         /** When the record is written, resolved; `null` when the recorder applies its default. */
@@ -126,10 +135,22 @@ final readonly class PendingSnapshot
         /** Whether a failed write throws. */
         public bool $failClosed,
 
-        /** Schema paths of the property keys that collided once cleaned, first 32. */
+        /** Concrete paths of the property keys that collided once cleaned, segment by segment, first 32. */
+        #[\SensitiveParameter]
         public array $collisions,
 
         /** How many property keys collided once cleaned. */
         public int $collisionCount,
+
+        /** The identifier a sign-in was attempted with, raw until it is hashed at capture, if given. */
+        #[\SensitiveParameter]
+        public ?string $identifier,
+
+        /** Concrete paths of the context keys that collided once cleaned, segment by segment, first 32. */
+        #[\SensitiveParameter]
+        public array $contextCollisions,
+
+        /** How many context keys collided once cleaned. */
+        public int $contextCollisionCount,
     ) {}
 }

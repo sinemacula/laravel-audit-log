@@ -4,12 +4,9 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Records;
 
-use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Ramsey\Uuid\Uuid;
-use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
@@ -18,6 +15,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\Unit\Stubs\StubUser;
 
 /**
@@ -35,24 +33,8 @@ use Tests\Unit\Stubs\StubUser;
 #[CoversClass(PendingSnapshot::class)]
 final class PendingRecordTest extends TestCase
 {
-    /** @var string The id every record here is built with. */
-    private const string ID = '01932b4e-8a40-7000-8000-000000000001';
-
     /** @var string The reuse refusal. */
     private const string REUSED = 'A pending record is recorded once, and this one has already been recorded.';
-
-    /**
-     * Restore UUID generation after each test.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        Str::createUuidsNormally();
-
-        parent::tearDown();
-    }
 
     /**
      * Describing a record and dropping the builder never calls its recorder,
@@ -243,16 +225,18 @@ final class PendingRecordTest extends TestCase
         self::assertFalse($snapshot->failClosed);
         self::assertSame([], $snapshot->collisions);
         self::assertSame(0, $snapshot->collisionCount);
+        self::assertSame([], $snapshot->contextCollisions);
+        self::assertSame(0, $snapshot->contextCollisionCount);
 
         $absent = [
             $snapshot->code, $snapshot->subject, $snapshot->actor, $snapshot->principal, $snapshot->tenant,
             $snapshot->credentialId, $snapshot->correlationId, $snapshot->reason, $snapshot->properties,
             $snapshot->note, $snapshot->noteOwner, $snapshot->guard, $snapshot->sessionId, $snapshot->requestId,
             $snapshot->traceId, $snapshot->ip, $snapshot->userAgent, $snapshot->origin, $snapshot->context,
-            $snapshot->timing, $snapshot->connection,
+            $snapshot->timing, $snapshot->connection, $snapshot->identifier,
         ];
 
-        self::assertSame(array_fill(0, 21, null), $absent);
+        self::assertSame(array_fill(0, 22, null), $absent);
     }
 
     /**
@@ -290,12 +274,13 @@ final class PendingRecordTest extends TestCase
         self::assertSame(Timing::TRANSACTIONAL, $snapshot->timing);
         self::assertSame('business', $snapshot->connection);
         self::assertTrue($snapshot->failClosed);
+        self::assertSame('alice@example.com', $snapshot->identifier);
         self::assertFalse($pending->isConsumed());
         self::assertSame(Outcome::SUCCESS, $pending->succeeded()->snapshot()->outcome);
     }
 
     /**
-     * Rows of `[call]`: one call of each public mutator, the sixteen fluent
+     * Rows of `[call]`: one call of each public mutator, the seventeen fluent
      * methods and the nine fillers, each with a valid argument.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
@@ -385,6 +370,9 @@ final class PendingRecordTest extends TestCase
             }],
             'withNote' => [static function (PendingRecord $pending): void {
                 $pending->withNote('');
+            }],
+            'withIdentifier' => [static function (PendingRecord $pending): void {
+                $pending->withIdentifier('');
             }],
             'succeeded' => [static function (PendingRecord $pending): void {
                 $pending->succeeded();
@@ -478,7 +466,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(25, $mutators);
+        self::assertCount(26, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }
@@ -524,8 +512,9 @@ final class PendingRecordTest extends TestCase
 
     /**
      * The full builder's calls made in any of the orders give equal snapshots,
-     * which hold the timing the envelope does not, and equal envelopes under
-     * one id and instant.
+     * and equal snapshots give equal records;
+     * `AuditRecordTest::testPermutedCallOrdersGiveEqualEnvelopes` checks the
+     * envelope.
      *
      * @param  list<string>  $order
      * @return void
@@ -533,8 +522,6 @@ final class PendingRecordTest extends TestCase
     #[DataProvider('providePermutations')]
     public function testPermutedCallOrdersGiveEqualRecords(array $order): void
     {
-        Str::createUuidsUsing(static fn (): UuidInterface => Uuid::fromString(self::ID));
-
         $calls     = self::calls();
         $reference = self::fullBuilder();
         $permuted  = new PendingRecord;
@@ -546,7 +533,6 @@ final class PendingRecordTest extends TestCase
         }
 
         self::assertEquals($reference->snapshot(), $permuted->snapshot());
-        self::assertSame(self::build($reference)->toArray(), self::build($permuted)->toArray());
     }
 
     /**
@@ -606,8 +592,7 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * The full builder's calls, by name, each on its own; its note has no
-     * owner, so the envelope keeps it.
+     * The full builder's calls, by name, each on its own.
      *
      * @return array<string, \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void>
      */
@@ -641,6 +626,9 @@ final class PendingRecordTest extends TestCase
             'withNote' => static function (PendingRecord $pending): void {
                 $pending->withNote('Approved after review');
             },
+            'withIdentifier' => static function (PendingRecord $pending): void {
+                $pending->withIdentifier('alice@example.com');
+            },
             'denied' => static function (PendingRecord $pending): void {
                 $pending->denied('policy');
             },
@@ -672,7 +660,7 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * The golden record's builder, every call made in its forward order.
+     * The full builder, every call made in its forward order.
      *
      * @param  ?\Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): \SineMacula\Laravel\AuditLog\Records\AuditRecord  $recorder
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
@@ -689,15 +677,16 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * The captured record of the builder, as the golden record is built.
+     * A captured record for the builder's recorder to return, which uses the
+     * builder up as building its own record would.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      */
     private static function build(PendingRecord $pending): AuditRecord
     {
-        $occurredAt = new \DateTimeImmutable('2026-11-01 12:34:56.789012', new \DateTimeZone('Pacific/Auckland'));
+        $pending->consume();
 
-        return AuditRecord::fromPending($pending, 2, 'finance', $occurredAt, 'app-eu-1', 'eu-west-2');
+        return RecordFactory::captured();
     }
 }

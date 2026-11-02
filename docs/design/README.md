@@ -1,7 +1,7 @@
 # Design Notes
 
-These notes document the package's record, definition, storage, integrity, context and testing contracts that are easy
-to miss if you only read the quick-start material or skim the test suite.
+These notes document the package's record, definition, redaction, storage, integrity, context and testing contracts that
+are easy to miss if you only read the quick-start material or skim the test suite.
 
 Each note is intentionally short and follows the same structure:
 
@@ -28,6 +28,10 @@ The current note set is:
   left as.
 - `context-resolution.md`: the capture pipeline, what contributors may fill, how the actor is read without loading a
   user, the execution frames, when an inbound request id or trace id is believed, and what travels into a queued job.
+- `redaction.md`: what a record keeps of what it is given: key matching, the field rules at capture, the hash domains,
+  the byte budgets and omission diagnostics, the encryption seam and the IP modes.
+- `threat-model.md`: what minimising does not promise: the limits of key matching, what a leaked key gives up, and what
+  remains in a stack trace or a note.
 - `testing-helpers.md`: the fake store and its assertions, what runs with it and what it does not model, and how
   Laravel's test helpers change what a record holds.
 

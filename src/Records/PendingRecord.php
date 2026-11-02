@@ -16,9 +16,10 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  *
  * Its public methods describe the activity (`event()`, `on()`, `by()`,
  * `asPrincipal()`, `forTenant()`, `usingCredential()`, `correlatedWith()`,
- * `withProperties()` and `withNote()`), set its outcome (`succeeded()`, the
- * default, `failed()` and `denied()`), and choose its delivery
- * (`afterCommit()`, `immediately()`, `transactional()` and `failClosed()`).
+ * `withProperties()`, `withNote()` and `withIdentifier()`), set its outcome
+ * (`succeeded()`, the default, `failed()` and `denied()`), and choose its
+ * delivery (`afterCommit()`, `immediately()`, `transactional()` and
+ * `failClosed()`).
  * Setting one field twice keeps the last value given, except that properties
  * merge at the top level, later keys replacing earlier ones; different calls
  * never interact, so the record does not depend on the order they are made in.
@@ -128,6 +129,9 @@ final class PendingRecord
             failClosed: $this->failClosed,
             collisions: $this->collisions,
             collisionCount: $this->collisionCount,
+            identifier: $this->identifier,
+            contextCollisions: $this->contextCollisions,
+            contextCollisionCount: $this->contextCollisionCount,
         );
     }
 

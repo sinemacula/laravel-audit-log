@@ -29,8 +29,8 @@ helpers change what a record holds. It decides which test can use the fake and w
   `immediately()` or `transactional()` stays held if the host rolls back afterwards. Rollback, savepoint and atomicity
   behaviour belongs in tests against a real database.
 - With the fake bound, the definition lookup, the timing check, the contributors, deferral and finalisation all run, so
-  the fake holds the finalised record the store would have received. Field rules are not applied yet, by the fake or by
-  the database store; they arrive with redaction.
+  the fake holds the finalised record the store would have received. Field rules apply at capture, so the fake holds the
+  same minimised record the database store would.
 
 ## Success Path
 
@@ -103,7 +103,8 @@ helpers change what a record holds. It decides which test can use the fake and w
   ```
 
 - Finalisation runs, so a test needs what signing needs: with no `app.key` and no `integrity.keys`, a record is refused
-  with an `\InvalidArgumentException` even with the fake bound.
+  with an `\InvalidArgumentException` even with the fake bound. Minimising runs too, so a record that needs a hash needs
+  `redaction.key` or `app.key`, whatever signs it.
 - An assertion with no fake bound fails the test, telling it to call `AuditLog::fake()`.
 - A fake bound in a request under Octane belongs to that request's sandbox and does not reach the next.
 
@@ -133,6 +134,7 @@ helpers change what a record holds. It decides which test can use the fake and w
 - `tests/Feature/Recording/FakeParityTest.php` `testTheFakeHoldsTheRecordTheStoreReceived`,
   `testContributorsRunWithTheFake`, `testDeferralRunsWithTheFake`,
   `testAnImmediateRecordStaysInTheFakeAfterAHostRollback`, `testFailingPropagatesThroughTheRecorder`
+- `tests/Feature/Privacy/CaptureMinimisationTest.php` `testTheFakeHoldsTheMinimisedRecord`
 - `tests/Feature/Recording/HttpContextTest.php` `testAWithoutMiddlewareRequestHasTheConsoleOrigin`,
   `testTwoRequestsHaveDifferentIds`
 - `tests/Feature/Recording/ConsoleContextTest.php` `testACommandRecordsTheConsoleOriginAndItsName`,

@@ -156,4 +156,37 @@ return [
         'region' => env('AUDIT_LOG_SOURCE_REGION'),
     ],
 
+    /*
+    |---------------------------------------------------------------------------
+    | Redaction
+    |---------------------------------------------------------------------------
+    |
+    | What a record keeps of what it is given. `keys` are more key names to
+    | redact, none by default, merged with the built-ins, each tokenised the way
+    | a key is, and no built-in can be removed: matching keys is a heuristic,
+    | whose remedy is an event definition that allowlists a code's fields.
+    | `identifiers` says how a sign-in identifier is stored, `hash` by default
+    | or `drop`. `ip` says how an address is stored, `full` by default,
+    | `truncate`, `hash`, `drop` or `encrypt`. `key` is at least 32 bytes, or
+    | `base64:` followed by the encoding of one, or empty by default to derive
+    | it from `app.key`; changing it visibly breaks correlation with earlier
+    | rows. `max_bytes` is the most the encoded properties may hold, from 8192
+    | to 16777216 and 16384 by default, and `max_context_bytes` the most the
+    | encoded context may hold, from 1024 to 16777216 and 4096 by default.
+    | `keys`, `identifiers`, `ip` and both budgets may change on any deploy and
+    | affect only later rows, and changing `ip` or `identifiers` breaks
+    | correlation across the switch. A malformed value fails closed when it is
+    | read, and `audit-log:check` reports it.
+    |
+    */
+
+    'redaction' => [
+        'keys'              => [],
+        'key'               => env('AUDIT_LOG_REDACTION_KEY'),
+        'identifiers'       => env('AUDIT_LOG_REDACTION_IDENTIFIERS', 'hash'),
+        'ip'                => env('AUDIT_LOG_REDACTION_IP', 'full'),
+        'max_bytes'         => env('AUDIT_LOG_REDACTION_MAX_BYTES', 16384),
+        'max_context_bytes' => env('AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES', 4096),
+    ],
+
 ];

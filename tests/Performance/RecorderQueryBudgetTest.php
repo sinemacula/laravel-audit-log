@@ -17,17 +17,24 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ActorContributor;
 use SineMacula\Laravel\AuditLog\Contributors\AmbientActor;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Contributors\OriginContributor;
 use SineMacula\Laravel\AuditLog\Contributors\RequestContributor;
+use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
+use SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher;
+use SineMacula\Laravel\AuditLog\Privacy\Minimised;
+use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
+use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
@@ -39,6 +46,7 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use Tests\Fixtures\Commands\RecordingCommand;
 use Tests\Fixtures\Contributors\QueryingContributor;
 use Tests\Fixtures\Jobs\RecordingJob;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
@@ -49,7 +57,9 @@ use Tests\Unit\Stubs\StubAuthUser;
  * and an application's contributor adds exactly what it runs itself. The
  * listeners on a host's own code paths, which run whether or not it records
  * anything, cost nothing: making a job's payload, and entering and leaving a
- * job or a command, leave only what the job or command runs itself.
+ * job or a command, leave only what the job or command runs itself. Minimising
+ * is arithmetic on what capture already holds, so it adds nothing to a record's
+ * cost, whatever its definition and its settings ask for.
  *
  * No `users` table exists, so a guard that tried to load its user would fail
  * the test as well as its budget.
@@ -69,6 +79,7 @@ use Tests\Unit\Stubs\StubAuthUser;
 #[CoversClass(CarryContextIntoJobs::class)]
 #[CoversClass(TrackJobFrames::class)]
 #[CoversClass(TrackCommandFrames::class)]
+#[CoversClass(RecordMinimiser::class)]
 final class RecorderQueryBudgetTest extends PerformanceContractTestCase
 {
     use WithConsoleEvents;
@@ -348,6 +359,54 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * A record using every handling, an identifier, an owned note and a hashed
+     * address costs what a plain record does inside a transaction: one insert
+     * and the savepoint that isolates it, read from nowhere. The stored values
+     * show the minimiser did run.
+     *
+     * @return void
+     */
+    public function testMinimisingAddsNoQuery(): void
+    {
+        $pending = $this->fullyMinimisedPending();
+
+        DB::connection()->beginTransaction();
+
+        $record = $this->assertStatementBudget(0, 1, 1, 0, static fn () => $pending->immediately()->record());
+
+        self::assertSame(app(IdentifierHasher::class)->ip('203.0.113.9'), $record->ip);
+        self::assertSame(Redactor::MARKER, $record->properties['customer'] ?? null);
+        self::assertSame(app(IdentifierHasher::class)->field('alice@example.com'), $record->properties['email'] ?? null);
+        self::assertSame(['v' => 1, 'k' => 'key_7', 'c' => base64_encode('078-05-1120')], $record->properties['ssn'] ?? null);
+        self::assertSame(['v' => 1, 'k' => 'key_7', 'c' => base64_encode('Erasable.')], $record->properties['_audit']['note'] ?? null);
+        self::assertSame(app(IdentifierHasher::class)->identifier('alice@example.com'), $record->properties['_audit']['identifier_hash'] ?? null);
+    }
+
+    /**
+     * With no transaction open the same record is one plain insert.
+     *
+     * @return void
+     */
+    public function testAFullyMinimisedRecordOutsideATransactionIsOneInsert(): void
+    {
+        $pending = $this->fullyMinimisedPending();
+
+        $this->assertStatementBudget(0, 1, 0, 0, static fn () => $pending->immediately()->record());
+    }
+
+    /**
+     * The minimiser on its own runs no statement at all.
+     *
+     * @return void
+     */
+    public function testTheMinimiserRunsNoStatement(): void
+    {
+        $snapshot = $this->fullyMinimisedPending()->snapshot();
+
+        $this->assertStatementBudget(0, 0, 0, 0, static fn (): Minimised => app(RecordMinimiser::class)->minimise($snapshot, self::everyHandling()));
+    }
+
+    /**
      * Keep the session in memory, so reading it could not reach a database.
      *
      * @param  mixed  $app
@@ -394,6 +453,57 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     private function user(): StubAuthUser
     {
         return (new StubAuthUser)->forceFill(['id' => 7]);
+    }
+
+    /**
+     * A builder holding everything minimising acts on, recorded by a recorder
+     * of its own whose definition uses every handling, with a hashed address
+     * and an encrypter that holds a key for everyone.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
+     */
+    private function fullyMinimisedPending(): PendingRecord
+    {
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'hash');
+
+        app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
+
+        $recorder = new Recorder(new EventCatalogue, new ContributorRegistry);
+
+        $recorder->define(self::everyHandling());
+
+        $pending = $recorder->event(self::CODE)
+            ->by(Reference::of('user', '7'))
+            ->withProperties([
+                'amount'   => '1200.00',
+                'customer' => ['name' => 'Alice Example'],
+                'email'    => 'alice@example.com',
+                'ssn'      => '078-05-1120',
+                'internal' => 'dropped',
+                'password' => 's3cr3t',
+            ])
+            ->withIdentifier('alice@example.com')
+            ->withNote('Erasable.', KeyOwner::ACTOR);
+
+        $pending->fillClient('203.0.113.9', null);
+        $pending->fillContext(['api_key' => 's3cr3t', 'plan' => 'pro']);
+
+        return $pending;
+    }
+
+    /**
+     * A definition of the code using every handling.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Definitions\EventDefinition
+     */
+    private static function everyHandling(): EventDefinition
+    {
+        return EventDefinition::for(self::CODE)
+            ->retain('amount')
+            ->redact('customer')
+            ->pseudonymise('email')
+            ->encrypt('ssn', KeyOwner::ACTOR)
+            ->drop('internal');
     }
 
     /**

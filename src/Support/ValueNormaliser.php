@@ -27,7 +27,9 @@ use Symfony\Component\Uid\AbstractUid;
  * The outermost array is at depth 1, and an array deeper than 8 becomes
  * `[TRUNCATED]`, which also bounds a structure that refers to itself. Map keys
  * are cleaned; a key that, once cleaned, is already in its map keeps the first
- * value and is diagnosed by its schema path.
+ * value and is diagnosed by its concrete path, segment by segment: a map key as
+ * its cleaned string and a list index as its integer. A diagnostic holds raw
+ * cleaned keys, so it must be masked before it is stored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,12 +62,6 @@ final class ValueNormaliser
     /** @var list<string> Namespaces of the UUID libraries whose own classes write their string. */
     private const array UID_NAMESPACES = ['Ramsey\Uuid\\', 'Symfony\Component\Uid\\'];
 
-    /** @var string Separator of a schema path's segments. */
-    private const string PATH_SEPARATOR = '.';
-
-    /** @var string A list index's segment in a schema path. */
-    private const string LIST_SEGMENT = '*';
-
     /**
      * Disallow instantiation; utility container only.
      */
@@ -82,12 +78,12 @@ final class ValueNormaliser
      *
      * @throws \InvalidArgumentException
      */
-    public static function normalise(mixed $value): Normalised
+    public static function normalise(#[\SensitiveParameter] mixed $value): Normalised
     {
         $collisions = [];
         $count      = 0;
 
-        $normalised = self::value($value, 1, '', $collisions, $count);
+        $normalised = self::value($value, 1, [], $collisions, $count);
 
         return new Normalised($normalised, $collisions, $count);
     }
@@ -102,7 +98,7 @@ final class ValueNormaliser
      * @param  float  $value
      * @return string
      */
-    public static function float(float $value): string
+    public static function float(#[\SensitiveParameter] float $value): string
     {
         if (!is_finite($value)) {
             return self::NONFINITE;
@@ -121,17 +117,22 @@ final class ValueNormaliser
      *
      * @param  mixed  $value
      * @param  int  $depth
-     * @param  string  $path
-     * @param  list<string>  $collisions
+     * @param  list<int|string>  $path
+     * @param  list<list<int|string>>  $collisions
      * @param  int  $count
      * @return array<array-key, mixed>|bool|int|string|null
      *
-     * @param-out list<string>  $collisions
+     * @param-out list<list<int|string>>  $collisions
      *
      * @throws \InvalidArgumentException
      */
-    private static function value(mixed $value, int $depth, string $path, array &$collisions, int &$count): array|bool|int|string|null
-    {
+    private static function value(
+        #[\SensitiveParameter] mixed $value,
+        int $depth,
+        #[\SensitiveParameter] array $path,
+        #[\SensitiveParameter] array &$collisions,
+        int &$count,
+    ): array|bool|int|string|null {
         if (is_array($value)) {
             return self::collection($value, $depth, $path, $collisions, $count);
         }
@@ -152,7 +153,7 @@ final class ValueNormaliser
      *
      * @throws \InvalidArgumentException
      */
-    private static function object(object $value): array|int|string
+    private static function object(#[\SensitiveParameter] object $value): array|int|string
     {
         return match (true) {
             $value instanceof Model                                        => Reference::to($value)->toArray(),
@@ -172,7 +173,7 @@ final class ValueNormaliser
      * @param  \BackedEnum  $value
      * @return int|string
      */
-    private static function backed(\BackedEnum $value): int|string
+    private static function backed(#[\SensitiveParameter] \BackedEnum $value): int|string
     {
         return is_int($value->value) ? self::integer($value->value) : TextSanitizer::clean($value->value);
     }
@@ -187,7 +188,7 @@ final class ValueNormaliser
      * @param  \Ramsey\Uuid\UuidInterface|\Symfony\Component\Uid\AbstractUid  $value
      * @return string
      */
-    private static function uid(AbstractUid|UuidInterface $value): string
+    private static function uid(#[\SensitiveParameter] AbstractUid|UuidInterface $value): string
     {
         $class = $value::class;
 
@@ -211,7 +212,7 @@ final class ValueNormaliser
      * @param  mixed  $value
      * @return bool|int|string|null
      */
-    private static function scalar(mixed $value): bool|int|string|null
+    private static function scalar(#[\SensitiveParameter] mixed $value): bool|int|string|null
     {
         return match (true) {
             is_string($value)                => TextSanitizer::clean($value),
@@ -229,7 +230,7 @@ final class ValueNormaliser
      * @param  int  $value
      * @return int|string
      */
-    private static function integer(int $value): int|string
+    private static function integer(#[\SensitiveParameter] int $value): int|string
     {
         return $value >= -self::MAX_SAFE_INTEGER && $value <= self::MAX_SAFE_INTEGER ? $value : (string) $value;
     }
@@ -240,7 +241,7 @@ final class ValueNormaliser
      * @param  \DateTimeInterface  $value
      * @return string
      */
-    private static function date(\DateTimeInterface $value): string
+    private static function date(#[\SensitiveParameter] \DateTimeInterface $value): string
     {
         return \DateTimeImmutable::createFromInterface($value)
             ->setTimezone(new \DateTimeZone('UTC'))
@@ -255,17 +256,22 @@ final class ValueNormaliser
      *
      * @param  array<array-key, mixed>  $value
      * @param  int  $depth
-     * @param  string  $path
-     * @param  list<string>  $collisions
+     * @param  list<int|string>  $path
+     * @param  list<list<int|string>>  $collisions
      * @param  int  $count
      * @return array<array-key, mixed>|string
      *
-     * @param-out list<string>  $collisions
+     * @param-out list<list<int|string>>  $collisions
      *
      * @throws \InvalidArgumentException
      */
-    private static function collection(array $value, int $depth, string $path, array &$collisions, int &$count): array|string
-    {
+    private static function collection(
+        #[\SensitiveParameter] array $value,
+        int $depth,
+        #[\SensitiveParameter] array $path,
+        #[\SensitiveParameter] array &$collisions,
+        int &$count,
+    ): array|string {
         if ($depth > self::MAX_DEPTH) {
             return self::TRUNCATED;
         }
@@ -276,29 +282,28 @@ final class ValueNormaliser
     }
 
     /**
-     * The list with each element normalised one level deeper, every index
-     * written `*` in the path.
+     * The list with each element normalised one level deeper, its index the
+     * next segment of the element's path.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  list<mixed>  $value
      * @param  int  $depth
-     * @param  string  $path
-     * @param  list<string>  $collisions
+     * @param  list<int|string>  $path
+     * @param  list<list<int|string>>  $collisions
      * @param  int  $count
      * @return list<mixed>
      *
-     * @param-out list<string>  $collisions
+     * @param-out list<list<int|string>>  $collisions
      *
      * @throws \InvalidArgumentException
      */
-    private static function list(array $value, int $depth, string $path, array &$collisions, int &$count): array
+    private static function list(#[\SensitiveParameter] array $value, int $depth, #[\SensitiveParameter] array $path, #[\SensitiveParameter] array &$collisions, int &$count): array
     {
-        $path = self::path($path, self::LIST_SEGMENT);
         $list = [];
 
-        foreach ($value as $element) {
-            $list[] = self::value($element, $depth + 1, $path, $collisions, $count);
+        foreach ($value as $index => $element) {
+            $list[] = self::value($element, $depth + 1, array_merge($path, [$index]), $collisions, $count);
         }
 
         return $list;
@@ -313,22 +318,22 @@ final class ValueNormaliser
      *
      * @param  array<array-key, mixed>  $value
      * @param  int  $depth
-     * @param  string  $path
-     * @param  list<string>  $collisions
+     * @param  list<int|string>  $path
+     * @param  list<list<int|string>>  $collisions
      * @param  int  $count
      * @return array<array-key, mixed>
      *
-     * @param-out list<string>  $collisions
+     * @param-out list<list<int|string>>  $collisions
      *
      * @throws \InvalidArgumentException
      */
-    private static function map(array $value, int $depth, string $path, array &$collisions, int &$count): array
+    private static function map(#[\SensitiveParameter] array $value, int $depth, #[\SensitiveParameter] array $path, #[\SensitiveParameter] array &$collisions, int &$count): array
     {
         $map = [];
 
         foreach ($value as $key => $element) {
             $key     = TextSanitizer::clean((string) $key);
-            $keyPath = self::path($path, $key);
+            $keyPath = array_merge($path, [$key]);
 
             if (array_key_exists($key, $map)) {
                 self::collide($keyPath, $collisions, $count);
@@ -346,14 +351,14 @@ final class ValueNormaliser
      * Record a collision: its path while fewer than the most are kept, and
      * always in the count.
      *
-     * @param  string  $path
-     * @param  list<string>  $collisions
+     * @param  list<int|string>  $path
+     * @param  list<list<int|string>>  $collisions
      * @param  int  $count
      * @return void
      *
-     * @param-out list<string>  $collisions
+     * @param-out list<list<int|string>>  $collisions
      */
-    private static function collide(string $path, array &$collisions, int &$count): void
+    private static function collide(#[\SensitiveParameter] array $path, #[\SensitiveParameter] array &$collisions, int &$count): void
     {
         $count++;
 
@@ -362,18 +367,6 @@ final class ValueNormaliser
         }
 
         $collisions[] = $path;
-    }
-
-    /**
-     * The path of a segment beneath its parent's path.
-     *
-     * @param  string  $parent
-     * @param  string  $segment
-     * @return string
-     */
-    private static function path(string $parent, string $segment): string
-    {
-        return $parent === '' ? $segment : $parent . self::PATH_SEPARATOR . $segment;
     }
 
     /**
@@ -395,7 +388,7 @@ final class ValueNormaliser
      * @param  float  $value
      * @return array{0: string, 1: int}
      */
-    private static function shortestDigits(float $value): array
+    private static function shortestDigits(#[\SensitiveParameter] float $value): array
     {
         $places = 0;
 
@@ -422,7 +415,7 @@ final class ValueNormaliser
      * @param  int  $places
      * @return ?array{0: string, 1: int}
      */
-    private static function readsBack(float $value, int $rounded, int $exponent, int $places): ?array
+    private static function readsBack(#[\SensitiveParameter] float $value, int $rounded, int $exponent, int $places): ?array
     {
         $scale = $exponent - $places;
 

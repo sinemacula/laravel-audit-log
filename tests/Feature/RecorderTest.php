@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -12,6 +13,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Ramsey\Uuid\Uuid;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\ContextContributor;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ActorContributor;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Contributors\OriginContributor;
@@ -21,6 +23,9 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
+use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
+use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
@@ -29,10 +34,14 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Fixtures\Contributors\ActorFillingContributor;
+use Tests\Fixtures\Contributors\SecretFillingContributor;
 use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Definitions\Enums\DisclosureActivity;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Definitions\Enums\UnretainedDisclosureActivity;
+use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
+use Tests\Fixtures\Privacy\ThrowingFieldEncrypter;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 use Tests\Unit\Stubs\Enums\StubActivity;
@@ -41,9 +50,9 @@ use Tests\Unit\Stubs\StubAuthUser;
 /**
  * Feature tests for the recorder: what each of its calls does, and the capture
  * pipeline a recorded activity runs: the definition, the timing's checks, the
- * contributors in order, the clock and source, and delivery. Its collaborators
- * come from the current container on every capture, and it holds nothing but
- * registration data.
+ * contributors in order, minimising what they leave, the clock and source, and
+ * delivery. Its collaborators come from the current container on every capture,
+ * and it holds nothing but registration data.
  *
  * Definitions and contributors are registered on a recorder of a test's own,
  * since the application's has frozen by the time a test runs.
@@ -1032,6 +1041,269 @@ final class RecorderTest extends TestCase
 
         self::assertSame(0, $this->fake->count());
         self::assertSame(1, $late->count());
+    }
+
+    /**
+     * Minimising takes a snapshot of its own after the contributors ran: a
+     * secret one filled into the context is redacted, and a field encrypted
+     * under the actor reaches the encrypter under the actor one filled, though
+     * the recorder's first snapshot held neither.
+     *
+     * @return void
+     */
+    public function testMinimisingSeesWhatTheContributorsFilled(): void
+    {
+        $encrypter = self::bindEncrypter(new RecordingFieldEncrypter);
+        $recorder  = self::recorder();
+
+        $recorder->define(EventDefinition::for(self::CODE)->encrypt('card', KeyOwner::ACTOR));
+        $recorder->contribute(SecretFillingContributor::class);
+
+        $record = $recorder->event(self::CODE)->withProperties(['card' => '4242'])->record();
+
+        self::assertSame(['api_key' => Redactor::MARKER, 'plan' => 'pro'], array_intersect_key($record->context ?? [], ['api_key' => true, 'plan' => true]));
+        self::assertSame(SecretFillingContributor::ACTOR_TYPE, $record->actorType);
+        self::assertSame(['card' => ['v' => 1, 'k' => 'key_' . SecretFillingContributor::ACTOR_ID, 'c' => base64_encode('4242')]], $record->properties);
+        self::assertCount(1, $encrypter->calls());
+        self::assertSame(SecretFillingContributor::ACTOR_ID, $encrypter->calls()[0][0]->id);
+        self::assertStringNotContainsString(SecretFillingContributor::SECRET, (string) json_encode($record->toArray()));
+    }
+
+    /**
+     * A registered code stores what its definition retains and drops the rest,
+     * counting the removal.
+     *
+     * @return void
+     */
+    public function testARegisteredCodeDropsItsUnlistedFields(): void
+    {
+        $recorder = self::recorder();
+
+        $recorder->define(EventDefinition::for(self::CODE)->retain('amount'));
+
+        $record = $recorder->event(self::CODE)->withProperties(['amount' => '1200.00', 'customer' => 'Alice'])->record();
+
+        self::assertSame(['amount' => '1200.00', '_audit' => ['omitted' => ['count' => 1, 'paths' => ['*']]]], $record->properties);
+        self::assertSame([$record], $this->fake->recorded());
+    }
+
+    /**
+     * A code with no definition keeps every field that is not secret-shaped,
+     * and the marker replaces the value of one that is.
+     *
+     * @return void
+     */
+    public function testAnUnregisteredCodeRetainsItsFields(): void
+    {
+        $record = AuditLog::event(self::CODE)->withProperties(['amount' => '1200.00', 'password' => 's3cr3t'])->record();
+
+        self::assertSame(['amount' => '1200.00', 'password' => Redactor::MARKER], $record->properties);
+    }
+
+    /**
+     * A registered definition's rules apply along with its version and
+     * category, from the one definition the capture found.
+     *
+     * @return void
+     */
+    public function testARegisteredDefinitionsRulesApplyWithItsVersion(): void
+    {
+        $recorder = self::recorder();
+
+        $recorder->define(EventDefinition::for(self::CODE)->version(3)->category('finance')->redact('amount'));
+
+        $record = $recorder->event(self::CODE)->withProperties(['amount' => '1200.00'])->record();
+
+        self::assertSame(3, $record->eventVersion);
+        self::assertSame('finance', $record->category);
+        self::assertSame(['amount' => Redactor::MARKER], $record->properties);
+    }
+
+    /**
+     * A malformed setting fails the write before anything reaches the store,
+     * through either way of recording.
+     *
+     * @return void
+     */
+    public function testAMinimiserFailureFailsTheWriteAndStoresNothing(): void
+    {
+        self::config()->set('audit-log.redaction.ip', 'partial');
+
+        foreach ([static fn (): AuditRecord => AuditLog::record(self::CODE), static fn (): AuditRecord => AuditLog::event(self::CODE)->record()] as $record) {
+            try {
+                $record();
+
+                self::fail('Expected the setting to be refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('`audit-log.redaction.ip` must be `full`, `truncate`, `hash`, `drop` or `encrypt`.', $exception->getMessage());
+            }
+        }
+
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * A minimiser's failure comes before the builder is used up, so the same
+     * builder records once the setting is put right.
+     *
+     * @return void
+     */
+    public function testAMinimiserFailureLeavesTheBuilderUsable(): void
+    {
+        self::config()->set('audit-log.redaction.max_bytes', 1);
+
+        $pending = AuditLog::event(self::CODE)->withProperties(['amount' => '1200.00']);
+
+        try {
+            $pending->record();
+
+            self::fail('Expected the setting to be refused.');
+        } catch (\InvalidArgumentException) {
+            self::assertFalse($pending->isConsumed());
+        }
+
+        self::config()->set('audit-log.redaction.max_bytes', 16384);
+
+        $record = $pending->record();
+
+        self::assertTrue($pending->isConsumed());
+        self::assertSame(['amount' => '1200.00'], $record->properties);
+        self::assertSame([$record], $this->fake->recorded());
+    }
+
+    /**
+     * A failure comes from the capture that met it, and the next capture is
+     * judged afresh: the minimiser holds nothing between them.
+     *
+     * @return void
+     */
+    public function testEachCaptureBuildsItsOwnMinimiser(): void
+    {
+        self::assertNotSame(app(RecordMinimiser::class), app(RecordMinimiser::class));
+
+        $encrypter = self::bindEncrypter(new ThrowingFieldEncrypter);
+
+        AuditLog::event(self::CODE)->withNote('First.', Reference::of('user', '1'))->record();
+        AuditLog::event(self::CODE)->withNote('Second.', Reference::of('user', '1'))->record();
+
+        self::assertSame(2, $encrypter->calls());
+    }
+
+    /**
+     * An encrypter bound after the application booted is the one a capture
+     * uses, so the package never holds on to its default.
+     *
+     * @return void
+     */
+    public function testAFieldEncrypterBoundAfterBootIsUsed(): void
+    {
+        $recorder = app(Recorder::class);
+        $late     = self::bindEncrypter(new RecordingFieldEncrypter);
+
+        $record = $recorder->event(self::CODE)->withNote('Erasable.', Reference::of('user', '1'))->record();
+
+        self::assertSame(['_audit' => ['note' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode('Erasable.')]]], $record->properties);
+        self::assertCount(1, $late->calls());
+    }
+
+    /**
+     * An encrypter that throws does not fail the write: the field is dropped
+     * and diagnosed, the record is stored, and the failure is reported without
+     * the exception the encrypter threw.
+     *
+     * @return void
+     */
+    public function testAThrowingEncrypterDoesNotFailTheWrite(): void
+    {
+        self::bindEncrypter(new ThrowingFieldEncrypter);
+
+        $handler = new RecordingExceptionHandler;
+
+        $this->app?->instance(ExceptionHandler::class, $handler);
+
+        $recorder = self::recorder();
+
+        $recorder->define(EventDefinition::for(self::CODE)->encrypt('card', KeyOwner::SUBJECT));
+
+        $record = $recorder->event(self::CODE)->on(Reference::of('invoice', '42'))->withProperties(['card' => '4242'])->record();
+
+        self::assertSame(['_audit' => ['omitted' => ['count' => 1, 'paths' => ['card']]]], $record->properties);
+        self::assertSame([$record], $this->fake->recorded());
+        self::assertCount(1, $handler->reports());
+        self::assertInstanceOf(FieldEncryptionFailedException::class, $handler->reports()[0]);
+        self::assertNull($handler->reports()[0]->getPrevious());
+    }
+
+    /**
+     * An identifier reaches the record as its keyed hash, under the configured
+     * key, and is never stored as given.
+     *
+     * @return void
+     */
+    public function testWithIdentifierReachesTheRecordHashed(): void
+    {
+        self::config()->set('audit-log.redaction.key', '0123456789abcdef0123456789abcdef');
+
+        $record = AuditLog::event(self::CODE)->withIdentifier('Alice@Example.COM')->failed('invalid_credentials')->record();
+
+        self::assertSame(['_audit' => ['identifier_hash' => '13f5820b5aa0c097:680a1e05e07bcd260a8f8eda495c167100f4413f08ac4a5d980061e30cd51abf']], $record->properties);
+        self::assertStringNotContainsString('example.com', strtolower((string) json_encode($record->toArray())));
+    }
+
+    /**
+     * The configured IP mode applies to the ambient client's address.
+     *
+     * @return void
+     */
+    public function testTheIpModeAppliesToTheFilledAddress(): void
+    {
+        self::config()->set('audit-log.redaction.ip', 'truncate');
+
+        $pending = AuditLog::event(self::CODE);
+
+        $pending->fillClient('203.0.113.7', null);
+
+        self::assertSame('203.0.113.0', $pending->record()->ip);
+    }
+
+    /**
+     * The properties and the builder hold the raw payload, so both are marked
+     * sensitive where the recorder takes them.
+     *
+     * @return void
+     */
+    public function testTheRecorderPropertiesParameterIsSensitive(): void
+    {
+        $properties = new \ReflectionParameter([Recorder::class, 'record'], 'properties');
+        $pending    = new \ReflectionParameter([Recorder::class, 'write'], 'pending');
+
+        self::assertCount(1, $properties->getAttributes(\SensitiveParameter::class));
+        self::assertCount(1, $pending->getAttributes(\SensitiveParameter::class));
+    }
+
+    /**
+     * Bind the encrypter a capture will use, and return it.
+     *
+     * @template TEncrypter of \SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter
+     *
+     * @param  TEncrypter  $encrypter
+     * @return TEncrypter
+     */
+    private static function bindEncrypter(FieldEncrypter $encrypter): FieldEncrypter
+    {
+        app()->instance(FieldEncrypter::class, $encrypter);
+
+        return $encrypter;
+    }
+
+    /**
+     * The application's configuration.
+     *
+     * @return \Illuminate\Config\Repository
+     */
+    private static function config(): ConfigRepository
+    {
+        return app(ConfigRepository::class);
     }
 
     /**

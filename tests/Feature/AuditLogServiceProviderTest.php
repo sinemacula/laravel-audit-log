@@ -29,6 +29,7 @@ use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
@@ -37,6 +38,7 @@ use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
+use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
@@ -221,6 +223,7 @@ final class AuditLogServiceProviderTest extends TestCase
             'the integrity settings' => [IntegritySettings::class, IntegritySettings::class],
             'the key ring'           => [KeyRing::class, KeyRing::class],
             'the store'              => [AuditStore::class, DatabaseAuditStore::class],
+            'the field encrypter'    => [FieldEncrypter::class, NoFieldEncrypter::class],
             'the catalogue'          => [EventCatalogue::class, EventCatalogue::class],
             'the contributors'       => [ContributorRegistry::class, ContributorRegistry::class],
             'the recorder'           => [Recorder::class, Recorder::class],

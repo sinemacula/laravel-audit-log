@@ -58,10 +58,10 @@ final class NamespaceDependenciesTest extends TestCase
     /** @var array<string, array{from: non-empty-list<string>, except: list<string>, forbids: non-empty-list<string>, allows: list<string>}> The rules, by what each holds. */
     private const array RULES = [
         'the enums name nothing of the package but other enums' => [
-            'from'    => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums'],
+            'from'    => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums'],
+            'allows'  => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums'],
         ],
         'the support helpers name nothing of the package but the support helpers, references and the clock contract' => [
             'from'    => ['Support'],
@@ -81,11 +81,11 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Records'],
             'allows'  => ['Records\EventCode'],
         ],
-        'contracts name nothing of the package but contracts, the definitions they return, the records they take and the conflict they raise' => [
+        'contracts name nothing of the package but contracts, the definitions they return, the records and references they take and the conflict they raise' => [
             'from'    => ['Contracts'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Contracts', 'Definitions\EventDefinition', 'Records\FinalisedRecord', 'Records\Contribution', 'Stores\RecordConflictException'],
+            'allows'  => ['Contracts', 'Definitions\EventDefinition', 'Records\FinalisedRecord', 'Records\Contribution', 'Records\Reference', 'Stores\RecordConflictException'],
         ],
         'the records name nothing of the stores, the read model, the console, the database helpers or anything that runs them' => [
             'from'    => ['Records'],
@@ -171,6 +171,18 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['*'],
             'allows'  => ['Contracts'],
         ],
+        'the privacy layer names nothing of the stores, the read model, the console, the database helpers or anything that runs them' => [
+            'from'    => ['Privacy'],
+            'except'  => [],
+            'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database', 'Delivery', 'Contributors', 'Runtime', 'Listeners', 'Testing', 'Facades', 'Recorder', 'Http'],
+            'allows'  => [],
+        ],
+        'the records name nothing of the privacy layer but the minimised value' => [
+            'from'    => ['Records'],
+            'except'  => [],
+            'forbids' => ['Privacy'],
+            'allows'  => ['Privacy\Minimised'],
+        ],
     ];
 
     /** @var array<string, array{from: non-empty-list<string>, except: list<string>, forbids: non-empty-list<string>, allows: list<string>}> The framework rules, by what each holds. */
@@ -188,7 +200,7 @@ final class NamespaceDependenciesTest extends TestCase
             'allows'  => [],
         ],
         'the domain uses no facade and no application container' => [
-            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores', 'Contributors', 'Runtime', 'Events'],
+            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores', 'Contributors', 'Runtime', 'Events', 'Privacy'],
             'except'  => [],
             'forbids' => ['Support\Facades', 'Foundation', 'Container', 'Contracts\Foundation', 'Contracts\Container'],
             'allows'  => [],

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 use Illuminate\Contracts\Config\Repository;
+use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 
 /**
  * The integrity settings, read from configuration on every call and validated
@@ -29,9 +30,6 @@ final readonly class IntegritySettings
 {
     /** @var string Prefix of every integrity setting's key. */
     private const string PREFIX = 'audit-log.integrity.';
-
-    /** @var string Prefix of a secret or an application key given as base64. */
-    private const string BASE64_PREFIX = 'base64:';
 
     /** @var string Why a current key id or an empty one is refused beside a ring that does not hold it. */
     private const string CURRENT_NOT_IN_RING = '`audit-log.integrity.current` must name a key in `audit-log.integrity.keys`.';
@@ -143,7 +141,7 @@ final readonly class IntegritySettings
         }
 
         foreach ($previous as $key) {
-            $keys[] = self::decoded($key) ?? throw new \InvalidArgumentException(self::MALFORMED_PREVIOUS_KEYS);
+            $keys[] = SecretSetting::decode($key) ?? throw new \InvalidArgumentException(self::MALFORMED_PREVIOUS_KEYS);
         }
 
         return $keys;
@@ -185,7 +183,7 @@ final readonly class IntegritySettings
             throw new \InvalidArgumentException('`app.key` must be set to derive the integrity key when `audit-log.integrity.keys` is empty.');
         }
 
-        return self::decoded($key) ?? throw new \InvalidArgumentException(self::MALFORMED_APPLICATION_KEY);
+        return SecretSetting::decode($key) ?? throw new \InvalidArgumentException(self::MALFORMED_APPLICATION_KEY);
     }
 
     /**
@@ -208,35 +206,12 @@ final readonly class IntegritySettings
             throw new \InvalidArgumentException($message);
         }
 
-        $decoded = self::decoded($secret);
+        $decoded = SecretSetting::decode($secret);
 
         if ($decoded === null) {
             throw new \InvalidArgumentException(sprintf('`audit-log.integrity.keys.%s` must be a secret of at least 32 bytes, or `base64:` followed by the encoding of one.', $id));
         }
 
         return $decoded;
-    }
-
-    /**
-     * The bytes of a secret or an application key: the strict decoding of what
-     * follows a `base64:` prefix, or the string itself, or `null` when the
-     * value is not a string, does not decode, or is shorter than 32 bytes.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $value
-     * @return ?string
-     */
-    private static function decoded(#[\SensitiveParameter] mixed $value): ?string
-    {
-        if (!is_string($value)) {
-            return null;
-        }
-
-        $bytes = str_starts_with($value, self::BASE64_PREFIX)
-            ? base64_decode(substr($value, strlen(self::BASE64_PREFIX)), true)
-            : $value;
-
-        return is_string($bytes) && strlen($bytes) >= IntegrityKey::MIN_SECRET_BYTES ? $bytes : null;
     }
 }

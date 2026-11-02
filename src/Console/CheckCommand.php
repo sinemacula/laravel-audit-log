@@ -11,6 +11,7 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
+use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 use SineMacula\Laravel\AuditLog\Runtime\ContextSettings;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -28,20 +29,23 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * named by its full path, with `app.key` and `app.previous_keys` read together
  * as the one key ring they make; then the guards the actor is read from, or the
  * default guard when no list is set, each configured in `auth.guards`, skipped
- * when the list is malformed), `[connections]` (the storage and maintenance
- * connections are each configured in `database.connections`, and use the same
- * driver; skipped when a connection setting is malformed), `[schema]` (the
- * storage connection's engine and the entries table's shape; see `EngineChecks`
- * and `SchemaChecks`, skipped when the storage connection or the table's name
- * is malformed or the connection is not configured) and `[integrity]` (a key
- * signs; skipped when the integrity settings are malformed). A malformed
- * context, source or definition setting skips nothing, since no later subject
- * reads it. It does not warn about a storage connection shared with the
- * application, which every default install would trip. The command writes
- * nothing and prints no secret, statement or binding: a malformed setting is
- * named by its key and never its value, only the name of a connection or guard
- * that is not configured is printed, and a connection that cannot be opened or
- * read is named with the class of what was thrown, never its message.
+ * when the list is malformed; then the redaction settings, with `app.key` read
+ * for them only beside an explicit ring and an empty `audit-log.redaction.key`,
+ * since otherwise the integrity settings read it and it is listed once),
+ * `[connections]` (the storage and maintenance connections are each configured
+ * in `database.connections`, and use the same driver; skipped when a connection
+ * setting is malformed), `[schema]` (the storage connection's engine and the
+ * entries table's shape; see `EngineChecks` and `SchemaChecks`, skipped when
+ * the storage connection or the table's name is malformed or the connection is
+ * not configured) and `[integrity]` (a key signs; skipped when the integrity
+ * settings are malformed). A malformed context, source, definition or redaction
+ * setting skips nothing, since no later subject reads it. It does not warn
+ * about a storage connection shared with the application, which every default
+ * install would trip. The command writes nothing and prints no secret,
+ * statement or binding: a malformed setting is named by its key and never its
+ * value, only the name of a connection or guard that is not configured is
+ * printed, and a connection that cannot be opened or read is named with the
+ * class of what was thrown, never its message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -185,8 +189,8 @@ final class CheckCommand extends Command
     /**
      * The checks of the settings records are captured with, one for each, so
      * one run reports every malformed setting: the context settings, the source
-     * settings, the definition setting and the guards the actor is read from.
-     * No other subject depends on them.
+     * settings, the definition setting, the guards the actor is read from and
+     * the redaction settings. No other subject depends on them.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -205,6 +209,42 @@ final class CheckCommand extends Command
             self::reading($source->region(...)),
             self::reading((new DefinitionSettings($config))->requiresRegistered(...)),
             static fn (): array => self::guardProblems($config),
+            ...self::redactionSettingChecks($config),
+        ];
+    }
+
+    /**
+     * The checks of the redaction settings, one for each, so one run reports
+     * every malformed setting: the configured key names, what is kept of an
+     * identifier and of an IP address, the two byte budgets, the explicit key
+     * and, beside an explicit ring, the application key the hashes would derive
+     * from. A malformed explicit key or ring has the same message as its own
+     * check, so a run lists it once.
+     *
+     * @param  \Illuminate\Config\Repository  $config
+     * @return list<\Closure(): list<string>>
+     */
+    private static function redactionSettingChecks(ConfigRepository $config): array
+    {
+        $redaction = new RedactionSettings($config);
+        $integrity = new IntegritySettings($config);
+
+        return [
+            self::reading($redaction->keys(...)),
+            self::reading($redaction->identifierMode(...)),
+            self::reading($redaction->ipMode(...)),
+            self::reading($redaction->maxBytes(...)),
+            self::reading($redaction->maxContextBytes(...)),
+            self::reading($redaction->explicitKey(...)),
+            // Without an integrity ring the integrity checks already read
+            // `app.key`, so it is listed once
+            static function () use ($redaction, $integrity): array {
+                if ($integrity->explicitKeys() !== []) {
+                    $redaction->rootKey();
+                }
+
+                return [];
+            },
         ];
     }
 

@@ -13,6 +13,9 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
+use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
+use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
@@ -22,15 +25,20 @@ use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 
 /**
  * A drift guard for the README, the guides in docs/guides and the design notes
- * in docs/design: every outcome, origin, provenance, field handling and key
- * owner, every configuration key and every method of the recorder is
- * documented; every package event has a row in the events table; every
- * `AuditLog::` call shown exists or is planned; every design note exists, has
- * the standard sections and is listed in the index, which ends with the
- * standard sentence; the context and testing notes state what they must; every
- * test a note cites exists; the vocabulary reserves every prefix and every
- * shipped code sits under one; and every example is valid and neutral, naming
- * no other package of the suite.
+ * in docs/design: every outcome, origin, provenance, field handling, key owner,
+ * IP mode and identifier mode, every configuration key and every method of the
+ * recorder is documented; every package event has a row in the events table;
+ * every `AuditLog::` call shown exists or is planned; every design note, the
+ * redaction note and the threat model among them, exists, has the standard
+ * sections and is listed in the index, which ends with the standard sentence;
+ * the notes state what they must, and the threat model opens with the limits of
+ * key matching; the redaction note lists every entry of the matcher and every
+ * IP mode, and never calls key matching fail-closed; every redaction setting's
+ * environment variable is in the README; every test a note cites and every
+ * file it anchors exists, and no document cites a file kept out of the
+ * repository; the vocabulary reserves every prefix and every shipped code sits
+ * under one; and every example is valid and neutral, naming no other package of
+ * the suite.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -44,7 +52,7 @@ use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 final class DocumentationTest extends TestCase
 {
     /** @var list<class-string<\BackedEnum>> The public enums whose every value is documented. */
-    private const array ENUMS = [Outcome::class, Origin::class, Provenance::class, FieldHandling::class, KeyOwner::class];
+    private const array ENUMS = [Outcome::class, Origin::class, Provenance::class, FieldHandling::class, KeyOwner::class, IpMode::class, IdentifierMode::class];
 
     /** @var list<string> The sections of every design note, in order. */
     private const array SECTIONS = ['Purpose', 'Invariants', 'Success Path', 'Failure / Edge Cases', 'Implementation Anchors', 'Authoritative Tests', 'Change Triggers'];
@@ -58,8 +66,23 @@ final class DocumentationTest extends TestCase
         'integrity.md',
         'outcomes.md',
         'context-resolution.md',
+        'redaction.md',
+        'threat-model.md',
         'testing-helpers.md',
     ];
+
+    /** @var string The sentence the threat model opens with. */
+    private const string KEY_MATCHING_LIMITS = 'Key matching cannot find a secret in free text or under an innocuous key; '
+        . 'event definitions, which allowlist fields, are the remedy.';
+
+    /** @var string The sentence the threat model states the brute force limit with. */
+    private const string BRUTE_FORCE_LIMIT = 'A guessable identifier falls to brute force once the key leaks.';
+
+    /** @var string The redaction note. */
+    private const string REDACTION_NOTE = '/docs/design/redaction.md';
+
+    /** @var string The threat model. */
+    private const string THREAT_MODEL = '/docs/design/threat-model.md';
 
     /** @var list<string> The facade calls the documentation may show before they ship; this list empties as each arrives. */
     private const array PLANNED_CALLS = ['bulk', 'capture', 'map'];
@@ -83,12 +106,18 @@ final class DocumentationTest extends TestCase
     /** @var string A string-literal argument, single or double quoted. */
     private const string LITERAL = '(?:\'([^\'\\\]*)\'|"([^"\\\]*)")';
 
+    /** @var string The ways of calling something fail-closed, however the words are wrapped. */
+    private const string FAIL_CLOSED = '/\bfail(?:s|ed|ing)?[\s-]+closed\b/i';
+
+    /** @var string A citation of what is kept out of the repository: the requirements, the backlog or a build file. */
+    private const string LOCAL_ONLY = '/FEATURES\.md|BACKLOG\.md|\bAUDIT-[A-Z]+\.\d|\bBL-\d|\.sinemacula\b|\bm\d+-design\b|§/';
+
     /** @var ?string The README, the guides and the design notes, read once. */
     private static ?string $documentation = null;
 
     /**
      * Rows of `[enum value, enum]`: every outcome, origin, provenance, field
-     * handling and key owner.
+     * handling, key owner, IP mode and identifier mode.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -642,15 +671,17 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[note, statement]`: what the context and testing notes must say,
-     * each a rule or a caveat a reader would otherwise find out the hard way.
+     * Rows of `[note, statement]`: what the notes must say, each a rule or a
+     * caveat a reader would otherwise find out the hard way.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
     public static function provideRequiredStatements(): iterable
     {
-        $context = '/docs/design/context-resolution.md';
-        $testing = '/docs/design/testing-helpers.md';
+        $context     = '/docs/design/context-resolution.md';
+        $testing     = '/docs/design/testing-helpers.md';
+        $definitions = '/docs/design/event-definitions.md';
+        $record      = '/docs/design/record-model.md';
 
         yield from [
             'the actor is never loaded'          => [$context, 'never through `user()`'],
@@ -669,7 +700,7 @@ final class DocumentationTest extends TestCase
             'the recorder is stateless'          => [$context, 'The recorder is stateless'],
             'registration at boot'               => [$context, 'not from a `booted()` callback'],
             'the fake is no engine'              => [$testing, 'no transaction engine'],
-            'field rules are not applied yet'    => [$testing, 'Field rules are not applied yet'],
+            'field rules apply at capture'       => [$testing, 'Field rules apply at capture'],
             'the failing fake'                   => [$testing, '`FakeAuditStore::failing(\Throwable)`'],
             'the first assertion'                => [$testing, '`assertAudited($code, ?Closure)`'],
             'the second assertion'               => [$testing, '`assertNotAudited($code, ?Closure)`'],
@@ -682,6 +713,44 @@ final class DocumentationTest extends TestCase
             'a record after a request'           => [$testing, 'A record made after `$this->get()`'],
             'the test wrapper'                   => [$testing, '`transactional()` counts a `DatabaseTransactions` wrapper'],
             'registering in a test'              => [$testing, '`$app->booting()`'],
+            'minimising in the pipeline'         => [$context, '`Privacy\RecordMinimiser` minimises it'],
+            'a filled value is minimised'        => [$context, 'A filled value is minimised too'],
+            'the walker reaches a nested rule'   => [$definitions, 'keeps `customer.email` and drops the rest of `customer`'],
+            'the rules apply at capture'         => [$definitions, 'the rules apply at capture'],
+            'what the metadata holds'            => [$record, 'it holds `note`, `identifier_hash` and `omitted`'],
+            'an owned note is sealed'            => [$record, 'it is sealed through `Contracts\FieldEncrypter`'],
+            'the record takes the minimised'     => [$record, '`AuditRecord::fromPending()` takes the minimised value'],
+            'an exemption is an assumption'      => [self::REDACTION_NOTE, 'An exemption assumes non-secret metadata'],
+            'an exempt container is kept'        => [self::REDACTION_NOTE, 'an exempt container\'s scalar values are kept'],
+            'the remedy is a field rule'         => [self::REDACTION_NOTE, 'the remedy is an explicit field rule'],
+            'policy before transform'            => [self::REDACTION_NOTE, 'selects the policy first and transforms the value after it'],
+            'a long container is dropped'        => [self::REDACTION_NOTE, 'A container whose canonical JSON is longer than 1024 bytes is dropped and diagnosed'],
+            'a 6to4 address keeps its /24'       => [self::REDACTION_NOTE, 'A `2002::/16` address truncates to its /40'],
+            'an invalid address is no refusal'   => [self::REDACTION_NOTE, 'An invalid address is `null` in every mode and adds `$ip`'],
+            'the minimum of the properties'      => [self::REDACTION_NOTE, 'at least 8192'],
+            'the minimum of the context'         => [self::REDACTION_NOTE, 'at least 1024'],
+            'what the count counts'              => [self::REDACTION_NOTE, '`count` counts removed branches'],
+            'the note is not protected'          => [self::REDACTION_NOTE, 'A note is not protected'],
+            'a mapped address is its IPv4'       => [self::REDACTION_NOTE, 'an IPv4-mapped address is its IPv4 address'],
+            'the encrypter\'s failure is named'  => [self::REDACTION_NOTE, '`Privacy\FieldEncryptionFailedException`'],
+            'no previous exception'              => [self::REDACTION_NOTE, 'has no previous exception'],
+            'one report per capture'             => [self::REDACTION_NOTE, 'one report per capture'],
+            'any other failure fails the write'  => [self::REDACTION_NOTE, 'Any other failure while minimising fails the write'],
+            'words joined with no boundary'      => [self::THREAT_MODEL, '`mypassword`'],
+            'only joined words are missed'       => [self::THREAT_MODEL, 'Only words joined with no boundary and not listed'],
+            'the facade\'s frame'                => [self::THREAT_MODEL, 'which no attribute can mark'],
+            'the setting that keeps arguments'   => [self::THREAT_MODEL, '`zend.exception_ignore_args`'],
+            'minimising at capture'              => [self::THREAT_MODEL, 'nothing raw rests in a deferred callback, event or row'],
+            'a secret is never un-redacted'      => [self::THREAT_MODEL, 'A built-in secret is never un-redacted'],
+            'no key means no field'              => [self::THREAT_MODEL, 'An `ENCRYPT` field with no key is dropped'],
+            'what a diagnostic never holds'      => [self::THREAT_MODEL, 'Diagnostics never hold a value or a dynamic key'],
+            'the key falls with the application' => [self::THREAT_MODEL, 'A key from `app.key` falls with it'],
+            'a dedicated key'                    => [self::THREAT_MODEL, 'A dedicated `redaction.key` allows independent operation'],
+            'failed sign-ins correlate'          => [self::THREAT_MODEL, 'Failed sign-ins correlate with each other'],
+            'a pseudonym is never another hash'  => [self::THREAT_MODEL, 'A pseudonym never equals an identifier hash or an IP hash'],
+            'a value hashes alike in any field'  => [self::THREAT_MODEL, 'the same value does give the same hash in any field of any code'],
+            'a field needing no linkage'         => [self::THREAT_MODEL, 'a field needing no linkage should use `drop` or `encrypt`'],
+            'a key change is visible'            => [self::THREAT_MODEL, 'A key change is visible through the fingerprint'],
         ];
     }
 
@@ -696,6 +765,238 @@ final class DocumentationTest extends TestCase
     public function testEachNoteStatesWhatItMust(string $note, string $statement): void
     {
         self::assertStringContainsString($statement, self::prose($note));
+    }
+
+    /**
+     * Rows of `[note, extra sections]`: the sections a note has beyond the
+     * standard ones, in order.
+     *
+     * @return iterable<string, array{0: string, 1: list<string>}>
+     */
+    public static function provideExtraSections(): iterable
+    {
+        yield from [
+            'redaction'    => [self::REDACTION_NOTE, ['Key Matching', 'Field Rules', 'Budgets And Omission', 'IP Modes']],
+            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force']],
+        ];
+    }
+
+    /**
+     * The redaction note and the threat model have their own sections, in
+     * order, between the failure and edge cases and the implementation anchors.
+     *
+     * @param  string  $note
+     * @param  list<string>  $extra
+     * @return void
+     */
+    #[DataProvider('provideExtraSections')]
+    public function testEachNoteHasItsExtraSectionsInOrder(string $note, array $extra): void
+    {
+        preg_match_all('/^## (.+)$/m', self::withoutCodeBlocks(self::read($note)), $sections);
+
+        self::assertSame([...array_slice(self::SECTIONS, 0, 4), ...$extra, ...array_slice(self::SECTIONS, 4)], $sections[1]);
+    }
+
+    /**
+     * The threat model states the limits of key matching, in the sentence that
+     * says what the remedy is, however the line is wrapped.
+     *
+     * @return void
+     */
+    public function testTheThreatModelStatesTheLimitsOfKeyMatching(): void
+    {
+        self::assertStringContainsString(self::KEY_MATCHING_LIMITS, self::prose(self::THREAT_MODEL));
+    }
+
+    /**
+     * Those limits are the first thing the threat model says: the first
+     * paragraph of its purpose starts with them.
+     *
+     * @return void
+     */
+    public function testTheThreatModelOpensWithThoseLimits(): void
+    {
+        $paragraphs = preg_split('/\n\s*\n/', trim(self::section(self::read(self::THREAT_MODEL), 'Purpose'))) ?: [];
+
+        self::assertStringStartsWith(self::KEY_MATCHING_LIMITS, self::collapsed($paragraphs[0] ?? ''));
+    }
+
+    /**
+     * The threat model states in its own section what a leaked key gives up,
+     * however the line is wrapped.
+     *
+     * @return void
+     */
+    public function testTheThreatModelStatesTheBruteForceLimit(): void
+    {
+        self::assertStringContainsString(self::BRUTE_FORCE_LIMIT, self::collapsed(self::section(self::read(self::THREAT_MODEL), 'Keys And Brute Force')));
+    }
+
+    /**
+     * The threat model's section on key matching names the limits a reader
+     * would otherwise assume were covered.
+     *
+     * @return void
+     */
+    public function testTheThreatModelNamesEachLimitOfKeyMatching(): void
+    {
+        $section = strtolower(self::collapsed(self::section(self::read(self::THREAT_MODEL), 'Limits Of Key Matching')));
+
+        foreach (['free text', 'innocuous keys', '`mypassword`', 'look-alikes', 'exempt containers', 'notes', '`auditlog::record()`', '`zend.exception_ignore_args`'] as $limit) {
+            self::assertStringContainsString($limit, $section);
+        }
+    }
+
+    /**
+     * The redaction note calls key matching a heuristic and, however the words
+     * are wrapped, never fail-closed; the threat model never does either.
+     *
+     * @return void
+     */
+    public function testTheRedactionNoteCallsKeyMatchingAHeuristic(): void
+    {
+        $section = self::section(self::read(self::REDACTION_NOTE), 'Key Matching');
+
+        self::assertStringContainsString('heuristic', $section);
+        self::assertSame(0, preg_match(self::FAIL_CLOSED, $section));
+        self::assertSame(0, preg_match(self::FAIL_CLOSED, self::read(self::THREAT_MODEL)));
+    }
+
+    /**
+     * The phrase key matching is never described with is found in each of its
+     * forms, across a wrapped line, and not in a phrase that merely resembles
+     * it.
+     *
+     * @return void
+     */
+    public function testTheFailClosedPatternFindsEachForm(): void
+    {
+        foreach (['fail-closed', 'Fails closed', "fails\n  closed", 'failing closed', 'failed-closed', 'fail closed'] as $phrase) {
+            self::assertSame(1, preg_match(self::FAIL_CLOSED, $phrase), $phrase);
+        }
+
+        foreach (['a failure closed it', 'failsafe', 'the door is closed'] as $phrase) {
+            self::assertSame(0, preg_match(self::FAIL_CLOSED, $phrase), $phrase);
+        }
+    }
+
+    /**
+     * Rows of `[entry]`: each survivor, exempt final token and sensitive unit
+     * of the matcher, its tokens joined by `_`.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideMatcherEntries(): iterable
+    {
+        foreach ([...Redactor::SURVIVORS, ...array_map(static fn (string $token): array => [$token], Redactor::EXEMPT_FINAL_TOKENS), ...Redactor::SENSITIVE_UNITS] as $tokens) {
+
+            $entry = implode('_', $tokens);
+
+            yield $entry => [$entry];
+        }
+    }
+
+    /**
+     * Every entry of the matcher is named in the redaction note's section on
+     * key matching, in code type.
+     *
+     * @param  string  $entry
+     * @return void
+     */
+    #[DataProvider('provideMatcherEntries')]
+    public function testTheRedactionNoteListsEveryMatcherEntry(string $entry): void
+    {
+        self::assertStringContainsString('`' . $entry . '`', self::section(self::read(self::REDACTION_NOTE), 'Key Matching'));
+    }
+
+    /**
+     * Every IP mode has a row of its own in the redaction note's matrix.
+     *
+     * @return void
+     */
+    public function testTheRedactionNoteHasARowForEveryIpMode(): void
+    {
+        $section = self::section(self::read(self::REDACTION_NOTE), 'IP Modes');
+
+        foreach (IpMode::cases() as $mode) {
+            self::assertSame(1, preg_match('/^\| `' . $mode->value . '` +\|/m', $section), sprintf('The matrix has no row for `%s`.', $mode->value));
+        }
+    }
+
+    /**
+     * The redaction settings read from the environment are named in the README,
+     * and there are as many as the settings that read one.
+     *
+     * @return void
+     */
+    public function testEveryRedactionLeafNamesItsEnvVarInTheReadme(): void
+    {
+        preg_match_all('/\bAUDIT_LOG_REDACTION_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
+
+        self::assertCount(5, $variables[0], 'The configuration does not read the redaction environment variables it should.');
+
+        foreach ($variables[0] as $variable) {
+            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+        }
+    }
+
+    /**
+     * Every file a note's implementation anchors name exists, and every note
+     * names at least one.
+     *
+     * @param  string  $note
+     * @return void
+     */
+    #[DataProvider('provideCitingNotes')]
+    public function testEveryAnchoredFileExists(string $note): void
+    {
+        $anchored = self::anchoredFiles(self::section(self::read('/docs/design/' . $note), 'Implementation Anchors'));
+        $missing  = array_values(array_filter($anchored, static fn (string $file): bool => !is_file(self::root() . '/' . $file)));
+
+        self::assertNotSame([], $anchored, sprintf('%s anchors no file.', $note));
+        self::assertSame([], $missing, sprintf('%s anchors files that do not exist.', $note));
+    }
+
+    /**
+     * The anchor scanner finds each backticked file, and neither a method nor a
+     * constant cited after it.
+     *
+     * @return void
+     */
+    public function testTheAnchorScannerFindsOnlyFiles(): void
+    {
+        $section = "- `src/Recorder.php`: `write()`; `config/audit-log.php`: `redaction`.\n- `database/migrations/one.php`, `MARKER`, `Privacy\\Redactor`.\n";
+
+        self::assertSame(['src/Recorder.php', 'config/audit-log.php', 'database/migrations/one.php'], self::anchoredFiles($section));
+    }
+
+    /**
+     * Nothing a reader of the repository can see cites what is kept out of it,
+     * since such a citation would lead nowhere.
+     *
+     * @return void
+     */
+    public function testNoDocumentCitesAFileKeptOutOfTheRepository(): void
+    {
+        self::assertSame(0, preg_match(self::LOCAL_ONLY, self::documentation()), 'The documentation cites a file kept out of the repository.');
+    }
+
+    /**
+     * The pattern for what is kept out of the repository finds each form of
+     * citation, and neither a requirement-like word nor the package's own
+     * environment variables.
+     *
+     * @return void
+     */
+    public function testTheLocalCitationPatternFindsEachForm(): void
+    {
+        foreach (['see FEATURES.md', 'BACKLOG.md', 'AUDIT-REDACT.8', 'BL-33', '.sinemacula/build', 'm4-design.md', 'section §9'] as $citation) {
+            self::assertSame(1, preg_match(self::LOCAL_ONLY, $citation), $citation);
+        }
+
+        foreach (['AUDIT_LOG_REDACTION_KEY', 'audit-log:check', 'BL-', 'sinemacula/laravel-audit-log'] as $text) {
+            self::assertSame(0, preg_match(self::LOCAL_ONLY, $text), $text);
+        }
     }
 
     /**
@@ -773,6 +1074,20 @@ final class DocumentationTest extends TestCase
         $pattern = '/^## ' . preg_quote($heading, '/') . '\n(.*?)(?=^## |\z)/ms';
 
         return preg_match($pattern, $note, $matches) === 1 ? $matches[1] : '';
+    }
+
+    /**
+     * The files a section anchors: each backticked path into the package's own
+     * source, configuration or database directories.
+     *
+     * @param  string  $section
+     * @return list<string>
+     */
+    private static function anchoredFiles(string $section): array
+    {
+        preg_match_all('/`((?:src|config|database)\/[^`\s]+\.php)`/', $section, $files);
+
+        return $files[1];
     }
 
     /**
@@ -1056,7 +1371,18 @@ final class DocumentationTest extends TestCase
      */
     private static function prose(string $path): string
     {
-        return (string) preg_replace('/\s+/', ' ', self::read($path));
+        return self::collapsed(self::read($path));
+    }
+
+    /**
+     * The text with every run of whitespace made one space.
+     *
+     * @param  string  $text
+     * @return string
+     */
+    private static function collapsed(string $text): string
+    {
+        return (string) preg_replace('/\s+/', ' ', $text);
     }
 
     /**
