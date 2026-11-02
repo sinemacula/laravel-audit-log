@@ -7,9 +7,13 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
+use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
+use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
@@ -19,11 +23,14 @@ use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 /**
  * A drift guard for the README, the guides in docs/guides and the design notes
  * in docs/design: every outcome, origin, provenance, field handling and key
- * owner, and every configuration key, is documented; every design note exists,
- * has the standard sections and is listed in the index, which ends with the
- * standard sentence; every test a note cites exists; the vocabulary reserves
- * every prefix and every shipped code sits under one; and every example is
- * valid and neutral, naming no other package of the suite.
+ * owner, every configuration key and every method of the recorder is
+ * documented; every package event has a row in the events table; every
+ * `AuditLog::` call shown exists or is planned; every design note exists, has
+ * the standard sections and is listed in the index, which ends with the
+ * standard sentence; the context and testing notes state what they must; every
+ * test a note cites exists; the vocabulary reserves every prefix and every
+ * shipped code sits under one; and every example is valid and neutral, naming
+ * no other package of the suite.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -43,7 +50,19 @@ final class DocumentationTest extends TestCase
     private const array SECTIONS = ['Purpose', 'Invariants', 'Success Path', 'Failure / Edge Cases', 'Implementation Anchors', 'Authoritative Tests', 'Change Triggers'];
 
     /** @var list<string> The design notes the package ships so far. */
-    private const array NOTES = ['record-model.md', 'event-definitions.md', 'vocabulary.md', 'storage.md', 'integrity.md', 'outcomes.md'];
+    private const array NOTES = [
+        'record-model.md',
+        'event-definitions.md',
+        'vocabulary.md',
+        'storage.md',
+        'integrity.md',
+        'outcomes.md',
+        'context-resolution.md',
+        'testing-helpers.md',
+    ];
+
+    /** @var list<string> The facade calls the documentation may show before they ship; this list empties as each arrives. */
+    private const array PLANNED_CALLS = ['bulk', 'capture', 'map'];
 
     /** @var string The sentence the design index ends with. */
     private const string CLOSING = 'These documents are secondary to the code and tests, not a replacement for them. '
@@ -453,6 +472,233 @@ final class DocumentationTest extends TestCase
     }
 
     /**
+     * Rows of `[event class]`: every event the package dispatches.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideEvents(): iterable
+    {
+        foreach (glob(self::root() . '/src/Events/*.php') ?: [] as $file) {
+
+            $class = self::PACKAGE_NAMESPACE . 'Events\\' . basename($file, '.php');
+
+            if (!is_a($class, AuditLogEvent::class, true) || (new \ReflectionClass($class))->isAbstract()) {
+                continue;
+            }
+
+            yield basename($file, '.php') => [$class];
+        }
+    }
+
+    /**
+     * Every event the package dispatches has a row in the events table.
+     *
+     * @param  string  $class
+     * @return void
+     */
+    #[DataProvider('provideEvents')]
+    public function testEveryEventIsInTheEventsTable(string $class): void
+    {
+        self::assertTrue(self::hasEventRow(self::documentation(), $class), sprintf('The events table has no row for %s.', $class));
+    }
+
+    /**
+     * An event's row starts a table row with the event's whole class name, so
+     * neither a mention in prose nor a row of a longer name counts.
+     *
+     * @return void
+     */
+    public function testTheEventRowMustNameTheWholeClass(): void
+    {
+        $class = AuditRecorded::class;
+
+        self::assertTrue(self::hasEventRow("| Event |\n| `{$class}` | The store accepted it |\n", $class));
+        self::assertFalse(self::hasEventRow("`{$class}` is dispatched.\n", $class));
+        self::assertFalse(self::hasEventRow("| The store accepted it | `{$class}` |\n", $class));
+        self::assertFalse(self::hasEventRow("| `{$class}Later` | Later |\n", $class));
+    }
+
+    /**
+     * Rows of `[method]`: every public method the recorder declares.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideRecorderMethods(): iterable
+    {
+        foreach (self::callsDeclaredOn(Recorder::class) as $method) {
+            yield $method => [$method];
+        }
+    }
+
+    /**
+     * Every method the recorder declares is shown being called.
+     *
+     * @param  string  $method
+     * @return void
+     */
+    #[DataProvider('provideRecorderMethods')]
+    public function testEveryRecorderMethodIsDocumented(string $method): void
+    {
+        self::assertSame(1, preg_match('/(::|->|`)' . $method . '\(/', self::documentation()), sprintf('The documentation does not show %s().', $method));
+    }
+
+    /**
+     * Every `AuditLog::name(` the documentation shows is a method the recorder
+     * or the facade declares, or a call that is planned.
+     *
+     * @return void
+     */
+    public function testEveryAuditLogCallTheDocumentationShowsExists(): void
+    {
+        $unknown = array_values(array_diff(self::auditLogCallsIn(self::documentation()), self::knownAuditLogCalls()));
+
+        self::assertSame([], $unknown, 'The documentation shows AuditLog calls that do not exist.');
+    }
+
+    /**
+     * The call scanner finds every call on the facade, however it is qualified
+     * or spaced, each once, and nothing else with that name in it.
+     *
+     * @return void
+     */
+    public function testTheCallScannerFindsEveryAuditLogCall(): void
+    {
+        $text = <<<'EOD'
+            AuditLog::record('invoice.approved');
+            Use `AuditLog::event()` to build one up.
+            \SineMacula\Laravel\AuditLog\Facades\AuditLog::accessed('document.downloaded');
+            $fake = AuditLog::fake ();
+            AuditLog::
+                contribute(OrganisationContributor::class);
+            AuditLog::record('invoice.voided');
+            $class = AuditLog::class;
+            NotAuditLog::bulk();
+            $AuditLog::map();
+            AuditLog->capture();
+            EOD;
+
+        self::assertSame(['record', 'event', 'accessed', 'fake', 'contribute'], self::auditLogCallsIn($text));
+    }
+
+    /**
+     * The calls allowed are those the recorder and the facade declare and the
+     * planned ones, by their exact names: what the facade inherits from
+     * Laravel, or forwards by magic, is not part of the package's surface, and
+     * a call in the wrong case is not the call.
+     *
+     * @return void
+     */
+    public function testTheKnownCallsAreOnlyThePackagesOwn(): void
+    {
+        $known = self::knownAuditLogCalls();
+
+        foreach (['record', 'event', 'accessed', 'define', 'contribute', 'fake', 'recorder', 'bulk', 'capture', 'map'] as $call) {
+            self::assertContains($call, $known);
+        }
+
+        foreach (['__construct', '__callStatic', 'swap', 'spy', 'shouldReceive', 'getFacadeRoot', 'getFacadeAccessor', 'Record'] as $call) {
+            self::assertNotContains($call, $known);
+        }
+    }
+
+    /**
+     * No planned call has shipped yet, so the list cannot outlive the methods
+     * it stands in for: a planned call that ships fails here until it is taken
+     * off the list.
+     *
+     * @return void
+     */
+    public function testNoPlannedCallHasShipped(): void
+    {
+        self::assertSame([], array_values(array_intersect(self::PLANNED_CALLS, self::callsDeclaredOn(Recorder::class))));
+        self::assertSame([], array_values(array_intersect(self::PLANNED_CALLS, self::callsDeclaredOn(AuditLog::class))));
+    }
+
+    /**
+     * The context note states what trusting a header depends on: `TrustProxies`
+     * must be configured, only the immediate peer is checked, and the trusted
+     * edge must overwrite or validate the headers.
+     *
+     * @return void
+     */
+    public function testTheContextNoteStatesTheProxyPrerequisite(): void
+    {
+        $note = self::prose('/docs/design/context-resolution.md');
+
+        self::assertStringContainsString('`TrustProxies` must be configured', $note);
+        self::assertStringContainsString('`isFromTrustedProxy()` checks only the immediate peer', $note);
+        self::assertStringContainsString('the trusted edge must overwrite or validate these headers', $note);
+    }
+
+    /**
+     * The context note states that what is carried into a job is readable in
+     * the queue payload.
+     *
+     * @return void
+     */
+    public function testTheContextNoteStatesThatHiddenContextIsNotEncrypted(): void
+    {
+        self::assertStringContainsString('Hidden Context travels in the queue payload unencrypted', self::prose('/docs/design/context-resolution.md'));
+    }
+
+    /**
+     * Rows of `[note, statement]`: what the context and testing notes must say,
+     * each a rule or a caveat a reader would otherwise find out the hard way.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideRequiredStatements(): iterable
+    {
+        $context = '/docs/design/context-resolution.md';
+        $testing = '/docs/design/testing-helpers.md';
+
+        yield from [
+            'the actor is never loaded'          => [$context, 'never through `user()`'],
+            'guards with the trait only'         => [$context, '`GuardHelpers` trait'],
+            'a foreign guard is asked one thing' => [$context, '`hasUser()` and nothing else'],
+            'the guard goes with the actor'      => [$context, 'The guard goes with the ambient actor only'],
+            'a record before the middleware'     => [$context, 'before the `auth` middleware'],
+            'outside any frame'                  => [$context, 'Outside any frame the origin is `console`'],
+            'a nested call without events'       => [$context, '`$this->call()` inside a command emits no command event'],
+            'no claimed id'                      => [$context, 'No claimed id is kept'],
+            'the snapshot is not authentication' => [$context, 'who started the work, not current authentication'],
+            'only the package is reset'          => [$context, 'Only the package\'s own state is ever reset'],
+            'a guard a job leaves signed in'     => [$context, 'still holding the identical object counts as holding nobody'],
+            'a listener on the end of a job'     => [$context, 'still inside the frame'],
+            'a record before trusting a proxy'   => [$context, 'in global middleware ahead of `TrustProxies`'],
+            'the recorder is stateless'          => [$context, 'The recorder is stateless'],
+            'registration at boot'               => [$context, 'not from a `booted()` callback'],
+            'the fake is no engine'              => [$testing, 'no transaction engine'],
+            'field rules are not applied yet'    => [$testing, 'Field rules are not applied yet'],
+            'the failing fake'                   => [$testing, '`FakeAuditStore::failing(\Throwable)`'],
+            'the first assertion'                => [$testing, '`assertAudited($code, ?Closure)`'],
+            'the second assertion'               => [$testing, '`assertNotAudited($code, ?Closure)`'],
+            'the third assertion'                => [$testing, '`assertNothingAudited()`'],
+            'the fourth assertion'               => [$testing, '`assertAuditedTimes($code, $times)`'],
+            'what the store received'            => [$testing, '`finalised()`, what the store received'],
+            'faking every event'                 => [$testing, '`Event::fake([AuditRecorded::class])`'],
+            'skipping the middleware'            => [$testing, '`withoutMiddleware()` means no HTTP frame'],
+            'console events in a test'           => [$testing, '`WithConsoleEvents` is needed for command frames'],
+            'a record after a request'           => [$testing, 'A record made after `$this->get()`'],
+            'the test wrapper'                   => [$testing, '`transactional()` counts a `DatabaseTransactions` wrapper'],
+            'registering in a test'              => [$testing, '`$app->booting()`'],
+        ];
+    }
+
+    /**
+     * Each of those notes states what it must, however the line is wrapped.
+     *
+     * @param  string  $note
+     * @param  string  $statement
+     * @return void
+     */
+    #[DataProvider('provideRequiredStatements')]
+    public function testEachNoteStatesWhatItMust(string $note, string $statement): void
+    {
+        self::assertStringContainsString($statement, self::prose($note));
+    }
+
+    /**
      * The dotted paths of the configuration's settings: every key whose value
      * is not a map of further settings, a list and an empty array included.
      *
@@ -694,6 +940,65 @@ final class DocumentationTest extends TestCase
     }
 
     /**
+     * Whether the text has a table row starting with the event's class name.
+     *
+     * @param  string  $text
+     * @param  string  $class
+     * @return bool
+     */
+    private static function hasEventRow(string $text, string $class): bool
+    {
+        return preg_match('/^\| `' . preg_quote($class, '/') . '`/m', $text) === 1;
+    }
+
+    /**
+     * The methods called on the `AuditLog` facade in the text, each once, in
+     * the order they first appear.
+     *
+     * @param  string  $text
+     * @return list<string>
+     */
+    private static function auditLogCallsIn(string $text): array
+    {
+        preg_match_all('/(?<![\w$])AuditLog\s*::\s*(\w+)\s*\(/', $text, $matches);
+
+        return array_values(array_unique($matches[1]));
+    }
+
+    /**
+     * The calls the documentation may show on the facade.
+     *
+     * @return list<string>
+     */
+    private static function knownAuditLogCalls(): array
+    {
+        return [...self::callsDeclaredOn(Recorder::class), ...self::callsDeclaredOn(AuditLog::class), ...self::PLANNED_CALLS];
+    }
+
+    /**
+     * The public methods the class declares itself, which are not inherited,
+     * but for its constructor and any magic method.
+     *
+     * @param  class-string  $class
+     * @return list<string>
+     */
+    private static function callsDeclaredOn(string $class): array
+    {
+        $calls = [];
+
+        foreach ((new \ReflectionClass($class))->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+
+            if ($method->getDeclaringClass()->getName() !== $class || str_starts_with($method->getName(), '__')) {
+                continue;
+            }
+
+            $calls[] = $method->getName();
+        }
+
+        return $calls;
+    }
+
+    /**
      * The text of a string literal `LITERAL` matched, whichever quotes it is
      * in.
      *
@@ -740,6 +1045,18 @@ final class DocumentationTest extends TestCase
         $files = [$root . '/README.md', ...(glob($root . '/docs/guides/*.md') ?: []), ...(glob($root . '/docs/design/*.md') ?: [])];
 
         return self::$documentation ??= implode("\n", array_map(static fn (string $file): string => (string) file_get_contents($file), $files));
+    }
+
+    /**
+     * A file of the repository with every run of whitespace made one space, so
+     * a sentence is found however its lines are wrapped.
+     *
+     * @param  string  $path
+     * @return string
+     */
+    private static function prose(string $path): string
+    {
+        return (string) preg_replace('/\s+/', ' ', self::read($path));
     }
 
     /**

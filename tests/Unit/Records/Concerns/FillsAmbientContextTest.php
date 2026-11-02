@@ -521,6 +521,109 @@ final class FillsAmbientContextTest extends TestCase
     }
 
     /**
+     * A builder nobody has touched has no settled actor.
+     *
+     * @return void
+     */
+    public function testNoActorIsSettledAtFirst(): void
+    {
+        self::assertFalse((new PendingRecord)->isActorSettled());
+    }
+
+    /**
+     * `by(null)` says there is explicitly no actor, which settles it.
+     *
+     * @return void
+     */
+    public function testByNullSettlesTheActor(): void
+    {
+        self::assertTrue((new PendingRecord)->by(null)->isActorSettled());
+    }
+
+    /**
+     * A contributor's actor settles it, so no later contributor replaces it.
+     *
+     * @return void
+     */
+    public function testAFilledActorSettlesIt(): void
+    {
+        $pending = new PendingRecord;
+
+        $pending->fillActor(Reference::of('user', '1'));
+
+        self::assertTrue($pending->isActorSettled());
+    }
+
+    /**
+     * A contributor with no actor to give leaves it open for the next.
+     *
+     * @return void
+     */
+    public function testAFillerGivenNullLeavesTheActorUnsettled(): void
+    {
+        $pending = new PendingRecord;
+
+        $pending->fillActor(null);
+
+        self::assertFalse($pending->isActorSettled());
+    }
+
+    /**
+     * Another field being filled does not settle the actor.
+     *
+     * @return void
+     */
+    public function testAnotherFieldDoesNotSettleTheActor(): void
+    {
+        $pending = new PendingRecord;
+
+        $pending->fillGuard('web');
+        $pending->fillPrincipal(Reference::of('team', '2'));
+
+        self::assertFalse($pending->isActorSettled());
+    }
+
+    /**
+     * A used builder refuses every filler, so nothing changes what was
+     * recorded.
+     *
+     * @return void
+     */
+    public function testAUsedBuilderRefusesEveryFiller(): void
+    {
+        $pending = (new PendingRecord)->event('invoice.approved');
+
+        $pending->consume();
+
+        foreach (self::provideFillers() as $name => [$fill]) {
+            try {
+                $fill($pending);
+
+                self::fail(sprintf('Expected the used builder to refuse %s.', $name));
+            } catch (\LogicException $exception) {
+                self::assertSame('A pending record is recorded once, and this one has already been recorded.', $exception->getMessage(), $name);
+            }
+        }
+    }
+
+    /**
+     * A used builder refuses the question, as it refuses every other call.
+     *
+     * @return void
+     */
+    public function testAUsedBuilderRefusesTheQuestion(): void
+    {
+        $pending = (new PendingRecord)->event('invoice.approved');
+
+        $pending->consume();
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('A pending record is recorded once, and this one has already been recorded.');
+
+        $pending->isActorSettled();
+    }
+
+    /**
      * A builder with every ambient field filled.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord

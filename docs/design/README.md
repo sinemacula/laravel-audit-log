@@ -1,7 +1,7 @@
 # Design Notes
 
-These notes document the package's record, definition, storage and integrity contracts that are easy to miss if you
-only read the quick-start material or skim the test suite.
+These notes document the package's record, definition, storage, integrity, context and testing contracts that are easy
+to miss if you only read the quick-start material or skim the test suite.
 
 Each note is intentionally short and follows the same structure:
 
@@ -26,6 +26,10 @@ The current note set is:
   managed, and what verifying a row answers.
 - `outcomes.md`: what storing a record returns or raises for each way a write can end, and what the host transaction is
   left as.
+- `context-resolution.md`: the capture pipeline, what contributors may fill, how the actor is read without loading a
+  user, the execution frames, when an inbound request id or trace id is believed, and what travels into a queued job.
+- `testing-helpers.md`: the fake store and its assertions, what runs with it and what it does not model, and how
+  Laravel's test helpers change what a record holds.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

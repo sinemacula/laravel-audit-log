@@ -77,6 +77,13 @@ php artisan migrate
 | `entries.table`                  | `audit_log_entries` | `AUDIT_LOG_ENTRIES_TABLE`                  | The entries table: 1 to 47 lower-case letters, digits and underscores, not starting with a digit.                                               |
 | `integrity.keys`                 | `[]`                | -                                          | A map of key ids to secrets of at least 32 bytes that sign and verify entries; empty to derive the key from `app.key`.                          |
 | `integrity.current`              | `null`              | `AUDIT_LOG_INTEGRITY_CURRENT`              | The key in `integrity.keys` that signs new entries.                                                                                             |
+| `actor.guards`                   | `null`              | -                                          | The guards the ambient actor is read from, in order; `null` for the default guard.                                                              |
+| `context.trust_request_id`       | `false`             | `AUDIT_LOG_CONTEXT_TRUST_REQUEST_ID`       | Whether a request id from a trusted proxy is believed.                                                                                          |
+| `context.request_id_header`      | `X-Request-Id`      | `AUDIT_LOG_CONTEXT_REQUEST_ID_HEADER`      | The header a trusted request id comes in.                                                                                                       |
+| `context.trust_traceparent`      | `false`             | `AUDIT_LOG_CONTEXT_TRUST_TRACEPARENT`      | Whether a `traceparent` from a trusted proxy is believed.                                                                                       |
+| `definitions.require_registered` | `false`             | `AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED` | Whether a code with no registered definition is refused, rather than taking the permissive definition.                                          |
+| `source.id`                      | `null`              | `AUDIT_LOG_SOURCE_ID`                      | The deployment records come from, 1 to 64 characters; `null` or empty for a slug of `app.name`.                                                 |
+| `source.region`                  | `null`              | `AUDIT_LOG_SOURCE_REGION`                  | The region records come from, 1 to 32 characters; `null` or empty for none.                                                                     |
 
 Run `php artisan audit-log:check` in a deploy pipeline: it reports every malformed setting, missing connection, schema
 problem and unusable key at once, exits non-zero on any, and writes nothing.
@@ -102,6 +109,47 @@ AuditLog::event('user.suspended')
     ->forTenant($organisation)
     ->withProperties(['until' => $until])
     ->record();
+```
+
+A record made before the `auth` middleware has run has no actor, because the package only reads a user the guard already
+holds and never loads one; name it with `->by()`. A request id or `traceparent` sent by the edge is believed only with
+its flag on and from a proxy `TrustProxies` trusts, and that proxy must overwrite or validate those headers, because
+only the immediate peer is checked.
+
+Record a completed disclosure, with its purpose and channel as machine-readable codes:
+
+```php
+AuditLog::accessed('document.downloaded', subject: $document, purpose: 'legal_hold', channel: 'portal')->record();
+```
+
+Choose when a record is written. Inside a transaction a record waits for the commit, and is dropped on a rollback:
+
+```php
+AuditLog::event('invoice.approved')->on($invoice)->afterCommit()->record();          // the default
+AuditLog::event('invoice.approved')->on($invoice)->afterCommit('billing')->record(); // that connection's transaction
+AuditLog::event('invoice.approved')->on($invoice)->immediately()->record();          // now, whatever is open
+AuditLog::event('invoice.approved')->on($invoice)->transactional()->record();        // atomic with an open transaction
+AuditLog::event('invoice.approved')->on($invoice)->failClosed()->record();           // now, and a failure must throw
+```
+
+Register event definitions and your own context contributors from a service provider's `boot()`; registration is refused
+once the application has booted:
+
+```php
+AuditLog::define(InvoiceActivity::class);
+AuditLog::contribute(OrganisationContributor::class);
+```
+
+A contributor implements `ContextContributor` and fills only what is still a gap.
+
+In a test, swap the store for a fake that holds what would have been stored:
+
+```php
+$fake = AuditLog::fake();
+
+$this->post('/invoices/42/approve');
+
+self::assertTrue($fake->hasRecorded('invoice.approved'));
 ```
 
 ## Requirements

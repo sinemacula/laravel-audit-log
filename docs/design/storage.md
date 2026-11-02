@@ -95,9 +95,9 @@ here; a change to any of them changes what every stored row means.
 
 ## Seams Left
 
-- `Contracts\AuditStore`, bound to `DatabaseAuditStore` by default, takes other stores (M5).
-- Pruning, holds and erasure on the maintenance connection (M9).
-- Partitioning the entries table (M10).
+- `Contracts\AuditStore`, bound to `DatabaseAuditStore` by default, takes other stores.
+- Pruning, holds and erasure on the maintenance connection.
+- Partitioning the entries table.
 
 ## Implementation Anchors
 

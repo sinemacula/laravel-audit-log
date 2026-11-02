@@ -134,9 +134,9 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * M1's integer and float rules survive the engine: the largest safe integer
-     * stays an integer, one beyond it is a decimal string, and floats are their
-     * shortest decimal strings, negative zero as `"0"`.
+     * The record's integer and float rules survive the engine: the largest safe
+     * integer stays an integer, one beyond it is a decimal string, and floats
+     * are their shortest decimal strings, negative zero as `"0"`.
      *
      * @return void
      */

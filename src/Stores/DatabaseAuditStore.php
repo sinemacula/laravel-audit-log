@@ -150,7 +150,7 @@ final readonly class DatabaseAuditStore implements AuditStore
             return;
         }
 
-        $connection->transaction(static fn (Connection $nested): bool => $nested->table($table)->insert($row), 1);
+        $connection->transaction(static fn (Connection $nested): bool => $nested->table($table)->insert($row));
     }
 
     /**

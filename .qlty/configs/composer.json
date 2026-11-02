@@ -3,6 +3,7 @@
         "dealerdirect/phpcodesniffer-composer-installer": "^1.2",
         "larastan/larastan": "^3.9",
         "laravel/framework": "^12.40|^13.3",
+        "laravel/octane": "^2.16",
         "mockery/mockery": "^1.6",
         "orchestra/testbench": "^10.2|^11.0",
         "phpstan/extension-installer": "^1.4",

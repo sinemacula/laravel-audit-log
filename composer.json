@@ -26,6 +26,7 @@
         "friendsofphp/php-cs-fixer": "^3.95.19",
         "infection/infection": "^0.33.2",
         "larastan/larastan": "^3.9",
+        "laravel/octane": "^2.16",
         "mockery/mockery": "^1.6",
         "orchestra/testbench": "^10.2|^11.0",
         "phpstan/extension-installer": "^1.4",

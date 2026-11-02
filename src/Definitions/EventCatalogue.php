@@ -18,7 +18,10 @@ use SineMacula\Laravel\AuditLog\Records\EventCode;
  * whichever came first. Once the application has booted the catalogue is frozen
  * and refuses any further registration, so a long-lived worker never registers
  * twice. A code no definition registers takes the permissive default, or is
- * refused when registration is required.
+ * refused when the caller requires registration, which it reads from the
+ * setting on each capture: the catalogue is resolved at boot to be frozen, and
+ * a malformed setting must not stop an application booting before
+ * `audit-log:check` can report it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,17 +35,6 @@ final class EventCatalogue
 
     /** @var bool Whether the application has booted, after which nothing more is registered. */
     private bool $frozen = false;
-
-    /**
-     * Constructor.
-     *
-     * @param  bool  $requireRegistered
-     */
-    public function __construct(
-
-        /** Whether a code no definition registers is a programming error (`definitions.require_registered`). */
-        private readonly bool $requireRegistered = false,
-    ) {}
 
     /**
      * Register a definition, or every case of an enum implementing
@@ -76,17 +68,18 @@ final class EventCatalogue
      * retained) when none is, unless registration is required.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\EventCode  $code
+     * @param  bool  $requireRegistered
      * @return \SineMacula\Laravel\AuditLog\Definitions\EventDefinition
      *
      * @throws \InvalidArgumentException
      */
-    public function definitionFor(EventCode $code): EventDefinition
+    public function definitionFor(EventCode $code, bool $requireRegistered = false): EventDefinition
     {
         if (isset($this->definitions[$code->value])) {
             return $this->definitions[$code->value];
         }
 
-        if ($this->requireRegistered) {
+        if ($requireRegistered) {
             throw new \InvalidArgumentException(sprintf('The event code `%s` is not registered, and unregistered codes are refused.', $code->value));
         }
 

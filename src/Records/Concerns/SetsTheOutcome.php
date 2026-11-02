@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records\Concerns;
 
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
+use SineMacula\Laravel\AuditLog\Support\MachineCode;
 
 /**
  * The pending record's outcome: it succeeded, which is the default, it failed,
@@ -25,9 +26,6 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
  */
 trait SetsTheOutcome
 {
-    /** @var string Pattern of a reason: a machine-readable code of 1 to 64 characters. */
-    private const string REASON_PATTERN = '/\A[a-z0-9][a-z0-9_.:-]{0,63}\z/';
-
     /** @var \SineMacula\Laravel\AuditLog\Records\Enums\Outcome How the activity ended. */
     private Outcome $outcome = Outcome::SUCCESS;
 
@@ -112,21 +110,6 @@ trait SetsTheOutcome
      */
     private static function reason(\BackedEnum|string|null $reason): ?string
     {
-        if ($reason instanceof \BackedEnum) {
-            if (!is_string($reason->value)) {
-                throw new \InvalidArgumentException('A reason enum must be backed by strings.');
-            }
-
-            $reason = $reason->value;
-        }
-
-        if ($reason !== null && preg_match(self::REASON_PATTERN, $reason) !== 1) {
-            $message = 'A reason must be a machine-readable code of 1 to 64 characters:'
-                . ' lower-case letters, digits, `_`, `.`, `:` or `-`, starting with a letter or a digit.';
-
-            throw new \InvalidArgumentException($message);
-        }
-
-        return $reason;
+        return $reason === null ? null : MachineCode::of($reason, 'A reason');
     }
 }

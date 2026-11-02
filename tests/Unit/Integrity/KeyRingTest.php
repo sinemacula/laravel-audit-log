@@ -382,6 +382,47 @@ final class KeyRingTest extends TestCase
     }
 
     /**
+     * Rows of `[integrity settings, application settings, the signing key's
+     * id]`: every shape of settings that `validate()` accepts.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @return iterable<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: string}>
+     */
+    public static function provideValidSettings(): iterable
+    {
+        yield from [
+            'derived from the application key' => [[], ['key' => self::APP_KEY], self::DERIVED_ID],
+            'derived with previous keys'       => [[], ['key' => self::APP_KEY, 'previous_keys' => [self::ZERO_APP_KEY]], self::DERIVED_ID],
+            'an empty ring and current'        => [['keys' => [], 'current' => ''], ['key' => self::APP_KEY], self::DERIVED_ID],
+            'an explicit ring'                 => [['keys' => ['old' => self::OLD_SECRET, 'new' => self::NEW_SECRET], 'current' => 'new'], [], 'new'],
+            'a numeric key id'                 => [['keys' => [7 => self::OLD_SECRET], 'current' => '7'], [], '7'],
+        ];
+    }
+
+    /**
+     * Settings that `validate()` accepts always give a key that signs, which is
+     * why `audit-log:check` has nothing to check for its `[integrity]` subject
+     * once they pass.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $integrity
+     * @param  array<string, mixed>  $app
+     * @param  string  $id
+     * @return void
+     */
+    #[DataProvider('provideValidSettings')]
+    public function testValidSettingsAlwaysGiveASigningKey(array $integrity, array $app, string $id): void
+    {
+        $settings = new IntegritySettings(new Repository(['audit-log' => ['integrity' => $integrity], 'app' => $app]));
+
+        $settings->validate();
+
+        self::assertSame($id, (new KeyRing($settings))->signingKey()->id);
+    }
+
+    /**
      * Derivation marks the application key sensitive, so a stack trace through
      * it never shows the key.
      *

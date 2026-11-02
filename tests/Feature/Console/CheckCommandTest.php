@@ -24,10 +24,11 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `audit-log:check`: it reads the settings, the connections
- * they name, the entries table and the integrity keys, lists every problem it
- * finds as `[<subject>] <message>` and every subject without one as
+ * and guards they name, the entries table and the integrity keys, lists every
+ * problem it finds as `[<subject>] <message>` and every subject without one as
  * `[<subject>] OK`, exits `1` when there is a problem and `0` when there is
- * none, and prints no secret, statement or binding.
+ * none, covers every leaf of the shipped configuration, and prints no secret,
+ * setting's value, statement or binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,6 +54,46 @@ final class CheckCommandTest extends TestCase
 
     /** @var string The configured table no test migrates. */
     private const string ABSENT_TABLE = 'audit_absent_entries';
+
+    /** @var array<string, int|string> A value the check refuses for each leaf of the package's configuration, by its path under `audit-log`. */
+    private const array BAD_LEAVES = [
+        'storage.connection'             => 123,
+        'storage.maintenance_connection' => 123,
+        'entries.table'                  => 'audit-log',
+        'integrity.keys'                 => 'x',
+        'integrity.current'              => 'k1',
+        'actor.guards'                   => 'web',
+        'context.trust_request_id'       => 'yes',
+        'context.request_id_header'      => 'X Request',
+        'context.trust_traceparent'      => 'yes',
+        'definitions.require_registered' => '1',
+        'source.id'                      => 42,
+        'source.region'                  => 42,
+    ];
+
+    /** @var string What a test's bad value carries, and the output must never hold. */
+    private const string SENTINEL = 'sentinel-7f3a9c';
+
+    /** @var string The message of a malformed list of guards. */
+    private const string MALFORMED_GUARDS = '[config] `audit-log.actor.guards` must be null, or a list of guard names of 1 to 64 characters.';
+
+    /** @var string The message of a malformed source id. */
+    private const string MALFORMED_SOURCE_ID = '[config] `audit-log.source.id` must be from 1 to 64 characters, with no control characters.';
+
+    /** @var string The message of a malformed source region. */
+    private const string MALFORMED_SOURCE_REGION = '[config] `audit-log.source.region` must be null or empty, or from 1 to 32 characters, with no control characters.';
+
+    /** @var string The message of a malformed header name. */
+    private const string MALFORMED_HEADER = '[config] `audit-log.context.request_id_header` must be a header name of 1 to 64 characters.';
+
+    /** @var string The message of a malformed flag trusting a request id. */
+    private const string MALFORMED_TRUST_REQUEST_ID = '[config] `audit-log.context.trust_request_id` must be true or false.';
+
+    /** @var string The message of a malformed flag trusting a `traceparent`. */
+    private const string MALFORMED_TRUST_TRACEPARENT = '[config] `audit-log.context.trust_traceparent` must be true or false.';
+
+    /** @var string The message of a malformed flag requiring a registered definition. */
+    private const string MALFORMED_REQUIRE_REGISTERED = '[config] `audit-log.definitions.require_registered` must be true or false.';
 
     /** @var list<string> Files a test created, removed when it ends. */
     private array $files = [];
@@ -145,7 +186,7 @@ final class CheckCommandTest extends TestCase
      * Rows of `[the settings changed, the one problem the change causes]`, one
      * for each setting and each way of getting it wrong a run reports.
      *
-     * @return iterable<string, array{0: array<string, array<array-key, string>|int|string|null>, 1: string}>
+     * @return iterable<string, array{0: array<string, array<array-key, int|string>|int|string|null>, 1: string}>
      */
     public static function provideBadSettings(): iterable
     {
@@ -210,6 +251,34 @@ final class CheckCommandTest extends TestCase
                 ['app.key' => ''],
                 '[config] `app.key` must be set to derive the integrity key when `audit-log.integrity.keys` is empty.',
             ],
+            'an empty list of guards'                  => [['audit-log.actor.guards' => []], self::MALFORMED_GUARDS],
+            'guards that are a string'                 => [['audit-log.actor.guards' => 'web'], self::MALFORMED_GUARDS],
+            'a guard that is not a string'             => [['audit-log.actor.guards' => [42]], self::MALFORMED_GUARDS],
+            'guards that are a map'                    => [['audit-log.actor.guards' => ['first' => 'web']], self::MALFORMED_GUARDS],
+            'an empty guard name'                      => [['audit-log.actor.guards' => ['']], self::MALFORMED_GUARDS],
+            'a guard name of 65 characters'            => [['audit-log.actor.guards' => [str_repeat('g', 65)]], self::MALFORMED_GUARDS],
+            'a guard name with a control character'    => [['audit-log.actor.guards' => ["web\x07"]], self::MALFORMED_GUARDS],
+            'a request id flag that is a word'         => [['audit-log.context.trust_request_id' => 'yes'], self::MALFORMED_TRUST_REQUEST_ID],
+            'a request id flag that is a number'       => [['audit-log.context.trust_request_id' => 1], self::MALFORMED_TRUST_REQUEST_ID],
+            'a request id flag that is null'           => [['audit-log.context.trust_request_id' => null], self::MALFORMED_TRUST_REQUEST_ID],
+            'a traceparent flag that is a word'        => [['audit-log.context.trust_traceparent' => 'yes'], self::MALFORMED_TRUST_TRACEPARENT],
+            'a traceparent flag that is a number'      => [['audit-log.context.trust_traceparent' => 1], self::MALFORMED_TRUST_TRACEPARENT],
+            'a traceparent flag that is null'          => [['audit-log.context.trust_traceparent' => null], self::MALFORMED_TRUST_TRACEPARENT],
+            'a header name with a space'               => [['audit-log.context.request_id_header' => 'X Request'], self::MALFORMED_HEADER],
+            'a header name that is not a string'       => [['audit-log.context.request_id_header' => 42], self::MALFORMED_HEADER],
+            'an empty header name'                     => [['audit-log.context.request_id_header' => ''], self::MALFORMED_HEADER],
+            'a header name of 65 characters'           => [['audit-log.context.request_id_header' => str_repeat('h', 65)], self::MALFORMED_HEADER],
+            'a registered flag that is a digit'        => [['audit-log.definitions.require_registered' => '1'], self::MALFORMED_REQUIRE_REGISTERED],
+            'a registered flag that is a word'         => [['audit-log.definitions.require_registered' => 'yes'], self::MALFORMED_REQUIRE_REGISTERED],
+            'a registered flag that is a number'       => [['audit-log.definitions.require_registered' => 1], self::MALFORMED_REQUIRE_REGISTERED],
+            'a source id that is not a string'         => [['audit-log.source.id' => 42], self::MALFORMED_SOURCE_ID],
+            'a source id of 65 characters'             => [['audit-log.source.id' => str_repeat('s', 65)], self::MALFORMED_SOURCE_ID],
+            'a source id with a control character'     => [['audit-log.source.id' => "app\x07"], self::MALFORMED_SOURCE_ID],
+            'a source region that is not a string'     => [['audit-log.source.region' => 42], self::MALFORMED_SOURCE_REGION],
+            'a source region of 33 characters'         => [['audit-log.source.region' => str_repeat('r', 33)], self::MALFORMED_SOURCE_REGION],
+            'a source region with a control character' => [['audit-log.source.region' => "eu\x07"], self::MALFORMED_SOURCE_REGION],
+            'an application name that gives no slug'   => [['app.name' => '!!!'], '[config] `audit-log.source.id` must be set, because `app.name` gives no slug.'],
+            'an application name that is not a string' => [['app.name' => 42], '[config] `audit-log.source.id` must be set, because `app.name` gives no slug.'],
         ];
     }
 
@@ -217,7 +286,7 @@ final class CheckCommandTest extends TestCase
      * Each bad setting is the one problem of its run, named by its full path,
      * and the run fails.
      *
-     * @param  array<string, array<array-key, string>|int|string|null>  $settings
+     * @param  array<string, array<array-key, int|string>|int|string|null>  $settings
      * @param  string  $problem
      * @return void
      */
@@ -483,6 +552,397 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
+     * Every name in the list must be configured, so one that is not is the one
+     * problem of its run, named because a guard's name is no secret, and the
+     * run fails.
+     *
+     * @return void
+     */
+    public function testAGuardNotInAuthGuardsIsAProblem(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.actor.guards', ['web', 'missing']);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] The guard [missing] that `audit-log.actor.guards` names is not configured in `auth.guards`.',
+            '[connections] OK',
+            '[schema] OK',
+            '[integrity] OK',
+        ], $output);
+    }
+
+    /**
+     * Each guard the list names and `auth.guards` does not is listed, in the
+     * list's order and once, however many times the list names it.
+     *
+     * @return void
+     */
+    public function testEveryMissingGuardIsListedOnceInOrder(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.actor.guards', ['second', 'web', 'first', 'second']);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] The guard [second] that `audit-log.actor.guards` names is not configured in `auth.guards`.',
+            '[config] The guard [first] that `audit-log.actor.guards` names is not configured in `auth.guards`.',
+        ], self::problemsIn($output));
+    }
+
+    /**
+     * With no list the actor is read from the default guard, so a default guard
+     * `auth.guards` does not configure is a problem.
+     *
+     * @return void
+     */
+    public function testADefaultGuardNotInAuthGuardsIsAProblem(): void
+    {
+        app(ConfigRepository::class)->set('auth.defaults.guard', 'nowhere');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] The default guard [nowhere] is not configured in `auth.guards`, and the actor is read from it.',
+            '[connections] OK',
+            '[schema] OK',
+            '[integrity] OK',
+        ], $output);
+    }
+
+    /**
+     * Rows of `[the settings changed, how the default guard is named]`: a
+     * default guard `AuthManager` would refuse, each named by its type when it
+     * is not a name.
+     *
+     * @return iterable<string, array{0: array<string, array<array-key, array<string, string>|string>|string|null>, 1: string}>
+     */
+    public static function provideUnusableDefaultGuards(): iterable
+    {
+        yield from [
+            'no default guard'                     => [['auth.defaults.guard' => null], 'null'],
+            'a default guard that is not a name'   => [['auth.defaults.guard' => ['web']], 'array'],
+            'an empty default guard'               => [['auth.defaults.guard' => ''], ''],
+            'a guard configured as a string'       => [['auth.guards' => ['web' => 'session']], 'web'],
+            'no guards at all'                     => [['auth.guards' => null], 'web'],
+            'a dotted name AuthManager cannot see' => [['auth.defaults.guard' => 'api.v1', 'auth.guards' => ['api.v1' => ['driver' => 'session']]], 'api.v1'],
+        ];
+    }
+
+    /**
+     * A default guard that cannot be resolved is the one problem of its run,
+     * looked up the way `AuthManager` looks it up: protects against a mutation
+     * that reads the guard's key as a literal or accepts anything set.
+     *
+     * @param  array<string, array<array-key, array<string, string>|string>|string|null>  $settings
+     * @param  string  $name
+     * @return void
+     */
+    #[DataProvider('provideUnusableDefaultGuards')]
+    public function testAnUnusableDefaultGuardIsAProblem(array $settings, string $name): void
+    {
+        app(ConfigRepository::class)->set($settings);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([sprintf('[config] The default guard [%s] is not configured in `auth.guards`, and the actor is read from it.', $name)], self::problemsIn($output));
+    }
+
+    /**
+     * A list whose every guard is configured passes, and the default guard,
+     * which a list stops the actor being read from, is then not checked.
+     *
+     * @return void
+     */
+    public function testAConfiguredGuardListPasses(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('auth.guards.api', ['driver' => 'token', 'provider' => 'users']);
+        $config->set('auth.defaults.guard', 'nowhere');
+        $config->set('audit-log.actor.guards', ['api', 'web']);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(0, $code);
+        self::assertSame(self::EVERY_SUBJECT_OK, $output);
+    }
+
+    /**
+     * A malformed list is reported once, by the context settings: the guard
+     * check neither repeats it nor falls back to the default guard, which is
+     * not the guard the application asked for.
+     *
+     * @return void
+     */
+    public function testAMalformedGuardListIsReportedOnce(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.actor.guards', 'web');
+        $config->set('auth.defaults.guard', 'nowhere');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([self::MALFORMED_GUARDS], self::problemsIn($output));
+    }
+
+    /**
+     * Every value at the edge of what a new setting accepts passes: a real
+     * boolean either way, the longest guard, header, source id and region,
+     * counted in characters, and an id and a region left empty.
+     *
+     * @return void
+     */
+    public function testTheNewSettingsAcceptEveryGoodValue(): void
+    {
+        $config = app(ConfigRepository::class);
+        $guard  = str_repeat('g', 64);
+
+        $config->set("auth.guards.{$guard}", ['driver' => 'session', 'provider' => 'users']);
+        $config->set('audit-log.actor.guards', [$guard]);
+        $config->set('audit-log.context.trust_request_id', true);
+        $config->set('audit-log.context.request_id_header', str_repeat('h', 64));
+        $config->set('audit-log.context.trust_traceparent', false);
+        $config->set('audit-log.definitions.require_registered', true);
+        $config->set('audit-log.source.id', str_repeat('é', 64));
+        $config->set('audit-log.source.region', str_repeat('é', 32));
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set('audit-log.source.id', '');
+        $config->set('audit-log.source.region', '');
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * The values the configuration ships pass: no list of guards, neither
+     * header trusted, the usual header name, and no source of its own, which
+     * `app.name` then gives.
+     *
+     * @return void
+     */
+    public function testTheShippedDefaultsOfTheNewSettingsPass(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.actor.guards'                   => null,
+            'audit-log.context.trust_request_id'       => false,
+            'audit-log.context.request_id_header'      => 'X-Request-Id',
+            'audit-log.context.trust_traceparent'      => false,
+            'audit-log.definitions.require_registered' => false,
+            'audit-log.source.id'                      => null,
+            'audit-log.source.region'                  => null,
+        ]);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * Each group of new settings reports in one run, after the settings before
+     * them and ahead of the guards, and none of them leaves out a later
+     * subject, since none of those reads it.
+     *
+     * @return void
+     */
+    public function testEveryNewSettingProblemIsListedAndNoSubjectIsLeftOut(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.actor.guards'                   => ['missing'],
+            'audit-log.context.trust_traceparent'      => 'yes',
+            'audit-log.definitions.require_registered' => 'yes',
+            'audit-log.entries.table'                  => self::ABSENT_TABLE,
+            'audit-log.source.region'                  => 42,
+        ]);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            self::MALFORMED_TRUST_TRACEPARENT,
+            self::MALFORMED_SOURCE_REGION,
+            self::MALFORMED_REQUIRE_REGISTERED,
+            '[config] The guard [missing] that `audit-log.actor.guards` names is not configured in `auth.guards`.',
+            '[connections] OK',
+            '[schema] The entries table `audit_absent_entries` does not exist on connection [testing]; publish and run the migrations'
+                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+            '[integrity] OK',
+        ], $output);
+    }
+
+    /**
+     * Every malformed setting a settings group holds is listed by the one run,
+     * by its full path and in the order the settings are read, so a deploy
+     * pipeline never has to fix them one run at a time.
+     *
+     * @return void
+     */
+    public function testEveryMalformedNewLeafIsReportedInOneRun(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.actor.guards', 'web');
+        $config->set('audit-log.context.trust_request_id', 'yes');
+        $config->set('audit-log.context.request_id_header', 'X Request');
+        $config->set('audit-log.context.trust_traceparent', 'yes');
+        $config->set('audit-log.source.id', 42);
+        $config->set('audit-log.source.region', 42);
+        $config->set('audit-log.definitions.require_registered', '1');
+
+        self::assertSame([
+            '[config] `audit-log.actor.guards` must be null, or a list of guard names of 1 to 64 characters.',
+            self::MALFORMED_TRUST_REQUEST_ID,
+            '[config] `audit-log.context.request_id_header` must be a header name of 1 to 64 characters.',
+            self::MALFORMED_TRUST_TRACEPARENT,
+            '[config] `audit-log.source.id` must be from 1 to 64 characters, with no control characters.',
+            '[config] `audit-log.source.region` must be null or empty, or from 1 to 32 characters, with no control characters.',
+            '[config] `audit-log.definitions.require_registered` must be true or false.',
+        ], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * A malformed current key id and a malformed explicit ring are each listed
+     * by the one run, and an explicit ring reads no application key.
+     *
+     * @return void
+     */
+    public function testEveryMalformedIntegritySettingIsReportedInOneRun(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('app.key', 'not a key');
+        $config->set('audit-log.integrity.current', 42);
+        $config->set('audit-log.integrity.keys', 'x');
+
+        $problems = self::problemsIn($this->check()[1]);
+
+        self::assertCount(2, $problems);
+        self::assertStringContainsString('`audit-log.integrity.current`', $problems[0]);
+        self::assertStringContainsString('`audit-log.integrity.keys`', $problems[1]);
+    }
+
+    /**
+     * With no ring set the application's keys are what the ring is derived
+     * from, so a malformed one is listed with a malformed current key id.
+     *
+     * @return void
+     */
+    public function testAMalformedApplicationKeyIsListedWithACurrentKeyId(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('app.key', '');
+        $config->set('audit-log.integrity.current', 'k1');
+
+        self::assertCount(2, self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Walks the leaves of the merged configuration, which must each have a bad
+     * value here, then plants each value in turn and asserts a `[config]` line
+     * naming that leaf, so a leaf added without a check fails this test instead
+     * of being missed silently.
+     *
+     * @return void
+     */
+    public function testEveryNewLeafIsCoveredByACheck(): void
+    {
+        $config   = app(ConfigRepository::class);
+        $settings = $config->array('audit-log');
+        $leaves   = self::leavesOf($settings);
+
+        self::assertContains('storage.connection', $leaves);
+        self::assertContains('integrity.keys', $leaves);
+        self::assertSame([], array_values(array_diff($leaves, array_keys(self::BAD_LEAVES))), 'A leaf of the configuration has no bad value, so no check is known to cover it.');
+
+        foreach (self::BAD_LEAVES as $leaf => $bad) {
+
+            $config->set("audit-log.{$leaf}", $bad);
+
+            [$code, $output] = $this->check();
+
+            $config->set('audit-log', $settings);
+
+            $named = array_filter($output, static fn (string $line): bool => str_starts_with($line, "[config] `audit-log.{$leaf}` "));
+
+            self::assertSame(1, $code, "A bad `{$leaf}` must fail the run.");
+            self::assertCount(1, $named, "A bad `{$leaf}` must be named by one `[config]` line.");
+        }
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * The walk finds a leaf at any depth, and takes an empty map, a list and
+     * `null` for leaves, so the test above cannot pass by finding nothing.
+     *
+     * @return void
+     */
+    public function testTheWalkFindsEveryLeaf(): void
+    {
+        self::assertSame(
+            ['top.deep.leaf', 'top.empty', 'top.list', 'unset', 'plain'],
+            self::leavesOf(['top' => ['deep' => ['leaf' => 1], 'empty' => [], 'list' => ['a', 'b']], 'unset' => null, 'plain' => 'value']),
+        );
+    }
+
+    /**
+     * Rows of `[the setting, the bad value, the text in it]`, with the value in
+     * each shape a setting refuses it in.
+     *
+     * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
+     */
+    public static function provideValuesThatMustNotBePrinted(): iterable
+    {
+        $long = str_repeat(self::SENTINEL, 8);
+
+        yield from [
+            'guards that are a string'                 => ['audit-log.actor.guards', self::SENTINEL, self::SENTINEL],
+            'guards that are a map'                    => ['audit-log.actor.guards', [self::SENTINEL => self::SENTINEL], self::SENTINEL],
+            'a guard name too long'                    => ['audit-log.actor.guards', [$long], self::SENTINEL],
+            'a guard name with a control character'    => ['audit-log.actor.guards', [self::SENTINEL . "\x07"], self::SENTINEL],
+            'a request id flag'                        => ['audit-log.context.trust_request_id', self::SENTINEL, self::SENTINEL],
+            'a header name'                            => ['audit-log.context.request_id_header', self::SENTINEL . ' X', self::SENTINEL],
+            'a traceparent flag'                       => ['audit-log.context.trust_traceparent', self::SENTINEL, self::SENTINEL],
+            'a registered flag'                        => ['audit-log.definitions.require_registered', self::SENTINEL, self::SENTINEL],
+            'a source id too long'                     => ['audit-log.source.id', $long, self::SENTINEL],
+            'a source id with a control character'     => ['audit-log.source.id', self::SENTINEL . "\x07", self::SENTINEL],
+            'a source region too long'                 => ['audit-log.source.region', $long, self::SENTINEL],
+            'a source region with a control character' => ['audit-log.source.region', self::SENTINEL . "\x07", self::SENTINEL],
+            'an application name that gives no slug'   => ['app.name', '!~!~!~', '!~!~!~'],
+            'an application name that is not a string' => ['app.name', [self::SENTINEL], self::SENTINEL],
+            'a default guard that is not a name'       => ['auth.defaults.guard', [self::SENTINEL], self::SENTINEL],
+        ];
+    }
+
+    /**
+     * A bad value fails the run and never appears in its output: the setting is
+     * named by its key, or, for a default guard that is not a name, by its
+     * type.
+     *
+     * @param  string  $setting
+     * @param  array<array-key, string>|string  $value
+     * @param  string  $sentinel
+     * @return void
+     */
+    #[DataProvider('provideValuesThatMustNotBePrinted')]
+    public function testNoSettingValueIsPrinted(string $setting, array|string $value, string $sentinel): void
+    {
+        app(ConfigRepository::class)->set($setting, $value);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertNotSame([], self::problemsIn($output));
+        self::assertStringNotContainsString($sentinel, implode("\n", $output));
+    }
+
+    /**
      * The check writes nothing: the table's rows are as they were.
      *
      * @return void
@@ -522,6 +982,29 @@ final class CheckCommandTest extends TestCase
     private static function problemsIn(array $output): array
     {
         return array_values(array_filter($output, static fn (string $line): bool => preg_match('/\A\[[a-z]+\] OK\z/', $line) !== 1));
+    }
+
+    /**
+     * The paths of the leaves under the settings: a value that is not a map, or
+     * is empty or a list, is a leaf.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $settings
+     * @param  string  $prefix
+     * @return list<string>
+     */
+    private static function leavesOf(array $settings, string $prefix = ''): array
+    {
+        $leaves = [];
+
+        foreach ($settings as $key => $value) {
+            $leaves = is_array($value) && $value !== [] && !array_is_list($value)
+                ? [...$leaves, ...self::leavesOf($value, "{$prefix}{$key}.")]
+                : [...$leaves, "{$prefix}{$key}"];
+        }
+
+        return $leaves;
     }
 
     /**

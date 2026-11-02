@@ -9,30 +9,39 @@ use Illuminate\Console\Command;
 use Illuminate\Database\DatabaseManager;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
-use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Records\SourceSettings;
+use SineMacula\Laravel\AuditLog\Runtime\ContextSettings;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:check`: reads every setting the package stores entries with, the
- * connections they name, the entries table and the integrity keys, and exits
- * non-zero on a problem, for deploy pipelines and readiness probes.
+ * `audit-log:check`: reads every setting the package stores entries and
+ * captures records with, the connections and guards they name, the entries
+ * table and the integrity keys, and exits non-zero on a problem, for deploy
+ * pipelines and readiness probes.
  *
- * Every check runs, so one run lists every problem, each as
- * `[<subject>] <message>`, and a subject without one as `[<subject>] OK`, in
- * this order: `[config]` (the storage and maintenance connection settings, the
- * entries table's name and the integrity settings, each named by its full
- * path), `[connections]` (the storage and maintenance connections are each
- * configured in `database.connections`, and use the same driver; skipped when a
- * connection setting is malformed), `[schema]` (the storage connection's engine
- * and the entries table's shape; see `EngineChecks` and `SchemaChecks`, skipped
- * when the storage connection or the table's name is malformed or the
- * connection is not configured) and `[integrity]` (a key signs; skipped when
- * the integrity settings are malformed). It does not warn about a storage
- * connection shared with the application, which every default install would
- * trip. The command writes nothing and prints no secret, statement or binding:
- * a connection that cannot be opened or read is named with the class of what
- * was thrown, never its message.
+ * Every check runs, so one run lists every problem, each as `[<subject>]
+ * <message>`, and a subject without one as `[<subject>] OK`, in this order:
+ * `[config]` (the storage and maintenance connection settings, the entries
+ * table's name and the integrity, context, source and definition settings, each
+ * named by its full path, with `app.key` and `app.previous_keys` read together
+ * as the one key ring they make; then the guards the actor is read from, or the
+ * default guard when no list is set, each configured in `auth.guards`, skipped
+ * when the list is malformed), `[connections]` (the storage and maintenance
+ * connections are each configured in `database.connections`, and use the same
+ * driver; skipped when a connection setting is malformed), `[schema]` (the
+ * storage connection's engine and the entries table's shape; see `EngineChecks`
+ * and `SchemaChecks`, skipped when the storage connection or the table's name
+ * is malformed or the connection is not configured) and `[integrity]` (a key
+ * signs; skipped when the integrity settings are malformed). A malformed
+ * context, source or definition setting skips nothing, since no later subject
+ * reads it. It does not warn about a storage connection shared with the
+ * application, which every default install would trip. The command writes
+ * nothing and prints no secret, statement or binding: a malformed setting is
+ * named by its key and never its value, only the name of a connection or guard
+ * that is not configured is printed, and a connection that cannot be opened or
+ * read is named with the class of what was thrown, never its message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -96,7 +105,7 @@ final class CheckCommand extends Command
     {
         [$storageCheck, $maintenanceCheck, $tableCheck, $integrityCheck] = self::settingChecks($config);
 
-        $checks  = ['config' => [$storageCheck, $maintenanceCheck, $tableCheck, $integrityCheck]];
+        $checks  = ['config' => [$storageCheck, $maintenanceCheck, $tableCheck, ...self::integritySettingChecks($config), ...self::captureSettingChecks($config)]];
         $storage = !self::fails($storageCheck);
 
         if ($storage && !self::fails($maintenanceCheck)) {
@@ -109,14 +118,10 @@ final class CheckCommand extends Command
             $checks['schema'] = [self::schemaCheck($database)];
         }
 
+        // Integrity settings that pass always give a key that signs, so the
+        // subject has no check of its own: it is listed exactly when they pass
         if (!self::fails($integrityCheck)) {
-            $checks['integrity'] = [
-                static function () use ($config): array {
-                    (new KeyRing(new IntegritySettings($config)))->signingKey();
-
-                    return [];
-                },
-            ];
+            $checks['integrity'] = [];
         }
 
         return $checks;
@@ -154,6 +159,71 @@ final class CheckCommand extends Command
                 return [];
             },
         ];
+    }
+
+    /**
+     * The checks of the integrity settings, one for each, so one run reports
+     * every malformed setting: the current key's id, the explicit ring and,
+     * when no ring is set, the application's keys it would be derived from. A
+     * setting two of them read is listed once, since a run lists a problem
+     * once.
+     *
+     * @param  \Illuminate\Config\Repository  $config
+     * @return list<\Closure(): list<string>>
+     */
+    private static function integritySettingChecks(ConfigRepository $config): array
+    {
+        $integrity = new IntegritySettings($config);
+
+        return [
+            self::reading($integrity->currentKeyId(...)),
+            self::reading($integrity->explicitKeys(...)),
+            self::reading(static fn (): array => $integrity->explicitKeys() === [] ? $integrity->applicationKeys() : []),
+        ];
+    }
+
+    /**
+     * The checks of the settings records are captured with, one for each, so
+     * one run reports every malformed setting: the context settings, the source
+     * settings, the definition setting and the guards the actor is read from.
+     * No other subject depends on them.
+     *
+     * @param  \Illuminate\Config\Repository  $config
+     * @return list<\Closure(): list<string>>
+     */
+    private static function captureSettingChecks(ConfigRepository $config): array
+    {
+        $context = new ContextSettings($config);
+        $source  = new SourceSettings($config);
+
+        return [
+            self::reading($context->guards(...)),
+            self::reading($context->trustsRequestId(...)),
+            self::reading($context->requestIdHeader(...)),
+            self::reading($context->trustsTraceparent(...)),
+            self::reading($source->id(...)),
+            self::reading($source->region(...)),
+            self::reading((new DefinitionSettings($config))->requiresRegistered(...)),
+            static fn (): array => self::guardProblems($config),
+        ];
+    }
+
+    /**
+     * The check that a setting can be read, which its reader refuses with an
+     * exception when it is malformed.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \Closure(): mixed  $read
+     * @return \Closure(): list<string>
+     */
+    private static function reading(\Closure $read): \Closure
+    {
+        return static function () use ($read): array {
+            $read();
+
+            return [];
+        };
     }
 
     /**
@@ -209,6 +279,72 @@ final class CheckCommand extends Command
                 return [sprintf('The storage connection [%s] could not be read (%s).', $connection, $exception::class)];
             }
         };
+    }
+
+    /**
+     * The problem of each guard the actor would be read from that is not
+     * configured in `auth.guards`, which `AuthManager` refuses with an
+     * exception the capture lets through, or none when the list itself is
+     * malformed, the problem the context settings' check reports.
+     *
+     * @param  \Illuminate\Config\Repository  $config
+     * @return list<string>
+     */
+    private static function guardProblems(ConfigRepository $config): array
+    {
+        try {
+            $guards = (new ContextSettings($config))->guards();
+        } catch (\InvalidArgumentException) {
+            return [];
+        }
+
+        if ($guards === null) {
+            return self::defaultGuardProblems($config);
+        }
+
+        $problems = [];
+
+        foreach ($guards as $guard) {
+
+            if (self::isGuardConfigured($config, $guard)) {
+                continue;
+            }
+
+            $problems[] = sprintf('The guard [%s] that `audit-log.actor.guards` names is not configured in `auth.guards`.', $guard);
+        }
+
+        return $problems;
+    }
+
+    /**
+     * The problem of a default guard that is not configured in `auth.guards`,
+     * named by its type when it is not a name, or none.
+     *
+     * @param  \Illuminate\Config\Repository  $config
+     * @return list<string>
+     */
+    private static function defaultGuardProblems(ConfigRepository $config): array
+    {
+        $guard = $config->get('auth.defaults.guard');
+
+        if (is_string($guard) && self::isGuardConfigured($config, $guard)) {
+            return [];
+        }
+
+        return [sprintf('The default guard [%s] is not configured in `auth.guards`, and the actor is read from it.', is_string($guard) ? $guard : get_debug_type($guard))];
+    }
+
+    /**
+     * Whether the guard is configured, looked up by the same dotted path
+     * `AuthManager` resolves it by.
+     *
+     * @param  \Illuminate\Config\Repository  $config
+     * @param  string  $guard
+     * @return bool
+     */
+    private static function isGuardConfigured(ConfigRepository $config, string $guard): bool
+    {
+        return is_array($config->get("auth.guards.{$guard}"));
     }
 
     /**
