@@ -70,8 +70,16 @@ php artisan vendor:publish --tag=audit-log-migrations
 php artisan migrate
 ```
 
-The package's tables live on the `storage.connection` connection (`AUDIT_LOG_STORAGE_CONNECTION`); the default
-connection is used when it is unset.
+| Key                              | Default             | Env                                        | What it does                                                                                                                                    |
+|----------------------------------|---------------------|--------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `storage.connection`             | `null`              | `AUDIT_LOG_STORAGE_CONNECTION`             | The connection the tables live on; `null` or empty for the default connection.                                                                  |
+| `storage.maintenance_connection` | `null`              | `AUDIT_LOG_STORAGE_MAINTENANCE_CONNECTION` | The connection pruning, holds and erasure run through, to the same database with a user of its own; `null` or empty for the storage connection. |
+| `entries.table`                  | `audit_log_entries` | `AUDIT_LOG_ENTRIES_TABLE`                  | The entries table: 1 to 47 lower-case letters, digits and underscores, not starting with a digit.                                               |
+| `integrity.keys`                 | `[]`                | -                                          | A map of key ids to secrets of at least 32 bytes that sign and verify entries; empty to derive the key from `app.key`.                          |
+| `integrity.current`              | `null`              | `AUDIT_LOG_INTEGRITY_CURRENT`              | The key in `integrity.keys` that signs new entries.                                                                                             |
+
+Run `php artisan audit-log:check` in a deploy pipeline: it reports every malformed setting, missing connection, schema
+problem and unusable key at once, exits non-zero on any, and writes nothing.
 
 ## Usage
 

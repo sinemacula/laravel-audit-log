@@ -43,7 +43,7 @@ final class DocumentationTest extends TestCase
     private const array SECTIONS = ['Purpose', 'Invariants', 'Success Path', 'Failure / Edge Cases', 'Implementation Anchors', 'Authoritative Tests', 'Change Triggers'];
 
     /** @var list<string> The design notes the package ships so far. */
-    private const array NOTES = ['record-model.md', 'event-definitions.md', 'vocabulary.md'];
+    private const array NOTES = ['record-model.md', 'event-definitions.md', 'vocabulary.md', 'storage.md', 'integrity.md', 'outcomes.md'];
 
     /** @var string The sentence the design index ends with. */
     private const string CLOSING = 'These documents are secondary to the code and tests, not a replacement for them. '

@@ -1,0 +1,834 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Integration\Stores;
+
+use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Connection;
+use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\ConnectionResolverInterface;
+use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
+use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
+use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
+use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
+use SineMacula\Laravel\AuditLog\Stores\RecordConflictException;
+use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Fixtures\Records\RecordFactory;
+use Tests\TestCase;
+
+/**
+ * Integration tests for the database store on the engine the suite runs
+ * against: one plain insert of the finalised record, alone outside a
+ * transaction and in a savepoint inside one; a duplicate resolved to success
+ * only when the existing row verifies with the same captured content, to a
+ * conflict when it does not, and propagated when it cannot be verified or no
+ * row holds the id; and a host transaction left usable by one failed audit
+ * statement, on SQLite, MySQL and PostgreSQL alike.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+#[CoversClass(DatabaseAuditStore::class)]
+final class DatabaseAuditStoreTest extends TestCase
+{
+    use InteractsWithAuditStore, MockeryPHPUnitIntegration;
+
+    /** @var string The id records are pinned to. */
+    private const string ID = '01932b4e-8a40-7000-8000-000000000001';
+
+    /** @var string A table the host transaction writes to. */
+    private const string HOST_TABLE = 'audit_host_writes';
+
+    /** @var string A table of the application's own for the entries. */
+    private const string CUSTOM_TABLE = 'tenant_audit_entries';
+
+    /** @var string Absolute path to the shipped entries migration file. */
+    private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php';
+
+    /** @var string The first key's secret, as its own 32 bytes. */
+    private const string FIRST_SECRET = 'audit store first key secret 32!';
+
+    /** @var string The second key's secret, as its own 32 bytes. */
+    private const string SECOND_SECRET = 'audit store second key secret32!';
+
+    /**
+     * Create the table the host transaction writes to.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Schema::dropIfExists(self::HOST_TABLE);
+
+        Schema::create(self::HOST_TABLE, static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('name', 32);
+        });
+    }
+
+    /**
+     * Roll back any transaction a failed test left open, then drop what the
+     * test added: the host table, the probe table, the custom table and the
+     * test-only index.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function tearDown(): void
+    {
+        $connection = $this->storageConnection();
+
+        while ($connection->transactionLevel() > 0) {
+            $connection->rollBack();
+        }
+
+        $this->removeProbeTable();
+        $this->removeRequestIdUniqueIndex();
+
+        Schema::dropIfExists(self::HOST_TABLE);
+        Schema::dropIfExists(self::CUSTOM_TABLE);
+
+        parent::tearDown();
+    }
+
+    /**
+     * A finalised record is stored as one row, which decodes to its envelope:
+     * every column, in table order, with the same canonical encoding.
+     *
+     * @return void
+     */
+    public function testStoresTheFinalisedRecordAsOneRow(): void
+    {
+        $finalised = $this->finalised();
+
+        $this->store()->store($finalised);
+
+        $stored   = $this->storedRow(self::ID);
+        $envelope = $finalised->toArray();
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(array_keys($envelope), array_keys($stored));
+        self::assertSame(CanonicalEncoder::encode($envelope), CanonicalEncoder::encode($stored));
+        self::assertSame(array_diff_key($envelope, ['context' => true, 'properties' => true]), array_diff_key($stored, ['context' => true, 'properties' => true]));
+        self::assertTrue(app(RecordSigner::class)->verifies($stored));
+    }
+
+    /**
+     * Outside a transaction the store opens none: no transaction begins, and
+     * the connection is at level 0 throughout.
+     *
+     * @return void
+     */
+    public function testOutsideATransactionTheStoreOpensNone(): void
+    {
+        $began  = 0;
+        $levels = [];
+
+        Event::listen(TransactionBeginning::class, static function () use (&$began): void {
+            $began++;
+        });
+
+        $this->storageConnection()->beforeExecuting(static function (string $query, array $bindings, $connection) use (&$levels): void {
+            $levels[] = $connection->transactionLevel();
+        });
+
+        $this->store()->store($this->finalised());
+
+        self::assertSame(0, $began);
+        self::assertSame([0], $levels);
+        self::assertSame(0, $this->storageConnection()->transactionLevel());
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * Inside a host transaction the insert runs one level deeper, in a
+     * savepoint, and the host is back at its own level once it succeeds; the
+     * row is the host's to commit.
+     *
+     * @return void
+     */
+    public function testInsideATransactionTheInsertRunsInASavepoint(): void
+    {
+        $connection = $this->storageConnection();
+        $inserts    = [];
+
+        $connection->beforeExecuting(static function (string $query, array $bindings, $connection) use (&$inserts): void {
+            if (!str_starts_with($query, 'insert into')) {
+                return;
+            }
+
+            $inserts[] = $connection->transactionLevel();
+        });
+
+        $connection->beginTransaction();
+        $connection->beginTransaction();
+
+        $this->store()->store($this->finalised());
+
+        self::assertSame([3], $inserts);
+        self::assertSame(2, $connection->transactionLevel());
+
+        $connection->commit();
+        $connection->commit();
+
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * The same finalised record stored twice is one row, kept as first stored.
+     *
+     * @return void
+     */
+    public function testTheSameRecordStoredTwiceIsOneRow(): void
+    {
+        $finalised = $this->finalised();
+
+        $this->store()->store($finalised);
+
+        $first = $this->storedRow(self::ID);
+
+        $this->store()->store($finalised);
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(CanonicalEncoder::encode($first), CanonicalEncoder::encode($this->storedRow(self::ID)));
+    }
+
+    /**
+     * The same captured record finalised again later, so with another
+     * `recorded_at` and HMAC, is the record stored already: the first row is
+     * kept, its time and HMAC included.
+     *
+     * @return void
+     */
+    public function testTheSameContentWithADifferentRecordedAtKeepsTheFirstRow(): void
+    {
+        $record = RecordFactory::captured(id: self::ID);
+        $first  = $this->finaliser('2026-11-01 12:00:00.200000')->finalise($record);
+        $later  = $this->finaliser('2026-11-01 12:00:05.000000')->finalise($record);
+
+        $this->store()->store($first);
+        $this->store()->store($later);
+
+        $stored = $this->storedRow(self::ID);
+
+        self::assertNotSame($first->hmac, $later->hmac);
+        self::assertSame(1, $this->entryCount());
+        self::assertSame('2026-11-01T12:00:00.200000Z', $stored['recorded_at']);
+        self::assertSame($first->hmac, $stored['hmac']);
+    }
+
+    /**
+     * The same captured record signed again after the ring's current key moved
+     * is the record stored already: the first row is kept under the first key.
+     *
+     * @return void
+     */
+    public function testTheSameContentSignedWithAnotherKeyKeepsTheFirstRow(): void
+    {
+        $record = RecordFactory::captured(id: self::ID);
+
+        $this->useRing(['k1' => self::FIRST_SECRET, 'k2' => self::SECOND_SECRET], 'k1');
+
+        $first = $this->finaliser()->finalise($record);
+
+        $this->store()->store($first);
+
+        $this->useRing(['k1' => self::FIRST_SECRET, 'k2' => self::SECOND_SECRET], 'k2');
+
+        $second = $this->finaliser()->finalise($record);
+
+        $this->store()->store($second);
+
+        $stored = $this->storedRow(self::ID);
+
+        self::assertSame('k2', $second->keyId);
+        self::assertSame(1, $this->entryCount());
+        self::assertSame('k1', $stored['key_id']);
+        self::assertSame($first->hmac, $stored['hmac']);
+    }
+
+    /**
+     * Another captured record under the same id, with different properties, is
+     * a conflict naming the id, and the first row is left as it was.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDifferentContentUnderTheSameIdIsAConflict(): void
+    {
+        $first = $this->finaliser()->finalise(RecordFactory::captured(['amount' => '1200.00'], self::ID));
+        $other = $this->finaliser()->finalise(RecordFactory::captured(['amount' => '1200.01'], self::ID));
+
+        $this->store()->store($first);
+
+        try {
+            $this->store()->store($other);
+
+            self::fail('Expected the record to conflict.');
+        } catch (RecordConflictException $exception) {
+            self::assertSame('An audit entry with id ' . self::ID . ' already exists with different captured content.', $exception->getMessage());
+            self::assertSame(self::ID, $exception->id);
+        }
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame($first->hmac, $this->storedRow(self::ID)['hmac']);
+        self::assertEquals((object) ['amount' => '1200.00'], $this->storedRow(self::ID)['properties']);
+    }
+
+    /**
+     * A stored row whose properties were edited with its old HMAC left in place
+     * fails verification, so storing the same record again is a conflict, and
+     * never a success that would vouch for the edit.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATamperedRowWithItsOldHmacIsAConflict(): void
+    {
+        $finalised = $this->finalised();
+
+        $this->store()->store($finalised);
+
+        $this->storageConnection()->table(EntrySettings::table())->where('id', self::ID)->update(['properties' => '{"amount":"9999.00"}']);
+
+        try {
+            $this->store()->store($finalised);
+
+            self::fail('Expected the tampered row to conflict.');
+        } catch (RecordConflictException $exception) {
+            self::assertSame('An audit entry with id ' . self::ID . ' already exists, and its stored row fails verification.', $exception->getMessage());
+        }
+
+        self::assertSame(1, $this->entryCount());
+        self::assertEquals((object) ['amount' => '9999.00'], $this->storedRow(self::ID)['properties']);
+    }
+
+    /**
+     * An existing row signed under a key the ring no longer holds cannot be
+     * verified, so the ring's `UnknownKeyException` propagates unchanged.
+     *
+     * @return void
+     */
+    public function testAnExistingRowUnderAnUnknownKeyPropagates(): void
+    {
+        $record = RecordFactory::captured(id: self::ID);
+
+        $this->useRing(['k1' => self::FIRST_SECRET], 'k1');
+
+        $this->store()->store($this->finaliser()->finalise($record));
+
+        $this->useRing(['k2' => self::SECOND_SECRET], 'k2');
+
+        $this->expectException(UnknownKeyException::class);
+
+        $this->store()->store($this->finaliser()->finalise($record));
+    }
+
+    /**
+     * An existing row with an integrity version this release does not verify
+     * cannot be judged: the signer's `\UnexpectedValueException` propagates,
+     * never a success, and the row is left as it was.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAMalformedExistingRowPropagates(): void
+    {
+        $finalised = $this->finalised();
+
+        $this->store()->store($finalised);
+
+        $this->storageConnection()->table(EntrySettings::table())->where('id', self::ID)->update(['integrity_version' => 2]);
+
+        try {
+            $this->store()->store($finalised);
+
+            self::fail('Expected the malformed row to be refused.');
+        } catch (\UnexpectedValueException $exception) {
+            self::assertSame('Integrity version 2 is not supported by this release.', $exception->getMessage());
+        }
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(2, $this->storedRow(self::ID)['integrity_version']);
+    }
+
+    /**
+     * Two imported records with distinct ids and one source identity violate
+     * the source-identity index: no row holds the second's id, so the insert's
+     * own `UniqueConstraintViolationException` propagates, and the first row is
+     * the only one.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASourceIdentityViolationPropagatesTheOriginalException(): void
+    {
+        $imported = ['provenance' => 'imported', 'source_id' => 'legacy-app', 'source_record_id' => 'legacy-77'];
+        $first    = $this->finaliser()->finalise(RecordFactory::withFields($imported));
+        $second   = $this->finaliser()->finalise(RecordFactory::withFields($imported));
+
+        $this->store()->store($first);
+
+        self::assertNotSame($first->record->id, $second->record->id);
+
+        try {
+            $this->store()->store($second);
+
+            self::fail('Expected the source identity to be refused.');
+        } catch (UniqueConstraintViolationException $exception) {
+            self::assertStringStartsWith('insert into', $exception->getSql());
+            self::assertInstanceOf(\PDOException::class, $exception->getPrevious());
+        }
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame($first->hmac, $this->storedRow($first->record->id)['hmac']);
+    }
+
+    /**
+     * A violation of a unique index other than the id's, with no row under the
+     * record's id, propagates the insert's own exception.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAViolationOfAnotherUniqueIndexPropagates(): void
+    {
+        $this->addRequestIdUniqueIndex();
+
+        $first  = $this->finaliser()->finalise(RecordFactory::withFields(['request_id' => 'req-1']));
+        $second = $this->finaliser()->finalise(RecordFactory::withFields(['request_id' => 'req-1']));
+
+        $this->store()->store($first);
+
+        try {
+            $this->store()->store($second);
+
+            self::fail('Expected the request id to be refused.');
+        } catch (UniqueConstraintViolationException $exception) {
+            self::assertStringStartsWith('insert into', $exception->getSql());
+        }
+
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * Inside a healthy host transaction an audit insert that fails on the probe
+     * table's `NOT NULL` column propagates the engine's `QueryException`, and
+     * the host writes again and commits: both host rows exist, and the probe
+     * table holds nothing.
+     *
+     * @return void
+     */
+    public function testAFailedAuditInsertLeavesAHealthyHostTransactionUsable(): void
+    {
+        $this->pointAtProbeTable();
+
+        $connection = $this->storageConnection();
+
+        $connection->beginTransaction();
+
+        $this->hostWrite('before');
+
+        $failure = $this->failedStore($this->finalised());
+
+        $this->hostWrite('after');
+
+        $connection->commit();
+
+        // The failure is the probe insert itself, so the host transaction saw a
+        // failed statement: one thrown before any SQL ran would prove nothing
+        // about the savepoint
+        self::assertSame(QueryException::class, $failure::class);
+        self::assertInstanceOf(QueryException::class, $failure);
+        self::assertStringStartsWith('insert into', $failure->getSql());
+        self::assertStringContainsString(self::PROBE_TABLE, $failure->getSql());
+        self::assertSame(['before', 'after'], $this->hostRows());
+        self::assertSame(0, $this->probeCount());
+    }
+
+    /**
+     * Inside a healthy host transaction a unique violation of another index
+     * propagates, and the host keeps the record it stored before, writes again
+     * and commits.
+     *
+     * @return void
+     */
+    public function testAUniqueViolationInsideAHostTransactionLeavesItUsable(): void
+    {
+        $this->addRequestIdUniqueIndex();
+
+        $connection = $this->storageConnection();
+        $first      = $this->finaliser()->finalise(RecordFactory::withFields(['request_id' => 'req-1']));
+
+        $connection->beginTransaction();
+
+        $this->hostWrite('before');
+        $this->store()->store($first);
+
+        $failure = $this->failedStore($this->finaliser()->finalise(RecordFactory::withFields(['request_id' => 'req-1'])));
+
+        $this->hostWrite('after');
+
+        $connection->commit();
+
+        self::assertInstanceOf(UniqueConstraintViolationException::class, $failure);
+        self::assertSame(['before', 'after'], $this->hostRows());
+        self::assertSame(1, $this->entryCount());
+        self::assertSame($first->hmac, $this->storedRow($first->record->id)['hmac']);
+    }
+
+    /**
+     * Inside a healthy host transaction a duplicate is resolved after its
+     * savepoint is rolled back, so even on PostgreSQL the lookup runs in a
+     * usable transaction, and the host writes again and commits; whether the
+     * first row was committed before the host began or stored within it.
+     *
+     * @return void
+     */
+    public function testADuplicateResolvedInsideAHostTransactionLeavesItUsable(): void
+    {
+        $committed  = $this->finalised();
+        $connection = $this->storageConnection();
+
+        $this->store()->store($committed);
+
+        $connection->beginTransaction();
+
+        $this->hostWrite('before');
+        $this->store()->store($committed);
+
+        $within = $this->finaliser()->finalise(RecordFactory::captured(['amount' => '5.00']));
+
+        $this->store()->store($within);
+        $this->store()->store($within);
+
+        $this->hostWrite('after');
+
+        $connection->commit();
+
+        self::assertSame(['before', 'after'], $this->hostRows());
+        self::assertSame(2, $this->entryCount());
+    }
+
+    /**
+     * Inside a healthy host transaction a conflict is raised after the
+     * savepoint is rolled back, so the host writes again and commits, and the
+     * first row is left as it was.
+     *
+     * @return void
+     */
+    public function testAConflictInsideAHostTransactionLeavesItUsable(): void
+    {
+        $first      = $this->finaliser()->finalise(RecordFactory::captured(['amount' => '1200.00'], self::ID));
+        $connection = $this->storageConnection();
+
+        $this->store()->store($first);
+
+        $connection->beginTransaction();
+
+        $this->hostWrite('before');
+
+        $failure = $this->failedStore($this->finaliser()->finalise(RecordFactory::captured(['amount' => '1.00'], self::ID)));
+
+        $this->hostWrite('after');
+
+        $connection->commit();
+
+        self::assertInstanceOf(RecordConflictException::class, $failure);
+        self::assertSame(['before', 'after'], $this->hostRows());
+        self::assertSame($first->hmac, $this->storedRow(self::ID)['hmac']);
+    }
+
+    /**
+     * On PostgreSQL a host transaction a failed host statement already aborted
+     * stays aborted: the store's savepoint is refused, and that refusal
+     * propagates as the driver raised it, neither masked as a duplicate nor
+     * resolved; the host is left at its own level, to roll back.
+     *
+     * @return void
+     */
+    public function testAnAlreadyAbortedPostgresHostTransactionPropagates(): void
+    {
+        $connection = $this->storageConnection();
+
+        if ($connection->getDriverName() !== 'pgsql') {
+            self::markTestSkipped('Only PostgreSQL aborts a transaction on a failed statement.');
+        }
+
+        $connection->beginTransaction();
+
+        $hostFailure = rescue(static fn () => $connection->statement('select * from audit_no_such_table'), static fn (\Throwable $exception): \Throwable => $exception, false);
+
+        $failure = $this->failedStore($this->finalised());
+
+        self::assertInstanceOf(QueryException::class, $hostFailure);
+        self::assertInstanceOf(\PDOException::class, $failure);
+        self::assertNotInstanceOf(UniqueConstraintViolationException::class, $failure);
+        self::assertSame('25P02', $failure->getCode());
+        self::assertSame(1, $connection->transactionLevel());
+
+        $connection->rollBack();
+
+        self::assertSame(0, $this->entryCount());
+    }
+
+    /**
+     * Outside a transaction an insert that fails on the probe table's `NOT
+     * NULL` column propagates exactly the `QueryException` the connection
+     * threw, unwrapped, and no lookup follows it.
+     *
+     * @return void
+     */
+    public function testTheStoreCatchesNothingButADuplicate(): void
+    {
+        $this->pointAtProbeTable();
+
+        $statements = [];
+
+        $this->storageConnection()->beforeExecuting(static function (string $query) use (&$statements): void {
+            $statements[] = $query;
+        });
+
+        $failure = $this->failedStore($this->finalised());
+
+        self::assertSame(QueryException::class, $failure::class);
+        self::assertInstanceOf(QueryException::class, $failure);
+        self::assertStringStartsWith('insert into', $failure->getSql());
+        self::assertInstanceOf(\PDOException::class, $failure->getPrevious());
+        self::assertCount(1, $statements);
+        self::assertStringStartsWith('insert into', $statements[0]);
+        self::assertSame(0, $this->probeCount());
+    }
+
+    /**
+     * Outside a transaction a duplicate's lookup takes no lock, on every
+     * engine; inside one it takes MySQL's shared lock, and no lock elsewhere.
+     *
+     * @return void
+     */
+    public function testOnlyMySqlInsideATransactionTakesASharedLockOnTheLookup(): void
+    {
+        $finalised  = $this->finalised();
+        $connection = $this->storageConnection();
+        $reads      = [];
+
+        $this->store()->store($finalised);
+
+        $connection->beforeExecuting(static function (string $query) use (&$reads): void {
+            if (!str_starts_with($query, 'select')) {
+                return;
+            }
+
+            $reads[] = $query;
+        });
+
+        $this->store()->store($finalised);
+
+        $connection->beginTransaction();
+        $this->store()->store($finalised);
+        $connection->commit();
+
+        self::assertCount(2, $reads);
+        self::assertDoesNotMatchRegularExpression('/\b(lock|for share|for update)\b/i', $reads[0]);
+
+        if ($connection->getDriverName() === 'mysql') {
+            self::assertStringEndsWith(' lock in share mode', $reads[1]);
+
+            return;
+        }
+
+        self::assertDoesNotMatchRegularExpression('/\b(lock|for share|for update)\b/i', $reads[1]);
+    }
+
+    /**
+     * The store writes to the table and connection the settings name when it is
+     * called, so a table of the application's own holds the record and the
+     * shipped one holds nothing.
+     *
+     * @return void
+     */
+    public function testStoresInTheConfiguredTable(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.entries.table', self::CUSTOM_TABLE);
+
+        $migration = require self::MIGRATION_PATH;
+
+        assert(is_object($migration) && method_exists($migration, 'up'));
+
+        $migration->up();
+
+        $finalised = $this->finalised();
+
+        $this->store()->store($finalised);
+        $this->store()->store($finalised);
+
+        self::assertSame(1, $this->storageConnection()->table(self::CUSTOM_TABLE)->count());
+
+        $config->set('audit-log.entries.table', EntrySettings::DEFAULT_TABLE);
+
+        self::assertSame(0, $this->entryCount());
+    }
+
+    /**
+     * A storage connection that is not a database connection supporting
+     * transactions is refused before anything is written, naming the
+     * connection.
+     *
+     * @return void
+     */
+    public function testAConnectionWithoutTransactionsIsRefused(): void
+    {
+        $connections = \Mockery::mock(ConnectionResolverInterface::class);
+
+        $connections->shouldReceive('connection')->once()->with(null)->andReturn(\Mockery::mock(ConnectionInterface::class));
+
+        $store = new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class));
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('The storage connection [testing] is not a database connection that supports transactions.');
+
+        $store->store($this->finalised());
+    }
+
+    /**
+     * Rows of `[driver, transaction level, whether the lookup takes a shared
+     * lock]`: MySQL inside a transaction, and every case that takes none.
+     *
+     * @return iterable<string, array{0: string, 1: int, 2: bool}>
+     */
+    public static function provideLookupLocks(): iterable
+    {
+        yield from [
+            'MySQL inside a transaction'      => ['mysql', 1, true],
+            'MySQL inside a nested one'       => ['mysql', 2, true],
+            'MySQL outside a transaction'     => ['mysql', 0, false],
+            'PostgreSQL inside a transaction' => ['pgsql', 1, false],
+            'SQLite inside a transaction'     => ['sqlite', 1, false],
+        ];
+    }
+
+    /**
+     * The duplicate's lookup reads the writer and takes a shared lock exactly
+     * when the connection is MySQL's and a transaction is open, whatever engine
+     * the suite runs on (SQLite compiles no lock, so the builder is observed
+     * instead of the statement).
+     *
+     * @param  string  $driver
+     * @param  int  $level
+     * @param  bool  $locks
+     * @return void
+     */
+    #[DataProvider('provideLookupLocks')]
+    public function testTheLookupTakesASharedLockOnlyOnMySqlInsideATransaction(string $driver, int $level, bool $locks): void
+    {
+        $finalised  = $this->finalised();
+        $duplicate  = new UniqueConstraintViolationException('testing', 'insert into "audit_log_entries"', [], new \PDOException('duplicate'));
+        $builder    = \Mockery::mock(Builder::class);
+        $connection = \Mockery::mock(Connection::class);
+
+        $connection->shouldReceive('transactionLevel')->andReturn($level);
+        $connection->shouldReceive('getDriverName')->andReturn($driver);
+        $connection->shouldReceive('table')->with(EntrySettings::DEFAULT_TABLE)->andReturn($builder);
+        $connection->shouldReceive('transaction')->times($level > 0 ? 1 : 0)->andThrow($duplicate);
+
+        $builder->shouldReceive('insert')->times($level > 0 ? 0 : 1)->andThrow($duplicate);
+        $builder->shouldReceive('useWritePdo')->once()->andReturnSelf();
+        $builder->shouldReceive('where')->once()->with('id', self::ID)->andReturnSelf();
+        $builder->shouldReceive('sharedLock')->times($locks ? 1 : 0)->andReturnSelf();
+        $builder->shouldReceive('first')->once()->andReturn((object) (new RowCodec)->encode($finalised));
+
+        $connections = \Mockery::mock(ConnectionResolverInterface::class);
+
+        $connections->shouldReceive('connection')->with(null)->andReturn($connection);
+
+        (new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class)))->store($finalised);
+    }
+
+    /**
+     * The captured record of an approved invoice under the pinned id, finalised
+     * on the frozen clock.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     */
+    private function finalised(): FinalisedRecord
+    {
+        return $this->finaliser()->finalise(RecordFactory::captured(id: self::ID));
+    }
+
+    /**
+     * Store the record, which must fail, and return what it threw.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @return \Throwable
+     */
+    private function failedStore(FinalisedRecord $record): \Throwable
+    {
+        try {
+            $this->store()->store($record);
+        } catch (\Throwable $exception) {
+            return $exception;
+        }
+
+        self::fail('Expected the store to fail.');
+    }
+
+    /**
+     * Make the explicit ring of the keys given, with the current key named.
+     *
+     * @param  array<string, string>  $keys
+     * @param  string  $current
+     * @return void
+     */
+    private function useRing(array $keys, string $current): void
+    {
+        app(ConfigRepository::class)->set('audit-log.integrity', ['keys' => $keys, 'current' => $current]);
+    }
+
+    /**
+     * Write a row to the host's table on the storage connection.
+     *
+     * @param  string  $name
+     * @return void
+     */
+    private function hostWrite(string $name): void
+    {
+        $this->storageConnection()->table(self::HOST_TABLE)->insert(['name' => $name]);
+    }
+
+    /**
+     * The names in the host's table, in the order they were written.
+     *
+     * @return list<string>
+     */
+    private function hostRows(): array
+    {
+        /** @var list<string> */
+        return $this->storageConnection()->table(self::HOST_TABLE)->orderBy('id')->pluck('name')->all();
+    }
+}

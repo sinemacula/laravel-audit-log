@@ -6,10 +6,12 @@ parameters:
 
     scanDirectories:
         - %currentWorkingDirectory%/src
+        - %currentWorkingDirectory%/database
         - %currentWorkingDirectory%/tests
 
     paths:
         - src
+        - database
         - tests
 
     # Analyse against the supported PHP range (composer.json and the CI matrix)
@@ -20,3 +22,15 @@ parameters:
     phpVersion:
         min: 80300
         max: 80599
+
+    # The package supports Laravel 12 alongside 13, so its floor sits below the
+    # 13.2 that introduced the model attributes. The legacy form is the only form
+    # available until the floor moves, which dropping 12 would mean. The leading
+    # wildcard is required because the config is staged outside the repository
+    # when it runs.
+    ignoreErrors:
+        -
+            identifier: sineMaculaLaravel.modelAttributeLaggingFloor
+            paths:
+                - '*/src/Models/*'
+                - '*/tests/*'
