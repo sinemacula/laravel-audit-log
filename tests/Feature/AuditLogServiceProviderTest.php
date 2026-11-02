@@ -350,10 +350,13 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The provider adds no route and no view path.
+     * The provider adds no route and no view path. Serving local files is off,
+     * because the framework then adds its own routes for them, on whichever
+     * version's skeleton turns it on.
      *
      * @return void
      */
+    #[DefineEnvironment('withoutServedFiles')]
     public function testRoutesAndViewsAreUnchanged(): void
     {
         $finder = app('view')->getFinder();
@@ -472,6 +475,17 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         // The provider must load no migration, which the class checks, so
         // nothing else loads one
+    }
+
+    /**
+     * Stop the framework serving the local disk, which adds routes of its own.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function withoutServedFiles(Application $app): void
+    {
+        $app->make(ConfigRepository::class)->set('filesystems.disks.local.serve', false);
     }
 
     /**
