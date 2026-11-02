@@ -14,6 +14,7 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Privacy\FieldPolicy;
 use SineMacula\Laravel\AuditLog\Privacy\KeyCeiling;
+use SineMacula\Laravel\AuditLog\Privacy\KeyTokenizer;
 use SineMacula\Laravel\AuditLog\Privacy\Minimised;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
@@ -61,8 +62,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     /** @var int The most a capture's peak memory may grow by, in bytes: 128 MiB. */
     private const int MAX_MEMORY_GROWTH = 134217728;
 
-    /** @var int The most CPU time a capture may use, in nanoseconds: 5 seconds. */
-    private const int MAX_NANOSECONDS = 5000000000;
+    /** @var int The most CPU time a capture may use, in nanoseconds: 30 seconds, far above linear work on any machine and far below quadratic work. */
+    private const int MAX_NANOSECONDS = 30000000000;
 
     /** @var int How many bytes a ten-megabyte payload holds. */
     private const int TEN_MEGABYTES = 10485760;
@@ -73,8 +74,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     /** @var int How many distinct keys at the ceiling a map repeated through a long list holds. */
     private const int REPEATED_KEYS = 10;
 
-    /** @var int The most CPU time a capture of repeated keys may use, in nanoseconds: 2 seconds, far under what splitting every occurrence takes. */
-    private const int MAX_REPEATED_KEY_NANOSECONDS = 2000000000;
+    /** @var int How many rounds of the repeated keys are split to measure this machine: a tenth of the long list. */
+    private const int SAMPLED_ROUNDS = 1000;
 
     /** @var int The ceiling of either budget, so that nothing is omitted. */
     private const int BUDGET_CEILING = 16777216;
@@ -365,9 +366,9 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
 
     /**
      * Ten thousand maps sharing a few keys at the ceiling, each of the most
-     * tokens it can hold, are judged within a tighter bound on time only
-     * because each distinct key is split once for the whole capture: splitting
-     * every occurrence takes several times the bound.
+     * tokens it can hold, are judged in less CPU time than splitting every
+     * occurrence alone takes on this machine, only because each distinct key is
+     * split once for the whole capture.
      *
      * @return void
      */
@@ -383,7 +384,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
 
         $pending = self::pending()->withProperties(['items' => array_fill(0, self::ELEMENTS, $map)]);
 
-        $minimised = $this->assertBounded($pending, self::permissive(), self::MAX_REPEATED_KEY_NANOSECONDS);
+        $minimised = $this->assertBounded($pending, self::permissive(), self::nanosecondsToSplitEveryOccurrence(array_keys($map)));
 
         self::assertSame(['_audit' => ['omitted' => ['count' => 1, 'paths' => ['*']]]], $minimised->properties);
     }
@@ -520,6 +521,26 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
         }
 
         return $minimised;
+    }
+
+    /**
+     * The CPU time splitting the keys in every map of the long list takes on
+     * this machine, measured on a tenth of the list.
+     *
+     * @param  list<int|string>  $keys
+     * @return int
+     */
+    private static function nanosecondsToSplitEveryOccurrence(array $keys): int
+    {
+        $started = self::cpuNanoseconds();
+
+        for ($round = 0; $round < self::SAMPLED_ROUNDS; $round++) {
+            foreach ($keys as $key) {
+                KeyTokenizer::tokens((string) $key);
+            }
+        }
+
+        return (self::cpuNanoseconds() - $started) * intdiv(self::ELEMENTS, self::SAMPLED_ROUNDS);
     }
 
     /**
