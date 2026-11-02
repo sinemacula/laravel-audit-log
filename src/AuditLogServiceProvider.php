@@ -19,6 +19,7 @@ use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
@@ -27,6 +28,7 @@ use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
+use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
@@ -35,12 +37,12 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
 
 /**
  * Package service provider: registers the package's configuration, its clock,
- * integrity settings, key ring and store, the recorder with its catalogue and
- * contributors, the scoped runtime state, the listeners that track execution
- * frames and carry context into jobs, the global middleware that enters an HTTP
- * frame, its publishing tags (the configuration and the migrations, which it
- * never loads itself) and the `audit-log:check` console command. It adds no
- * route.
+ * integrity settings, key ring, store and field encrypter, the recorder with
+ * its catalogue and contributors, the scoped runtime state, the listeners that
+ * track execution frames and carry context into jobs, the global middleware
+ * that enters an HTTP frame, its publishing tags (the configuration and the
+ * migrations, which it never loads itself) and the `audit-log:check` console
+ * command. It adds no route.
  *
  * Registration of definitions and contributors is frozen once the application
  * has booted, so a long-lived worker registers once. Booting issues no query
@@ -66,10 +68,11 @@ final class AuditLogServiceProvider extends ServiceProvider
      * Register container bindings.
      *
      * Every binding is a default: one that the application or another package
-     * made before this provider registers is kept, so a store or a clock bound
-     * earlier is never replaced by the package's (an `AuditStore` by
-     * `DatabaseAuditStore`, a `Clock` by `SystemClock`), and one made after
-     * replaces the default, as any later binding does.
+     * made before this provider registers is kept, so a store, a clock or an
+     * encrypter bound earlier is never replaced by the package's (an
+     * `AuditStore` by `DatabaseAuditStore`, a `Clock` by `SystemClock`, a
+     * `FieldEncrypter` by `NoFieldEncrypter`), and one made after replaces the
+     * default, as any later binding does.
      *
      * @return void
      */
@@ -85,6 +88,7 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->singletonIf(IntegritySettings::class);
         $this->app->singletonIf(KeyRing::class);
         $this->app->singletonIf(AuditStore::class, DatabaseAuditStore::class);
+        $this->app->singletonIf(FieldEncrypter::class, NoFieldEncrypter::class);
         $this->app->singletonIf(EventCatalogue::class);
         $this->app->singletonIf(ContributorRegistry::class);
         $this->app->singletonIf(Recorder::class);

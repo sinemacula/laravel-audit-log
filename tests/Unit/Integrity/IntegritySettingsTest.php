@@ -8,6 +8,7 @@ use Illuminate\Config\Repository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 
 /**
@@ -450,7 +451,7 @@ final class IntegritySettingsTest extends TestCase
      */
     public function testTheDecodingHelperMarksItsValueSensitive(): void
     {
-        $decoded = (new \ReflectionMethod(IntegritySettings::class, 'decoded'))->getParameters()[0];
+        $decoded = (new \ReflectionMethod(SecretSetting::class, 'decode'))->getParameters()[0];
         $secret  = (new \ReflectionMethod(IntegritySettings::class, 'secret'))->getParameters()[1];
 
         self::assertSame('value', $decoded->getName());

@@ -27,8 +27,9 @@ use Tests\TestCase;
  * and guards they name, the entries table and the integrity keys, lists every
  * problem it finds as `[<subject>] <message>` and every subject without one as
  * `[<subject>] OK`, exits `1` when there is a problem and `0` when there is
- * none, covers every leaf of the shipped configuration, and prints no secret,
- * setting's value, statement or binding.
+ * none, covers every leaf of the shipped configuration, lists `app.key` once
+ * whichever settings read it, and prints no secret, setting's value, statement
+ * or binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,6 +70,18 @@ final class CheckCommandTest extends TestCase
         'definitions.require_registered' => '1',
         'source.id'                      => 42,
         'source.region'                  => 42,
+        'redaction.keys'                 => 'password',
+        'redaction.key'                  => 'short',
+        'redaction.identifiers'          => 'maybe',
+        'redaction.ip'                   => 'partial',
+        'redaction.max_bytes'            => 8191,
+        'redaction.max_context_bytes'    => 1023,
+    ];
+
+    /** @var array<string, array<string, string>|string> An explicit ring whose settings all pass, so none of them reads `app.key`. */
+    private const array RING = [
+        'audit-log.integrity.keys'    => ['k1' => 'a-secret-of-exactly-32-bytes-ok!'],
+        'audit-log.integrity.current' => 'k1',
     ];
 
     /** @var string What a test's bad value carries, and the output must never hold. */
@@ -94,6 +107,38 @@ final class CheckCommandTest extends TestCase
 
     /** @var string The message of a malformed flag requiring a registered definition. */
     private const string MALFORMED_REQUIRE_REGISTERED = '[config] `audit-log.definitions.require_registered` must be true or false.';
+
+    /** @var string The message of malformed redaction key names. */
+    private const string MALFORMED_REDACTION_KEYS = '[config] `audit-log.redaction.keys` must be a list of key names, each of at least one token.';
+
+    /** @var string The message of a malformed redaction key. */
+    private const string MALFORMED_REDACTION_KEY = '[config] `audit-log.redaction.key` must be at least 32 bytes, or `base64:` followed by the encoding of at least 32 bytes.';
+
+    /** @var string The message of a missing application key the redaction key would derive from. */
+    private const string MISSING_APPLICATION_KEY = '[config] `app.key` must be set to derive the redaction key when `audit-log.redaction.key` is empty.';
+
+    /** @var string The message of a malformed application key the redaction key would derive from. */
+    private const string MALFORMED_APPLICATION_KEY = '[config] `app.key` must be at least 32 bytes, or `base64:` followed by the encoding of at least 32 bytes,'
+        . ' to derive the redaction key.';
+
+    /** @var string The message of a missing application key the integrity key would derive from. */
+    private const string MISSING_INTEGRITY_APPLICATION_KEY = '[config] `app.key` must be set to derive the integrity key when `audit-log.integrity.keys` is empty.';
+
+    /** @var string The message of a malformed application key the integrity key would derive from. */
+    private const string MALFORMED_INTEGRITY_APPLICATION_KEY = '[config] `app.key` must be at least 32 bytes, or `base64:` followed by the encoding of at least 32 bytes,'
+        . ' to derive the integrity key.';
+
+    /** @var string The message of a malformed identifier mode. */
+    private const string MALFORMED_IDENTIFIERS = '[config] `audit-log.redaction.identifiers` must be `hash` or `drop`.';
+
+    /** @var string The message of a malformed IP mode. */
+    private const string MALFORMED_IP = '[config] `audit-log.redaction.ip` must be `full`, `truncate`, `hash`, `drop` or `encrypt`.';
+
+    /** @var string The message of a malformed properties budget. */
+    private const string MALFORMED_MAX_BYTES = '[config] `audit-log.redaction.max_bytes` must be an integer from 8192 to 16777216.';
+
+    /** @var string The message of a malformed context budget. */
+    private const string MALFORMED_MAX_CONTEXT_BYTES = '[config] `audit-log.redaction.max_context_bytes` must be an integer from 1024 to 16777216.';
 
     /** @var list<string> Files a test created, removed when it ends. */
     private array $files = [];
@@ -279,6 +324,38 @@ final class CheckCommandTest extends TestCase
             'a source region with a control character' => [['audit-log.source.region' => "eu\x07"], self::MALFORMED_SOURCE_REGION],
             'an application name that gives no slug'   => [['app.name' => '!!!'], '[config] `audit-log.source.id` must be set, because `app.name` gives no slug.'],
             'an application name that is not a string' => [['app.name' => 42], '[config] `audit-log.source.id` must be set, because `app.name` gives no slug.'],
+            'redaction keys that are a string'         => [['audit-log.redaction.keys' => 'password'], self::MALFORMED_REDACTION_KEYS],
+            'redaction keys that are a map'            => [['audit-log.redaction.keys' => ['first' => 'password']], self::MALFORMED_REDACTION_KEYS],
+            'redaction keys that are null'             => [['audit-log.redaction.keys' => null], self::MALFORMED_REDACTION_KEYS],
+            'a redaction key name that is a number'    => [['audit-log.redaction.keys' => [42]], self::MALFORMED_REDACTION_KEYS],
+            'an empty redaction key name'              => [['audit-log.redaction.keys' => ['']], self::MALFORMED_REDACTION_KEYS],
+            'a redaction key name of separators'       => [['audit-log.redaction.keys' => ['_-. ']], self::MALFORMED_REDACTION_KEYS],
+            'a redaction key name of invalid UTF-8'    => [['audit-log.redaction.keys' => ["pass\xFF"]], self::MALFORMED_REDACTION_KEYS],
+            'a redaction key of 31 bytes'              => [['audit-log.redaction.key' => self::SHORT_SECRET], self::MALFORMED_REDACTION_KEY],
+            'a redaction key that is a number'         => [['audit-log.redaction.key' => 42], self::MALFORMED_REDACTION_KEY],
+            'a redaction key that does not decode'     => [['audit-log.redaction.key' => 'base64:!not-base64!'], self::MALFORMED_REDACTION_KEY],
+            'a redaction key decoding to 31 bytes'     => [['audit-log.redaction.key' => 'base64:' . base64_encode(self::SHORT_SECRET)], self::MALFORMED_REDACTION_KEY],
+            'a short redaction key beside a ring'      => [[...self::RING, 'audit-log.redaction.key' => self::SHORT_SECRET], self::MALFORMED_REDACTION_KEY],
+            'an empty application key beside a ring'   => [[...self::RING, 'app.key' => ''], self::MISSING_APPLICATION_KEY],
+            'no application key beside a ring'         => [[...self::RING, 'app.key' => null], self::MISSING_APPLICATION_KEY],
+            'a numeric application key beside a ring'  => [[...self::RING, 'app.key' => 42], self::MISSING_APPLICATION_KEY],
+            'a short application key beside a ring'    => [[...self::RING, 'app.key' => self::SHORT_SECRET], self::MALFORMED_APPLICATION_KEY],
+            'an identifier mode that is unknown'       => [['audit-log.redaction.identifiers' => 'maybe'], self::MALFORMED_IDENTIFIERS],
+            'an identifier mode in capitals'           => [['audit-log.redaction.identifiers' => 'HASH'], self::MALFORMED_IDENTIFIERS],
+            'an identifier mode that is a number'      => [['audit-log.redaction.identifiers' => 1], self::MALFORMED_IDENTIFIERS],
+            'an identifier mode that is null'          => [['audit-log.redaction.identifiers' => null], self::MALFORMED_IDENTIFIERS],
+            'an IP mode that is unknown'               => [['audit-log.redaction.ip' => 'partial'], self::MALFORMED_IP],
+            'an IP mode in capitals'                   => [['audit-log.redaction.ip' => 'FULL'], self::MALFORMED_IP],
+            'an IP mode that is a number'              => [['audit-log.redaction.ip' => 1], self::MALFORMED_IP],
+            'an IP mode that is null'                  => [['audit-log.redaction.ip' => null], self::MALFORMED_IP],
+            'a properties budget under its minimum'    => [['audit-log.redaction.max_bytes' => 8191], self::MALFORMED_MAX_BYTES],
+            'a properties budget over its ceiling'     => [['audit-log.redaction.max_bytes' => 16777217], self::MALFORMED_MAX_BYTES],
+            'a properties budget that is a word'       => [['audit-log.redaction.max_bytes' => 'many'], self::MALFORMED_MAX_BYTES],
+            'a properties budget that is null'         => [['audit-log.redaction.max_bytes' => null], self::MALFORMED_MAX_BYTES],
+            'a context budget under its minimum'       => [['audit-log.redaction.max_context_bytes' => 1023], self::MALFORMED_MAX_CONTEXT_BYTES],
+            'a context budget over its ceiling'        => [['audit-log.redaction.max_context_bytes' => 16777217], self::MALFORMED_MAX_CONTEXT_BYTES],
+            'a context budget that is a word'          => [['audit-log.redaction.max_context_bytes' => 'many'], self::MALFORMED_MAX_CONTEXT_BYTES],
+            'a context budget that is null'            => [['audit-log.redaction.max_context_bytes' => null], self::MALFORMED_MAX_CONTEXT_BYTES],
         ];
     }
 
@@ -695,7 +772,9 @@ final class CheckCommandTest extends TestCase
     /**
      * Every value at the edge of what a new setting accepts passes: a real
      * boolean either way, the longest guard, header, source id and region,
-     * counted in characters, and an id and a region left empty.
+     * counted in characters, an id and a region left empty, and a redaction key
+     * of exactly 32 bytes in either form, each mode, and each budget at its
+     * minimum and its ceiling, as an integer or the digits `env()` returns.
      *
      * @return void
      */
@@ -712,19 +791,42 @@ final class CheckCommandTest extends TestCase
         $config->set('audit-log.definitions.require_registered', true);
         $config->set('audit-log.source.id', str_repeat('é', 64));
         $config->set('audit-log.source.region', str_repeat('é', 32));
+        $config->set('audit-log.redaction.keys', ['internalNote', 'x', 'é']);
+        $config->set('audit-log.redaction.key', str_repeat('k', 32));
+        $config->set('audit-log.redaction.identifiers', 'drop');
+        $config->set('audit-log.redaction.ip', 'truncate');
+        $config->set('audit-log.redaction.max_bytes', 8192);
+        $config->set('audit-log.redaction.max_context_bytes', 1024);
 
         self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
 
         $config->set('audit-log.source.id', '');
         $config->set('audit-log.source.region', '');
+        $config->set('audit-log.redaction.key', 'base64:' . base64_encode(str_repeat('k', 32)));
+        $config->set('audit-log.redaction.identifiers', 'hash');
+        $config->set('audit-log.redaction.ip', 'hash');
+        $config->set('audit-log.redaction.max_bytes', 16777216);
+        $config->set('audit-log.redaction.max_context_bytes', 16777216);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set('audit-log.redaction.key', '');
+        $config->set('audit-log.redaction.ip', 'drop');
+        $config->set('audit-log.redaction.max_bytes', '8192');
+        $config->set('audit-log.redaction.max_context_bytes', '1024');
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set('audit-log.redaction.ip', 'encrypt');
 
         self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
     }
 
     /**
      * The values the configuration ships pass: no list of guards, neither
-     * header trusted, the usual header name, and no source of its own, which
-     * `app.name` then gives.
+     * header trusted, the usual header name, no source of its own, which
+     * `app.name` then gives, and no redaction key names or key, identifiers
+     * hashed, the IP address kept in full and the default budgets.
      *
      * @return void
      */
@@ -738,6 +840,12 @@ final class CheckCommandTest extends TestCase
             'audit-log.definitions.require_registered' => false,
             'audit-log.source.id'                      => null,
             'audit-log.source.region'                  => null,
+            'audit-log.redaction.keys'                 => [],
+            'audit-log.redaction.key'                  => null,
+            'audit-log.redaction.identifiers'          => 'hash',
+            'audit-log.redaction.ip'                   => 'full',
+            'audit-log.redaction.max_bytes'            => 16384,
+            'audit-log.redaction.max_context_bytes'    => 4096,
         ]);
 
         self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
@@ -843,6 +951,201 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
+     * Without a ring the integrity settings read `app.key`, so a missing or a
+     * malformed one is the one line they give, whatever the redaction settings
+     * would say of it. An empty ring is no ring.
+     *
+     * @return void
+     */
+    public function testAnApplicationKeyIsReportedOnceWithoutARing(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('app.key', '');
+
+        self::assertSame([self::MISSING_INTEGRITY_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set('app.key', self::SHORT_SECRET);
+
+        self::assertSame([self::MALFORMED_INTEGRITY_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set('audit-log.integrity.keys', []);
+
+        self::assertSame([self::MALFORMED_INTEGRITY_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * With an explicit ring nothing of the integrity settings reads `app.key`,
+     * so an empty redaction key, which falls to it, is what names it: one line
+     * naming the redaction key, and the integrity subject still passes.
+     *
+     * @return void
+     */
+    public function testTheRedactionKeyFallsToTheApplicationKeyWithARing(): void
+    {
+        app(ConfigRepository::class)->set([...self::RING, 'audit-log.redaction.key' => '', 'app.key' => '']);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([self::MISSING_APPLICATION_KEY, '[connections] OK', '[schema] OK', '[integrity] OK'], $output);
+    }
+
+    /**
+     * An explicit ring and an empty redaction key beside a good `app.key` pass,
+     * in either of the forms a key is given in, so the application key is
+     * judged and not merely refused.
+     *
+     * @return void
+     */
+    public function testARingAndAGoodApplicationKeyPass(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set([...self::RING, 'app.key' => str_repeat('k', 32)]);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set('app.key', 'base64:' . base64_encode(str_repeat('k', 32)));
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * An explicit redaction key is the root secret, so beside a ring nothing
+     * reads `app.key` and a bad one passes; without a ring only the integrity
+     * settings read it, and it is theirs to report.
+     *
+     * @return void
+     */
+    public function testAnExplicitRedactionKeyNeedsNoApplicationKey(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set([...self::RING, 'audit-log.redaction.key' => str_repeat('k', 32), 'app.key' => '']);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set('audit-log.integrity.keys', []);
+        $config->set('audit-log.integrity.current', null);
+
+        self::assertSame([self::MISSING_INTEGRITY_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * A malformed explicit redaction key never falls back to `app.key`, so
+     * beside a ring and a bad application key the one line names the redaction
+     * key, though two checks read it.
+     *
+     * @return void
+     */
+    public function testAMalformedRedactionKeyHidesTheApplicationKeyBesideARing(): void
+    {
+        app(ConfigRepository::class)->set([...self::RING, 'audit-log.redaction.key' => 'short', 'app.key' => '']);
+
+        self::assertSame([self::MALFORMED_REDACTION_KEY], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Rows of `[the settings changed, the one problem the change causes]`: a
+     * ring that cannot be read is the ring's own problem, listed once though
+     * the redaction check reads it too, and it reads no `app.key` beside it.
+     *
+     * @return iterable<string, array{0: array<string, array<string, string>|string>, 1: string}>
+     */
+    public static function provideMalformedRings(): iterable
+    {
+        yield from [
+            'a ring that is not a map' => [
+                ['audit-log.integrity.keys' => 'x'],
+                '[config] `audit-log.integrity.keys` must be a map of key ids to secrets, or empty to derive the key from `app.key`.',
+            ],
+            'a ring with a short secret' => [
+                ['audit-log.integrity.keys' => ['k1' => self::SHORT_SECRET], 'audit-log.integrity.current' => 'k1'],
+                '[config] `audit-log.integrity.keys.k1` must be a secret of at least 32 bytes, or `base64:` followed by the encoding of one.',
+            ],
+        ];
+    }
+
+    /**
+     * A malformed ring is listed once and `app.key`, which nothing then needs
+     * to read, not at all.
+     *
+     * @param  array<string, array<string, string>|string>  $settings
+     * @param  string  $problem
+     * @return void
+     */
+    #[DataProvider('provideMalformedRings')]
+    public function testAMalformedRingIsListedOnce(array $settings, string $problem): void
+    {
+        app(ConfigRepository::class)->set([...$settings, 'app.key' => '']);
+
+        self::assertSame([$problem], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Every malformed redaction setting is listed by the one run, by its full
+     * path and in the order the settings are read, and the application key
+     * after them when the redaction key falls to it, so a deploy pipeline never
+     * has to fix them one run at a time.
+     *
+     * @return void
+     */
+    public function testEveryMalformedRedactionLeafIsReportedInOneRun(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.redaction.max_context_bytes', 1023);
+        $config->set('audit-log.redaction.max_bytes', 8191);
+        $config->set('audit-log.redaction.key', 'short');
+        $config->set('audit-log.redaction.ip', 'partial');
+        $config->set('audit-log.redaction.identifiers', 'maybe');
+        $config->set('audit-log.redaction.keys', 'password');
+
+        $malformed = [
+            self::MALFORMED_REDACTION_KEYS,
+            self::MALFORMED_IDENTIFIERS,
+            self::MALFORMED_IP,
+            self::MALFORMED_MAX_BYTES,
+            self::MALFORMED_MAX_CONTEXT_BYTES,
+        ];
+
+        self::assertSame([...$malformed, self::MALFORMED_REDACTION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set([...self::RING, 'audit-log.redaction.key' => null, 'app.key' => self::SHORT_SECRET]);
+
+        self::assertSame([...$malformed, self::MALFORMED_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * The redaction settings report after every setting already checked and
+     * after the guards, whose order is unchanged, and a malformed one leaves
+     * out no later subject, since none of those reads it.
+     *
+     * @return void
+     */
+    public function testAMalformedRedactionSettingLeavesOutNoSubject(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.actor.guards'  => ['missing'],
+            'audit-log.source.region' => 42,
+            'audit-log.redaction.ip'  => 'partial',
+        ]);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            self::MALFORMED_SOURCE_REGION,
+            '[config] The guard [missing] that `audit-log.actor.guards` names is not configured in `auth.guards`.',
+            self::MALFORMED_IP,
+            '[connections] OK',
+            '[schema] OK',
+            '[integrity] OK',
+        ], $output);
+    }
+
+    /**
      * Walks the leaves of the merged configuration, which must each have a bad
      * value here, then plants each value in turn and asserts a `[config]` line
      * naming that leaf, so a leaf added without a check fails this test instead
@@ -917,6 +1220,16 @@ final class CheckCommandTest extends TestCase
             'an application name that gives no slug'   => ['app.name', '!~!~!~', '!~!~!~'],
             'an application name that is not a string' => ['app.name', [self::SENTINEL], self::SENTINEL],
             'a default guard that is not a name'       => ['auth.defaults.guard', [self::SENTINEL], self::SENTINEL],
+            'redaction keys that are a string'         => ['audit-log.redaction.keys', self::SENTINEL, self::SENTINEL],
+            'redaction keys that are a map'            => ['audit-log.redaction.keys', [self::SENTINEL => self::SENTINEL], self::SENTINEL],
+            'a redaction key name of invalid UTF-8'    => ['audit-log.redaction.keys', [self::SENTINEL . "\xFF"], self::SENTINEL],
+            'a redaction key too short'                => ['audit-log.redaction.key', self::SENTINEL, self::SENTINEL],
+            'a redaction key that does not decode'     => ['audit-log.redaction.key', 'base64:' . self::SENTINEL, self::SENTINEL],
+            'a redaction key decoding too short'       => ['audit-log.redaction.key', 'base64:' . base64_encode(self::SENTINEL), base64_encode(self::SENTINEL)],
+            'an identifier mode'                       => ['audit-log.redaction.identifiers', self::SENTINEL, self::SENTINEL],
+            'an IP mode'                               => ['audit-log.redaction.ip', self::SENTINEL, self::SENTINEL],
+            'a properties budget'                      => ['audit-log.redaction.max_bytes', self::SENTINEL, self::SENTINEL],
+            'a context budget'                         => ['audit-log.redaction.max_context_bytes', self::SENTINEL, self::SENTINEL],
         ];
     }
 
@@ -940,6 +1253,40 @@ final class CheckCommandTest extends TestCase
         self::assertSame(1, $code);
         self::assertNotSame([], self::problemsIn($output));
         self::assertStringNotContainsString($sentinel, implode("\n", $output));
+    }
+
+    /**
+     * Rows of `[the settings beside the application key]`: without a ring the
+     * integrity settings report it, and beside one the redaction settings do.
+     *
+     * @return iterable<string, array{0: array<string, array<string, string>|string>}>
+     */
+    public static function provideRingSettings(): iterable
+    {
+        yield from [
+            'without a ring' => [[]],
+            'beside a ring'  => [self::RING],
+        ];
+    }
+
+    /**
+     * An application key too short to use fails the run and never appears in
+     * its output, whichever settings read it, and neither does a ring's secret.
+     *
+     * @param  array<string, array<string, string>|string>  $settings
+     * @return void
+     */
+    #[DataProvider('provideRingSettings')]
+    public function testNoApplicationKeyIsPrinted(array $settings): void
+    {
+        app(ConfigRepository::class)->set([...$settings, 'app.key' => self::SENTINEL]);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertCount(1, self::problemsIn($output));
+        self::assertStringNotContainsString(self::SENTINEL, implode("\n", $output));
+        self::assertStringNotContainsString('a-secret-of-exactly-32-bytes-ok!', implode("\n", $output));
     }
 
     /**

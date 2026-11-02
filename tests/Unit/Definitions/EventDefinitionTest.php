@@ -18,7 +18,8 @@ use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
  * Unit tests for the event definition: its defaults, the versions and
  * categories it keeps and refuses, its immutability, the rules its shorthands
  * add, the duplicate and unreachable rules it refuses in either order, the
- * order it keeps its rules in, which rule decides a field, and equality.
+ * order it keeps its rules in, which rule decides a field, which rule lies
+ * beneath a path, and equality.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -692,6 +693,102 @@ final class EventDefinitionTest extends TestCase
         $redacting = EventDefinition::for('invoice.approved')->redact('amount')->unlisted(FieldHandling::RETAIN);
 
         self::assertSame(FieldHandling::REDACT, $redacting->handlingFor(['amount']));
+    }
+
+    /**
+     * Rows of `[concrete path, the rule found beneath it]`: over one
+     * definition, a literal, a wildcard in the pattern, a list index, a rule
+     * more than one level down, and paths with nothing beneath them.
+     *
+     * @return iterable<string, array{0: list<int|string>, 1: ?string}>
+     */
+    public static function provideDescendantRules(): iterable
+    {
+        yield from [
+            'a literal'                     => [['customer'], 'customer.email'],
+            'a literal, more levels down'   => [['deep'], 'deep.er.still'],
+            'and one level above it'        => [['deep', 'er'], 'deep.er.still'],
+            'a wildcard in the pattern'     => [['items', 7], 'items.*.sku'],
+            'and a dynamic key through it'  => [['items', 'bob@example.com'], 'items.*.sku'],
+            'a list index'                  => [['lines'], 'lines.0.sku'],
+            'and the index itself'          => [['lines', 0], 'lines.0.sku'],
+            'a numeric key'                 => [[5], '5.total'],
+            'an index another rule names'   => [['lines', 1], null],
+            'a padded index is another key' => [['lines', '00'], null],
+            'a key with a dot is not two'   => [['customer.email'], null],
+            'none'                          => [['other'], null],
+        ];
+    }
+
+    /**
+     * The rule beneath a path is one with more segments whose leading segments
+     * match it, comparing a list index by its decimal string.
+     *
+     * @param  list<int|string>  $path
+     * @param  ?string  $expected
+     * @return void
+     */
+    #[DataProvider('provideDescendantRules')]
+    public function testRuleBeneathFindsADescendantRule(array $path, ?string $expected): void
+    {
+        $definition = EventDefinition::for(self::CODE)
+            ->retain('customer.email')
+            ->drop('deep.er.still')
+            ->redact('items.*.sku')
+            ->drop('lines.0.sku')
+            ->retain('5.total');
+
+        self::assertSame($expected, $definition->ruleBeneath($path)?->path);
+    }
+
+    /**
+     * A rule at the path or above it decides the path, so it is not beneath it.
+     *
+     * @return void
+     */
+    public function testRuleBeneathIgnoresARuleAtOrAboveThePath(): void
+    {
+        $definition = EventDefinition::for(self::CODE)->retain('customer')->retain('order.total');
+
+        self::assertNull($definition->ruleBeneath(['customer']), 'A rule at the path is not beneath it.');
+        self::assertNull($definition->ruleBeneath(['customer', 'name']), 'A rule above the path is not beneath it.');
+        self::assertNull($definition->ruleBeneath(['order', 'total']), 'A rule at the path is not beneath it.');
+        self::assertNull($definition->ruleBeneath(['order', 'total', 'net']), 'A rule above the path is not beneath it.');
+    }
+
+    /**
+     * Of several rules beneath a path the first in path order is taken, however
+     * they were added, so the answer does not depend on the order of building.
+     *
+     * @return void
+     */
+    public function testRuleBeneathTakesTheFirstInPathOrder(): void
+    {
+        $forward = EventDefinition::for(self::CODE)->retain('a.c')->retain('a.b')->retain('*.d');
+        $reverse = EventDefinition::for(self::CODE)->retain('*.d')->retain('a.b')->retain('a.c');
+
+        self::assertSame('*.d', $forward->ruleBeneath(['a'])?->path);
+        self::assertSame('*.d', $reverse->ruleBeneath(['a'])?->path);
+
+        $literal = EventDefinition::for(self::CODE)->retain('a.c')->retain('a.b');
+
+        self::assertSame('a.b', $literal->ruleBeneath(['a'])?->path);
+    }
+
+    /**
+     * The rule beneath a path says nothing about the path's own handling: a
+     * branch holding a rule-governed field is still handled as unlisted fields
+     * are until the walker reaches that field.
+     *
+     * @return void
+     */
+    public function testARuleBeneathDoesNotDecideThePath(): void
+    {
+        $definition = EventDefinition::for(self::CODE)->retain('customer.email');
+
+        self::assertNull($definition->ruleFor(['customer']));
+        self::assertSame(FieldHandling::DROP, $definition->handlingFor(['customer']));
+        self::assertSame('customer.email', $definition->ruleBeneath(['customer'])?->path);
     }
 
     /**

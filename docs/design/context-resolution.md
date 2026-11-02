@@ -11,10 +11,16 @@ where it came from, so each value's source, and what it does not claim, is fixed
 
 - A capture runs one pipeline, in this order (`Recorder::write()`): the definition is found in `EventCatalogue`, with
   `definitions.require_registered` read for this capture; `RecordDelivery::check()` accepts the timing; the contributors
-  fill the gaps, in order; `AuditRecord::fromPending()` builds the record, its id and `occurred_at` from the `Clock` and
-  its source from `source.id` and `source.region`; `RecordDelivery::deliver()` finalises it once and stores it, after
-  commit unless the builder chose otherwise; and `AuditRecorded` is dispatched. A refusal of the definition or the
-  timing consumes nothing, so it leaves the builder usable and runs no contributor.
+  fill the gaps, in order; a fresh snapshot is taken, because the first predates what they filled, and
+  `Privacy\RecordMinimiser` minimises it under the definition; `AuditRecord::fromPending()` builds the record from what
+  that leaves, its id and `occurred_at` from the `Clock` and its source from `source.id` and `source.region`;
+  `RecordDelivery::deliver()` finalises it once and stores it, after commit unless the builder chose otherwise; and
+  `AuditRecorded` is dispatched. A refusal of the definition or the timing consumes nothing, so it leaves the builder
+  usable and runs no contributor. A failure while minimising comes after the contributors have run, but it too stores
+  nothing and leaves the builder usable.
+- A filled value is minimised too: what a contributor gives the context or the IP address passes through the same steps
+  as what the application gave, and a secret-shaped key in a filled context is redacted (see `redaction.md`). A filled
+  address that is not valid fails nothing: the record is stored with a `null` address and `$ip` in `omitted`.
 - A contributor implements `Contracts\ContextContributor` and is given a `Records\Contribution`, through which it may
   fill gaps and read what it needs to decide how, but not record, choose the timing or read the properties. The defaults
   run first, as `OriginContributor`, `RequestContributor`, `ActorContributor`; the application's run after them, in the
@@ -63,7 +69,8 @@ where it came from, so each value's source, and what it does not claim, is fixed
 - Request metadata (the IP address, the user agent, the method and the route's name) comes only from an active HTTP
   frame, and only when it is innermost, so a command or a job inside a request has the request's identifiers and no
   client or route. Laravel's placeholder console request is never a frame, so it is never read. The IP address is read
-  through `Request::ip()`, so the application's trusted proxies decide it.
+  through `Request::ip()`, so the application's trusted proxies decide it, and `redaction.ip` decides what is stored of
+  it.
 - The request id is what Context carries, or else one already known, or else a trusted inbound id, or else a UUID v7
   from the `Clock`, generated on first use. The trace id is what Context carries, or else one already known, or else a
   trusted `traceparent`, and is never generated. Each is kept in hidden Context (`audit-log.request_id`,
@@ -143,7 +150,8 @@ where it came from, so each value's source, and what it does not claim, is fixed
    earlier identity.
 3. `AuditLog::record()` runs the pipeline. `OriginContributor` fills `http`; `RequestContributor` fills the request id,
    generating it on first use, any trace id, the client, the method and the route's name; `ActorContributor` fills the
-   actor and guard if a guard holds a user; the application's contributors fill what is left.
+   actor and guard if a guard holds a user; the application's contributors fill what is left; and all of it is minimised
+   before the record is built.
 4. Every other record in the request shares the request id.
 5. The request queues a job, and its payload carries the request id, the trace id and the snapshot in hidden Context.
 6. A worker's `JobProcessing` enters a job frame. A record in the job has the origin `queue`, the job's class in its
@@ -204,8 +212,8 @@ Accepted is not always durable, and `outcomes.md` says when it is. Every package
 
 ## Implementation Anchors
 
-- `src/Recorder.php`: `write()`; `src/Facades/AuditLog.php`; `src/AuditLogServiceProvider.php`: `registerListeners()`,
-  `registerHttpFrame()`, `freezeRegistrationOnceBooted()`.
+- `src/Recorder.php`: `write()`; `src/Privacy/RecordMinimiser.php`: `minimise()`; `src/Facades/AuditLog.php`;
+  `src/AuditLogServiceProvider.php`: `registerListeners()`, `registerHttpFrame()`, `freezeRegistrationOnceBooted()`.
 - `src/Contracts/ContextContributor.php`, `src/Records/Contribution.php`, `src/Contributors/ContributorRegistry.php`.
 - `src/Contributors/OriginContributor.php`, `src/Contributors/RequestContributor.php`,
   `src/Contributors/ActorContributor.php`, `src/Contributors/AmbientActor.php`: `current()`, `held()`;
@@ -227,7 +235,12 @@ Accepted is not always durable, and `outcomes.md` says when it is. Every package
   `testAnApplicationContributorFillsAGap`, `testAContributorNeverReplacesAnExplicitValue`,
   `testTheFirstContributorToFillWins`, `testAContributorIsResolvedPerCapture`, `testAThrowingContributorPropagates`,
   `testATimingRefusalRunsNoContributor`, `testHoldsOnlyRegistrationData`, `testDefineIsRefusedAfterBoot`,
-  `testContributeIsRefusedAfterBoot`, `testAFakeBoundAfterTheRecorderIsResolvedIsUsed`
+  `testContributeIsRefusedAfterBoot`, `testAFakeBoundAfterTheRecorderIsResolvedIsUsed`,
+  `testMinimisingSeesWhatTheContributorsFilled`, `testAMinimiserFailureFailsTheWriteAndStoresNothing`,
+  `testAMinimiserFailureLeavesTheBuilderUsable`
+- `tests/Feature/Privacy/CaptureMinimisationTest.php` `testAContributedContextIsRedacted`,
+  `testAnIpModeAppliesToARealRequest`, `testAnInvalidFilledIpIsNotStoredAndIsDiagnosed`,
+  `testAGarbageIpStoresTheRecordWithNoAddress`, `testAContributorsGarbageIpDoesNotFailTheWrite`
 - `tests/Feature/AuditLogServiceProviderTest.php` `testRegistrationIsFrozenOnceBooted`,
   `testRegistrationInAProvidersBootIsAccepted`, `testTheHttpFrameMiddlewareIsFirstAndOnce`
 - `tests/Feature/Recording/HttpContextTest.php`

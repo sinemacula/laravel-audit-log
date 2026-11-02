@@ -15,7 +15,8 @@ use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 /**
  * The pending record's description of the activity: its event code, the
  * references it names (subject, actor, principal and tenant), the credential
- * and correlation ids, the properties and the note.
+ * and correlation ids, the properties, the note, and the identifier a sign-in
+ * was attempted with.
  *
  * Setting a field again replaces it, the last call winning, except that
  * properties merge at the top level, later keys replacing earlier ones. A model
@@ -78,7 +79,10 @@ trait DescribesTheActivity
     /** @var \SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner|\SineMacula\Laravel\AuditLog\Records\Reference|null Whose key the note is encrypted under; `null` for a plaintext note. */
     private KeyOwner|Reference|null $noteOwner = null;
 
-    /** @var list<string> Schema paths of the property keys that collided once cleaned, first 32 across every call. */
+    /** @var ?string The identifier a sign-in was attempted with, raw until it is hashed at capture. */
+    private ?string $identifier = null;
+
+    /** @var list<list<int|string>> Concrete paths of the property keys that collided once cleaned, segment by segment, first 32 across every call. */
     private array $collisions = [];
 
     /** @var int How many property keys collided once cleaned, across every call. */
@@ -248,7 +252,7 @@ trait DescribesTheActivity
      * @throws \InvalidArgumentException
      * @throws \LogicException
      */
-    public function withProperties(array $properties): self
+    public function withProperties(#[\SensitiveParameter] array $properties): self
     {
         $this->assertUsable();
 
@@ -279,7 +283,7 @@ trait DescribesTheActivity
      * @throws \InvalidArgumentException
      * @throws \LogicException
      */
-    public function withNote(string $text, KeyOwner|Model|Reference|null $owner = null): self
+    public function withNote(#[\SensitiveParameter] string $text, KeyOwner|Model|Reference|null $owner = null): self
     {
         $this->assertUsable();
 
@@ -288,6 +292,29 @@ trait DescribesTheActivity
 
         $this->note      = $note;
         $this->noteOwner = $noteOwner;
+
+        return $this;
+    }
+
+    /**
+     * Name the identifier a sign-in was attempted with, such as the email
+     * address a form posted. It is kept as given and validated not at all,
+     * because it is untrusted input and not a programming error. It is hashed
+     * at capture to `properties._audit.identifier_hash` under
+     * `redaction.identifiers`. It is not in the properties, so
+     * `withProperties()` cannot spoof it and an `unlisted = DROP` definition
+     * cannot lose it. The last identifier given wins.
+     *
+     * @param  string  $identifier
+     * @return self
+     *
+     * @throws \LogicException
+     */
+    public function withIdentifier(#[\SensitiveParameter] string $identifier): self
+    {
+        $this->assertUsable();
+
+        $this->identifier = $identifier;
 
         return $this;
     }
@@ -336,7 +363,7 @@ trait DescribesTheActivity
      *
      * @throws \InvalidArgumentException
      */
-    private static function checkKeys(array $values): void
+    private static function checkKeys(#[\SensitiveParameter] array $values): void
     {
         if (self::holdsReservedKey($values)) {
             throw new \InvalidArgumentException(sprintf('Keys beginning `%s` are reserved for the package\'s own metadata.', self::RESERVED_KEY));
@@ -352,7 +379,7 @@ trait DescribesTheActivity
      *
      * @throws \InvalidArgumentException
      */
-    private static function note(string $text): string
+    private static function note(#[\SensitiveParameter] string $text): string
     {
         $note = TextSanitizer::clean($text, self::NOTE_MAX_BYTES);
 
@@ -372,7 +399,7 @@ trait DescribesTheActivity
      * @param  array<array-key, mixed>  $values
      * @return bool
      */
-    private static function holdsReservedKey(array $values): bool
+    private static function holdsReservedKey(#[\SensitiveParameter] array $values): bool
     {
         foreach ($values as $key => $value) {
             if (str_starts_with((string) $key, self::RESERVED_KEY) || (is_array($value) && self::holdsReservedKey($value))) {

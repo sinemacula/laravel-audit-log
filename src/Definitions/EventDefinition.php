@@ -286,7 +286,7 @@ final readonly class EventDefinition
      *
      * @internal
      */
-    public function ruleFor(array $path): ?FieldRule
+    public function ruleFor(#[\SensitiveParameter] array $path): ?FieldRule
     {
         $winner = null;
 
@@ -306,6 +306,30 @@ final readonly class EventDefinition
     }
 
     /**
+     * The first rule, in path order, that names a field beneath the concrete
+     * path: it has more segments than the path and its leading segments match
+     * it, or `null` when no rule does. A rule at or above the path decides the
+     * path itself, and is the answer of `ruleFor()`, not of this.
+     *
+     * @param  list<int|string>  $path
+     * @return ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule
+     *
+     * @internal
+     */
+    public function ruleBeneath(#[\SensitiveParameter] array $path): ?FieldRule
+    {
+        $length = count($path);
+
+        foreach ($this->rules as $rule) {
+            if (count($rule->segments) > $length && FieldPath::matches(array_slice($rule->segments, 0, $length), $path)) {
+                return $rule;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * How the field at the concrete path is handled: by the rule that decides
      * it, or as unlisted fields are when none does.
      *
@@ -314,7 +338,7 @@ final readonly class EventDefinition
      *
      * @internal
      */
-    public function handlingFor(array $path): FieldHandling
+    public function handlingFor(#[\SensitiveParameter] array $path): FieldHandling
     {
         return $this->ruleFor($path)->handling ?? $this->unlisted;
     }

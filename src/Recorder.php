@@ -13,6 +13,7 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
+use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
@@ -29,10 +30,12 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
  * while it boots.
  *
  * A recorded activity runs one pipeline: its definition is found, its timing is
- * checked, the contributors fill its gaps in order, the record is built with
- * the clock's time and the configured source, and it is delivered, after commit
- * unless the builder chose otherwise. A refusal before the record is built
- * leaves the builder usable, and a failed write propagates.
+ * checked, the contributors fill its gaps in order, what they leave is
+ * minimised, the record is built from that with the clock's time and the
+ * configured source, and it is delivered, after commit unless the builder chose
+ * otherwise. A refusal before the record is built, a minimiser's failure among
+ * them, stores nothing and leaves the builder usable, and a failed write
+ * propagates.
  *
  * A singleton that outlives requests under Octane, so it holds only frozen
  * registration data: contributors, runtime state, the clock, the store and the
@@ -79,6 +82,7 @@ final readonly class Recorder
     public function record(
         \BackedEnum|string $code,
         Model|Reference|null $subject = null,
+        #[\SensitiveParameter]
         array $properties = [],
         Outcome $outcome = Outcome::SUCCESS,
         \BackedEnum|string|null $reason = null,
@@ -200,20 +204,24 @@ final readonly class Recorder
 
     /**
      * The pipeline a builder's `record()` runs: nothing is consumed until the
-     * definition and the timing have been accepted, so a refusal of either
-     * leaves the builder usable.
+     * definition and the timing have been accepted and the record minimised, so
+     * a refusal of any of them leaves the builder usable. Minimising takes a
+     * snapshot of its own, because the first predates what the contributors
+     * filled; that first one stays for the definition, the timing and the
+     * connection, which they cannot change.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
+     * @throws \JsonException
      * @throws \LogicException
      * @throws \UnexpectedValueException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
      * @throws \SineMacula\Laravel\AuditLog\Stores\RecordConflictException
      */
-    private function write(PendingRecord $pending): AuditRecord
+    private function write(#[\SensitiveParameter] PendingRecord $pending): AuditRecord
     {
         $container = Container::getInstance();
         $snapshot  = $pending->snapshot();
@@ -232,8 +240,10 @@ final readonly class Recorder
             $container->make($contributor)->contribute($contribution);
         }
 
-        $source = $container->make(SourceSettings::class);
-        $record = AuditRecord::fromPending($pending, $definition->version, $definition->category, $container->make(Clock::class)->now(), $source->id(), $source->region());
+        $minimised  = $container->make(RecordMinimiser::class)->minimise($pending->snapshot(), $definition);
+        $source     = $container->make(SourceSettings::class);
+        $occurredAt = $container->make(Clock::class)->now();
+        $record     = AuditRecord::fromPending($pending, $minimised, $definition->version, $definition->category, $occurredAt, $source->id(), $source->region());
 
         $delivery->deliver($record, $timing, $snapshot->connection);
 

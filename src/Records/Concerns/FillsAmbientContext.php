@@ -22,8 +22,10 @@ use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
  * fields treats each on its own. An explicit setter called after a filler
  * replaces the filled value, so explicit beats contributor in either order.
  * Every value is validated whether or not it is used, so a malformed one is
- * refused in any order. The trait also keeps which fields are given, and the
- * identifier and map checks the builder's other methods share.
+ * refused in any order. The IP address alone is taken as it comes, because one
+ * that is not valid is stored as `null` and diagnosed when the record is
+ * minimised, and never loses the record. The trait also keeps which fields are
+ * given, and the identifier and map checks the builder's other methods share.
  *
  * The methods sit in a trait only so the builder stays within the number of
  * methods one class may declare; the package's recorder and `Contribution` call
@@ -44,9 +46,6 @@ trait FillsAmbientContext
 
     /** @var int Longest request id, in characters: the `request_id` column. */
     private const int REQUEST_MAX_CHARACTERS = 64;
-
-    /** @var int Longest IP address, in characters: the `ip` column, which also holds a hashed or encrypted form. */
-    private const int IP_MAX_CHARACTERS = 255;
 
     /** @var int Longest user agent kept, in bytes: the `user_agent` column. */
     private const int USER_AGENT_MAX_BYTES = 512;
@@ -72,7 +71,7 @@ trait FillsAmbientContext
     /** @var ?string The W3C trace id of a trusted `traceparent`, if known. */
     private ?string $traceId = null;
 
-    /** @var ?string The client's IP address, as the contributor stores it, if known. */
+    /** @var ?string The client's IP address, as the contributor gave it and before it is minimised, if known. */
     private ?string $ip = null;
 
     /** @var ?string The client's user agent, cleaned and capped, if known. */
@@ -87,6 +86,12 @@ trait FillsAmbientContext
     private array $context = [];
 
     // phpcs:enable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+
+    /** @var list<list<int|string>> Concrete paths of the context keys that collided once cleaned, segment by segment, first 32 across every call. */
+    private array $contextCollisions = [];
+
+    /** @var int How many context keys collided once cleaned, across every call. */
+    private int $contextCollisionCount = 0;
 
     /**
      * Fill the actor, unless one was given or filled already, `by(null)`
@@ -252,9 +257,10 @@ trait FillsAmbientContext
     }
 
     /**
-     * Fill the client's IP address, 1 to 255 characters, validated and never
-     * cleaned or cut, and its user agent, cleaned and cut to 512 bytes, each on
-     * its own. A user agent that is empty once cleaned counts as none.
+     * Fill the client's IP address, any string as it comes, and its user agent,
+     * cleaned and cut to 512 bytes, each on its own. An address that is not
+     * valid is stored as `null` and diagnosed when the record is minimised. A
+     * user agent that is empty once cleaned counts as none.
      *
      * @param  ?string  $ip
      * @param  ?string  $userAgent
@@ -265,13 +271,9 @@ trait FillsAmbientContext
      *
      * @internal
      */
-    public function fillClient(?string $ip, ?string $userAgent): void
+    public function fillClient(#[\SensitiveParameter] ?string $ip, #[\SensitiveParameter] ?string $userAgent): void
     {
         $this->assertUsable();
-
-        if ($ip !== null) {
-            self::checkIdentifier($ip, self::IP_MAX_CHARACTERS, 'An IP address');
-        }
 
         $userAgent = $userAgent === null ? '' : TextSanitizer::clean($userAgent, self::USER_AGENT_MAX_BYTES);
 
@@ -324,11 +326,16 @@ trait FillsAmbientContext
      *
      * @internal
      */
-    public function fillContext(array $context): void
+    public function fillContext(#[\SensitiveParameter] array $context): void
     {
         $this->assertUsable();
 
-        $this->context += self::mapOf(ValueNormaliser::normalise($context), 'Context is a map of names to values, not a list.');
+        $normalised = ValueNormaliser::normalise($context);
+        $values     = self::mapOf($normalised, 'Context is a map of names to values, not a list.');
+
+        $this->context += $values;
+        $this->contextCollisions = array_slice(array_merge($this->contextCollisions, $normalised->collisions), 0, Normalised::MAX_COLLISIONS);
+        $this->contextCollisionCount += $normalised->collisionCount;
     }
 
     /**
@@ -437,7 +444,7 @@ trait FillsAmbientContext
      *
      * @throws \InvalidArgumentException
      */
-    private static function mapOf(Normalised $normalised, string $message): array
+    private static function mapOf(#[\SensitiveParameter] Normalised $normalised, string $message): array
     {
         $value = $normalised->value;
 

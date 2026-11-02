@@ -14,11 +14,13 @@ use Ramsey\Uuid\Rfc4122\FieldsInterface;
 use Ramsey\Uuid\Uuid;
 use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
+use SineMacula\Laravel\AuditLog\Privacy\Minimised;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\RecordVersion;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\StubUser;
 
@@ -26,8 +28,8 @@ use Tests\Unit\Stubs\StubUser;
  * Unit tests for the captured record: its shape and its one named constructor,
  * the pinned envelope and the golden v1 record, the UUID version 7 id and its
  * order, the UTC instant, the versions, provenance and source it carries, the
- * reference pairs, where a note is stored and that an owned note never is, and
- * the refusals of building one.
+ * reference pairs, that it stores only what minimising left, where a note is
+ * stored and that an owned note never is, and the refusals of building one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -249,7 +251,8 @@ final class AuditRecordTest extends TestCase
      */
     public function testTheEventVersionAndCategoryAreTheCallers(): void
     {
-        $record = AuditRecord::fromPending(self::minimalBuilder(), 7, 'finance', self::instant(), 'app-eu-1');
+        $pending = self::minimalBuilder();
+        $record  = AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 7, 'finance', self::instant(), 'app-eu-1');
 
         self::assertSame(7, $record->eventVersion);
         self::assertSame('finance', $record->category);
@@ -350,9 +353,9 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A note with an owner is never stored in plaintext: the properties hold no
-     * metadata, the note's text appears nowhere in the encoded envelope, and
-     * with no other properties the properties are `null`.
+     * A note with an owner is never stored in plaintext: with no encrypter it
+     * is dropped, the properties hold only the diagnostic of its fixed path,
+     * and the note's text appears nowhere in the encoded envelope.
      *
      * @param  \Closure(): (\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner|\SineMacula\Laravel\AuditLog\Records\Reference)  $owner
      * @return void
@@ -365,8 +368,8 @@ final class AuditRecordTest extends TestCase
         $withProperties = self::build(self::minimalBuilder()->withProperties(['amount' => '1200.00'])->withNote('Erasable remark', $owner()));
         $alone          = self::build(self::minimalBuilder()->withNote('Erasable remark', $owner()));
 
-        self::assertSame(['amount' => '1200.00'], $withProperties->properties);
-        self::assertNull($alone->properties);
+        self::assertSame(['amount' => '1200.00', '_audit' => ['omitted' => ['count' => 1, 'paths' => ['_audit.note']]]], $withProperties->properties);
+        self::assertSame(['_audit' => ['omitted' => ['count' => 1, 'paths' => ['_audit.note']]]], $alone->properties);
         self::assertStringNotContainsString('Erasable remark', json_encode($withProperties->toArray(), JSON_THROW_ON_ERROR));
         self::assertStringNotContainsString('Erasable remark', json_encode($alone->toArray(), JSON_THROW_ON_ERROR));
     }
@@ -394,8 +397,113 @@ final class AuditRecordTest extends TestCase
 
         $record = self::build($pending);
 
-        self::assertNull($record->properties);
+        self::assertSame(['_audit' => ['omitted' => ['count' => 1, 'paths' => ['_audit.note']]]], $record->properties);
         self::assertStringNotContainsString('Erasable remark', json_encode($record->toArray(), JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * The record stores what it is given as minimised, and nothing of the
+     * builder's raw address, context or properties reaches it.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheRecordStoresTheMinimisedValues(): void
+    {
+        $pending = self::minimalBuilder()->withProperties(['raw_property' => 'raw']);
+        $pending->fillClient('203.0.113.7', 'Mozilla/5.0');
+        $pending->fillContext(['raw_context' => 'raw']);
+
+        $record = AuditRecord::fromPending($pending, new Minimised(['kept' => 'property'], ['kept' => 'context'], '203.0.113.0'), 1, 'general', self::instant(), 'app-eu-1');
+
+        self::assertSame('203.0.113.0', $record->ip);
+        self::assertSame(['kept' => 'context'], $record->context);
+        self::assertSame(['kept' => 'property'], $record->properties);
+        self::assertSame('Mozilla/5.0', $record->userAgent);
+        self::assertStringNotContainsString('raw', json_encode($record->toArray(), JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * Minimising leaving nothing stores `null` for each, whatever the builder
+     * held.
+     *
+     * @return void
+     */
+    public function testAMinimisedRecordOfNothingStoresNulls(): void
+    {
+        $pending = self::minimalBuilder()->withProperties(['raw_property' => 'raw']);
+        $pending->fillClient('203.0.113.7', 'Mozilla/5.0');
+        $pending->fillContext(['raw_context' => 'raw']);
+
+        $record = AuditRecord::fromPending($pending, new Minimised(null, null, null), 1, 'general', self::instant(), 'app-eu-1');
+
+        self::assertNull($record->ip);
+        self::assertNull($record->context);
+        self::assertNull($record->properties);
+    }
+
+    /**
+     * The builder's parameter is marked sensitive: it holds the raw payload,
+     * and a refusal here is thrown with it on the stack.
+     *
+     * @return void
+     */
+    public function testThePendingParameterIsSensitive(): void
+    {
+        $parameter = (new \ReflectionMethod(AuditRecord::class, 'fromPending'))->getParameters()[0];
+
+        self::assertSame('pending', $parameter->getName());
+        self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class));
+    }
+
+    /**
+     * Rows of `[the order of the full builder's calls]`: forward, reversed,
+     * outcome and timing first, and fillers first.
+     *
+     * @return iterable<string, array{0: list<string>}>
+     */
+    public static function providePermutations(): iterable
+    {
+        $forward = array_keys(self::calls());
+        $first   = ['denied', 'transactional', 'failClosed'];
+        $fillers = array_values(array_filter($forward, static fn (string $name): bool => str_starts_with($name, 'fill')));
+
+        yield from [
+            'forward'                  => [$forward],
+            'reversed'                 => [array_reverse($forward)],
+            'outcome and timing first' => [[...$first, ...array_values(array_diff($forward, $first))]],
+            'fillers first'            => [[...$fillers, ...array_values(array_diff($forward, $fillers))]],
+        ];
+    }
+
+    /**
+     * The full builder's calls made in any of the orders give the same
+     * envelope, byte for byte, under a pinned id.
+     *
+     * @param  list<string>  $order
+     * @return void
+     */
+    #[DataProvider('providePermutations')]
+    public function testPermutedCallOrdersGiveEqualEnvelopes(array $order): void
+    {
+        Str::createUuidsUsing(static fn (): UuidInterface => Uuid::fromString(self::ID));
+
+        $calls     = self::calls();
+        $reference = new PendingRecord;
+        $permuted  = new PendingRecord;
+
+        self::assertCount(count($calls), $order);
+
+        foreach ($calls as $call) {
+            $call($reference);
+        }
+
+        foreach ($order as $name) {
+            $calls[$name]($permuted);
+        }
+
+        self::assertSame(self::build($reference)->toArray(), self::build($permuted)->toArray());
     }
 
     /**
@@ -521,7 +629,9 @@ final class AuditRecordTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage($message);
 
-        AuditRecord::fromPending(self::minimalBuilder(), 1, 'general', self::instant(), $sourceId, $sourceRegion);
+        $pending = self::minimalBuilder();
+
+        AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 1, 'general', self::instant(), $sourceId, $sourceRegion);
     }
 
     /**
@@ -534,9 +644,11 @@ final class AuditRecordTest extends TestCase
      */
     public function testTheSourceIsKept(): void
     {
-        $withRegion    = AuditRecord::fromPending(self::minimalBuilder(), 1, 'general', self::instant(), 'app-eu-1', 'eu-west-2');
-        $withoutRegion = AuditRecord::fromPending(self::minimalBuilder(), 1, 'general', self::instant(), 'app-eu-1');
-        $longest       = AuditRecord::fromPending(self::minimalBuilder(), 1, 'general', self::instant(), str_repeat('é', 64), str_repeat('é', 32));
+        $minimised = RecordFactory::minimisedOf(self::minimalBuilder());
+
+        $withRegion    = AuditRecord::fromPending(self::minimalBuilder(), $minimised, 1, 'general', self::instant(), 'app-eu-1', 'eu-west-2');
+        $withoutRegion = AuditRecord::fromPending(self::minimalBuilder(), $minimised, 1, 'general', self::instant(), 'app-eu-1');
+        $longest       = AuditRecord::fromPending(self::minimalBuilder(), $minimised, 1, 'general', self::instant(), str_repeat('é', 64), str_repeat('é', 32));
 
         self::assertSame(['app-eu-1', 'eu-west-2'], [$withRegion->sourceId, $withRegion->sourceRegion]);
         self::assertSame(['app-eu-1', null], [$withoutRegion->sourceId, $withoutRegion->sourceRegion]);
@@ -559,6 +671,75 @@ final class AuditRecordTest extends TestCase
 
         self::assertCount(1, $parameters);
         self::assertCount(1, array_values($parameters)[0]->getAttributes(\SensitiveParameter::class));
+    }
+
+    /**
+     * The full builder's calls, by name, each on its own; its note has no
+     * owner, so the envelope keeps it.
+     *
+     * @return array<string, \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void>
+     */
+    private static function calls(): array
+    {
+        return [
+            'event' => static function (PendingRecord $pending): void {
+                $pending->event('invoice.approved');
+            },
+            'on' => static function (PendingRecord $pending): void {
+                $pending->on(Reference::of('invoice', 'inv_0042'));
+            },
+            'by' => static function (PendingRecord $pending): void {
+                $pending->by(Reference::of('user', 42));
+            },
+            'asPrincipal' => static function (PendingRecord $pending): void {
+                $pending->asPrincipal(Reference::of('team', '7'));
+            },
+            'forTenant' => static function (PendingRecord $pending): void {
+                $pending->forTenant(Reference::of('organisation', 'org_01'));
+            },
+            'usingCredential' => static function (PendingRecord $pending): void {
+                $pending->usingCredential('key_01');
+            },
+            'correlatedWith' => static function (PendingRecord $pending): void {
+                $pending->correlatedWith('app:ticket-123');
+            },
+            'withProperties' => static function (PendingRecord $pending): void {
+                $pending->withProperties(['amount' => '1200.00', 'currency' => 'GBP', 'lines' => [1, 2]]);
+            },
+            'withNote' => static function (PendingRecord $pending): void {
+                $pending->withNote('Approved after review');
+            },
+            'withIdentifier' => static function (PendingRecord $pending): void {
+                $pending->withIdentifier('alice@example.com');
+            },
+            'denied' => static function (PendingRecord $pending): void {
+                $pending->denied('policy');
+            },
+            'transactional' => static function (PendingRecord $pending): void {
+                $pending->transactional('business');
+            },
+            'failClosed' => static function (PendingRecord $pending): void {
+                $pending->failClosed();
+            },
+            'fillGuard' => static function (PendingRecord $pending): void {
+                $pending->fillGuard('web');
+            },
+            'fillSession' => static function (PendingRecord $pending): void {
+                $pending->fillSession('sess_ref_1');
+            },
+            'fillRequest' => static function (PendingRecord $pending): void {
+                $pending->fillRequest('01932b4e-8a40-7000-8000-0000000000aa', '4bf92f3577b34da6a3ce929d0e0e4736');
+            },
+            'fillClient' => static function (PendingRecord $pending): void {
+                $pending->fillClient('203.0.113.7', 'Mozilla/5.0');
+            },
+            'fillOrigin' => static function (PendingRecord $pending): void {
+                $pending->fillOrigin(Origin::HTTP);
+            },
+            'fillContext' => static function (PendingRecord $pending): void {
+                $pending->fillContext(['route' => 'invoices.approve', 'method' => 'POST']);
+            },
+        ];
     }
 
     /**
@@ -616,7 +797,7 @@ final class AuditRecordTest extends TestCase
      */
     private static function build(PendingRecord $pending, ?\DateTimeInterface $occurredAt = null): AuditRecord
     {
-        return AuditRecord::fromPending($pending, 2, 'finance', $occurredAt ?? self::instant(), 'app-eu-1', 'eu-west-2');
+        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 2, 'finance', $occurredAt ?? self::instant(), 'app-eu-1', 'eu-west-2');
     }
 
     /**

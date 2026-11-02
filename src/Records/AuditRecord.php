@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records;
 
 use Illuminate\Support\Str;
+use SineMacula\Laravel\AuditLog\Privacy\Minimised;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
@@ -19,10 +20,12 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  * order they were captured. It carries the current record version, the event
  * version and category of its code's definition, and `captured` provenance,
  * which says the application asserted the activity, not that the claim is true;
- * the import fields are `null`. A note without an owner is kept at
- * `properties._audit.note`, after the caller's keys, and cannot be erased; a
- * note with an owner is never stored in plaintext, so until it can be encrypted
- * it is not stored at all.
+ * the import fields are `null`.
+ *
+ * It holds only minimised values: its IP address, context and properties are
+ * what `RecordMinimiser` left of the builder's, and the note, the identifier
+ * hash and the diagnostics of what was removed sit at `properties._audit`, last
+ * and after the caller's keys, written there by that minimiser.
  *
  * The delivery pipeline later finalises it, once, adding the time it was
  * recorded and its integrity fields; nothing here knows of that.
@@ -39,9 +42,6 @@ final readonly class AuditRecord
 
     /** @var int Longest source region, in characters: the `source_region` column. */
     public const int SOURCE_REGION_MAX_CHARACTERS = 32;
-
-    /** @var string Key of the package's own metadata within the properties. */
-    private const string METADATA_KEY = '_audit';
 
     /**
      * Constructor.
@@ -165,16 +165,16 @@ final readonly class AuditRecord
         /** The import batch the record came in; `null` for a captured record. */
         public ?string $importBatchId,
 
-        /** The client's IP address, if known. */
+        /** The client's IP address in the configured mode, if known and kept. */
         public ?string $ip,
 
         /** The client's user agent, cleaned and capped, if known. */
         public ?string $userAgent,
 
-        /** The context, normalised, as a map; `null` when there is none. */
+        /** The context, minimised, as a map; `null` when there is none. */
         public ?array $context,
 
-        /** The properties, normalised, as a map, with the package's metadata last; `null` when there are none. */
+        /** The properties, minimised, as a map, with the package's metadata last; `null` when there are none. */
         public ?array $properties,
 
         /** When the activity happened, as ISO-8601 UTC with microseconds. */
@@ -183,11 +183,13 @@ final readonly class AuditRecord
 
     /**
      * The captured record of the pending record, which this uses up: built
-     * once, with the event version and category of its code's definition, the
+     * once, with what minimising left of its IP address, context and
+     * properties, the event version and category of its code's definition, the
      * instant the activity happened, and the source it was captured on. The
      * origin must have been filled.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
      * @param  int  $eventVersion
      * @param  string  $category
      * @param  \DateTimeInterface  $occurredAt
@@ -201,7 +203,9 @@ final readonly class AuditRecord
      * @internal
      */
     public static function fromPending(
+        #[\SensitiveParameter]
         PendingRecord $pending,
+        Minimised $minimised,
         int $eventVersion,
         string $category,
         \DateTimeInterface $occurredAt,
@@ -248,10 +252,10 @@ final readonly class AuditRecord
             sourceRegion: $sourceRegion,
             sourceRecordId: null,
             importBatchId: null,
-            ip: $snapshot->ip,
+            ip: $minimised->ip,
             userAgent: $snapshot->userAgent,
-            context: $snapshot->context,
-            properties: self::properties($snapshot),
+            context: $minimised->context,
+            properties: $minimised->properties,
             occurredAt: self::utc($occurredAt),
         );
     }
@@ -318,7 +322,7 @@ final readonly class AuditRecord
      *
      * @throws \LogicException
      */
-    private static function originOf(PendingSnapshot $snapshot): string
+    private static function originOf(#[\SensitiveParameter] PendingSnapshot $snapshot): string
     {
         return $snapshot->origin->value ?? throw new \LogicException('A captured record needs an origin; the origin contributor fills it before the record is built.');
     }
@@ -367,28 +371,6 @@ final readonly class AuditRecord
     private static function pair(?Reference $reference): array
     {
         return $reference === null ? [null, null] : [$reference->type, $reference->id];
-    }
-
-    /**
-     * The properties the record stores: the caller's map, then the package's
-     * metadata holding a note that has no owner. A note with an owner is left
-     * out, because it is never stored in plaintext. `null` when nothing
-     * remains.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
-     * @return ?array<array-key, mixed>
-     */
-    private static function properties(PendingSnapshot $snapshot): ?array
-    {
-        $properties = $snapshot->properties ?? [];
-
-        if ($snapshot->note !== null && $snapshot->noteOwner === null) {
-            $properties[self::METADATA_KEY] = ['note' => $snapshot->note];
-        }
-
-        return $properties === [] ? null : $properties;
     }
 
     /**

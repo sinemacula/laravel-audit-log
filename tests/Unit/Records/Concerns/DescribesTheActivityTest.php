@@ -13,6 +13,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Records\Concerns\DescribesTheActivity;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
+use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\Normalised;
 use Tests\Unit\Stubs\Enums\StubActivity;
@@ -512,7 +513,7 @@ final class DescribesTheActivityTest extends TestCase
         $snapshot = $pending->snapshot();
 
         self::assertSame(['amount' => '1', 'b' => 1], $snapshot->properties);
-        self::assertSame(['b'], $snapshot->collisions);
+        self::assertSame([['b']], $snapshot->collisions);
         self::assertSame(1, $snapshot->collisionCount);
     }
 
@@ -531,7 +532,7 @@ final class DescribesTheActivityTest extends TestCase
 
     /**
      * Keys that collide once cleaned keep the first value and are diagnosed by
-     * their schema path, accumulated across calls and bounded at 32 paths while
+     * their segments, accumulated across calls and bounded at 32 paths while
      * every collision is counted.
      *
      * @return void
@@ -555,9 +556,174 @@ final class DescribesTheActivityTest extends TestCase
         self::assertSame(1, $snapshot->properties['a'] ?? null);
         self::assertCount(Normalised::MAX_COLLISIONS, $snapshot->collisions);
         self::assertSame(33, $snapshot->collisionCount);
-        self::assertSame('a', $snapshot->collisions[0]);
-        self::assertSame('k0', $snapshot->collisions[1]);
-        self::assertSame('items.*.x', $snapshot->collisions[31]);
+        self::assertSame(['a'], $snapshot->collisions[0]);
+        self::assertSame(['k0'], $snapshot->collisions[1]);
+        self::assertSame(['items', 0, 'x'], $snapshot->collisions[31]);
+    }
+
+    /**
+     * An identifier is kept exactly as it was given: it is untrusted input, not
+     * a programming error, so nothing validates or cleans it, an empty one and
+     * one holding controls included.
+     *
+     * @return void
+     */
+    public function testWithIdentifierKeepsTheValueAsGiven(): void
+    {
+        $long = str_repeat('x', 5000);
+
+        foreach (['Alice@Example.COM', '', "  a\0b\n", "\xFF", $long] as $identifier) {
+            self::assertSame($identifier, (new PendingRecord)->withIdentifier($identifier)->snapshot()->identifier);
+        }
+    }
+
+    /**
+     * No identifier is held until one is given.
+     *
+     * @return void
+     */
+    public function testAFreshBuilderHasNoIdentifier(): void
+    {
+        self::assertNull((new PendingRecord)->snapshot()->identifier);
+    }
+
+    /**
+     * Giving an identifier again replaces it, as any other field.
+     *
+     * @return void
+     */
+    public function testTheLastIdentifierWins(): void
+    {
+        $pending = (new PendingRecord)->withIdentifier('first@example.com')->withIdentifier('last@example.com');
+
+        self::assertSame('last@example.com', $pending->snapshot()->identifier);
+    }
+
+    /**
+     * Setting an identifier returns the builder itself, as every fluent method
+     * does.
+     *
+     * @return void
+     */
+    public function testWithIdentifierReturnsTheBuilder(): void
+    {
+        $pending = new PendingRecord;
+
+        self::assertSame($pending, $pending->withIdentifier('alice@example.com'));
+    }
+
+    /**
+     * An identifier is held beside the properties, not among them, and the
+     * properties given leave it alone.
+     *
+     * @return void
+     */
+    public function testAnIdentifierIsNotInTheProperties(): void
+    {
+        $bare  = (new PendingRecord)->withIdentifier('alice@example.com')->snapshot();
+        $mixed = (new PendingRecord)
+            ->withProperties(['amount' => '1'])
+            ->withIdentifier('alice@example.com')
+            ->withProperties(['currency' => 'GBP'])
+            ->snapshot();
+
+        self::assertNull($bare->properties);
+        self::assertSame(['amount' => '1', 'currency' => 'GBP'], $mixed->properties);
+        self::assertSame('alice@example.com', $mixed->identifier);
+    }
+
+    /**
+     * The identifier parameter is marked sensitive, so it never appears in a
+     * stack trace.
+     *
+     * @return void
+     */
+    public function testTheIdentifierIsMarkedSensitive(): void
+    {
+        self::assertTrue(self::isSensitive('withIdentifier', 'identifier'));
+    }
+
+    /**
+     * Every parameter the properties and the note pass through is marked
+     * sensitive, the private helpers included, since a refusal is thrown with
+     * them on the stack.
+     *
+     * @return void
+     */
+    public function testThePropertiesAndNoteAreMarkedSensitive(): void
+    {
+        $parameters = [
+            'withProperties'   => 'properties',
+            'checkKeys'        => 'values',
+            'holdsReservedKey' => 'values',
+            'withNote'         => 'text',
+            'note'             => 'text',
+            'mapOf'            => 'normalised',
+        ];
+
+        foreach ($parameters as $method => $name) {
+            self::assertTrue(self::isSensitive($method, $name), "{$method}() does not mark \${$name}.");
+        }
+
+        self::assertFalse(self::isSensitive('withNote', 'owner'));
+    }
+
+    /**
+     * The snapshot marks every payload it holds as sensitive, the raw keys of
+     * its collisions included, and the fields that hold no payload stay
+     * readable.
+     *
+     * @return void
+     */
+    public function testTheSnapshotMarksItsPayloadSensitive(): void
+    {
+        $parameters = (new \ReflectionMethod(PendingSnapshot::class, '__construct'))->getParameters();
+        $sensitive  = array_filter($parameters, static fn (\ReflectionParameter $parameter): bool => $parameter->getAttributes(\SensitiveParameter::class) !== []);
+        $names      = array_map(static fn (\ReflectionParameter $parameter): string => $parameter->getName(), array_values($sensitive));
+
+        self::assertSame(['credentialId', 'properties', 'note', 'ip', 'context', 'collisions', 'identifier', 'contextCollisions'], $names);
+    }
+
+    /**
+     * A refusal of the properties leaves no value and no key in the exception's
+     * stack trace, even with every frame keeping its arguments: not the
+     * reserved key's refusal, nor a list's, which is thrown with the normalised
+     * value on the stack.
+     *
+     * @return void
+     */
+    public function testARefusedPayloadStaysOutOfTheStackTrace(): void
+    {
+        $refused  = [['planted-key' => 'planted-value', 'deep' => ['_audit' => 'planted-value']], ['planted-value']];
+        $previous = ini_set('zend.exception_ignore_args', '0');
+
+        try {
+            foreach ($refused as $properties) {
+                try {
+                    (new PendingRecord)->withProperties($properties);
+                    self::fail('Expected the properties to be refused.');
+                } catch (\InvalidArgumentException $exception) {
+                    self::assertStringNotContainsString('planted', print_r($exception->getTrace(), true));
+                    self::assertStringNotContainsString('planted', (string) $exception);
+                }
+            }
+        } finally {
+            ini_set('zend.exception_ignore_args', $previous === false ? '0' : $previous);
+        }
+    }
+
+    /**
+     * A caller cannot write the identifier's hash through the properties, since
+     * the whole of the package's metadata is refused.
+     *
+     * @return void
+     */
+    public function testAPropertyCannotSpoofTheIdentifierHash(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(self::RESERVED);
+
+        (new PendingRecord)->withProperties(['_audit' => ['identifier_hash' => 'x']]);
     }
 
     /**
@@ -688,5 +854,25 @@ final class DescribesTheActivityTest extends TestCase
         $this->expectExceptionMessage('A pending record needs an event code before it is recorded; set one with `event()`.');
 
         (new PendingRecord)->withNote('Reviewed')->consume();
+    }
+
+    /**
+     * Whether the builder's method marks the parameter of that name sensitive.
+     *
+     * @param  string  $method
+     * @param  string  $name
+     * @return bool
+     */
+    private static function isSensitive(string $method, string $name): bool
+    {
+        foreach ((new \ReflectionMethod(PendingRecord::class, $method))->getParameters() as $parameter) {
+            if ($parameter->getName() !== $name) {
+                continue;
+            }
+
+            return $parameter->getAttributes(\SensitiveParameter::class) !== [];
+        }
+
+        self::fail("{$method}() has no parameter \${$name}.");
     }
 }

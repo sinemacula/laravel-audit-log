@@ -12,6 +12,7 @@ use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Fixtures\Records\RecordFactory;
 
 /**
  * Unit tests for the view of a pending record a contributor gets: each filler
@@ -316,6 +317,8 @@ final class ContributionTest extends TestCase
      */
     private function captured(PendingRecord $pending): array
     {
-        return AuditRecord::fromPending($pending, 1, 'finance', new \DateTimeImmutable('2026-11-01 12:00:00', new \DateTimeZone('UTC')), 'app')->toArray();
+        $occurredAt = new \DateTimeImmutable('2026-11-01 12:00:00', new \DateTimeZone('UTC'));
+
+        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 1, 'finance', $occurredAt, 'app')->toArray();
     }
 }

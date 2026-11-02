@@ -102,7 +102,7 @@ final class FieldPath
      * @param  list<int|string>  $path
      * @return bool
      */
-    public static function matches(array $pattern, array $path): bool
+    public static function matches(array $pattern, #[\SensitiveParameter] array $path): bool
     {
         if (count($pattern) !== count($path)) {
             return false;

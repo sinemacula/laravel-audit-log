@@ -14,6 +14,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
@@ -49,6 +50,7 @@ final class ProviderBindingOrderTest extends TestCase
         $abstracts = [
             Clock::class,
             AuditStore::class,
+            FieldEncrypter::class,
             KeyRing::class,
             IntegritySettings::class,
             Recorder::class,

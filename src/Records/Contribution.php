@@ -129,8 +129,9 @@ final readonly class Contribution
     }
 
     /**
-     * Fill the client's IP address, 1 to 255 characters, and its user agent,
-     * cleaned and cut to 512 bytes, each on its own.
+     * Fill the client's IP address, any string as it comes, and its user agent,
+     * cleaned and cut to 512 bytes, each on its own. An address that is not
+     * valid is stored as `null` and diagnosed.
      *
      * @param  ?string  $ip
      * @param  ?string  $userAgent
@@ -139,7 +140,7 @@ final readonly class Contribution
      * @throws \InvalidArgumentException
      * @throws \LogicException
      */
-    public function fillClient(?string $ip, ?string $userAgent): void
+    public function fillClient(#[\SensitiveParameter] ?string $ip, #[\SensitiveParameter] ?string $userAgent): void
     {
         $this->pending->fillClient($ip, $userAgent);
     }
@@ -172,7 +173,7 @@ final readonly class Contribution
      * @throws \InvalidArgumentException
      * @throws \LogicException
      */
-    public function fillContext(array $context): void
+    public function fillContext(#[\SensitiveParameter] array $context): void
     {
         $this->pending->fillContext($context);
     }

@@ -9,10 +9,12 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Records\Concerns\FillsAmbientContext;
+use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Support\Normalised;
 use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\StubUser;
 
@@ -20,8 +22,9 @@ use Tests\Unit\Stubs\StubUser;
  * Unit tests for how contributors fill a pending record's gaps: each filler
  * fills an open field and marks it, never replaces a given or filled one, and
  * leaves the field open when given `null`; an explicit setter replaces a filled
- * value; two-field fillers treat each field on their own; and the values each
- * filler refuses.
+ * value; two-field fillers treat each field on their own; the values each
+ * filler refuses, and the address none refuses; and the context's collision
+ * diagnostics.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,6 +32,7 @@ use Tests\Unit\Stubs\StubUser;
  * @internal
  */
 #[CoversClass(PendingRecord::class)]
+#[CoversClass(Contribution::class)]
 #[CoversTrait(FillsAmbientContext::class)]
 final class FillsAmbientContextTest extends TestCase
 {
@@ -320,6 +324,167 @@ final class FillsAmbientContextTest extends TestCase
     }
 
     /**
+     * Context keys that collide once cleaned keep the first value and are
+     * diagnosed by their segments, accumulated across calls.
+     *
+     * @return void
+     */
+    public function testContextCollisionsAreCarriedBySegment(): void
+    {
+        $pending = new PendingRecord;
+
+        $pending->fillContext(['a' => 1, "a\0" => 2]);
+        $pending->fillContext(['b.c' => [['x' => 1, "x\0" => 2]]]);
+
+        $snapshot = $pending->snapshot();
+
+        self::assertSame(['a' => 1, 'b.c' => [['x' => 1]]], $snapshot->context);
+        self::assertSame([['a'], ['b.c', 0, 'x']], $snapshot->contextCollisions);
+        self::assertSame(2, $snapshot->contextCollisionCount);
+    }
+
+    /**
+     * At most 32 context collision paths are kept across every call, the first
+     * met, while the count covers every one.
+     *
+     * @return void
+     */
+    public function testContextCollisionsAreCappedWhileTheCountContinues(): void
+    {
+        $pending = new PendingRecord;
+
+        foreach (range(0, 39) as $index) {
+            $pending->fillContext(["k{$index}" => 1, "k{$index}\0" => 2]);
+        }
+
+        $snapshot = $pending->snapshot();
+
+        self::assertCount(Normalised::MAX_COLLISIONS, $snapshot->contextCollisions);
+        self::assertSame(['k0'], $snapshot->contextCollisions[0]);
+        self::assertSame(['k31'], $snapshot->contextCollisions[31]);
+        self::assertSame(40, $snapshot->contextCollisionCount);
+    }
+
+    /**
+     * A list is refused before anything is carried: not the context, nor the
+     * collisions met inside it, and what was filled before is unchanged.
+     *
+     * @return void
+     */
+    public function testARefusedContextCarriesNoCollision(): void
+    {
+        $pending = new PendingRecord;
+
+        $pending->fillContext(['a' => 1, "a\0" => 2]);
+
+        try {
+            $pending->fillContext([['x' => 1, "x\0" => 2]]);
+            self::fail('Expected the list to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('Context is a map of names to values, not a list.', $exception->getMessage());
+        }
+
+        $snapshot = $pending->snapshot();
+
+        self::assertSame(['a' => 1], $snapshot->context);
+        self::assertSame([['a']], $snapshot->contextCollisions);
+        self::assertSame(1, $snapshot->contextCollisionCount);
+    }
+
+    /**
+     * A builder holds no context collision until a context with one is filled.
+     *
+     * @return void
+     */
+    public function testAFreshBuilderHasNoContextCollisions(): void
+    {
+        $fresh  = new PendingRecord;
+        $filled = new PendingRecord;
+
+        $filled->fillContext(['route' => 'invoices.approve']);
+
+        self::assertSame([], $fresh->snapshot()->contextCollisions);
+        self::assertSame(0, $fresh->snapshot()->contextCollisionCount);
+        self::assertSame([], $filled->snapshot()->contextCollisions);
+        self::assertSame(0, $filled->snapshot()->contextCollisionCount);
+    }
+
+    /**
+     * Context collisions and property collisions are carried apart, so neither
+     * is mistaken for the other.
+     *
+     * @return void
+     */
+    public function testContextAndPropertyCollisionsAreKeptApart(): void
+    {
+        $pending = (new PendingRecord)->withProperties(['p' => 1, "p\0" => 2]);
+
+        $pending->fillContext(['c' => 1, "c\0" => 2]);
+
+        $snapshot = $pending->snapshot();
+
+        self::assertSame([['p']], $snapshot->collisions);
+        self::assertSame(1, $snapshot->collisionCount);
+        self::assertSame([['c']], $snapshot->contextCollisions);
+        self::assertSame(1, $snapshot->contextCollisionCount);
+    }
+
+    /**
+     * A contributor's context reaches the builder's diagnostics through its
+     * view of the builder, as any filler's value does.
+     *
+     * @return void
+     */
+    public function testAContributorsContextCollisionsAreCarried(): void
+    {
+        $pending = new PendingRecord;
+
+        (new Contribution($pending))->fillContext(['a' => 1, "a\0" => 2]);
+
+        self::assertSame([['a']], $pending->snapshot()->contextCollisions);
+        self::assertSame(1, $pending->snapshot()->contextCollisionCount);
+    }
+
+    /**
+     * The context parameter is marked sensitive on the builder and on the view
+     * a contributor gets, and so is the helper a refused list is thrown from,
+     * so none of them appears in a stack trace.
+     *
+     * @return void
+     */
+    public function testTheContextIsMarkedSensitive(): void
+    {
+        $builder = (new \ReflectionMethod(PendingRecord::class, 'fillContext'))->getParameters()[0];
+        $view    = (new \ReflectionMethod(Contribution::class, 'fillContext'))->getParameters()[0];
+        $mapOf   = (new \ReflectionMethod(PendingRecord::class, 'mapOf'))->getParameters()[0];
+
+        self::assertCount(1, $builder->getAttributes(\SensitiveParameter::class));
+        self::assertCount(1, $view->getAttributes(\SensitiveParameter::class));
+        self::assertCount(1, $mapOf->getAttributes(\SensitiveParameter::class));
+    }
+
+    /**
+     * A refused context leaves no value in the exception's stack trace, even
+     * with every frame keeping its arguments.
+     *
+     * @return void
+     */
+    public function testARefusedContextStaysOutOfTheStackTrace(): void
+    {
+        $previous = ini_set('zend.exception_ignore_args', '0');
+
+        try {
+            (new Contribution(new PendingRecord))->fillContext(['planted-value']);
+            self::fail('Expected the list to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringNotContainsString('planted', print_r($exception->getTrace(), true));
+            self::assertStringNotContainsString('planted', (string) $exception);
+        } finally {
+            ini_set('zend.exception_ignore_args', $previous === false ? '0' : $previous);
+        }
+    }
+
+    /**
      * The user agent is cleaned of controls and cut at 512 bytes; one that is
      * empty once cleaned counts as none, so the next contributor can fill it.
      *
@@ -423,7 +588,6 @@ final class FillsAmbientContextTest extends TestCase
         $guard   = 'A guard name must be from 1 to 64 characters, with no control characters.';
         $session = 'A session reference must be from 1 to 191 characters, with no control characters.';
         $request = 'A request id must be from 1 to 64 characters, with no control characters.';
-        $ip      = 'An IP address must be from 1 to 255 characters, with no control characters.';
 
         yield from [
             'a 65-character guard' => [static function (PendingRecord $pending): void {
@@ -441,12 +605,6 @@ final class FillsAmbientContextTest extends TestCase
             'a 65-character request id' => [static function (PendingRecord $pending): void {
                 $pending->fillRequest(str_repeat('r', 65));
             }, $request],
-            'a 256-character IP address' => [static function (PendingRecord $pending): void {
-                $pending->fillClient(str_repeat('1', 256), null);
-            }, $ip],
-            'an IP address with a NUL' => [static function (PendingRecord $pending): void {
-                $pending->fillClient("203.0.113.7\0", null);
-            }, $ip],
         ];
     }
 
@@ -484,13 +642,47 @@ final class FillsAmbientContextTest extends TestCase
         $pending->fillGuard(str_repeat('é', 64));
         $pending->fillSession(str_repeat('é', 191));
         $pending->fillRequest(str_repeat('é', 64));
-        $pending->fillClient(str_repeat('é', 255), null);
 
         $snapshot = $pending->snapshot();
 
-        self::assertSame([str_repeat('é', 64), str_repeat('é', 191), str_repeat('é', 64), str_repeat('é', 255)], [
-            $snapshot->guard, $snapshot->sessionId, $snapshot->requestId, $snapshot->ip,
+        self::assertSame([str_repeat('é', 64), str_repeat('é', 191), str_repeat('é', 64)], [
+            $snapshot->guard, $snapshot->sessionId, $snapshot->requestId,
         ]);
+    }
+
+    /**
+     * Rows of `[address]`: strings no address could be, each of which an
+     * identifier's check would have refused.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideGarbageAddresses(): iterable
+    {
+        yield from [
+            'empty'           => [''],
+            'over-long'       => [str_repeat('1', 256)],
+            'a NUL'           => ["203.0.113.7\0"],
+            'not valid UTF-8' => ["203.0.113.7\xFF"],
+        ];
+    }
+
+    /**
+     * No address is refused, since a bad one must not lose the record: it is
+     * taken as it comes, and claims the field like any other, for minimising to
+     * store as `null` and diagnose.
+     *
+     * @param  string  $address
+     * @return void
+     */
+    #[DataProvider('provideGarbageAddresses')]
+    public function testFillClientRefusesNoAddress(string $address): void
+    {
+        $pending = new PendingRecord;
+
+        $pending->fillClient($address, null);
+        $pending->fillClient('203.0.113.7', null);
+
+        self::assertSame($address, $pending->snapshot()->ip);
     }
 
     /**
