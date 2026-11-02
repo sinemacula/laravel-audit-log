@@ -21,11 +21,11 @@ use PHPUnit\Framework\TestCase;
  * The same scanner holds the package to the framework: `FRAMEWORK_RULES` are
  * read the same way, with `forbids` and `allows` relative to the framework, so
  * nothing ships a route or a view, nothing reads authentication state, and the
- * domain reaches for no facade or container. Until the contributors exist no
- * class may read authentication state; when they do, `Contributors` joins that
- * rule's `except`, as the one namespace that touches `Auth` and the guards. And
- * no class names another package of the suite: anything under the suite's
- * namespace but outside this package's is refused.
+ * domain reaches for no facade or container. Only the contributors and the
+ * cached user read authentication state, as the one namespace and the one class
+ * that touch `Auth` and the guards. And no class names another package of the
+ * suite: anything under the suite's namespace but outside this package's is
+ * refused.
  *
  * A class names another through an import (`use`, grouped or aliased), a
  * qualified or fully qualified name in its code, or a fully qualified type in a
@@ -58,10 +58,10 @@ final class NamespaceDependenciesTest extends TestCase
     /** @var array<string, array{from: non-empty-list<string>, except: list<string>, forbids: non-empty-list<string>, allows: list<string>}> The rules, by what each holds. */
     private const array RULES = [
         'the enums name nothing of the package but other enums' => [
-            'from'    => ['Records\Enums', 'Definitions\Enums'],
+            'from'    => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Records\Enums', 'Definitions\Enums'],
+            'allows'  => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums'],
         ],
         'the support helpers name nothing of the package but the support helpers, references and the clock contract' => [
             'from'    => ['Support'],
@@ -85,12 +85,12 @@ final class NamespaceDependenciesTest extends TestCase
             'from'    => ['Contracts'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Contracts', 'Definitions\EventDefinition', 'Records\FinalisedRecord', 'Stores\RecordConflictException'],
+            'allows'  => ['Contracts', 'Definitions\EventDefinition', 'Records\FinalisedRecord', 'Records\Contribution', 'Stores\RecordConflictException'],
         ],
-        'the records name nothing of the stores, the read model, the console or the database helpers' => [
+        'the records name nothing of the stores, the read model, the console, the database helpers or anything that runs them' => [
             'from'    => ['Records'],
             'except'  => [],
-            'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database'],
+            'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database', 'Delivery', 'Contributors', 'Runtime', 'Listeners', 'Testing', 'Facades', 'Recorder', 'Http'],
             'allows'  => [],
         ],
         'the record values name nothing of the integrity layer but the finaliser' => [
@@ -135,6 +135,42 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['AuditLogServiceProvider'],
             'allows'  => [],
         ],
+        'only the delivery writes to the store' => [
+            'from'    => ['*'],
+            'except'  => ['Delivery', 'Stores', 'Testing', 'Contracts', 'AuditLogServiceProvider'],
+            'forbids' => ['Contracts\AuditStore'],
+            'allows'  => [],
+        ],
+        'only the testing helpers and the facade name the testing helpers' => [
+            'from'    => ['*'],
+            'except'  => ['Testing', 'Facades'],
+            'forbids' => ['Testing'],
+            'allows'  => [],
+        ],
+        'only the facade names the facade' => [
+            'from'    => ['*'],
+            'except'  => ['Facades'],
+            'forbids' => ['Facades'],
+            'allows'  => [],
+        ],
+        'the runtime names nothing of the recorder, the delivery, the stores or the contributors' => [
+            'from'    => ['Runtime'],
+            'except'  => [],
+            'forbids' => ['Recorder', 'Delivery', 'Stores', 'Contributors', 'Listeners', 'Http'],
+            'allows'  => [],
+        ],
+        'the contributors name nothing of the recorder, the delivery or the stores' => [
+            'from'    => ['Contributors'],
+            'except'  => [],
+            'forbids' => ['Recorder', 'Delivery', 'Stores'],
+            'allows'  => [],
+        ],
+        'the events name nothing of the package but contracts' => [
+            'from'    => ['Events'],
+            'except'  => [],
+            'forbids' => ['*'],
+            'allows'  => ['Contracts'],
+        ],
     ];
 
     /** @var array<string, array{from: non-empty-list<string>, except: list<string>, forbids: non-empty-list<string>, allows: list<string>}> The framework rules, by what each holds. */
@@ -143,16 +179,16 @@ final class NamespaceDependenciesTest extends TestCase
             'from'    => ['*'],
             'except'  => [],
             'forbids' => ['Routing', 'Support\Facades\Route', 'View', 'Contracts\View', 'Support\Facades\View', 'Support\Facades\Blade'],
-            'allows'  => [],
+            'allows'  => ['Routing\Route'],
         ],
-        'no class reads authentication state until the contributors exist' => [
+        'only the contributors and the cached user read authentication state' => [
             'from'    => ['*'],
-            'except'  => [],
+            'except'  => ['Contributors', 'Runtime\CachedUser'],
             'forbids' => ['Auth', 'Contracts\Auth', 'Support\Facades\Auth'],
             'allows'  => [],
         ],
         'the domain uses no facade and no application container' => [
-            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores'],
+            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores', 'Contributors', 'Runtime', 'Events'],
             'except'  => [],
             'forbids' => ['Support\Facades', 'Foundation', 'Container', 'Contracts\Foundation', 'Contracts\Container'],
             'allows'  => [],

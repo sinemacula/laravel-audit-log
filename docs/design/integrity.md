@@ -70,8 +70,8 @@ change to any of them is a new version, never an edit of the old one.
 
 ## Seams Left
 
-- Membership seals, external anchors and `audit-log:verify`, which prove completeness and report every row (M6).
-- Carrying derived keys into a managed ring, and listing the ring's ids for reports (M6).
+- Membership seals, external anchors and `audit-log:verify`, which prove completeness and report every row.
+- Carrying derived keys into a managed ring, and listing the ring's ids for reports.
 
 ## Implementation Anchors
 

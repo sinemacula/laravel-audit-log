@@ -460,13 +460,14 @@ final class PendingRecordTest extends TestCase
 
     /**
      * Each set of mutator rows covers every public method of the builder but
-     * the lifecycle ones, so a new mutator without a row fails here.
+     * the lifecycle ones and its one read, so a new mutator without a row fails
+     * here.
      *
      * @return void
      */
     public function testTheMutatorRowsCoverEveryPublicMutator(): void
     {
-        $lifecycle = ['__construct', 'record', 'snapshot', 'consume', 'isConsumed'];
+        $lifecycle = ['__construct', 'record', 'snapshot', 'consume', 'isConsumed', 'isActorSettled'];
         $public    = (new \ReflectionClass(PendingRecord::class))->getMethods(\ReflectionMethod::IS_PUBLIC);
         $methods   = array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $public);
         $mutators  = array_values(array_diff($methods, $lifecycle));

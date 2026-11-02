@@ -35,6 +35,38 @@ final class ShippedConfigTest extends TestCase
     /** @var string Env var naming the current integrity key. */
     private const string CURRENT_ENV = 'AUDIT_LOG_INTEGRITY_CURRENT';
 
+    /** @var string Env var turning on trust in an inbound request id. */
+    private const string TRUST_REQUEST_ID_ENV = 'AUDIT_LOG_CONTEXT_TRUST_REQUEST_ID';
+
+    /** @var string Env var naming the request id's header. */
+    private const string REQUEST_ID_HEADER_ENV = 'AUDIT_LOG_CONTEXT_REQUEST_ID_HEADER';
+
+    /** @var string Env var turning on trust in an inbound `traceparent`. */
+    private const string TRUST_TRACEPARENT_ENV = 'AUDIT_LOG_CONTEXT_TRUST_TRACEPARENT';
+
+    /** @var string Env var refusing a code with no registered definition. */
+    private const string REQUIRE_REGISTERED_ENV = 'AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED';
+
+    /** @var string Env var naming the source's id. */
+    private const string SOURCE_ID_ENV = 'AUDIT_LOG_SOURCE_ID';
+
+    /** @var string Env var naming the source's region. */
+    private const string SOURCE_REGION_ENV = 'AUDIT_LOG_SOURCE_REGION';
+
+    /** @var list<string> Every env var the shipped file reads. */
+    private const array ENVS = [
+        self::CONNECTION_ENV,
+        self::MAINTENANCE_ENV,
+        self::TABLE_ENV,
+        self::CURRENT_ENV,
+        self::TRUST_REQUEST_ID_ENV,
+        self::REQUEST_ID_HEADER_ENV,
+        self::TRUST_TRACEPARENT_ENV,
+        self::REQUIRE_REGISTERED_ENV,
+        self::SOURCE_ID_ENV,
+        self::SOURCE_REGION_ENV,
+    ];
+
     /**
      * Clear every env var after each test.
      *
@@ -43,7 +75,7 @@ final class ShippedConfigTest extends TestCase
     #[\Override]
     protected function tearDown(): void
     {
-        foreach ([self::CONNECTION_ENV, self::MAINTENANCE_ENV, self::TABLE_ENV, self::CURRENT_ENV] as $env) {
+        foreach (self::ENVS as $env) {
             putenv($env);
         }
 
@@ -151,6 +183,167 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * With nothing configured the actor is read from the default guard.
+     *
+     * @return void
+     */
+    public function testActorGuardsDefaultToNone(): void
+    {
+        self::assertNull($this->config()['actor']['guards']);
+    }
+
+    /**
+     * With nothing in the environment an inbound request id is not believed.
+     *
+     * @return void
+     */
+    public function testTrustRequestIdDefaultsToOff(): void
+    {
+        putenv(self::TRUST_REQUEST_ID_ENV);
+
+        self::assertFalse($this->config()['context']['trust_request_id']);
+    }
+
+    /**
+     * Trust in an inbound request id is read from its env var, raw, for the
+     * settings class to validate.
+     *
+     * @return void
+     */
+    public function testTrustRequestIdIsReadFromTheEnvironment(): void
+    {
+        putenv(self::TRUST_REQUEST_ID_ENV . '=true');
+
+        self::assertTrue($this->config()['context']['trust_request_id']);
+
+        putenv(self::TRUST_REQUEST_ID_ENV . '=yes');
+
+        self::assertSame('yes', $this->config()['context']['trust_request_id']);
+    }
+
+    /**
+     * With nothing in the environment the request id's header is
+     * `X-Request-Id`.
+     *
+     * @return void
+     */
+    public function testTheRequestIdHeaderDefaultsToXRequestId(): void
+    {
+        putenv(self::REQUEST_ID_HEADER_ENV);
+
+        self::assertSame('X-Request-Id', $this->config()['context']['request_id_header']);
+    }
+
+    /**
+     * The request id's header is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheRequestIdHeaderIsReadFromTheEnvironment(): void
+    {
+        putenv(self::REQUEST_ID_HEADER_ENV . '=X-Correlation-Id');
+
+        self::assertSame('X-Correlation-Id', $this->config()['context']['request_id_header']);
+    }
+
+    /**
+     * With nothing in the environment an inbound `traceparent` is not believed.
+     *
+     * @return void
+     */
+    public function testTrustTraceparentDefaultsToOff(): void
+    {
+        putenv(self::TRUST_TRACEPARENT_ENV);
+
+        self::assertFalse($this->config()['context']['trust_traceparent']);
+    }
+
+    /**
+     * Trust in an inbound `traceparent` is read from its env var.
+     *
+     * @return void
+     */
+    public function testTrustTraceparentIsReadFromTheEnvironment(): void
+    {
+        putenv(self::TRUST_TRACEPARENT_ENV . '=true');
+
+        self::assertTrue($this->config()['context']['trust_traceparent']);
+    }
+
+    /**
+     * With nothing in the environment a code needs no registered definition.
+     *
+     * @return void
+     */
+    public function testRequireRegisteredDefaultsToOff(): void
+    {
+        putenv(self::REQUIRE_REGISTERED_ENV);
+
+        self::assertFalse($this->config()['definitions']['require_registered']);
+    }
+
+    /**
+     * Requiring registration is read from its env var.
+     *
+     * @return void
+     */
+    public function testRequireRegisteredIsReadFromTheEnvironment(): void
+    {
+        putenv(self::REQUIRE_REGISTERED_ENV . '=true');
+
+        self::assertTrue($this->config()['definitions']['require_registered']);
+    }
+
+    /**
+     * With nothing in the environment the source has no id of its own, so it
+     * takes a slug of the application's name.
+     *
+     * @return void
+     */
+    public function testTheSourceIdDefaultsToNone(): void
+    {
+        putenv(self::SOURCE_ID_ENV);
+
+        self::assertNull($this->config()['source']['id']);
+    }
+
+    /**
+     * The source's id is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheSourceIdIsReadFromTheEnvironment(): void
+    {
+        putenv(self::SOURCE_ID_ENV . '=billing-eu');
+
+        self::assertSame('billing-eu', $this->config()['source']['id']);
+    }
+
+    /**
+     * With nothing in the environment the source has no region.
+     *
+     * @return void
+     */
+    public function testTheSourceRegionDefaultsToNone(): void
+    {
+        putenv(self::SOURCE_REGION_ENV);
+
+        self::assertNull($this->config()['source']['region']);
+    }
+
+    /**
+     * The source's region is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheSourceRegionIsReadFromTheEnvironment(): void
+    {
+        putenv(self::SOURCE_REGION_ENV . '=eu-west-1');
+
+        self::assertSame('eu-west-1', $this->config()['source']['region']);
+    }
+
+    /**
      * The shipped file has exactly these leaves, in this order, so an added,
      * renamed or dropped leaf fails here.
      *
@@ -173,6 +366,13 @@ final class ShippedConfigTest extends TestCase
             'entries.table',
             'integrity.keys',
             'integrity.current',
+            'actor.guards',
+            'context.trust_request_id',
+            'context.request_id_header',
+            'context.trust_traceparent',
+            'definitions.require_registered',
+            'source.id',
+            'source.region',
         ], $leaves);
     }
 
@@ -183,7 +383,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -191,7 +391,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}} $config */
         $config = require self::CONFIG;
 
         return $config;

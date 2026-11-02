@@ -4,20 +4,48 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog;
 
+use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Foundation\Http\Kernel;
+use Illuminate\Log\Context\Events\ContextDehydrating;
+use Illuminate\Queue\Events\JobExceptionOccurred;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
+use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
+use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
+use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
+use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
+use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
+use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 
 /**
  * Package service provider: registers the package's configuration, its clock,
- * integrity settings, key ring and store, its publishing tags (the
- * configuration and the migrations, which it never loads itself) and the
- * `audit-log:check` console command.
+ * integrity settings, key ring and store, the recorder with its catalogue and
+ * contributors, the scoped runtime state, the listeners that track execution
+ * frames and carry context into jobs, the global middleware that enters an HTTP
+ * frame, its publishing tags (the configuration and the migrations, which it
+ * never loads itself) and the `audit-log:check` console command. It adds no
+ * route.
+ *
+ * Registration of definitions and contributors is frozen once the application
+ * has booted, so a long-lived worker registers once. Booting issues no query
+ * and reads no setting that could stop it, so a malformed one reaches
+ * `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,6 +85,12 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->singletonIf(IntegritySettings::class);
         $this->app->singletonIf(KeyRing::class);
         $this->app->singletonIf(AuditStore::class, DatabaseAuditStore::class);
+        $this->app->singletonIf(EventCatalogue::class);
+        $this->app->singletonIf(ContributorRegistry::class);
+        $this->app->singletonIf(Recorder::class);
+        $this->app->scopedIf(ExecutionFrames::class);
+        $this->app->scopedIf(RequestIdentity::class);
+        $this->app->scopedIf(ReportLatch::class);
     }
 
     /**
@@ -68,6 +102,9 @@ final class AuditLogServiceProvider extends ServiceProvider
     {
         $this->registerPublishing();
         $this->registerCommands();
+        $this->registerListeners();
+        $this->registerHttpFrame();
+        $this->freezeRegistrationOnceBooted();
     }
 
     /**
@@ -110,5 +147,62 @@ final class AuditLogServiceProvider extends ServiceProvider
         }
 
         $this->commands([CheckCommand::class]);
+    }
+
+    /**
+     * Register the listeners that track execution frames and carry context into
+     * queued jobs, wherever the application runs: recording never branches on
+     * the console.
+     *
+     * The events that end a frame are listened to once the application has
+     * booted, after every listener any provider's `boot()` adds. An application
+     * auditing a job's or a command's end is therefore still inside its frame,
+     * and a record it makes there has the job's or the command's origin, name
+     * and carried actor.
+     *
+     * @return void
+     */
+    protected function registerListeners(): void
+    {
+        Event::listen(CommandStarting::class, TrackCommandFrames::class);
+        Event::listen(JobProcessing::class, TrackJobFrames::class);
+        Event::listen(ContextDehydrating::class, CarryContextIntoJobs::class);
+
+        $this->app->booted(static function (): void {
+            Event::listen(CommandFinished::class, TrackCommandFrames::class);
+            Event::listen([JobProcessed::class, JobFailed::class, JobExceptionOccurred::class], TrackJobFrames::class);
+        });
+    }
+
+    /**
+     * Put the middleware that enters an HTTP frame first on the kernel's global
+     * stack, so a record in any other global middleware has its request.
+     *
+     * @return void
+     */
+    protected function registerHttpFrame(): void
+    {
+        $this->callAfterResolving(HttpKernel::class, static function (mixed $kernel): void {
+
+            if (!$kernel instanceof Kernel) {
+                return;
+            }
+
+            $kernel->prependMiddleware(EnterHttpFrame::class);
+        });
+    }
+
+    /**
+     * Freeze the catalogue and the contributors once the application has
+     * booted, after which each refuses any further registration.
+     *
+     * @return void
+     */
+    protected function freezeRegistrationOnceBooted(): void
+    {
+        $this->app->booted(static function (Application $app): void {
+            $app->make(EventCatalogue::class)->freeze();
+            $app->make(ContributorRegistry::class)->freeze();
+        });
     }
 }

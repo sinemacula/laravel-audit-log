@@ -53,7 +53,7 @@ final class EventCatalogueTest extends TestCase
         self::assertTrue($definition->equals(EventDefinition::permissive($code)));
         self::assertSame(FieldHandling::RETAIN, $definition->unlisted);
         self::assertFalse((new EventCatalogue)->isRegistered($code));
-        self::assertTrue((new EventCatalogue(false))->definitionFor($code)->equals($definition));
+        self::assertTrue((new EventCatalogue)->definitionFor($code, false)->equals($definition));
     }
 
     /**
@@ -64,14 +64,14 @@ final class EventCatalogueTest extends TestCase
      */
     public function testAnUnregisteredCodeIsRefusedWhenRegistrationIsRequired(): void
     {
-        $catalogue = new EventCatalogue(requireRegistered: true);
+        $catalogue = new EventCatalogue;
 
         $catalogue->define(InvoiceActivity::class);
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('The event code `user.suspended` is not registered, and unregistered codes are refused.');
 
-        $catalogue->definitionFor(EventCode::of('user.suspended'));
+        $catalogue->definitionFor(EventCode::of('user.suspended'), requireRegistered: true);
     }
 
     /**
@@ -82,12 +82,59 @@ final class EventCatalogueTest extends TestCase
      */
     public function testARegisteredCodeIsServedWhenRegistrationIsRequired(): void
     {
-        $catalogue  = new EventCatalogue(requireRegistered: true);
+        $catalogue  = new EventCatalogue;
         $definition = EventDefinition::for('invoice.approved')->retain('amount');
 
         $catalogue->define($definition);
 
-        self::assertSame($definition, $catalogue->definitionFor(EventCode::of('invoice.approved')));
+        self::assertSame($definition, $catalogue->definitionFor(EventCode::of('invoice.approved'), requireRegistered: true));
+    }
+
+    /**
+     * Whether registration is required is asked on each call, so one catalogue,
+     * resolved once at boot, answers each capture by what that capture asks: a
+     * refusal leaves nothing behind, and the same code then takes the default.
+     *
+     * @return void
+     */
+    public function testRegistrationIsRequiredPerCall(): void
+    {
+        $catalogue = new EventCatalogue;
+        $code      = EventCode::of('user.suspended');
+
+        self::assertTrue($catalogue->definitionFor($code)->equals(EventDefinition::permissive($code)));
+
+        try {
+            $catalogue->definitionFor($code, true);
+            self::fail('Expected the unregistered code to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('The event code `user.suspended` is not registered, and unregistered codes are refused.', $exception->getMessage());
+        }
+
+        self::assertTrue($catalogue->definitionFor($code)->equals(EventDefinition::permissive($code)));
+        self::assertFalse($catalogue->isRegistered($code));
+    }
+
+    /**
+     * Freezing the catalogue changes nothing about how a code is served, so a
+     * capture after boot reads it as one during boot would.
+     *
+     * @return void
+     */
+    public function testAFrozenCatalogueStillServesEachCallAsAsked(): void
+    {
+        $catalogue  = new EventCatalogue;
+        $definition = EventDefinition::for('invoice.approved');
+
+        $catalogue->define($definition);
+        $catalogue->freeze();
+
+        self::assertSame($definition, $catalogue->definitionFor(EventCode::of('invoice.approved'), true));
+        self::assertTrue($catalogue->definitionFor(EventCode::of('user.suspended'))->equals(EventDefinition::permissive(EventCode::of('user.suspended'))));
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $catalogue->definitionFor(EventCode::of('user.suspended'), true);
     }
 
     /**

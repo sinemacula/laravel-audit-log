@@ -36,9 +36,18 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   model's attributes. A model without a key is refused, so an unsaved model is never referenced.
 - In the envelope a reference is a pair of columns (`actor_type` and `actor_id`, and likewise for the subject, the
   principal and the tenant), both set or both `null`, never an empty string.
-- `by(null)` is an explicit "no actor" and differs from not calling `by()`: a contributor fills an actor only when none
-  was given, so `by(null)` stays `null` while an unset actor may be filled. `asPrincipal(null)` and `forTenant(null)`
-  work the same way. Explicit values beat filled ones in either order, and the first contributor to fill a field wins.
+- `by(null)` is an explicit "no actor" and differs from not calling `by()`: `Contribution::fillActor()` fills an actor
+  only when none was given, so `by(null)` stays `null` while an unset actor may be filled. `asPrincipal(null)` and
+  `forTenant(null)` work the same way. Explicit values beat filled ones in either order, and the first contributor to
+  fill a field wins.
+- A contributor never sees the builder. It is given a `Contribution`, a narrow view (`@api`) that holds nothing of its
+  own and delegates to the builder: the fillers (`fillActor()`, `fillPrincipal()`, `fillTenant()`, `fillGuard()`,
+  `fillSession()`, `fillRequest()`, `fillClient()`, `fillOrigin()`, `fillContext()`) and the reads `code()`,
+  `subject()`, `actor()`, `hasActor()` and `isActorSettled()`. It cannot record the record, choose its timing, or read
+  its properties or note. The builder's own fillers are `@internal`, and an application never calls them.
+- A filler given `null` changes nothing and leaves the field open for the next contributor; `fillContext()` adds only
+  the keys the context does not hold yet; and a malformed value is refused whether or not it would have been used.
+  `hasActor()` is false for no actor yet and for `by(null)`, which `isActorSettled()` tells apart.
 - A captured record always has an origin: `http`, `console` or `queue` (`Origin`). Its provenance is always `captured`
   (`Provenance::CAPTURED`), which says the application asserted the activity, not that the claim is true; `imported`
   belongs to records another source asserted. No public method takes a provenance, and the import fields
@@ -57,7 +66,7 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   `record()` included, is a `\LogicException`. A builder made without a recorder can be described but not recorded.
   Nothing is written without `record()`.
 - A builder has one timing (`after_commit`, `immediate` or `transactional`), and `failClosed()` never combines with
-  `afterCommit()`. What each timing does when the record is written belongs to the write path.
+  `afterCommit()`. What each timing does when the record is written is in `outcomes.md`.
 - A programming error (an invalid code, reason, reference, identifier or payload, a reused builder, a conflicting
   timing) is an SPL exception, `\InvalidArgumentException` or `\LogicException`, thrown whatever the configured
   failure policy: it is the caller's bug, not a write failure to contain.
@@ -69,10 +78,13 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   `correlatedWith()` a namespaced id such as `app:ticket-123`, `withProperties()`, `withNote()`, and an outcome.
 - Each value is validated and normalised as it is given, so the builder's properties and context hold only strings,
   integers, booleans, `null`, lists and maps, and every other field a validated value.
-- The package's contributors fill the gaps the application left: the actor, principal and tenant, the guard, the
-  session reference, the request and trace ids, the IP address and user agent, the origin and the context.
-- `record()` hands the builder to the recorder, which builds the `AuditRecord` from it with the code's event version
-  and category, the time it occurred and the application's source id and region, and returns it.
+- Contributors fill the gaps the application left, each through a `Contribution`. The package's defaults fill the
+  origin, the request and trace ids, the IP address and user agent, the actor and its guard, and the context (see
+  `context-resolution.md`). The application's own, registered with `AuditLog::contribute()`, then fill whatever is left,
+  such as the principal, the tenant or the session reference.
+- `record()` hands the builder to the recorder, which runs the contributors, builds the `AuditRecord` from it with the
+  code's event version and category, the time it occurred and the application's source id and region, delivers it
+  according to its timing (see `outcomes.md`) and returns it.
 
 ## Failure / Edge Cases
 
@@ -179,6 +191,8 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 
 - `src/Records/AuditRecord.php`: `fromPending()`, `toArray()`.
 - `src/Records/PendingRecord.php`: `record()`, `NOTE_MAX_BYTES`; `src/Records/PendingSnapshot.php`.
+- `src/Records/Contribution.php`: `fillActor()`, `isActorSettled()`; `src/Contracts/ContextContributor.php`:
+  `contribute()`.
 - `src/Records/Concerns/DescribesTheActivity.php`, `src/Records/Concerns/SetsTheOutcome.php`,
   `src/Records/Concerns/ChoosesDelivery.php`, `src/Records/Concerns/FillsAmbientContext.php`.
 - `src/Records/EventCode.php`: `MAX_BYTES`, `RESERVED_PREFIX`; `src/Records/RecordVersion.php`: `CURRENT`, `check()`.
@@ -213,6 +227,10 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testFailClosedAfterCommitIsALogicError`
 - `tests/Unit/Records/Concerns/FillsAmbientContextTest.php` `testAFillerNeverReplacesAGivenField`,
   `testAnExplicitValueReplacesAFilledOne`, `testFillersRefuseValuesOutsideTheirColumns`
+- `tests/Unit/Records/ContributionTest.php` `testEachFillerFillsTheRecord`, `testAnExplicitValueIsNeverReplaced`,
+  `testTheFirstContributorToFillWins`, `testAMalformedValueIsRefusedByTheBuilder`, `testReadsTheCodeAndSubject`,
+  `testHasActorIsFalseForNoActorAndForByNull`, `testIsActorSettledTellsByNullFromNoActor`,
+  `testExposesNoWayToRecordOrChooseTiming`
 - `tests/Unit/Records/PendingRecordTest.php` `testNothingIsRecordedWithoutRecord`, `testASecondRecordIsALogicError`,
   `testRecordWithoutARecorderIsALogicError`, `testNoPublicMethodAcceptsAProvenance`,
   `testPermutedCallOrdersGiveEqualRecords`, `testProgrammingErrorsAreSplExceptions`
@@ -234,3 +252,4 @@ Update this note when any of the following change:
 - a normalisation or sanitising rule, or a marker's text
 - the note cap, or where a note is stored
 - what the builder refuses, or when it is used up
+- what a `Contribution` can fill or read

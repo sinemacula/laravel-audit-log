@@ -35,6 +35,10 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  * captured record; the package's recorder passes its own write method. A
  * builder made without one can be described and inspected but not recorded.
  *
+ * Callers see this builder and contributors see `Contribution`, a narrow view
+ * of it. The `fill*` methods the view delegates to are `@internal`: public only
+ * so the view can reach them, and an application never calls them.
+ *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

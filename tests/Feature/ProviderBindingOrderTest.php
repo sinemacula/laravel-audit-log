@@ -14,8 +14,14 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
+use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
+use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
+use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 use Tests\Fixtures\Support\FrozenClock;
 
@@ -45,6 +51,12 @@ final class ProviderBindingOrderTest extends TestCase
             AuditStore::class,
             KeyRing::class,
             IntegritySettings::class,
+            Recorder::class,
+            EventCatalogue::class,
+            ContributorRegistry::class,
+            ExecutionFrames::class,
+            RequestIdentity::class,
+            ReportLatch::class,
         ];
 
         foreach ($abstracts as $abstract) {

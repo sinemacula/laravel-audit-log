@@ -74,4 +74,86 @@ return [
         'current' => env('AUDIT_LOG_INTEGRITY_CURRENT'),
     ],
 
+    /*
+    |---------------------------------------------------------------------------
+    | Actor
+    |---------------------------------------------------------------------------
+    |
+    | The guards the ambient actor is read from, in order: `null` for the
+    | default guard (the default), or a non-empty list of guard names of 1 to 64
+    | characters. The first guard holding a user decides, and the actor comes
+    | from what it already holds, never from `user()`. Any other value fails
+    | closed when it is read, and `audit-log:check` reports it, as it does a
+    | name `auth.guards` does not configure. It may change on any deploy.
+    |
+    */
+
+    'actor' => [
+        'guards' => null,
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Context
+    |---------------------------------------------------------------------------
+    |
+    | Whether a request id or a `traceparent` sent by the edge is believed. Both
+    | flags are `false` by default and must be real booleans. Trusting a header
+    | needs both its flag and a configured `TrustProxies`, and
+    | `isFromTrustedProxy()` checks only the immediate peer, so the trusted edge
+    | must overwrite or validate these headers. A record or a dispatch in global
+    | middleware ahead of `TrustProxies` runs before the proxy is trusted, so it
+    | gets a generated id, kept for the rest of the request. An untrusted,
+    | repeated or malformed header is ignored and never kept. `request_id_header`
+    | names the request id's header (`X-Request-Id` by default), 1 to 64
+    | characters of an RFC 9110 token. A malformed setting fails closed when it
+    | is read, and `audit-log:check` reports it. They may change on any deploy.
+    |
+    */
+
+    'context' => [
+        'trust_request_id'  => env('AUDIT_LOG_CONTEXT_TRUST_REQUEST_ID', false),
+        'request_id_header' => env('AUDIT_LOG_CONTEXT_REQUEST_ID_HEADER', 'X-Request-Id'),
+        'trust_traceparent' => env('AUDIT_LOG_CONTEXT_TRUST_TRACEPARENT', false),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Definitions
+    |---------------------------------------------------------------------------
+    |
+    | Whether a code with no registered definition is refused: `false` by
+    | default, so it takes the permissive definition, or `true`, so it is a
+    | programming error. It must be a real boolean, read on every capture;
+    | anything else fails closed there, never at boot, and `audit-log:check`
+    | reports it. Turn it on once every code the application records is
+    | registered.
+    |
+    */
+
+    'definitions' => [
+        'require_registered' => env('AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED', false),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Source
+    |---------------------------------------------------------------------------
+    |
+    | Which deployment a record came from. `id` is 1 to 64 characters with no
+    | control characters, kept as given; `null` or empty, the default, takes a
+    | slug of `app.name`. `region` is `null` or empty for none, the default, or
+    | 1 to 32 characters with no control characters. A malformed value fails
+    | closed when it is read, as does an `app.name` that gives no slug, and
+    | `audit-log:check` reports each. Each record keeps the values it was
+    | written with, so changing them on a deploy leaves earlier rows as they
+    | are.
+    |
+    */
+
+    'source' => [
+        'id'     => env('AUDIT_LOG_SOURCE_ID'),
+        'region' => env('AUDIT_LOG_SOURCE_REGION'),
+    ],
+
 ];

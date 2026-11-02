@@ -2,12 +2,12 @@
 
 ## Purpose
 
-This note records what an event definition says about a code, and how definitions are registered: the payload
-contract's version, the category stored on every row, the field rules that decide what of a payload is kept, how a
-path names a field and which rule wins when several match, who owns an encrypted field, and what a code no one defined
-gets. Definitions are the application's statement of what each event may carry, so a registered code keeps only what
-its rules allow, and an ambiguous or contradictory definition is refused while the application boots rather than
-discovered in the data.
+This note records what an event definition says about a code, and how definitions are registered: the payload contract's
+version, the category stored on every row, the field rules that decide what of a payload is kept, how a path names a
+field and which rule wins when several match, who owns an encrypted field, what a code no one defined gets, and what a
+disclosure's definition must keep. Definitions are the application's statement of what each event may carry, so a
+registered code keeps only what its rules allow, and an ambiguous or contradictory definition is refused while the
+application boots rather than discovered in the data.
 
 ## Invariants
 
@@ -26,7 +26,10 @@ discovered in the data.
   encrypted, since an encrypted field names its owner.
 - An unregistered code takes the permissive default (`EventDefinition::permissive()`): version 1, `general`, no rules,
   and unlisted fields retained, so recording works with no set-up. `definitions.require_registered` (default `false`)
-  makes an unregistered code a programming error instead; the catalogue's `requireRegistered` flag carries it.
+  makes an unregistered code a programming error instead.
+- `definitions.require_registered` is read on every capture, through `DefinitionSettings`, and handed to
+  `definitionFor()` as an argument. The catalogue keeps no flag: it is resolved at boot to be frozen, and a malformed
+  setting must not stop an application booting before `audit-log:check` can report it. Only a real boolean passes.
 - Every `encrypt` rule names its owner: `KeyOwner::ACTOR` (`actor`), `KeyOwner::SUBJECT` (`subject`), or the path of a
   property holding a reference. An owner path names one property, without `*`, and is never the encrypted field
   itself. When the owner is absent or has no key, the field is dropped and diagnosed, never stored in plaintext.
@@ -36,11 +39,18 @@ discovered in the data.
 - Two rules for one path are refused unless they are identical, which is kept once. A rule that a terminal rule with
   fewer segments may cover is unreachable and refused, in whichever order the two are added.
 - Rules are kept in path order, so two definitions built from the same parts in any order are equal (`equals()`).
-- Definitions are registered while the application boots, and only then. Registering an identical definition again
-  changes nothing; a different definition for a registered code is refused whichever is registered first; and an enum
-  registers every case's definition or, when any is refused, none of them.
+- Definitions are registered while the application boots, and only then: the package freezes the catalogue once the
+  application has booted, so a long-lived worker registers once. Registering an identical definition again changes
+  nothing; a different definition for a registered code is refused whichever is registered first; and an enum registers
+  every case's definition or, when any is refused, none of them.
+- A disclosure's definition must retain `purpose`, as `EventDefinition::for($this)->retain('purpose')` does, because
+  `accessed()` keeps why something was disclosed in `properties.purpose`. `accessed()` refuses a code whose registered
+  definition resolves `purpose` to any other handling, by a rule or by `unlisted`. The check is `accessed()`'s alone:
+  only it knows a code is a disclosure, so registering such a definition is not refused and `event()` under that code
+  is unaffected. An unregistered code is accepted, since the permissive default retains every field.
 - A definition describes how a payload is handled; applying the rules to a payload belongs to the redaction pipeline,
-  which never applies them to the package's own metadata (`properties._audit`).
+  which never applies them to the package's own metadata (`properties._audit`). Until it lands, a record keeps its
+  payload as given.
 
 ## Success Path
 
@@ -71,6 +81,15 @@ enum InvoiceActivity: string implements DefinesAuditEvents
 }
 ```
 
+- The application registers the enum from a service provider's `boot()`:
+
+```php
+public function boot(): void
+{
+    AuditLog::define(InvoiceActivity::class);
+}
+```
+
 - The catalogue (`EventCatalogue`) asks every case for its definition, checks them all, then registers them.
 - When a record is made, the catalogue gives its code's definition, or the permissive default for a code no one
   defined, and the record takes its event version and category from it.
@@ -92,8 +111,14 @@ enum InvoiceActivity: string implements DefinesAuditEvents
   `\InvalidArgumentException`, and none of the enum's cases is registered.
 - A conflicting definition for a registered code: `\LogicException`, and none of the enum's cases is registered.
 - Registering after the application has booted (the catalogue is frozen): `\LogicException`, checked before anything
-  else, so a long-running worker never registers twice.
-- An unregistered code while registration is required: `\InvalidArgumentException`.
+  else, so a long-running worker never registers twice. A request is refused every time, however many came before it.
+- An unregistered code while registration is required: `\InvalidArgumentException` from `record()`, before the builder
+  is used, so it stays usable and nothing is written.
+- A `definitions.require_registered` that is not a real boolean, a set `null` included: every capture fails closed with
+  an `\InvalidArgumentException` naming the key and never the value. Booting never reads it, so the application still
+  boots, and `audit-log:check` reports it.
+- `accessed()` under a code whose registered definition does not retain `purpose`: `\LogicException`, and no builder is
+  made, so nothing is written.
 - A key containing `.` or `*` cannot be written as a literal segment, and is reachable only through `*`.
 
 ## Paths and Precedence
@@ -134,10 +159,16 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
 - The catalogue holds one definition per code. An enum is registered whole: its backing type is checked first, then
   every case's definition is collected and checked against its case's code and against what is registered, and only
   then is anything stored.
-- The application registers its definitions while it boots; the package freezes the catalogue once the application
-  has booted, and freezing again changes nothing. A frozen catalogue still serves definitions.
+- The application registers its definitions from a provider's `boot()`, with `AuditLog::define()`. The package freezes
+  the catalogue in a `booted()` callback, and freezing again changes nothing. A frozen catalogue still serves
+  definitions.
+- An application's own `booted()` callback is not the place to register, because whether it runs before the freeze
+  depends on the order the callbacks were added in.
+- Under Octane the catalogue is made once per worker: what was registered at boot serves every request, and a request
+  can register nothing.
 - `definitionFor()` serves a registered definition, the permissive default for an unregistered code, or refuses the
-  code when registration is required.
+  code when the call says registration is required. Nothing of that is kept between calls, so a setting one request
+  changes reaches its own captures and no later request's.
 
 ## Implementation Anchors
 
@@ -149,6 +180,9 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
 - `src/Definitions/Enums/KeyOwner.php`: `ACTOR`, `SUBJECT`.
 - `src/Contracts/DefinesAuditEvents.php`.
 - `src/Definitions/EventCatalogue.php`: `define()`, `definitionFor()`, `freeze()`.
+- `src/Definitions/DefinitionSettings.php`: `requiresRegistered()`, `validate()`.
+- `src/Recorder.php`: `define()`, `accessed()`.
+- `src/AuditLogServiceProvider.php`: `freezeRegistrationOnceBooted()`.
 
 ## Authoritative Tests
 
@@ -172,7 +206,21 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
   `testAnUnregisteredCodeIsRefusedWhenRegistrationIsRequired`, `testDefinesEveryCaseOfAnEnum`,
   `testAnIdenticalRegistrationRepeatedIsIdempotent`, `testAConflictingDefinitionThrowsInEitherOrder`,
   `testAConflictingEnumRegistersNoneOfItsCases`, `testRefusesACaseThatDefinesAnotherCode`,
-  `testRefusesAnIntegerBackedDefiningEnum`, `testDefiningAfterFreezingThrows`, `testDefinitionsAreServedAfterFreezing`
+  `testRefusesAnIntegerBackedDefiningEnum`, `testDefiningAfterFreezingThrows`, `testDefinitionsAreServedAfterFreezing`,
+  `testRegistrationIsRequiredPerCall`, `testAFrozenCatalogueStillServesEachCallAsAsked`, `testTheFrozenCheckComesFirst`,
+  `testFreezingIsIdempotentAndReported`
+- `tests/Unit/Definitions/DefinitionSettingsTest.php` `testDefaultsToFalse`, `testReadsTheSettingOnEveryCall`,
+  `testRefusesAnythingButABoolean`, `testNoMessageHoldsTheValue`
+- `tests/Feature/RecorderTest.php` `testAnUnregisteredCodeIsRefusedWhenRegistrationIsRequired`,
+  `testAMalformedRequireRegisteredFailsClosed`, `testARegisteredDisclosureDefinitionThatRetainsThePurposeIsAccepted`,
+  `testARegisteredDisclosureDefinitionThatDoesNotRetainThePurposeIsRefused`,
+  `testAnEnumDefinitionThatDoesNotRetainThePurposeIsRefused`, `testAnUnregisteredDisclosureCodeIsAccepted`,
+  `testDefineIsRefusedAfterBoot`
+- `tests/Feature/Recording/AccessRecordsTest.php` `testAPurposeOfARegisteredDefinitionIsStored`
+- `tests/Feature/AuditLogServiceProviderTest.php` `testRegistrationIsFrozenOnceBooted`,
+  `testRegistrationInAProvidersBootIsAccepted`, `testAMalformedSettingDoesNotStopBoot`
+- `tests/Integration/Octane/RegistrationRequestsTest.php` `testDefinitionsRegisteredAtBootServeEveryRequest`,
+  `testDefineInARequestIsRefused`, `testRequiringRegistrationInOneRequestDoesNotReachTheNext`
 
 ## Change Triggers
 
@@ -184,3 +232,5 @@ Update this note when any of the following change:
 - how the winning rule is chosen, or which rules are unreachable
 - what an unregistered code gets, or when it is refused
 - when definitions may be registered, or what a conflict is
+- when `definitions.require_registered` is read, or what a malformed value does
+- what a disclosure's definition must retain

@@ -133,8 +133,9 @@ final class StoredTime
     }
 
     /**
-     * The value parsed in UTC under the format, with every field reset first,
-     * or `null` unless formatting the result gives the value back.
+     * The value parsed in UTC under the format, which names every field down to
+     * the microsecond, or `null` unless formatting the result gives the value
+     * back.
      *
      * @param  string  $format
      * @param  string  $value
@@ -142,7 +143,7 @@ final class StoredTime
      */
     private static function parse(string $format, string $value): ?\DateTimeImmutable
     {
-        $parsed = \DateTimeImmutable::createFromFormat('!' . $format, $value, new \DateTimeZone('UTC'));
+        $parsed = \DateTimeImmutable::createFromFormat($format, $value, new \DateTimeZone('UTC'));
 
         return $parsed !== false && $parsed->format($format) === $value ? $parsed : null;
     }

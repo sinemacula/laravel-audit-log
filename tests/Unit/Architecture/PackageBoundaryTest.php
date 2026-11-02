@@ -13,8 +13,10 @@ use PHPUnit\Framework\TestCase;
  * which class names which: no frontend (no route, view, component or asset
  * directory, and no provider that loads one), no other package of the suite
  * required, named or configured, the quality tools' dependencies in step with
- * the package's, and every type tagged as public surface or internal with the
- * standard author and copyright lines.
+ * the package's, every type tagged as public surface or internal with the
+ * standard author and copyright lines, no branch on the console outside the
+ * provider, no static property to outlive a request, and no call that makes a
+ * guard load a user.
  *
  * Each scanner reads tokens or text rather than parsing, so each has a
  * self-test that feeds it a fixed source and pins exactly what it finds.
@@ -65,6 +67,18 @@ final class PackageBoundaryTest extends TestCase
 
     /** @var string The standard copyright line. */
     private const string COPYRIGHT = '/^\s*\* @copyright\s+2026 Sine Macula Limited$/m';
+
+    /** @var string The only file allowed to ask whether the application runs in the console. */
+    private const string PROVIDER = 'src/AuditLogServiceProvider.php';
+
+    /** @var string The package's root namespace. */
+    private const string PACKAGE = 'SineMacula\Laravel\AuditLog\\';
+
+    /** @var list<string> The directory and the file that touch a guard. */
+    private const array GUARD_READERS = ['src/Contributors/', 'src/Runtime/CachedUser.php'];
+
+    /** @var list<string> The other `GuardHelpers` methods that call `user()`. */
+    private const array USER_LOADERS = ['id', 'check', 'guest', 'authenticate'];
 
     /**
      * Rows of `[path]`: the directories a frontend would ship in.
@@ -443,6 +457,142 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
+     * Recording never branches on the console: only the provider asks, to
+     * publish its files and register its command, and the origin comes from the
+     * execution frames.
+     *
+     * @return void
+     */
+    public function testNoClassOutsideTheProviderAsksWhetherItRunsInTheConsole(): void
+    {
+        $asks = [];
+
+        foreach (self::files(['src'], 'php') as $file) {
+            foreach ($file === self::PROVIDER ? [] : self::memberCallsIn(self::contents($file), ['runningInConsole']) as $call) {
+                $asks[] = "{$file} calls {$call}";
+            }
+        }
+
+        self::assertSame([], $asks);
+    }
+
+    /**
+     * The scanner finds the call on an object, through a nullsafe operator and
+     * on a class, in any case; and nothing for a comment, a string or a
+     * declaration of the same name.
+     *
+     * @return void
+     */
+    public function testTheConsoleScannerFindsEveryCall(): void
+    {
+        $source = <<<'PHP'
+            <?php
+
+            // $this->app->runningInConsole();
+            final class Example
+            {
+                public function runningInConsole(): string
+                {
+                    $this->app->runningInConsole();
+                    $this->app?->RUNNINGINCONSOLE();
+                    App::runningInConsole();
+
+                    return '$this->app->runningInConsole()';
+                }
+            }
+            PHP;
+
+        self::assertSame(['runningInConsole', 'runningInConsole', 'runningInConsole'], self::memberCallsIn($source, ['runningInConsole']));
+    }
+
+    /**
+     * No class of the package declares a static property, so nothing survives
+     * from one Octane request to the next outside the container. Each property
+     * is judged by its declaring class, so a parent's statics, such as those of
+     * Laravel's `Facade`, are not counted.
+     *
+     * @return void
+     */
+    public function testNoClassDeclaresAStaticProperty(): void
+    {
+        $declared = [];
+
+        foreach (self::files(['src'], 'php') as $file) {
+
+            $class = self::PACKAGE . str_replace('/', '\\', substr($file, strlen('src/'), -strlen('.php')));
+
+            self::assertTrue(class_exists($class) || interface_exists($class) || trait_exists($class) || enum_exists($class), "{$file} does not declare {$class}.");
+
+            $declared = [...$declared, ...self::staticPropertiesOf($class)];
+        }
+
+        self::assertSame([], $declared);
+        self::assertContains('Illuminate\Support\Facades\Facade::$app', self::staticPropertiesOf('Illuminate\Support\Facades\Facade'));
+    }
+
+    /**
+     * No class calls `user()` on anything, since it loads a user and dispatches
+     * `Authenticated`. And where a guard is touched, none calls the helpers
+     * that call it on a `GuardHelpers` guard.
+     *
+     * @return void
+     */
+    public function testNoClassCallsAGuardsUser(): void
+    {
+        $calls = [];
+
+        foreach (self::files(['src'], 'php') as $file) {
+
+            $names = self::touchesAGuard($file) ? ['user', ...self::USER_LOADERS] : ['user'];
+
+            foreach (self::memberCallsIn(self::contents($file), $names) as $call) {
+                $calls[] = "{$file} calls {$call}";
+            }
+        }
+
+        self::assertSame([], $calls);
+    }
+
+    /**
+     * The scanner finds each form of the call: on a property, through a
+     * nullsafe operator, on a class, in any case, and as a first-class
+     * callable; and nothing for a comment, a string, a declaration, a read of a
+     * property of the same name, or a method with a longer name.
+     *
+     * @return void
+     */
+    public function testTheGuardCallScannerFindsEveryForm(): void
+    {
+        $source = <<<'PHP'
+            <?php
+
+            // $guard->user();
+            /** $guard->check() */
+            final class Example
+            {
+                public function user(): string
+                {
+                    $guard->user();
+                    $this->guard?->USER();
+                    Auth::user();
+                    $guard->user(...);
+                    $guard->id();
+                    $guard->check();
+                    $guard->guest();
+                    $guard->authenticate();
+                    $read = $bound->user;
+                    $guard->username();
+                    $guard->hasUser();
+
+                    return '$guard->user()';
+                }
+            }
+            PHP;
+
+        self::assertSame(['user', 'user', 'user', 'user', 'id', 'check', 'guest', 'authenticate'], self::memberCallsIn($source, ['user', ...self::USER_LOADERS]));
+    }
+
+    /**
      * The files under the directories that exist, relative to the root and
      * sorted, keeping only those with the extension when one is given.
      *
@@ -797,5 +947,77 @@ final class PackageBoundaryTest extends TestCase
         $meaningful = static fn (array|string $token): bool => !is_array($token) || !in_array($token[0], $ignored, true);
 
         return array_values(array_filter(token_get_all($source), $meaningful));
+    }
+
+    /**
+     * The calls of any of the named methods the source makes on an object or a
+     * class, each as it is named here, in order.
+     *
+     * @param  string  $source
+     * @param  list<string>  $names
+     * @return list<string>
+     */
+    private static function memberCallsIn(string $source, array $names): array
+    {
+        $wanted = array_combine(array_map(strtolower(...), $names), $names);
+        $tokens = self::tokens($source);
+        $calls  = [];
+
+        foreach ($tokens as $index => $token) {
+
+            $before = $tokens[$index - 1] ?? null;
+
+            if (!is_array($token) || $token[0] !== T_STRING || !isset($wanted[strtolower($token[1])]) || ($tokens[$index + 1] ?? null) !== '(') {
+                continue;
+            }
+
+            if (!is_array($before) || !in_array($before[0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON], true)) {
+                continue;
+            }
+
+            $calls[] = $wanted[strtolower($token[1])];
+        }
+
+        return $calls;
+    }
+
+    /**
+     * Whether the file is one of those that touch a guard.
+     *
+     * @param  string  $file
+     * @return bool
+     */
+    private static function touchesAGuard(string $file): bool
+    {
+        foreach (self::GUARD_READERS as $reader) {
+            if (str_starts_with($file, $reader)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The static properties the class itself declares, named with it.
+     *
+     * @param  string  $class
+     * @return list<string>
+     *
+     * @throws \ReflectionException
+     */
+    private static function staticPropertiesOf(string $class): array
+    {
+        $declared = [];
+
+        foreach ((new \ReflectionClass($class))->getProperties(\ReflectionProperty::IS_STATIC) as $property) {
+            if ($property->getDeclaringClass()->getName() !== $class) {
+                continue;
+            }
+
+            $declared[] = $class . '::$' . $property->getName();
+        }
+
+        return $declared;
     }
 }

@@ -26,8 +26,8 @@ use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
  * identifier and map checks the builder's other methods share.
  *
  * The methods sit in a trait only so the builder stays within the number of
- * methods one class may declare; the package's contributors call them, and an
- * application never needs to.
+ * methods one class may declare; the package's recorder and `Contribution` call
+ * the fillers, and an application never does.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -329,6 +329,23 @@ trait FillsAmbientContext
         $this->assertUsable();
 
         $this->context += self::mapOf(ValueNormaliser::normalise($context), 'Context is a map of names to values, not a list.');
+    }
+
+    /**
+     * Whether the actor is given explicitly or filled, so no filler can change
+     * it, `by(null)` included.
+     *
+     * @return bool
+     *
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function isActorSettled(): bool
+    {
+        $this->assertUsable();
+
+        return $this->isGiven('actor');
     }
 
     /**
