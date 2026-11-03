@@ -114,7 +114,7 @@ final class BulkOperationTest extends TestCase
         self::assertSame(['artifact_id' => $artifact['id'], 'digest' => hash('sha256', $canonical), 'count' => self::SUBJECTS], $descriptor);
         self::assertSame($artifact['digest'], hash('sha256', $canonical));
         self::assertSame(Manifest::encode($members), $canonical);
-        self::assertSame($descriptor, self::storedProperties()['_audit']['manifest'] ?? null);
+        self::assertSame(self::keysSorted($descriptor), self::keysSorted(self::storedProperties()['_audit']['manifest'] ?? null));
     }
 
     /**
@@ -323,5 +323,28 @@ final class BulkOperationTest extends TestCase
         $this->beforeApplicationDestroyed(static function (): void {
             Schema::connection(self::CONNECTION)->dropIfExists(Tag::TABLE);
         });
+    }
+
+    /**
+     * The value with every map's keys sorted, at any depth, so a map read back
+     * from a JSON column compares the same on every engine: MySQL keeps a JSON
+     * object's keys in an order of its own.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $value
+     * @return mixed
+     */
+    private static function keysSorted(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        if (!array_is_list($value)) {
+            ksort($value, SORT_STRING);
+        }
+
+        return array_map(self::keysSorted(...), $value);
     }
 }

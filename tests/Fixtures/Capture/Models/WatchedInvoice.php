@@ -26,6 +26,7 @@ use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
  *
  * @inheritable
  *
+ * @property int $id
  * @property ?string $number
  * @property ?int $amount
  * @property ?string $secret_note

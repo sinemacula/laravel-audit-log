@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @internal
  *
+ * @property int $id
  * @property ?string $description
  * @property ?int $quantity
  * @property ?string $deleted_at

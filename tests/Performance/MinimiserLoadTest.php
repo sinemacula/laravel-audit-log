@@ -204,7 +204,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
 
     /**
      * Each of a hundred thousand keys is costed once and sorted once, the keys
-     * bytewise lowest going first, since they all cost the same: the 521 that
+     * bytewise lowest going first, since they all cost the same: the 512 that
      * fit beside the reserve are those left.
      *
      * @return void
@@ -215,10 +215,10 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
 
         $properties = $minimised->properties ?? [];
 
-        self::assertCount(522, $properties);
-        self::assertSame('field_099479', array_key_first($properties));
+        self::assertCount(513, $properties);
+        self::assertSame('field_099488', array_key_first($properties));
         self::assertSame('_audit', array_key_last($properties));
-        self::assertSame(['count' => 99479, 'paths' => ['*']], $properties['_audit']['omitted']);
+        self::assertSame(['count' => 99488, 'paths' => ['*']], $properties['_audit']['omitted']);
     }
 
     /**

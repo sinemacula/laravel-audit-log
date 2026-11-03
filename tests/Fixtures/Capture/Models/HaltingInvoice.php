@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @internal
  *
+ * @property int $id
  * @property ?string $number
  */
 final class HaltingInvoice extends Model

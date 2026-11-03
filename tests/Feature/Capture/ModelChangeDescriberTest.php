@@ -881,6 +881,10 @@ final class ModelChangeDescriberTest extends TestCase
 
         self::assertNull($model->getConnection()->getName());
 
+        // A connection without a name cannot be tracked by the transactions
+        // manager, which keys its transactions by name, so it is left out
+        $model->getConnection()->unsetTransactionManager();
+
         $watch = ModelWatch::of(WatchedInvoice::class, 'invoice', ['number']);
 
         $this->expectException(\LogicException::class);
