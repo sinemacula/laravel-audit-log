@@ -216,13 +216,15 @@ final class WriteGuardTest extends TestCase
 
     /**
      * An exception thrown from the work shows the guard's frame with the work
-     * withheld, so nothing the work captured reaches a trace.
+     * withheld, so nothing the work captured reaches a trace, even with the
+     * arguments kept, as a development setting keeps them.
      *
      * @return void
      */
     public function testAThrownFailureWithholdsTheWork(): void
     {
-        $guard = new WriteGuard;
+        $guard    = new WriteGuard;
+        $previous = ini_set('zend.exception_ignore_args', '0');
 
         try {
             $guard->during(static function (): void {
@@ -236,6 +238,8 @@ final class WriteGuardTest extends TestCase
 
             self::assertCount(1, $frames);
             self::assertInstanceOf(\SensitiveParameterValue::class, $frames[0]['args'][0] ?? null);
+        } finally {
+            ini_set('zend.exception_ignore_args', $previous === false ? '0' : $previous);
         }
     }
 
