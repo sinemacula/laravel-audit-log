@@ -23,6 +23,7 @@ use Ramsey\Uuid\Uuid;
 use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
+use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\FailureHandler;
 use SineMacula\Laravel\AuditLog\Delivery\Outbox;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxWriter;
@@ -30,6 +31,7 @@ use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
@@ -60,6 +62,12 @@ use Tests\TestCase;
  * package, and each says `AuditWriteFailed`. Laravel still recognises the
  * deadlock, so a host's `transaction()` retries it, at the outermost level
  * only. With no host open the same failures follow the failure rule.
+ *
+ * A captured record follows the `REPORT` rule whatever the mode, and a host's
+ * failure is still the one thing it lets out: thrown sanitised from a
+ * synchronous capture inside a host, and signalled as fatal, while one outside
+ * a host, or met by a write deferred to the commit, is spilled, reported and
+ * signalled, and the capture returns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -112,6 +120,9 @@ final class HostFatalFailuresTest extends TestCase
 
     /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditWriteFailed> Every `AuditWriteFailed` heard. */
     private array $failures = [];
+
+    /** @var list<string> The class each capture's signal was told, in order. */
+    private array $signalled = [];
 
     /**
      * Create the table the host writes to, bind the reporter, capture the spill
@@ -610,6 +621,158 @@ final class HostFatalFailuresTest extends TestCase
         self::assertCount(1, $this->spillLines());
         self::assertCount(1, $this->reporter->reports());
         self::assertCount(1, $this->failures);
+    }
+
+    /**
+     * A capture's deadlock inside a host transaction is the one failure that
+     * reaches the dispatching flow: the same sanitised exception as for any
+     * record, under the `throw` mode too, which a capture never reads, with
+     * nothing spilled or reported, and the signal told once that it was fatal.
+     *
+     * @return void
+     */
+    public function testACapturesDeadlockInsideAHostTransactionPropagatesSanitised(): void
+    {
+        $host   = $this->host();
+        $signal = $this->signal();
+
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+
+        $this->bindStoreRaising(self::deadlock());
+
+        $host->beginTransaction();
+
+        self::assertDeadlockIsSanitised($this->deadlockFrom(static fn () => self::deliverCaptured($signal)));
+        self::assertSame(1, $host->transactionLevel());
+        self::assertSame([], $this->spillLines());
+        self::assertSame([], $this->reporter->reports());
+        self::assertCount(1, $this->failures);
+        self::assertSame(DeadlockException::class, $this->failures[0]->exception);
+        self::assertSame([DeadlockException::class], $this->signalled);
+        self::assertTrue($signal->isFatal());
+    }
+
+    /**
+     * A capture's lost connection inside a host transaction propagates as the
+     * sanitised failed write, holding nothing of the failure, and the signal is
+     * told once that it was fatal.
+     *
+     * @return void
+     */
+    public function testACapturesLostConnectionInsideAHostTransactionPropagatesSanitised(): void
+    {
+        $signal = $this->signal();
+
+        $this->bindStoreRaising(self::lostConnection());
+
+        $this->host()->beginTransaction();
+
+        $thrown = $this->failedWriteFrom(static fn () => self::deliverCaptured($signal));
+
+        self::assertSame(QueryException::class, $thrown->exceptionClass);
+        self::assertSame(FailedOperation::STORE->value, $thrown->operation);
+        self::assertNull($thrown->getPrevious());
+        self::assertStringNotContainsString(self::SECRET, $thrown->getMessage());
+        self::assertSame([], $this->spillLines());
+        self::assertSame([], $this->reporter->reports());
+        self::assertCount(1, $this->failures);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertTrue($signal->isFatal());
+    }
+
+    /**
+     * A capture's outbox insert inside the host's transaction on the outbox
+     * connection is not deferred, so its deadlock reaches the dispatching flow
+     * sanitised, whatever the record's timing, and the signal says it was
+     * fatal.
+     *
+     * @return void
+     */
+    public function testACapturesOutboxInsertDeadlockInsideTheHostPropagatesSanitised(): void
+    {
+        $this->outboxModeOn();
+
+        $host = $this->outboxConnection();
+
+        $this->raiseOnOutboxInserts(self::deadlock());
+
+        foreach ([Timing::AFTER_COMMIT, Timing::IMMEDIATE] as $timing) {
+            $signal = $this->signal();
+
+            $host->beginTransaction();
+
+            self::assertDeadlockIsSanitised($this->deadlockFrom(static fn () => self::deliverCaptured($signal, $timing)), $timing->name);
+            self::assertFalse($signal->isDeferred(), $timing->name);
+            self::assertTrue($signal->isFatal(), $timing->name);
+
+            $host->rollBack();
+        }
+
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame([], $this->spillLines());
+        self::assertSame([], $this->reporter->reports());
+        self::assertSame([DeadlockException::class, DeadlockException::class], $this->signalled);
+    }
+
+    /**
+     * With no transaction open a capture's deadlock or lost connection ends
+     * nothing, so it follows the `REPORT` rule under the `throw` mode too: the
+     * capture returns, the record is spilled and reported once, and the signal
+     * is told once, not fatal.
+     *
+     * @param  \Closure(): \Illuminate\Database\QueryException  $failure
+     * @return void
+     */
+    #[DataProvider('provideFatalFailures')]
+    public function testOutsideATransactionACapturesFailureIsReported(\Closure $failure): void
+    {
+        $signal = $this->signal();
+        $record = RecordFactory::captured();
+
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+
+        $this->bindStoreRaising($failure());
+
+        app(RecordDelivery::class)->deliver($record, Timing::IMMEDIATE, null, false, $signal);
+
+        self::assertCount(1, $this->spillLines());
+        self::assertCount(1, $this->reporter->reports());
+        self::assertCount(1, $this->failures);
+        self::assertSame($record->id, $this->failures[0]->id);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+    }
+
+    /**
+     * A deferred capture's write runs once the host has committed, so either
+     * failure ends nothing there: the commit stands, the record is spilled and
+     * reported once, and the signal is told at the commit, not fatal.
+     *
+     * @param  \Closure(): \Illuminate\Database\QueryException  $failure
+     * @return void
+     */
+    #[DataProvider('provideFatalFailures')]
+    public function testADeferredCapturesFatalFailureLeavesTheCommitStanding(\Closure $failure): void
+    {
+        $signal = $this->signal();
+
+        $this->bindStoreRaising($failure());
+
+        $this->host()->transaction(function () use ($signal): void {
+            $this->writeTheBusinessChange();
+
+            self::deliverCaptured($signal, Timing::AFTER_COMMIT);
+
+            self::assertTrue($signal->isDeferred());
+            self::assertSame([], $this->signalled);
+        });
+
+        self::assertSame(1, $this->hostRows());
+        self::assertCount(1, $this->spillLines());
+        self::assertCount(1, $this->reporter->reports());
+        self::assertCount(1, $this->failures);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
     }
 
     /**
@@ -1413,6 +1576,31 @@ final class HostFatalFailuresTest extends TestCase
     private static function immediateRecord(): AuditRecord
     {
         return AuditLog::event(self::CODE)->immediately()->record();
+    }
+
+    /**
+     * Deliver a captured record with the capture's signal, as a capture
+     * delivers it.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $signal
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
+     * @return void
+     */
+    private static function deliverCaptured(#[\SensitiveParameter] CaptureSignal $signal, Timing $timing = Timing::IMMEDIATE): void
+    {
+        app(RecordDelivery::class)->deliver(RecordFactory::captured(), $timing, null, false, $signal);
+    }
+
+    /**
+     * A capture's signal that keeps the class it is told.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal
+     */
+    private function signal(): CaptureSignal
+    {
+        return new CaptureSignal(function (string $exceptionClass): void {
+            $this->signalled[] = $exceptionClass;
+        });
     }
 
     /**

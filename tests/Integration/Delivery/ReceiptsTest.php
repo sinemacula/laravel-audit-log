@@ -17,12 +17,18 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Delivery\DeliveryCoordinator;
+use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Delivery\Receipt;
 use SineMacula\Laravel\AuditLog\Delivery\Receipts;
+use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\InteractsWithReadWriteSplit;
+use Tests\Concerns\SeedsTheOutbox;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
@@ -30,8 +36,9 @@ use Tests\TestCase;
  * attempt counted before each call, a first attempt that falls to an update
  * when a racing owner made the receipt first, a delivery that is never changed
  * again, failures named by class, resets that keep deliveries, and every
- * receipt on the storage connection's writer however the outbox is placed; on
- * SQLite, MySQL and PostgreSQL alike.
+ * receipt on the storage connection's writer however the outbox is placed, and
+ * a bundle's receipt written only after both of its rows; on SQLite, MySQL and
+ * PostgreSQL alike.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,7 +49,7 @@ use Tests\TestCase;
 #[CoversClass(Receipt::class)]
 final class ReceiptsTest extends TestCase
 {
-    use InteractsWithOutbox, InteractsWithReadWriteSplit, MockeryPHPUnitIntegration;
+    use InteractsWithOutbox, InteractsWithReadWriteSplit, MockeryPHPUnitIntegration, SeedsTheOutbox;
 
     /** @var string The instant the clock is stopped at. */
     private const string NOW = '2026-11-01T12:00:00.000000Z';
@@ -600,6 +607,53 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
+     * A drained bundle's receipt is marked delivered only after both of its
+     * rows are written, the artifact's then the entry's, inside the transaction
+     * the receipt shares with them: when the receipt is written, the
+     * transaction already holds the entry and its artifact, and once it commits
+     * all three are kept.
+     *
+     * @return void
+     */
+    public function testABundlesReceiptFollowsBothRows(): void
+    {
+        $record = app(RecordFinaliser::class)->finalise(RecordFactory::bundled());
+        $id     = $this->enqueue($record);
+        $steps  = [];
+        $held   = null;
+
+        DB::connection(StorageConnection::name())->beforeExecuting(static function (string $query, array $bindings, Connection $connection) use ($id, &$steps, &$held): void {
+            $step = self::stepOf($query);
+
+            if ($step === null) {
+                return;
+            }
+
+            $steps[] = $step;
+
+            if ($step !== 'delivered') {
+                return;
+            }
+
+            $held = [
+                'level'     => $connection->transactionLevel(),
+                'entries'   => self::rawCount($connection, EntrySettings::table(), 'id', $id),
+                'artifacts' => self::rawCount($connection, EntrySettings::artifactsTable(), 'entry_id', $id),
+            ];
+        });
+
+        self::assertSame(1, app(OutboxDrainer::class)->drain(100, false)->delivered());
+        self::assertSame(['artifact', 'entry', 'delivered'], $steps);
+        self::assertSame(['level' => 1, 'entries' => 1, 'artifacts' => 1], $held);
+        self::assertSame(self::NOW, $this->receipt($id, DeliveryCoordinator::STORE_DESTINATION)['delivered_at'] ?? null);
+
+        $storage = DB::connection(StorageConnection::name());
+
+        self::assertSame(1, $storage->table(EntrySettings::table())->where('id', $id)->count());
+        self::assertSame(1, $storage->table(EntrySettings::artifactsTable())->where('entry_id', $id)->count());
+    }
+
+    /**
      * The receipts, as the container builds them.
      *
      * @return \SineMacula\Laravel\AuditLog\Delivery\Receipts
@@ -607,5 +661,43 @@ final class ReceiptsTest extends TestCase
     private function receipts(): Receipts
     {
         return app(Receipts::class);
+    }
+
+    /**
+     * What the statement does to a bundle's delivery: inserts its artifact,
+     * inserts its entry, or marks its receipt delivered; otherwise nothing.
+     *
+     * @param  string  $query
+     * @return ?string
+     */
+    private static function stepOf(string $query): ?string
+    {
+        return match (true) {
+            str_starts_with($query, 'insert into ') && str_contains($query, EntrySettings::artifactsTable()) => 'artifact',
+            str_starts_with($query, 'insert into ') && str_contains($query, EntrySettings::table())          => 'entry',
+            preg_match('/\Aupdate .* set [`"]?delivered_at[`"]? = /', $query) === 1                          => 'delivered',
+            default                                                                                          => null,
+        };
+    }
+
+    /**
+     * The rows of the table whose column holds the id, counted over the
+     * connection's own PDO, so the count is seen inside its open transaction
+     * and is not itself a statement the connection reports.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  string  $column
+     * @param  string  $id
+     * @return int
+     */
+    private static function rawCount(Connection $connection, string $table, string $column, string $id): int
+    {
+        $grammar   = $connection->getQueryGrammar();
+        $statement = $connection->getPdo()->prepare(sprintf('select count(*) from %s where %s = ?', $grammar->wrapTable($table), $grammar->wrap($column)));
+
+        $statement->execute([$id]);
+
+        return (int) $statement->fetchColumn();
     }
 }

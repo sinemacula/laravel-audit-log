@@ -26,6 +26,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Privacy\FieldPolicy;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException;
@@ -46,10 +47,11 @@ use Tests\TestCase;
  * engine the suite runs against: with both byte budgets at their ceiling a
  * record captured through the real path is encrypted, inserted, read back,
  * decrypted, decoded and stored whole; an envelope at the bound fits the
- * outbox's column and MySQL's packet; the bound holds every column at its
- * longest; and one past it follows the failure policy rather than reaching the
- * outbox; on SQLite, MySQL and PostgreSQL alike. Everything of this size is
- * compared by length and hash, because a failure must not try to print it.
+ * outbox's column and MySQL's packet, and so does a bundle at the bound, its
+ * attachment counted; the bound holds every column at its longest; and one past
+ * it follows the failure policy rather than reaching the outbox; on SQLite,
+ * MySQL and PostgreSQL alike. Everything of this size is compared by length and
+ * hash, because a failure must not try to print it.
  *
  * The memory limit is raised for the test, because it is often less than one of
  * these records needs, and the assertions should be what fails rather than the
@@ -330,6 +332,66 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
+     * A bundle of exactly the bound, its attachment included, is encrypted,
+     * inserted in the outbox, read back with the same bytes, and decrypts and
+     * decodes to the same record and attachment; one byte more is refused as
+     * oversize, naming its record, though its record's columns alone are within
+     * the bound by the attachment's length, because the bound is the whole
+     * bundle's.
+     *
+     * @return void
+     */
+    public function testABundleAtTheBoundSurvivesEncryptionAndTheEngine(): void
+    {
+        $base     = RecordFactory::bundled();
+        $codec    = app(EnvelopeCodec::class);
+        $length   = EnvelopeCodec::MAX_BYTES - strlen($codec->encode($this->finalisedRecord(self::paddedBundle($base, 0))));
+        $record   = $this->finalisedRecord(self::paddedBundle($base, $length));
+        $envelope = $codec->encode($record);
+        $id       = $record->record->id;
+
+        self::assertSame(EnvelopeCodec::MAX_BYTES, strlen($envelope));
+        self::assertNotNull($base->attachment);
+
+        $payload = app(StringEncrypter::class)->encryptString($envelope);
+
+        app(Outbox::class)->insert($id, $payload);
+
+        $read = $this->payloadOf($id);
+
+        self::assertSame(hash('sha256', $payload), hash('sha256', $read));
+
+        unset($payload);
+
+        $decrypted = app(StringEncrypter::class)->decryptString($read);
+
+        unset($read);
+
+        self::assertSame(hash('sha256', $envelope), hash('sha256', $decrypted));
+
+        $decoded = $codec->decode($decrypted, $id);
+
+        self::assertSame($record->hmac, $decoded->hmac);
+        self::assertEquals($record->record->attachment, $decoded->record->attachment);
+        self::assertSame(hash('sha256', $envelope), hash('sha256', $codec->encode($decoded)));
+
+        unset($decrypted, $decoded, $envelope);
+
+        $over = $this->finalisedRecord(self::paddedBundle($base, $length + 1));
+
+        self::assertLessThan(EnvelopeCodec::MAX_BYTES - strlen($base->attachment->members), strlen(CanonicalEncoder::encode($over->toArray())));
+
+        try {
+            $codec->encode($over);
+
+            self::fail('Expected a bundle past the bound to be refused.');
+        } catch (EnvelopeRejectedException $exception) {
+            self::assertSame(EnvelopeFailure::OVERSIZE, $exception->failure);
+            self::assertSame($id, $exception->id);
+        }
+    }
+
+    /**
      * Rows of `[failure mode, asked to fail closed, timing, whether a line is
      * spilled, whether it throws, how many reports]`: each rule a record can
      * follow.
@@ -588,6 +650,21 @@ final class EnvelopeSizeBoundTest extends TestCase
     private function paddedRecord(int $length): AuditRecord
     {
         return RecordFactory::withFields(['properties' => ['pad' => str_repeat('a', $length)]], RecordFactory::captured(id: self::ID));
+    }
+
+    /**
+     * The bulk record with its own attachment and descriptor, and a property of
+     * the length given beside them.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $base
+     * @param  int  $length
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     */
+    private static function paddedBundle(AuditRecord $base, int $length): AuditRecord
+    {
+        $properties = [...(array) $base->properties, 'pad' => str_repeat('a', $length)];
+
+        return RecordFactory::withFields(['properties' => $properties, 'attachment' => $base->attachment], $base);
     }
 
     /**

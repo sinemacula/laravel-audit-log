@@ -29,10 +29,17 @@ final class ByteBudgetTest extends TestCase
     private const int MINIMUM = 8192;
 
     /** @var int What the properties' keys may cost at the minimum, beside the reserve. */
-    private const int MINIMUM_LIMIT = 3792;
+    private const int MINIMUM_LIMIT = 3592;
 
     /** @var int The least budget the settings accept for the context. */
     private const int CONTEXT_MINIMUM = 1024;
+
+    /** @var array{artifact_id: string, digest: string, count: int} The largest manifest descriptor: a UUID, a SHA-256 and the greatest member cap the settings allow. */
+    private const array LARGEST_MANIFEST = [
+        'artifact_id' => 'ffffffff-ffff-7fff-bfff-ffffffffffff',
+        'digest'      => 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+        'count'       => 1000000,
+    ];
 
     /** @var string An identifier hash as the hasher writes it. */
     private const string HASH = 'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -209,7 +216,7 @@ final class ByteBudgetTest extends TestCase
      */
     public function testKeysNoRuleNamesGoBeforeRuleGovernedKeys(): void
     {
-        $values = ['free_large' => self::costing('free_large', 5000), 'free_small' => self::costing('free_small', 200), 'ruled' => self::costing('ruled', 3700)];
+        $values = ['free_large' => self::costing('free_large', 5000), 'free_small' => self::costing('free_small', 200), 'ruled' => self::costing('ruled', 3500)];
 
         $result = ByteBudget::properties($values, null, null, self::definition()->retain('ruled'), self::MINIMUM, new OmissionLog);
 
@@ -227,7 +234,7 @@ final class ByteBudgetTest extends TestCase
      */
     public function testABranchHoldingARuleGovernedFieldGoesLast(): void
     {
-        $values = ['free_large' => self::costing('free_large', 5000), 'free_small' => self::costing('free_small', 200), 'customer' => ['email' => str_repeat('x', 3600)]];
+        $values = ['free_large' => self::costing('free_large', 5000), 'free_small' => self::costing('free_small', 200), 'customer' => ['email' => str_repeat('x', 3400)]];
 
         $result = ByteBudget::properties($values, null, null, self::definition()->retain('customer.email'), self::MINIMUM, new OmissionLog);
 
@@ -527,8 +534,8 @@ final class ByteBudgetTest extends TestCase
 
     /**
      * The reserve holds the largest metadata there can be, measured rather than
-     * assumed: a full hash and 32 paths of 128 bytes under the largest count,
-     * with a comma, which is 4357 bytes.
+     * assumed: a full hash, the largest manifest descriptor and 32 paths of 128
+     * bytes under the largest count, with a comma, which is 4515 bytes.
      *
      * @return void
      *
@@ -538,17 +545,115 @@ final class ByteBudgetTest extends TestCase
     {
         $paths = array_map(static fn (int $index): string => str_pad((string) $index, OmissionLog::MAX_PATH_BYTES, 'k'), range(1, OmissionLog::MAX_PATHS));
 
-        $metadata = ['_audit' => ['identifier_hash' => self::HASH, 'omitted' => ['count' => PHP_INT_MAX, 'paths' => $paths]]];
+        $metadata = ['_audit' => ['identifier_hash' => self::HASH, 'manifest' => self::LARGEST_MANIFEST, 'omitted' => ['count' => PHP_INT_MAX, 'paths' => $paths]]];
 
-        self::assertSame(4357, strlen(self::encoded($metadata)) + 1);
-        self::assertSame(4400, ByteBudget::METADATA_RESERVE_BYTES);
+        self::assertSame(4515, strlen(self::encoded($metadata)) + 1);
+        self::assertSame(4600, ByteBudget::METADATA_RESERVE_BYTES);
+        self::assertLessThanOrEqual(ByteBudget::METADATA_RESERVE_BYTES, strlen(self::encoded($metadata)) + 1);
+    }
+
+    /**
+     * The largest manifest descriptor, measured: its key, a lower-case UUID, a
+     * hex SHA-256 and the greatest count the settings allow cost 158 bytes with
+     * a comma, which the reserve holds beside the rest of the largest metadata,
+     * and still holds should a count reach the largest integer.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheReserveHoldsTheLargestManifest(): void
+    {
+        $paths = array_map(static fn (int $index): string => str_pad((string) $index, OmissionLog::MAX_PATH_BYTES, 'k'), range(1, OmissionLog::MAX_PATHS));
+        $rest  = ['identifier_hash' => self::HASH, 'omitted' => ['count' => PHP_INT_MAX, 'paths' => $paths]];
+
+        $without = strlen(self::encoded(['_audit' => $rest]));
+        $with    = strlen(self::encoded(['_audit' => ['identifier_hash' => self::HASH, 'manifest' => self::LARGEST_MANIFEST] + $rest]));
+
+        self::assertSame(158, $with - $without);
+
+        $endless = strlen(self::encoded(['_audit' => ['identifier_hash' => self::HASH, 'manifest' => ['count' => PHP_INT_MAX] + self::LARGEST_MANIFEST] + $rest]));
+
+        self::assertLessThan(ByteBudget::METADATA_RESERVE_BYTES, $endless + 1);
+    }
+
+    /**
+     * The manifest descriptor sits after the identifier hash and before what
+     * was omitted, with the note first, and is written as given.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheManifestSitsAfterTheIdentifierHash(): void
+    {
+        $log = new OmissionLog;
+
+        $log->add('$ip');
+
+        $result = ByteBudget::properties(['b' => 1], 'Checked', self::HASH, self::definition(), self::MINIMUM, $log, self::LARGEST_MANIFEST);
+
+        self::assertSame(['b' => 1, '_audit' => [
+            'note'            => 'Checked',
+            'identifier_hash' => self::HASH,
+            'manifest'        => self::LARGEST_MANIFEST,
+            'omitted'         => ['count' => 1, 'paths' => ['$ip']],
+        ]], $result);
+        $alone = ByteBudget::properties([], null, null, self::definition(), self::MINIMUM, new OmissionLog, self::LARGEST_MANIFEST);
+
+        self::assertSame(['_audit' => ['manifest' => self::LARGEST_MANIFEST]], $alone);
+    }
+
+    /**
+     * Whatever else goes, the manifest descriptor stays, beside the hash and
+     * the omitted list, and it is never itself a candidate: nothing it costs is
+     * reported, and the final encoding fits.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheManifestIsNeverOmitted(): void
+    {
+        $log = new OmissionLog;
+
+        $values = ['huge' => str_repeat('x', self::MINIMUM * 2), 'small' => 1];
+        $result = ByteBudget::properties($values, null, self::HASH, self::definition(), self::MINIMUM, $log, self::LARGEST_MANIFEST);
+
+        self::assertSame(['small' => 1, '_audit' => [
+            'identifier_hash' => self::HASH,
+            'manifest'        => self::LARGEST_MANIFEST,
+            'omitted'         => ['count' => 1, 'paths' => ['*']],
+        ]], $result);
+        self::assertLessThanOrEqual(self::MINIMUM, strlen(self::encoded($result)));
+    }
+
+    /**
+     * The manifest descriptor is counted in the first comparison too: a payload
+     * that fits only without it loses a key with it.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheManifestCountsTowardTheBudget(): void
+    {
+        $bare = strlen(self::encoded(['a' => '']));
+        $fits = ['a' => str_repeat('x', self::MINIMUM - $bare)];
+
+        self::assertSame($fits, ByteBudget::properties($fits, null, null, self::definition(), self::MINIMUM, new OmissionLog));
+
+        $result = ByteBudget::properties($fits, null, null, self::definition(), self::MINIMUM, new OmissionLog, self::LARGEST_MANIFEST);
+
+        self::assertSame(['_audit' => ['manifest' => self::LARGEST_MANIFEST, 'omitted' => ['count' => 1, 'paths' => ['*']]]], $result);
     }
 
     /**
      * The worst case fits the least budget: 32 distinct rule paths of 128 bytes
-     * from the omissions, the largest count, an identifier hash and a note of
-     * 1,024 bytes that all need escaping. The note fits beside the reserve even
-     * so, so it stays, and everything else that could go has gone.
+     * from the omissions, the largest count, an identifier hash, the largest
+     * manifest descriptor and a note of 1,024 bytes that all need escaping. The
+     * note fits beside the reserve even so, so it stays, and everything else
+     * that could go has gone.
      *
      * @return void
      *
@@ -563,11 +668,12 @@ final class ByteBudgetTest extends TestCase
         $log->addCount(PHP_INT_MAX);
 
         $note   = str_repeat('"', 1024);
-        $result = ByteBudget::properties($values, $note, self::HASH, $definition, self::MINIMUM, $log);
+        $result = ByteBudget::properties($values, $note, self::HASH, $definition, self::MINIMUM, $log, self::LARGEST_MANIFEST);
 
         self::assertSame(['_audit'], array_keys($result ?? []));
         self::assertSame($note, $result['_audit']['note'] ?? null);
         self::assertSame(self::HASH, $result['_audit']['identifier_hash'] ?? null);
+        self::assertSame(self::LARGEST_MANIFEST, $result['_audit']['manifest'] ?? null);
         self::assertSame(PHP_INT_MAX, $result['_audit']['omitted']['count'] ?? null);
         self::assertCount(32, $result['_audit']['omitted']['paths'] ?? []);
         self::assertLessThanOrEqual(self::MINIMUM, strlen(self::encoded($result)));
@@ -575,8 +681,9 @@ final class ByteBudgetTest extends TestCase
 
     /**
      * The worst case still fits with a note too large to stay, which only an
-     * envelope can be: the note goes, and the hash and the list do not. Its
-     * path sorts after the 32 already held, so only the count records it.
+     * envelope can be: the note goes, and the hash, the manifest descriptor and
+     * the list do not. Its path sorts after the 32 already held, so only the
+     * count records it.
      *
      * @return void
      *
@@ -590,10 +697,11 @@ final class ByteBudgetTest extends TestCase
 
         $log->addCount(PHP_INT_MAX);
 
-        $result = ByteBudget::properties($values, ['v' => 1, 'k' => 'key', 'c' => str_repeat('"', 4096)], self::HASH, $definition, self::MINIMUM, $log);
+        $result = ByteBudget::properties($values, ['v' => 1, 'k' => 'key', 'c' => str_repeat('"', 4096)], self::HASH, $definition, self::MINIMUM, $log, self::LARGEST_MANIFEST);
 
         self::assertArrayNotHasKey('note', $result['_audit'] ?? []);
         self::assertSame(self::HASH, $result['_audit']['identifier_hash'] ?? null);
+        self::assertSame(self::LARGEST_MANIFEST, $result['_audit']['manifest'] ?? null);
         self::assertCount(32, $result['_audit']['omitted']['paths'] ?? []);
         self::assertLessThanOrEqual(self::MINIMUM, strlen(self::encoded($result)));
     }
@@ -619,10 +727,11 @@ final class ByteBudgetTest extends TestCase
 
         $values['keep'] = self::costing('keep', self::MINIMUM_LIMIT - 2058);
 
-        $result = ByteBudget::properties($values, $note, self::HASH, $definition->retain('keep'), self::MINIMUM, $log);
+        $result = ByteBudget::properties($values, $note, self::HASH, $definition->retain('keep'), self::MINIMUM, $log, self::LARGEST_MANIFEST);
 
         self::assertArrayHasKey('keep', $result ?? []);
         self::assertSame($note, $result['_audit']['note'] ?? null);
+        self::assertSame(self::LARGEST_MANIFEST, $result['_audit']['manifest'] ?? null);
         self::assertCount(32, $result['_audit']['omitted']['paths'] ?? []);
         self::assertLessThanOrEqual(self::MINIMUM, strlen(self::encoded($result)));
         self::assertGreaterThan(self::MINIMUM - ByteBudget::METADATA_RESERVE_BYTES, strlen(self::encoded($result)));
@@ -725,9 +834,9 @@ final class ByteBudgetTest extends TestCase
      */
     public function testANumericKeyIsCostedAsAString(): void
     {
-        $values = [9 => self::costing('9', 4400), 10 => self::costing('10', 4400)];
+        $values = [9 => self::costing('9', 4600), 10 => self::costing('10', 4600)];
 
-        $result = ByteBudget::properties($values, null, null, self::definition(), 8800, new OmissionLog);
+        $result = ByteBudget::properties($values, null, null, self::definition(), 9200, new OmissionLog);
 
         self::assertSame([9, '_audit'], array_keys($result ?? []));
 

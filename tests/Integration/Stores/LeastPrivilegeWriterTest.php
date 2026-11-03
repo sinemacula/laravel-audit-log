@@ -18,10 +18,11 @@ use Tests\TestCase;
 
 /**
  * Integration tests for the store under a least-privilege writer, on MySQL and
- * PostgreSQL: a login granted `SELECT` and `INSERT` on the entries table and
- * nothing else (on PostgreSQL also `CONNECT` and the schema's `USAGE`, which
- * grant no table privilege) stores records and resolves duplicates, outside and
- * inside a transaction, and is refused every update and delete. On MySQL, the
+ * PostgreSQL: a login granted `SELECT` and `INSERT` on the entries and
+ * artifacts tables and nothing else (on PostgreSQL also `CONNECT` and the
+ * schema's `USAGE`, which grant no table privilege) stores records and bundles
+ * and resolves their duplicates, outside and inside a transaction, and is
+ * refused every update and delete of an entry or an artifact. On MySQL, the
  * shared locking read the store resolves a duplicate with inside a transaction
  * needs only `SELECT`, where `FOR UPDATE` would need more.
  *
@@ -135,6 +136,35 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
+     * The writer stores a bundle and resolves its duplicate outside a
+     * transaction, and inside one stores another, resolves its duplicate and
+     * the first's, and commits: each an entry and an artifact.
+     *
+     * @return void
+     */
+    public function testAWriterGrantedOnlyWhatTheStoreNeedsStoresABundle(): void
+    {
+        $first  = $this->finaliser()->finalise(RecordFactory::bundled());
+        $second = $this->finaliser()->finalise(RecordFactory::bundled(5));
+        $writer = $this->writer();
+
+        $this->store()->store($first);
+        $this->store()->store($first);
+
+        $writer->beginTransaction();
+
+        $this->store()->store($second);
+        $this->store()->store($second);
+        $this->store()->store($first);
+
+        $writer->commit();
+
+        self::assertSame(self::WRITER, $this->storageConnection()->getName());
+        self::assertSame(2, DB::connection(self::CONNECTION)->table(EntrySettings::table())->count());
+        self::assertSame(2, DB::connection(self::CONNECTION)->table(EntrySettings::artifactsTable())->count());
+    }
+
+    /**
      * The writer can neither update nor delete an entry: the engine refuses
      * both, and the entry is left as it was.
      *
@@ -165,6 +195,44 @@ final class LeastPrivilegeWriterTest extends TestCase
         self::assertSame(1, DB::connection(self::CONNECTION)->table(EntrySettings::table())->count());
         self::assertSame($finalised->hmac, DB::connection(self::CONNECTION)->table(EntrySettings::table())->value('hmac'));
         self::assertSame('success', DB::connection(self::CONNECTION)->table(EntrySettings::table())->value('outcome'));
+    }
+
+    /**
+     * The writer can neither update nor delete an artifact: the engine refuses
+     * both, and the artifact is left as it was stored with its entry.
+     *
+     * @return void
+     */
+    public function testTheWriterIsRefusedArtifactUpdatesAndDeletes(): void
+    {
+        $bundle     = $this->finaliser()->finalise(RecordFactory::bundled());
+        $writer     = $this->writer();
+        $attachment = $bundle->record->attachment;
+
+        self::assertNotNull($attachment);
+
+        $this->store()->store($bundle);
+
+        $refusals = [
+            'update' => static fn () => $writer->table(EntrySettings::artifactsTable())->where('id', $attachment->id)->update(['member_count' => 4]),
+            'delete' => static fn () => $writer->table(EntrySettings::artifactsTable())->where('id', $attachment->id)->delete(),
+        ];
+
+        foreach ($refusals as $statement => $refusal) {
+            try {
+                $refusal();
+
+                self::fail("Expected the writer's {$statement} of an artifact to be refused.");
+            } catch (QueryException $exception) {
+                self::assertSame($writer->getDriverName() === 'mysql' ? '42000' : '42501', $exception->getCode(), "The {$statement}.");
+            }
+        }
+
+        $stored = (array) DB::connection(self::CONNECTION)->table(EntrySettings::artifactsTable())->sole();
+
+        self::assertSame($attachment->id, $stored['id']);
+        self::assertSame($attachment->digest, $stored['digest']);
+        self::assertSame('3', (string) $stored['member_count']);
     }
 
     /**
@@ -202,20 +270,23 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
-     * Create the login, granted `SELECT` and `INSERT` on the entries table
-     * alone.
+     * Create the login, granted `SELECT` and `INSERT` on the entries and
+     * artifacts tables alone.
      *
      * @return void
      */
     private function createLogin(): void
     {
         $root     = DB::connection(self::CONNECTION);
-        $table    = EntrySettings::table();
+        $tables   = [EntrySettings::table(), EntrySettings::artifactsTable()];
         $database = $root->getDatabaseName();
 
         if ($root->getDriverName() === 'mysql') {
             $root->statement(sprintf('CREATE USER \'%s\'@\'%%\' IDENTIFIED BY \'%s\'', $this->login, self::PASSWORD));
-            $root->statement(sprintf('GRANT SELECT, INSERT ON `%s`.`%s` TO \'%s\'@\'%%\'', $database, $table, $this->login));
+
+            foreach ($tables as $table) {
+                $root->statement(sprintf('GRANT SELECT, INSERT ON `%s`.`%s` TO \'%s\'@\'%%\'', $database, $table, $this->login));
+            }
 
             return;
         }
@@ -223,7 +294,10 @@ final class LeastPrivilegeWriterTest extends TestCase
         $root->statement(sprintf('CREATE ROLE %s LOGIN PASSWORD \'%s\'', $this->login, self::PASSWORD));
         $root->statement(sprintf('GRANT CONNECT ON DATABASE "%s" TO %s', $database, $this->login));
         $root->statement(sprintf('GRANT USAGE ON SCHEMA public TO %s', $this->login));
-        $root->statement(sprintf('GRANT SELECT, INSERT ON "%s" TO %s', $table, $this->login));
+
+        foreach ($tables as $table) {
+            $root->statement(sprintf('GRANT SELECT, INSERT ON "%s" TO %s', $table, $this->login));
+        }
     }
 
     /**

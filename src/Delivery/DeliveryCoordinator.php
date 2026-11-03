@@ -31,6 +31,14 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
  * its failure's class on its receipt, never its message, and the others are
  * still tried.
  *
+ * A bundle, a record with its attachment, is handed whole to each destination
+ * that keeps attachments, and its receipt is marked delivered only once that
+ * destination returned, so a bundle is never marked delivered without its entry
+ * and its artifact. A destination that keeps none is asked before it is called
+ * and refused, its attempt counted: that destination's failure alone, so the
+ * others are still tried and the row is retried, then failed and kept, never
+ * deleted. A record without an attachment asks no destination.
+ *
  * The claim is renewed before every call and every receipt, and once the drain
  * finds it no longer owns the row it stops and writes nothing further, not even
  * the receipt of a call that succeeded: the new owner repeats the call, which
@@ -189,10 +197,10 @@ final readonly class DeliveryCoordinator
     /**
      * Count the attempt on the destination's receipt, then call the destination
      * and mark its receipt delivered: complete when it has the record,
-     * incomplete when it failed or a receipt could not be written, and stale
-     * when the claim no longer owns the row. A destination that joins a
-     * transaction on the storage connection is called inside one it shares with
-     * its receipt.
+     * incomplete when it failed, keeps no attachment the record carries or a
+     * receipt could not be written, and stale when the claim no longer owns the
+     * row. A destination that joins a transaction on the storage connection is
+     * called inside one it shares with its receipt.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -218,6 +226,8 @@ final readonly class DeliveryCoordinator
     ): DeliveryResult {
         try {
             $this->receipts->attempting($record->record->id, $name, $receipt);
+
+            self::refuseAnAttachmentTo($destination, $record);
 
             $delivered = $destination instanceof DurableAuditStore && $destination->participatesIn(StorageConnection::resolvedName())
                 ? $this->deliverInTransaction($record, $claim, $name, $destination)
@@ -398,6 +408,27 @@ final readonly class DeliveryCoordinator
         } catch (\Throwable) {
             // The record is delivered; a broken reporter must not stop the
             // drain, and there is nowhere left to say so
+        }
+    }
+
+    /**
+     * Refuse the record's attachment to a destination that keeps none, before
+     * it is called, so a bundle is never handed to a store that would lose its
+     * members. A record without an attachment asks the destination nothing.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $destination
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    private static function refuseAnAttachmentTo(AuditStore $destination, #[\SensitiveParameter] FinalisedRecord $record): void
+    {
+        $refused = $record->record->attachment !== null && !StoreCapabilities::keepsAttachments($destination);
+        $refusal = $refused ? StoreCapabilities::refuseAttachmentsTo($destination) : null;
+
+        if ($refusal !== null) {
+            throw $refusal;
         }
     }
 }

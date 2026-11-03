@@ -25,6 +25,13 @@ use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
  * counted by its id and the class of the failure, never its message, and stops
  * no other line.
  *
+ * A spilled bundle, a record with its attachment, is replayed whole: the store
+ * keeps its entry and its artifact together, and a bundle it holds already is a
+ * no-op. The bound store is asked whether it keeps attachments before it is
+ * called; one that keeps none is never handed the bundle, which is counted
+ * failed and stays in the file. A failed outbox row holding a bundle is drained
+ * as any other, so each destination is asked in turn.
+ *
  * An outbox replay resets the receipts of the destinations that do not have a
  * record first, then requeues its row, then drains, so a crash between the two
  * leaves the row failed and a rerun is safe, and a destination that has the
@@ -173,8 +180,8 @@ final readonly class Replayer
 
     /**
      * Give the record to the store inside the write guard and dispatch
-     * `AuditRecorded`; a failure is counted by the record's id and its class
-     * alone.
+     * `AuditRecorded`; a failure, a bundle refused by a store that keeps no
+     * attachments included, is counted by the record's id and its class alone.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  string  $where
@@ -187,6 +194,10 @@ final readonly class Replayer
 
         try {
             $container->make(WriteGuard::class)->during(static function () use ($container, $record): void {
+                if ($record->record->attachment !== null) {
+                    (new StoreCapabilities($container))->assertAcceptsAttachments();
+                }
+
                 $container->make(AuditStore::class)->store($record);
             });
         } catch (\Throwable $exception) {

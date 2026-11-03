@@ -21,18 +21,20 @@ use Tests\TestCase;
 /**
  * Integration tests for the triggers the storage note documents, run exactly as
  * written on whichever engine the suite runs against: they install, refuse an
- * update of an entry or a member, a change to any immutable checkpoint column
- * and a delete of a member or a seal, allow the anchor columns, refuse a delete
- * of an entry by anyone but the maintenance user (on SQLite by anyone), let the
- * maintenance user delete one, refuse a `TRUNCATE` on PostgreSQL, leave the
- * integrity state table alone, and leave sealing, anchoring, the sweep and
- * verification working; the documented SQLite prune deletes and restores its
- * trigger, and a failed one rolled back keeps it.
+ * update of an entry, an artifact or a member, a change to any immutable
+ * checkpoint column and a delete of a member or a seal, allow the anchor
+ * columns, refuse a delete of an entry or an artifact by anyone but the
+ * maintenance user (on SQLite by anyone), let the maintenance user delete one,
+ * refuse a `TRUNCATE` on PostgreSQL, leave the integrity state table alone, and
+ * leave sealing, anchoring, the sweep and verification working; the documented
+ * SQLite prune deletes and restores its triggers, an entry's artifact with it,
+ * and a failed one rolled back keeps them.
  *
  * On MySQL and PostgreSQL the documented grants are run too, for the logins
  * this worker creates, `audit_writer_<token>` and `audit_maintenance_<token>`,
- * which are dropped when the test ends, as the triggers are. The tests cover
- * documented SQL, not a class of the package.
+ * which are dropped when the test ends, as the triggers are, and they limit
+ * what each login does to an artifact. The tests cover documented SQL, not a
+ * class of the package.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,6 +57,9 @@ final class AppendOnlyTriggersTest extends TestCase
 
     /** @var string When every command runs: past the anchoring grace of every seal, and within the allowed age of every entry. */
     private const string VERIFIED_AT = '2026-11-01 14:00:00';
+
+    /** @var string The id an artifact a test stores is given, its number replacing `%012d`. */
+    private const string ARTIFACT_ID = '01932b4e-9000-7000-8000-%012d';
 
     /** @var array<string, string> The names this worker gives the placeholders, once its logins exist. */
     private array $names = [];
@@ -152,6 +157,116 @@ final class AppendOnlyTriggersTest extends TestCase
 
         self::assertRefusedByATrigger(static fn () => $entries->clone()->where('id', $entry)->update(['outcome' => 'failure']), EntrySettings::table(), 'UPDATE');
         self::assertSame('success', $entries->clone()->where('id', $entry)->value('outcome'));
+    }
+
+    /**
+     * Rows of `[column, value]`: each artifact column changed to a value no
+     * stored artifact has.
+     *
+     * @return iterable<string, array{0: string, 1: int|string}>
+     */
+    public static function provideArtifactColumns(): iterable
+    {
+        yield from [
+            'id'           => ['id', sprintf(self::ARTIFACT_ID, 999)],
+            'entry_id'     => ['entry_id', '01932b4e-8a40-7000-8000-00000000ffff'],
+            'kind'         => ['kind', 'other'],
+            'member_count' => ['member_count', 99],
+            'digest'       => ['digest', str_repeat('e', 64)],
+            'members'      => ['members', 'eyJpdiI6ImFub3RoZXIifQ=='],
+            'created_at'   => ['created_at', '2026-01-01 00:00:00.000000'],
+        ];
+    }
+
+    /**
+     * A change to any column of an artifact is refused, even by the tables'
+     * owner, and the artifact is left as it was.
+     *
+     * @param  string  $column
+     * @param  int|string  $value
+     * @return void
+     */
+    #[DataProvider('provideArtifactColumns')]
+    public function testAnArtifactUpdateIsRefused(string $column, int|string $value): void
+    {
+        $artifact  = $this->storeArtifact(1, $this->sealedLog()[0]);
+        $artifacts = $this->root()->table(EntrySettings::artifactsTable());
+        $before    = $artifacts->clone()->where('id', $artifact)->first();
+
+        self::assertNotNull($before);
+        self::assertRefusedByATrigger(static fn () => $artifacts->clone()->where('id', $artifact)->update([$column => $value]), EntrySettings::artifactsTable(), 'UPDATE');
+        self::assertEquals($before, $artifacts->clone()->where('id', $artifact)->first());
+    }
+
+    /**
+     * A delete of an artifact by the tables' owner is refused, and on MySQL and
+     * PostgreSQL so is one by the writer granted `DELETE` beyond the documented
+     * grants, while the maintenance user deletes it, as a prune does, and the
+     * entries, the other artifact, every member and every seal stay.
+     *
+     * @return void
+     */
+    public function testAnArtifactDeleteIsRefusedButForTheMaintenanceUser(): void
+    {
+        $entries = $this->sealedLog();
+        $root    = $this->root();
+        $table   = EntrySettings::artifactsTable();
+        $first   = $this->storeArtifact(1, $entries[0]);
+
+        $this->storeArtifact(2, $entries[1]);
+
+        self::assertRefusedByATrigger(static fn () => $root->table($table)->where('id', $first)->delete(), $table, 'DELETE');
+
+        if ($this->names === []) {
+            self::assertSame(2, $root->table($table)->count());
+
+            return;
+        }
+
+        $root->statement($root->getDriverName() === 'mysql'
+            ? sprintf('GRANT DELETE ON `%s`.`%s` TO \'%s\'@\'%%\'', $this->names['app_db'], $table, $this->names['audit_writer'])
+            : sprintf('GRANT DELETE ON "%s" TO "%s"', $table, $this->names['audit_writer']));
+
+        $writer = DB::connection(self::WRITER);
+
+        self::assertRefusedByATrigger(static fn () => $writer->table($table)->where('id', $first)->delete(), $table, 'DELETE');
+        self::assertSame(2, $root->table($table)->count());
+        self::assertSame(1, DB::connection(self::MAINTENANCE)->table($table)->where('id', $first)->delete());
+        self::assertFalse($root->table($table)->where('id', $first)->exists());
+        self::assertSame(1, $root->table($table)->count());
+        self::assertSame(4, $root->table(EntrySettings::table())->count());
+        self::assertSame(4, $root->table(IntegrityTables::membersTable())->count());
+        self::assertSame(2, $root->table(IntegrityTables::checkpointsTable())->count());
+    }
+
+    /**
+     * On MySQL and PostgreSQL the documented grants let the writer read and
+     * insert an artifact and nothing more, and the maintenance user read one
+     * but never update it: the engine, not a trigger, refuses the rest.
+     *
+     * @return void
+     */
+    public function testTheGrantsLimitWhatEachUserDoesToAnArtifact(): void
+    {
+        $this->skipOnSqlite();
+
+        $entry       = $this->sealedLog()[0];
+        $driver      = $this->root()->getDriverName();
+        $table       = EntrySettings::artifactsTable();
+        $writer      = DB::connection(self::WRITER)->table($table);
+        $maintenance = DB::connection(self::MAINTENANCE)->table($table);
+        $artifact    = sprintf(self::ARTIFACT_ID, 1);
+        $digest      = self::artifactRow(1, $entry)['digest'];
+        $change      = ['digest' => str_repeat('e', 64)];
+
+        self::assertTrue($writer->clone()->insert(self::artifactRow(1, $entry)));
+        self::assertSame($digest, $writer->clone()->where('id', $artifact)->value('digest'));
+        self::assertSame($digest, $maintenance->clone()->where('id', $artifact)->value('digest'));
+
+        self::assertRefusedByTheGrants(static fn () => $writer->clone()->where('id', $artifact)->update($change), $driver, 'The writer\'s update of an artifact');
+        self::assertRefusedByTheGrants(static fn () => $writer->clone()->where('id', $artifact)->delete(), $driver, 'The writer\'s delete of an artifact');
+        self::assertRefusedByTheGrants(static fn () => $maintenance->clone()->where('id', $artifact)->update($change), $driver, 'The maintenance user\'s update of an artifact');
+        self::assertSame($digest, $this->root()->table($table)->where('id', $artifact)->value('digest'));
     }
 
     /**
@@ -378,6 +493,38 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
+     * On SQLite the documented prune deletes an entry's artifact with the entry
+     * and leaves both delete triggers as they were, so the next artifact's
+     * delete is refused; the other artifact stays.
+     *
+     * @return void
+     */
+    public function testTheDocumentedSqlitePruneDeletesAnArtifactWithItsEntry(): void
+    {
+        $this->skipUnlessSqlite();
+
+        $entries   = $this->sealedLog();
+        $root      = $this->root();
+        $artifacts = EntrySettings::artifactsTable();
+        $pruned    = $this->storeArtifact(1, $entries[0]);
+        $kept      = $this->storeArtifact(2, $entries[1]);
+
+        $root->unprepared($this->pruneOf(sprintf(
+            'DELETE FROM %s WHERE entry_id = \'%s\'; DELETE FROM %s WHERE id = \'%s\';',
+            $artifacts,
+            $entries[0],
+            EntrySettings::table(),
+            $entries[0],
+        )));
+
+        self::assertFalse($root->table($artifacts)->where('id', $pruned)->exists());
+        self::assertFalse($root->table(EntrySettings::table())->where('id', $entries[0])->exists());
+        self::assertSame($this->installedTriggers($root), $this->documentedTriggerNames());
+        self::assertRefusedByATrigger(static fn () => $root->table($artifacts)->where('id', $kept)->delete(), $artifacts, 'DELETE');
+        self::assertSame(1, $root->table($artifacts)->count());
+    }
+
+    /**
      * On SQLite a prune that fails after dropping the trigger and deleting an
      * entry, rolled back, keeps the entry and the trigger.
      *
@@ -409,6 +556,7 @@ final class AppendOnlyTriggersTest extends TestCase
     {
         yield from [
             'entries'     => [EntrySettings::DEFAULT_TABLE],
+            'artifacts'   => [EntrySettings::DEFAULT_ARTIFACTS_TABLE],
             'checkpoints' => [IntegrityTables::DEFAULT_CHECKPOINTS],
             'members'     => [IntegrityTables::DEFAULT_MEMBERS],
         ];
@@ -430,7 +578,7 @@ final class AppendOnlyTriggersTest extends TestCase
             self::markTestSkipped('Only PostgreSQL has the truncate triggers; MySQL refuses it by the grants.');
         }
 
-        $this->sealedLog();
+        $this->storeArtifact(1, $this->sealedLog()[0]);
 
         $count = $root->table($table)->count();
 
@@ -518,6 +666,40 @@ final class AppendOnlyTriggersTest extends TestCase
         $this->sealAll();
 
         return [...$first, ...$second];
+    }
+
+    /**
+     * Store an artifact of the entry, as the tables' owner, and return its id.
+     *
+     * @param  int  $number
+     * @param  string  $entryId
+     * @return string
+     */
+    private function storeArtifact(int $number, string $entryId): string
+    {
+        $this->root()->table(EntrySettings::artifactsTable())->insert(self::artifactRow($number, $entryId));
+
+        return sprintf(self::ARTIFACT_ID, $number);
+    }
+
+    /**
+     * An artifact row of the entry, its id numbered.
+     *
+     * @param  int  $number
+     * @param  string  $entryId
+     * @return array<string, int|string>
+     */
+    private static function artifactRow(int $number, string $entryId): array
+    {
+        return [
+            'id'           => sprintf(self::ARTIFACT_ID, $number),
+            'entry_id'     => $entryId,
+            'kind'         => 'bulk',
+            'member_count' => 3,
+            'digest'       => str_repeat('a', 64),
+            'members'      => 'eyJpdiI6IjAxMjM0NTY3ODkifQ==',
+            'created_at'   => '2026-11-01 12:00:00.000000',
+        ];
     }
 
     /**

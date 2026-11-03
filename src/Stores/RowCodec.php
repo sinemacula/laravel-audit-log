@@ -10,8 +10,9 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
  * The one conversion between a finalised record and a row of the entries table:
- * the record encoded for its insert, and a stored row decoded back to the
- * envelope it holds.
+ * the record encoded for its insert, a bulk record's attachment encoded as the
+ * row of the artifacts table written with it, and a stored row decoded back to
+ * the envelope it holds.
  *
  * A row is written with its JSON in fixed flags, its integers as they are, and
  * its times in UTC as `Y-m-d H:i:s.u`, written out explicitly because the
@@ -23,7 +24,9 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * rebuilt from an envelope gives its JSON columns as objects where they were
  * objects, and they are written as objects. Decoding returns the envelope,
  * never a record: a stored row is evidence. The codec never trims, folds case
- * or normalises a value.
+ * or normalises a value. An artifact's row is the attachment as it was sealed,
+ * naming the record's id as its entry, with the record's recorded time as its
+ * own, stored as the entry stores it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -96,6 +99,27 @@ final readonly class RowCodec
         $row['recorded_at'] = StoredTime::toStorage($row['recorded_at']);
 
         return $row;
+    }
+
+    /**
+     * The record's attachment as the row of the artifacts table its insert
+     * writes, in table order: its id, the record's id as its entry, its kind,
+     * member count, digest and sealed members as they are, and the record's
+     * recorded time in UTC as `Y-m-d H:i:s.u`. Only a bulk record has one.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @return array{id: string, entry_id: string, kind: string, member_count: int, digest: string, members: string, created_at: string}
+     *
+     * @throws \LogicException
+     */
+    public function encodeAttachment(#[\SensitiveParameter] FinalisedRecord $record): array
+    {
+        $attachment = $record->record->attachment ?? throw new \LogicException('Only a bulk record has an attachment to store.');
+
+        return [
+            ...$attachment->envelopeFor($record->record->id),
+            'created_at' => StoredTime::toStorage($record->recordedAt),
+        ];
     }
 
     /**

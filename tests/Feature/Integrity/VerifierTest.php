@@ -25,6 +25,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CheckpointWriter;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
+use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
@@ -39,6 +40,7 @@ use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\Verifier;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SealsEntries;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
@@ -52,7 +54,8 @@ use Tests\TestCase;
  * receipt cleared; an anchor that fails is asked once; only a run of the whole
  * log checks for orphaned members and unsealed entries and records its
  * completion; seals written after the run began are never read; keys rotated
- * between seals and within one verify; and every statement reads the writer.
+ * between seals and within one verify; a bundle's artifact is checked with its
+ * seal; and every statement reads the writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,7 +65,7 @@ use Tests\TestCase;
 #[CoversClass(Verifier::class)]
 final class VerifierTest extends TestCase
 {
-    use SealsEntries;
+    use SealsEntries, SeedsArtifacts;
 
     /** @var string When every seal of a test is made. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -1333,6 +1336,33 @@ final class VerifierTest extends TestCase
     }
 
     /**
+     * A run over a seal holding a bundle whose artifact was changed after
+     * sealing fails as tampered, its segment naming the bundle's entry, while
+     * the seal of an intact bundle stays valid.
+     *
+     * @return void
+     */
+    public function testARunWithATamperedArtifactFails(): void
+    {
+        $this->seedBundle();
+        $this->sealAll();
+
+        $entryId = $this->seedBundle(2);
+
+        $this->sealAll();
+        $this->tamperWithArtifact($entryId, ['digest' => self::OTHER_DIGEST]);
+
+        $summary = $this->verifyLog();
+
+        self::assertSame(1, $summary->integrity['valid']);
+        self::assertSame(1, $summary->integrity['tampered']);
+        self::assertSame(Finding::MANIFEST_MISMATCH, $this->streamed[1]->finding);
+        self::assertSame($entryId, $this->streamed[1]->firstBadId);
+        self::assertSame(Finding::MANIFEST_MISMATCH, $summary->firstFinding);
+        self::assertTrue($summary->fails(false));
+    }
+
+    /**
      * Run a verification of the range, the whole log by default, under the
      * anchor and on the clock given, keeping every report it streams.
      *
@@ -1366,7 +1396,8 @@ final class VerifierTest extends TestCase
         $anchor ??= new NullAnchor;
         $database = app(DatabaseManager::class);
         $settings = app(SealSettings::class);
-        $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, new NullPruneLedger, $anchor, $database);
+        $manifest = app(ManifestVerifier::class);
+        $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, new NullPruneLedger, $anchor, $database, $manifest);
 
         return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), $clock ?? FrozenClock::at(self::VERIFIED_AT), $database);
     }

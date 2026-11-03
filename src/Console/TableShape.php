@@ -12,9 +12,10 @@ namespace SineMacula\Laravel\AuditLog\Console;
  * its name's suffix, the primary key's columns, and the sentence that describes
  * a column the package does not write.
  *
- * There is one shape for each of six tables: the entries, the outbox, the
- * deliveries, the checkpoints, the checkpoint members and the integrity state.
- * Each is built by its named constructor, and none can be built otherwise.
+ * There is one shape for each of seven tables: the entries, the artifacts, the
+ * outbox, the deliveries, the checkpoints, the checkpoint members and the
+ * integrity state. Each is built by its named constructor, and none can be
+ * built otherwise.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,6 +76,22 @@ final readonly class TableShape
         '_occurred_index'  => [['occurred_at'], false],
         '_recorded_index'  => [['recorded_at', 'id'], false],
         '_source_unique'   => [['source_id', 'source_record_id'], true],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each artifacts column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array ARTIFACTS_COLUMNS = [
+        'id'           => ['uuid', 36, false],
+        'entry_id'     => ['uuid', 36, false],
+        'kind'         => ['string', 16, false],
+        'member_count' => ['integer', null, false],
+        'digest'       => ['string', 64, false],
+        'members'      => ['longtext', null, false],
+        'created_at'   => ['datetime', 6, false],
+    ];
+
+    /** @var array<string, array{0: non-empty-list<string>, 1: bool}> Each index the artifacts migration creates, by its name's suffix, with its columns and uniqueness. */
+    private const array ARTIFACTS_INDEXES = [
+        '_entry_unique' => [['entry_id'], true],
     ];
 
     /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each outbox column the package writes, in order, with its type family, length or precision, and nullability. */
@@ -149,7 +166,7 @@ final readonly class TableShape
     /** @var string How a column of a checkpoints or checkpoint members table the package does not write is described. */
     private const string UNKNOWN_SEAL_COLUMN = 'Column `%s` is not one the package writes, so no seal covers it.';
 
-    /** @var string How a column of an outbox, deliveries or integrity state table the package does not write is described. */
+    /** @var string How a column of an artifacts, outbox, deliveries or integrity state table the package does not write is described. */
     private const string UNKNOWN_DELIVERY_COLUMN = 'Column `%s` is not one the package writes.';
 
     /**
@@ -163,7 +180,7 @@ final readonly class TableShape
      */
     private function __construct(
 
-        /** What the table is called in a problem: `entries`, `outbox`, `deliveries`, `checkpoints`, `checkpoint members` or `integrity state`. */
+        /** What the table is called in a problem: `entries`, `artifacts`, `outbox`, `deliveries`, `checkpoints`, `checkpoint members` or `integrity state`. */
         public string $label,
 
         /** Each column the package writes, in order, with its type family, its length or precision, and its nullability. */
@@ -187,6 +204,17 @@ final readonly class TableShape
     public static function entries(): self
     {
         return new self('entries', self::ENTRIES_COLUMNS, self::ENTRIES_INDEXES, ['id'], self::UNKNOWN_ENTRIES_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the artifacts table: keyed by the
+     * artifact's id, and an entry with at most one artifact.
+     *
+     * @return self
+     */
+    public static function artifacts(): self
+    {
+        return new self('artifacts', self::ARTIFACTS_COLUMNS, self::ARTIFACTS_INDEXES, ['id'], self::UNKNOWN_DELIVERY_COLUMN);
     }
 
     /**

@@ -15,9 +15,13 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Integrity\Anchorer;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Sealer;
+use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
+use SineMacula\Laravel\AuditLog\Integrity\VerificationContext;
 use SineMacula\Laravel\AuditLog\Integrity\Verifier;
 use Tests\Concerns\RunsDocumentedSql;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Concerns\TampersWithTheLog;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
@@ -27,10 +31,11 @@ use Tests\TestCase;
  * the storage note documents, run exactly as written by the tables' owner, on
  * MySQL and PostgreSQL: a writer granted those privileges and nothing else
  * records, seals, anchors, verifies strictly and completes a sweep, which
- * forgets its cursor; it cannot change an immutable checkpoint column, update
- * or delete a member, delete a seal, truncate any of the package's tables or
- * run any DDL; and the maintenance user may delete an entry and read the
- * evidence, and nothing more.
+ * forgets its cursor; a bundle's artifact is verified by a user granted only
+ * `SELECT` on it; it cannot change an immutable checkpoint column, update or
+ * delete a member, delete a seal, truncate any of the package's tables or run
+ * any DDL; and the maintenance user may delete an entry and read the evidence,
+ * and nothing more.
  *
  * Each worker creates logins of its own, `audit_writer_<token>` and
  * `audit_maintenance_<token>`, and drops them when the test ends. No trigger is
@@ -47,7 +52,7 @@ use Tests\TestCase;
 #[CoversClass(Verifier::class)]
 final class LeastPrivilegeSealerTest extends TestCase
 {
-    use RunsDocumentedSql, TampersWithTheLog;
+    use RunsDocumentedSql, SeedsArtifacts, TampersWithTheLog;
 
     /** @var string The connection the writer's login uses, which is the storage connection. */
     private const string WRITER = 'audit_writer';
@@ -57,6 +62,9 @@ final class LeastPrivilegeSealerTest extends TestCase
 
     /** @var string When the entries are sealed and verified: within the allowed age of every entry. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
+
+    /** @var string The clock a segment is verified at directly, at which every grace ends. */
+    private const string RUN_CLOCK = '2026-11-02T00:00:00.000000Z';
 
     /** @var array<string, string> The names this worker gives the placeholders, once its logins exist. */
     private array $names = [];
@@ -317,6 +325,41 @@ final class LeastPrivilegeSealerTest extends TestCase
 
         self::assertSame([$ids[1]], $this->root()->table(EntrySettings::table())->pluck('id')->all());
         self::assertSame(2, $this->root()->table(IntegrityTables::membersTable())->count());
+    }
+
+    /**
+     * A bundle the writer stores is sealed and verified strictly, and its
+     * segment, artifact included, verifies on the maintenance user's
+     * connection, which holds no privilege on the artifacts but `SELECT` and
+     * `DELETE`, and no `INSERT` it could have used.
+     *
+     * @return void
+     */
+    public function testVerificationReadsArtifactsWithOnlySelect(): void
+    {
+        $this->storeEntries(1);
+
+        $entryId = $this->seedBundle();
+
+        self::assertSame(0, $this->runSeal()[0]);
+        self::assertSame(0, $this->verify(['--strict' => true])[0]);
+
+        $maintenance = DB::connection(self::MAINTENANCE);
+        $artifact    = $this->root()->table(EntrySettings::artifactsTable())->where('entry_id', $entryId)->first();
+        $copy        = ['id' => '01932b4e-8a40-7000-8000-00000000f0f1', 'entry_id' => '01932b4e-8a40-7000-8000-00000000f0f2'] + (array) $artifact;
+
+        $insert = static fn () => $maintenance->table(EntrySettings::artifactsTable())->insert($copy);
+
+        self::assertRefusedByTheGrants($insert, $maintenance->getDriverName(), 'The maintenance user\'s insert of an artifact');
+
+        app(ConfigRepository::class)->set('audit-log.storage.connection', self::MAINTENANCE);
+
+        $seal   = (array) $maintenance->table(IntegrityTables::checkpointsTable())->where('sequence', 1)->first();
+        $report = app(SegmentVerifier::class)->verify($seal, 1, null, new VerificationContext(null, true, self::RUN_CLOCK, self::RUN_CLOCK));
+
+        self::assertSame(IntegrityStatus::VALID, $report->integrity);
+        self::assertNull($report->finding);
+        self::assertSame(2, $report->members);
     }
 
     /**

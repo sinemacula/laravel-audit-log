@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Stores;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
@@ -13,9 +14,14 @@ use Monolog\Level;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Delivery\SpillReader;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
 use Tests\Concerns\CapturesLogLines;
 use Tests\Concerns\InteractsWithAuditStore;
@@ -27,7 +33,8 @@ use Tests\TestCase;
 /**
  * Feature tests for the spill: the one line a failed write leaves, at
  * `critical`, on the configured channel; the marker and the canonical envelope
- * it holds, signed or marked `unsigned`; that it stays one physical line and
+ * it holds, signed or marked `unsigned`, a record with an attachment as its
+ * whole bundle, which the codec reads back; that it stays one physical line and
  * holds no `%`, so the documented channel writes it back byte for byte; and
  * that a failed channel propagates.
  *
@@ -257,6 +264,140 @@ final class FailureSpillTest extends TestCase
         foreach (['recorded_at', 'integrity_version', 'key_id', 'hmac'] as $column) {
             self::assertArrayNotHasKey($column, $decoded, "An unsigned spill holds `{$column}`.");
         }
+    }
+
+    /**
+     * A finalised record with an attachment is spilled as its whole bundle: the
+     * bundle version, the record's signed columns, and the attachment naming
+     * the record as its entry, its sealed members as they were.
+     *
+     * @return void
+     */
+    public function testASpilledBundleHoldsItsAttachment(): void
+    {
+        $record     = $this->finaliser()->finalise(RecordFactory::bundled());
+        $attachment = $record->record->attachment;
+
+        self::assertNotNull($attachment);
+
+        $this->captureLogLines();
+
+        $this->spill()->spillFinalised($record);
+
+        $line    = $this->spillLines()[0];
+        $decoded = $this->decoded($line);
+
+        self::assertSame(FailureSpill::MARKER . CanonicalEncoder::encode(EnvelopeCodec::envelopeOf($record)), $line);
+        self::assertSame(['attachment', 'bundle_version', 'record'], array_keys($decoded));
+        self::assertSame(EnvelopeCodec::BUNDLE_VERSION, $decoded['bundle_version']);
+        self::assertSame(CanonicalEncoder::encode($attachment->envelopeFor($record->record->id)), CanonicalEncoder::encode($decoded['attachment']));
+        self::assertSame(CanonicalEncoder::encode($record->toArray()), CanonicalEncoder::encode($decoded['record']));
+        self::assertSame($record->record->id, $decoded['attachment']['entry_id']);
+        self::assertSame($attachment->members, $decoded['attachment']['members']);
+        self::assertSame($record->hmac, $decoded['record']['hmac']);
+    }
+
+    /**
+     * A record with an attachment that was never finalised is spilled as its
+     * bundle marked `unsigned`, the attachment beside its record, and no
+     * integrity field in the record.
+     *
+     * @return void
+     */
+    public function testAnUnsignedBundleIsMarkedAndHoldsItsAttachment(): void
+    {
+        $record     = RecordFactory::bundled();
+        $attachment = $record->attachment;
+
+        self::assertNotNull($attachment);
+
+        $this->captureLogLines();
+
+        $this->spill()->spillUnsigned($record);
+
+        $line    = $this->spillLines()[0];
+        $decoded = $this->decoded($line);
+
+        self::assertSame(FailureSpill::MARKER . CanonicalEncoder::encode(EnvelopeCodec::unsignedEnvelopeOf($record)), $line);
+        self::assertSame(['attachment', 'bundle_version', 'record', 'unsigned'], array_keys($decoded));
+        self::assertTrue($decoded['unsigned']);
+        self::assertSame(CanonicalEncoder::encode($attachment->envelopeFor($record->id)), CanonicalEncoder::encode($decoded['attachment']));
+        self::assertSame(CanonicalEncoder::encode($record->toArray()), CanonicalEncoder::encode($decoded['record']));
+
+        foreach (['recorded_at', 'integrity_version', 'key_id', 'hmac'] as $column) {
+            self::assertArrayNotHasKey($column, $decoded['record'], "An unsigned bundle's record holds `{$column}`.");
+        }
+    }
+
+    /**
+     * A bundle spilled through the documented channel reads back through the
+     * codec as the same record with the same attachment, whose members open to
+     * the manifest's canonical form; the unsigned bundle beside it is refused
+     * as unsigned, naming its record.
+     *
+     * @return void
+     */
+    public function testASpilledBundleReadsBackThroughTheCodec(): void
+    {
+        $this->spillTo(self::SPILL_CHANNEL);
+
+        $record   = $this->finaliser()->finalise(RecordFactory::bundled());
+        $unsigned = RecordFactory::bundled();
+
+        $this->spill()->spillFinalised($record);
+        $this->spill()->spillUnsigned($unsigned);
+
+        $lines = explode("\n", $this->contentsOf(self::SPILL_CHANNEL));
+        $codec = app(EnvelopeCodec::class);
+
+        self::assertCount(3, $lines);
+
+        $json = SpillReader::extract($lines[0]);
+
+        self::assertIsString($json);
+
+        $decoded = $codec->decode($json, $record->record->id);
+
+        self::assertSame($codec->encode($record), $codec->encode($decoded));
+        self::assertEquals($record->record->attachment, $decoded->record->attachment);
+        self::assertNotNull($decoded->record->attachment);
+
+        $members = app(StringEncrypter::class)->decryptString($decoded->record->attachment->members);
+
+        self::assertSame(['count' => 3, 'digest' => $decoded->record->attachment->digest], Manifest::readCanonical($members));
+
+        try {
+            $codec->decode((string) SpillReader::extract($lines[1]));
+
+            self::fail('Expected the unsigned bundle to be refused.');
+        } catch (EnvelopeRejectedException $exception) {
+            self::assertSame(EnvelopeFailure::UNSIGNED, $exception->failure);
+            self::assertSame($unsigned->id, $exception->id);
+        }
+    }
+
+    /**
+     * A `%` anywhere in a bundle's record is written as its JSON escape, as in
+     * any other line, so the bundle's line holds none, and its record still
+     * verifies once it is read back.
+     *
+     * @return void
+     */
+    public function testABundlesLineHoldsNoPercentSign(): void
+    {
+        $bundled    = RecordFactory::bundled();
+        $properties = [...(array) $bundled->properties, 'share' => '100%', '%key%' => '%%s'];
+        $record     = $this->finaliser()->finalise(RecordFactory::withFields(['properties' => $properties, 'attachment' => $bundled->attachment], $bundled));
+
+        $this->captureLogLines();
+
+        $this->spill()->spillFinalised($record);
+
+        $line = $this->spillLines()[0];
+
+        self::assertStringNotContainsString('%', $line);
+        self::assertSame(FailureSpill::line(EnvelopeCodec::envelopeOf($record)), $line);
+        self::assertSame($record->hmac, app(EnvelopeCodec::class)->decode(substr($line, strlen(FailureSpill::MARKER)))->hmac);
     }
 
     /**

@@ -74,7 +74,7 @@ final class PackageBoundaryTest extends TestCase
     /** @var string The package's root namespace. */
     private const string PACKAGE = 'SineMacula\Laravel\AuditLog\\';
 
-    /** @var list<string> The directory and the file that touch a guard. */
+    /** @var list<string> The directory and the file that read a guard's user; any other file touches a guard when it resolves one by name. */
     private const array GUARD_READERS = ['src/Contributors/', 'src/Runtime/CachedUser.php'];
 
     /** @var list<string> The other `GuardHelpers` methods that call `user()`. */
@@ -580,6 +580,7 @@ final class PackageBoundaryTest extends TestCase
                     $guard->check();
                     $guard->guest();
                     $guard->authenticate();
+                    $auth->guard('web')->check();
                     $read = $bound->user;
                     $guard->username();
                     $guard->hasUser();
@@ -589,7 +590,62 @@ final class PackageBoundaryTest extends TestCase
             }
             PHP;
 
-        self::assertSame(['user', 'user', 'user', 'user', 'id', 'check', 'guest', 'authenticate'], self::memberCallsIn($source, ['user', ...self::USER_LOADERS]));
+        self::assertSame(['user', 'user', 'user', 'user', 'id', 'check', 'guest', 'authenticate', 'check'], self::memberCallsIn($source, ['user', ...self::USER_LOADERS]));
+    }
+
+    /**
+     * Rows of `[source, whether it resolves a guard]`: each form of resolving a
+     * guard by name, on the manager, through a nullsafe operator, on the
+     * facade, in any case and as a first-class callable; and nothing for a
+     * comment, a string, a declaration, a read of a property of the same name,
+     * or a method with a longer name.
+     *
+     * @return iterable<string, array{0: string, 1: bool}>
+     */
+    public static function provideGuardResolutions(): iterable
+    {
+        yield from [
+            'on the manager'              => ['<?php $auth->guard($name);', true],
+            'with no name'                => ['<?php $this->auth->guard();', true],
+            'through a nullsafe'          => ['<?php $auth?->guard(\'web\');', true],
+            'on the facade'               => ['<?php Auth::guard(\'web\');', true],
+            'in another case'             => ['<?php $auth->GUARD(\'web\');', true],
+            'as a first-class callable'   => ['<?php $resolve = $auth->guard(...);', true],
+            'in a comment'                => ["<?php\n// \$auth->guard('web');\n/** \$auth->guard('web') */", false],
+            'in a string'                 => ['<?php $call = \'$auth->guard()\';', false],
+            'as a declaration'            => ['<?php final class A { public function guard(): void {} }', false],
+            'a property of the name'      => ['<?php $name = $event->guard;', false],
+            'a method with a longer name' => ['<?php $pending->fillGuard($guard);', false],
+        ];
+    }
+
+    /**
+     * A file that resolves a guard by name touches one, so a call there of a
+     * helper that loads the guard's user is refused too, wherever the file is.
+     *
+     * @param  string  $source
+     * @param  bool  $resolves
+     * @return void
+     */
+    #[DataProvider('provideGuardResolutions')]
+    public function testTheGuardScannerFindsEveryResolutionOfAGuard(string $source, bool $resolves): void
+    {
+        self::assertSame($resolves, self::resolvesAGuard($source));
+    }
+
+    /**
+     * The core sign-in listener resolves the guard an event names, so it is
+     * held to the helpers' rule; a listener that never resolves a guard is held
+     * only to the rule on `user()`.
+     *
+     * @return void
+     */
+    public function testTheAuthListenerTouchesAGuard(): void
+    {
+        self::assertTrue(self::touchesAGuard('src/Listeners/RecordLaravelAuthEvent.php'));
+        self::assertTrue(self::touchesAGuard('src/Contributors/AmbientActor.php'));
+        self::assertTrue(self::touchesAGuard('src/Runtime/CachedUser.php'));
+        self::assertFalse(self::touchesAGuard('src/Listeners/RecordGateDenial.php'));
     }
 
     /**
@@ -982,7 +1038,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * Whether the file is one of those that touch a guard.
+     * Whether the file touches a guard: it is one of those that read a guard's
+     * user, or it resolves a guard by name.
      *
      * @param  string  $file
      * @return bool
@@ -995,7 +1052,19 @@ final class PackageBoundaryTest extends TestCase
             }
         }
 
-        return false;
+        return self::resolvesAGuard(self::contents($file));
+    }
+
+    /**
+     * Whether the source resolves a guard by name, on the manager or the
+     * facade.
+     *
+     * @param  string  $source
+     * @return bool
+     */
+    private static function resolvesAGuard(string $source): bool
+    {
+        return self::memberCallsIn($source, ['guard']) !== [];
     }
 
     /**

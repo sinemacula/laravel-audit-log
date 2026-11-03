@@ -21,6 +21,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Anchors\DiskAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\CheckpointWriter;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
+use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
@@ -35,6 +36,7 @@ use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\Concerns\SealsEntries;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
@@ -42,9 +44,11 @@ use Tests\Fixtures\Support\FrozenClock;
  * Statement-budget and memory contract for verification: a run of an empty log
  * reads the head and the five whole-log counts and writes its completion; each
  * segment adds one read of its members and their entries, and each page of
- * seals one more; a ranged run reads its range, its boundary and the head, and
- * writes nothing; the null prune ledger and the null anchor cost no statement,
- * and an anchor that answers costs one read of the local seal at its head; every
+ * seals one more; a segment's bundles add one read of their artifacts and one
+ * of their members for each batch of them, and a segment without one adds
+ * nothing; a ranged run reads its range, its boundary and the head, and writes
+ * nothing; the null prune ledger and the null anchor cost no statement, and an
+ * anchor that answers costs one read of the local seal at its head; every
  * report is let go as the run goes; and the peak memory of a run follows its
  * largest segment, never the number of segments.
  *
@@ -61,7 +65,7 @@ use Tests\Fixtures\Support\FrozenClock;
 #[CoversClass(SegmentVerifier::class)]
 final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 {
-    use SealsEntries;
+    use SealsEntries, SeedsArtifacts;
 
     /** @var int The reads a run of the whole log makes whatever it holds: the head, the seals outside the chain, the orphaned members, and the overdue, the far-ahead and the pending entries. */
     private const int WHOLE_RUN_READS = 6;
@@ -71,6 +75,9 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 
     /** @var int Entries inserted by one statement, well under every engine's placeholder limit. */
     private const int INSERT_CHUNK = 20;
+
+    /** @var string When a segment of bundles is sealed: after the factory's bundles are recorded. */
+    private const string BUNDLES_SEALED_AT = '2026-11-01 13:00:00';
 
     /** @var string The disk a disk anchor writes to, faked for each test that anchors. */
     private const string ANCHOR_DISK = 'anchors';
@@ -267,6 +274,62 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * Rows of `[bundles in the segment, batches]`: one bundle, a whole batch of
+     * them, and one more than a batch, which takes a second.
+     *
+     * @return iterable<string, array{0: int, 1: int}>
+     */
+    public static function provideBundleCounts(): iterable
+    {
+        yield from [
+            'one bundle'            => [1, 1],
+            'a whole batch'         => [ManifestVerifier::ENTRY_BATCH, 1],
+            'one more than a batch' => [ManifestVerifier::ENTRY_BATCH + 1, 2],
+        ];
+    }
+
+    /**
+     * A segment's bundles cost one read of their artifacts' columns and one of
+     * their members for each batch of entries whose members fit the byte bound,
+     * on top of what the segment costs, never a read per entry.
+     *
+     * @param  int  $bundles
+     * @param  int  $batches
+     * @return void
+     */
+    #[DataProvider('provideBundleCounts')]
+    public function testManifestChecksAddTwoQueriesPerBatch(int $bundles, int $batches): void
+    {
+        $this->insertEntries(1);
+        $this->seedBundles($bundles, 1);
+        $this->sealAt(self::BUNDLES_SEALED_AT);
+        $this->sealAll();
+
+        $summary = $this->assertStatementBudget(self::WHOLE_RUN_READS + 1 + 1 + 2 * $batches, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog());
+
+        self::assertSame(1, $summary->integrity['valid']);
+        self::assertSame($bundles + 1, $this->streamed[0]->members);
+    }
+
+    /**
+     * A segment of entries none of which is a bundle costs exactly what it did
+     * before manifests were checked: one read of its members, and no read of
+     * the artifacts.
+     *
+     * @return void
+     */
+    public function testASegmentWithoutBundlesAddsNoQuery(): void
+    {
+        $this->storeSeals(1, 3);
+
+        $this->assertStatementBudget(self::WHOLE_RUN_READS + 1 + 1, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog());
+
+        $artifacts = array_filter($this->capturedStatements(), static fn (string $sql): bool => str_contains($sql, EntrySettings::artifactsTable()));
+
+        self::assertSame([], $artifacts);
+    }
+
+    /**
      * Every report is let go as the run goes: by the time a report is given to
      * the callback, none but the one before it is still held anywhere, and once
      * the run ends none is, so neither the verifier nor its summary keeps them,
@@ -377,7 +440,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
         $anchor ??= new NullAnchor;
         $database = app(DatabaseManager::class);
         $settings = app(SealSettings::class);
-        $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, new NullPruneLedger, $anchor, $database);
+        $manifest = app(ManifestVerifier::class);
+        $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, new NullPruneLedger, $anchor, $database, $manifest);
 
         return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), app(Clock::class), $database);
     }

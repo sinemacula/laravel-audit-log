@@ -24,6 +24,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
+use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
@@ -36,6 +37,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationContext;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SealsEntries;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\TestCase;
@@ -47,9 +49,10 @@ use Tests\TestCase;
  * change gives and which wins, the expected sequence, the chain over recomputed
  * digests, the members read in one statement and sorted rather than trusted,
  * the prune records that account for missing entries and the ones that do not,
- * and anchoring as a separate answer: asked of the anchor, never of the
- * receipt, not asked once it has failed, contradicted by the anchor's head, and
- * awaiting its first anchoring within the grace.
+ * the manifests of the bundles whose entries verified, checked together, and
+ * anchoring as a separate answer: asked of the anchor, never of the receipt,
+ * not asked once it has failed, contradicted by the anchor's head, and awaiting
+ * its first anchoring within the grace.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,7 +62,7 @@ use Tests\TestCase;
 #[CoversClass(SegmentVerifier::class)]
 final class SegmentVerifierTest extends TestCase
 {
-    use SealsEntries;
+    use SealsEntries, SeedsArtifacts;
 
     /** @var string When every seal of a test is made. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -1574,6 +1577,187 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
+     * A segment holding a bundle beside plain entries, its artifact as written,
+     * is valid, with every member row found.
+     *
+     * @return void
+     */
+    public function testASegmentWithAValidBundleIsValid(): void
+    {
+        $this->storeEntries(2);
+        $this->seedBundle();
+        $this->sealAll();
+
+        $report = $this->report(1);
+
+        self::assertSame(IntegrityStatus::VALID, $report->integrity);
+        self::assertNull($report->finding);
+        self::assertSame(3, $report->members);
+    }
+
+    /**
+     * A segment whose bundle's artifact was changed after sealing is tampered,
+     * named at the bundle's entry, whether the artifact was edited or deleted.
+     *
+     * @return void
+     */
+    public function testATamperedArtifactMakesTheSegmentTampered(): void
+    {
+        $this->storeEntries(1);
+
+        $edited  = $this->seedBundle();
+        $deleted = $this->seedBundle(2);
+
+        $this->sealAll();
+        $this->tamperWithArtifact($edited, ['member_count' => 2]);
+
+        $report = $this->report(1);
+
+        self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
+        self::assertSame(Finding::MANIFEST_MISMATCH, $report->finding);
+        self::assertSame($edited, $report->firstBadId);
+
+        $this->tamperWithArtifact($edited, ['member_count' => 3]);
+        $this->artifactsTable()->where('entry_id', $deleted)->delete();
+
+        $report = $this->report(1);
+
+        self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
+        self::assertSame(Finding::MANIFEST_MISSING, $report->finding);
+        self::assertSame($deleted, $report->firstBadId);
+    }
+
+    /**
+     * A segment whose bundle's members the application's keys cannot decrypt is
+     * unverifiable, named at the bundle's entry.
+     *
+     * @return void
+     */
+    public function testAnUnreadableArtifactMakesTheSegmentUnverifiable(): void
+    {
+        $entryId = $this->seedBundle();
+
+        $this->sealAll();
+        $this->tamperWithArtifact($entryId, ['members' => 'not a ciphertext']);
+
+        $report = $this->report(1);
+
+        self::assertSame(IntegrityStatus::UNVERIFIABLE, $report->integrity);
+        self::assertSame(Finding::MANIFEST_UNREADABLE, $report->finding);
+        self::assertSame($entryId, $report->firstBadId);
+    }
+
+    /**
+     * An unreadable artifact never hides a tampered one: the segment is
+     * tampered, at the tampered bundle.
+     *
+     * @return void
+     */
+    public function testATamperedArtifactOutranksAnUnreadableOne(): void
+    {
+        $unreadable = $this->seedBundle();
+        $tampered   = $this->seedBundle();
+
+        $this->sealAll();
+        $this->tamperWithArtifact($unreadable, ['members' => 'not a ciphertext']);
+        $this->tamperWithArtifact($tampered, ['kind' => 'export']);
+
+        $report = $this->report(1);
+
+        self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
+        self::assertSame(Finding::MANIFEST_MISMATCH, $report->finding);
+        self::assertSame($tampered, $report->firstBadId);
+    }
+
+    /**
+     * A member whose entry does not verify is not trusted for its descriptor:
+     * its artifact is never asked for, so a deleted one adds no finding, and an
+     * entry under a key the ring no longer holds stays unverifiable rather than
+     * becoming tampered.
+     *
+     * @return void
+     */
+    public function testAMemberThatFailsItsHmacIsNotTrustedForItsDescriptor(): void
+    {
+        $entryId = $this->seedBundle();
+
+        $this->useRing(['k2026' => self::SECRET_2026], 'k2026');
+        $this->sealAll();
+        $this->artifactsTable()->where('entry_id', $entryId)->delete();
+
+        $seal       = $this->seal(1);
+        $statements = $this->countStatements(fn (): SegmentReport => $this->verifier()->verify($seal, 1, null, self::context()));
+        $report     = $this->report(1);
+
+        self::assertSame(IntegrityStatus::UNVERIFIABLE, $report->integrity);
+        self::assertSame(Finding::ENTRY_KEY, $report->finding);
+        self::assertSame($entryId, $report->firstBadId);
+        self::assertSame(1, $statements);
+    }
+
+    /**
+     * A bundle's entry edited after sealing is tampered at the entry, and its
+     * artifact is never read.
+     *
+     * @return void
+     */
+    public function testAnEditedBundleEntryIsNeverCheckedForItsArtifact(): void
+    {
+        $entryId = $this->seedBundle();
+
+        $this->sealAll();
+        $this->entries()->where('id', $entryId)->update(['outcome' => 'denied']);
+
+        $seal       = $this->seal(1);
+        $statements = $this->countStatements(fn (): SegmentReport => $this->verifier()->verify($seal, 1, null, self::context()));
+        $report     = $this->report(1);
+
+        self::assertSame(Finding::ENTRY_HMAC, $report->finding);
+        self::assertSame(1, $statements);
+    }
+
+    /**
+     * A bundle's entry and its artifact deleted under a valid prune record of
+     * exactly that seal are pruned, with no manifest finding: a missing entry
+     * has no descriptor to check.
+     *
+     * @return void
+     */
+    public function testAPrunedBundleEntryNeedsNoArtifact(): void
+    {
+        $this->storeEntries(1);
+
+        $entryId = $this->seedBundle();
+
+        $this->sealAll();
+        $this->entries()->where('id', $entryId)->delete();
+        $this->artifactsTable()->where('entry_id', $entryId)->delete();
+
+        $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1))));
+
+        self::assertSame(IntegrityStatus::PRUNED, $report->integrity);
+        self::assertNull($report->finding);
+        self::assertSame(2, $report->members);
+    }
+
+    /**
+     * A segment of bundles reads its members and entries in one statement and
+     * its manifests in one more for their artifacts and one for their members.
+     *
+     * @return void
+     */
+    public function testASegmentsBundlesAddTwoStatements(): void
+    {
+        $this->storeEntries(2);
+        $this->seedBundles(3);
+        $this->sealAll();
+
+        $seal = $this->seal(1);
+
+        self::assertSame(3, $this->countStatements(fn (): SegmentReport => $this->verifier()->verify($seal, 1, null, self::context())));
+    }
+
+    /**
      * Store entries and seal them twice, two seals of two entries each.
      *
      * @return void
@@ -1627,6 +1811,7 @@ final class SegmentVerifierTest extends TestCase
             $prunes ?? new NullPruneLedger,
             $anchor ?? new NullAnchor,
             app(DatabaseManager::class),
+            app(ManifestVerifier::class),
         );
     }
 

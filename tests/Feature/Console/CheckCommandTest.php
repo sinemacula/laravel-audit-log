@@ -26,13 +26,13 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `audit-log:check`: it reads the settings, the connections
- * and guards they name, the entries table, the integrity keys and the delivery,
- * lists every problem it finds as `[<subject>] <message>` and every subject
- * without one as `[<subject>] OK`, ends with a `[spill]` note that is never a
- * problem, exits `1` when there is a problem and `0` when there is none, covers
- * every leaf of the shipped configuration and of the failure and delivery
- * settings, lists `app.key` once whichever settings read it, and prints no
- * secret, setting's value, statement or binding.
+ * and guards they name, the entries and artifacts tables, the integrity keys
+ * and the delivery, lists every problem it finds as `[<subject>] <message>` and
+ * every subject without one as `[<subject>] OK`, ends with a `[spill]` note
+ * that is never a problem, exits `1` when there is a problem and `0` when there
+ * is none, covers every leaf of the shipped configuration and of the failure
+ * and delivery settings, lists `app.key` once whichever settings read it, and
+ * prints no secret, setting's value, statement or binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,11 +51,17 @@ final class CheckCommandTest extends TestCase
     /** @var list<string> What a run prints when nothing has a problem, the note on the default channel last. */
     private const array EVERY_SUBJECT_OK = ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE];
 
-    /** @var string Absolute path to the shipped entries migration file. */
-    private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php';
+    /** @var list<string> Absolute paths to the shipped migration files of the tables the schema subject checks, in the order they run. */
+    private const array MIGRATION_PATHS = [
+        __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_000600_create_audit_log_artifacts_table.php',
+    ];
 
     /** @var string The table a test migrates under a name of its own. */
     private const string CUSTOM_TABLE = 'audit_custom_entries';
+
+    /** @var string The artifacts table a test migrates under a name of its own; PostgreSQL's index names would clash with the default's. */
+    private const string CUSTOM_ARTIFACTS_TABLE = 'audit_custom_artifacts';
 
     /** @var string A secret one byte short of the 32 an integrity key needs. */
     private const string SHORT_SECRET = 'a-secret-one-byte-short-of-32!!';
@@ -87,11 +93,18 @@ final class CheckCommandTest extends TestCase
     /** @var string The configured table no test migrates. */
     private const string ABSENT_TABLE = 'audit_absent_entries';
 
+    /** @var string The longest artifacts table's name the setting accepts, which a test migrates. */
+    private const string LONGEST_ARTIFACTS_TABLE = 'audit_log_artifacts_under_the_longest_name_xxxx';
+
+    /** @var string The configured artifacts table no test migrates. */
+    private const string ABSENT_ARTIFACTS_TABLE = 'audit_absent_artifacts';
+
     /** @var array<string, int|string> A value the check refuses for each leaf of the package's configuration, by its path under `audit-log`. */
     private const array BAD_LEAVES = [
         'storage.connection'                        => 123,
         'storage.maintenance_connection'            => 123,
         'entries.table'                             => 'audit-log',
+        'entries.artifacts_table'                   => 'audit-artifacts',
         'integrity.keys'                            => 'x',
         'integrity.current'                         => 'k1',
         'actor.guards'                              => 'web',
@@ -99,6 +112,14 @@ final class CheckCommandTest extends TestCase
         'context.request_id_header'                 => 'X Request',
         'context.trust_traceparent'                 => 'yes',
         'definitions.require_registered'            => '1',
+        'capture.laravel.except_guards'             => 'web',
+        'capture.laravel.identifier_key'            => 'e mail',
+        'capture.gate.enabled'                      => 'true',
+        'capture.gate.only_abilities'               => 'update',
+        'capture.gate.except_abilities'             => 'update',
+        'capture.gate.reason_codes'                 => 'plan_expired',
+        'capture.bulk.max_members'                  => 0,
+        'capture.bulk.max_bytes'                    => 65535,
         'source.id'                                 => 42,
         'source.region'                             => 42,
         'redaction.keys'                            => 'password',
@@ -214,6 +235,9 @@ final class CheckCommandTest extends TestCase
     private const string MALFORMED_DELIVERIES_TABLE = '[config] `audit-log.delivery.deliveries_table` must be a table name of 1 to 47 lower-case letters, digits and underscores'
         . ' that does not start with a digit.';
 
+    /** @var string The problem of an excepted guard `auth.guards` does not configure, by its name. */
+    private const string UNCONFIGURED_EXCEPT_GUARD = '[config] The guard [%s] that `audit-log.capture.laravel.except_guards` names is not configured in `auth.guards`.';
+
     /** @var list<string> Files a test created, removed when it ends. */
     private array $files = [];
 
@@ -241,7 +265,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Drop the table a test migrated under a name of its own and remove the
+     * Drop the tables a test migrated under names of their own and remove the
      * files it created.
      *
      * @return void
@@ -251,11 +275,14 @@ final class CheckCommandTest extends TestCase
     {
         if (app(ConfigRepository::class)->has('database.connections.custom')) {
             Schema::connection('custom')->dropIfExists(self::CUSTOM_TABLE);
+            Schema::connection('custom')->dropIfExists(self::CUSTOM_ARTIFACTS_TABLE);
 
             foreach (self::CUSTOM_INTEGRITY_TABLES as $table) {
                 Schema::connection('custom')->dropIfExists($table);
             }
         }
+
+        Schema::connection(self::CONNECTION)->dropIfExists(self::LONGEST_ARTIFACTS_TABLE);
 
         foreach ($this->files as $file) {
 
@@ -298,6 +325,7 @@ final class CheckCommandTest extends TestCase
         $config->set('audit-log.storage.connection', 'custom');
         $config->set('audit-log.storage.maintenance_connection', 'custom');
         $config->set('audit-log.entries.table', self::CUSTOM_TABLE);
+        $config->set('audit-log.entries.artifacts_table', self::CUSTOM_ARTIFACTS_TABLE);
         $config->set('audit-log.integrity.keys', ['k1' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         $config->set('audit-log.integrity.current', 'k1');
         $config->set(self::CUSTOM_INTEGRITY_TABLES);
@@ -312,6 +340,7 @@ final class CheckCommandTest extends TestCase
 
         self::assertContains('[integrity] The checkpoints table `audit_custom_checkpoints` does not exist on connection [custom]' . self::PUBLISH, $before);
         self::assertTrue(Schema::connection('custom')->hasTable(self::CUSTOM_TABLE));
+        self::assertTrue(Schema::connection('custom')->hasTable(self::CUSTOM_ARTIFACTS_TABLE));
         self::assertSame(0, $code);
         self::assertSame(self::EVERY_SUBJECT_OK, $output);
     }
@@ -636,7 +665,7 @@ final class CheckCommandTest extends TestCase
     /**
      * The engine's problems are listed with the tables': here a MySQL session
      * that is not strict, on a connection that answers as MySQL would and holds
-     * no table, so the integrity tables are missing too.
+     * no table, so the artifacts and integrity tables are missing too.
      *
      * @return void
      */
@@ -665,6 +694,7 @@ final class CheckCommandTest extends TestCase
             '[schema] The storage connection does not run in strict mode; set `strict` to true on the connection, so a value that does not fit fails instead of'
                 . ' being cut.',
             '[schema] The entries table `audit_log_entries` does not exist on connection [fake]' . self::PUBLISH,
+            '[schema] The artifacts table `audit_log_artifacts` does not exist on connection [fake]' . self::PUBLISH,
             '[integrity] The checkpoints table `audit_log_checkpoints` does not exist on connection [fake]' . self::PUBLISH,
             '[integrity] The checkpoint members table `audit_log_checkpoint_members` does not exist on connection [fake]' . self::PUBLISH,
             '[integrity] The integrity state table `audit_log_integrity_state` does not exist on connection [fake]' . self::PUBLISH,
@@ -693,6 +723,89 @@ final class CheckCommandTest extends TestCase
             '[delivery] OK',
             self::SPILL_NOTE,
         ], $output);
+    }
+
+    /**
+     * A missing artifacts table fails the schema subject, after the entries
+     * table's checks and as one problem, and every other subject passes.
+     *
+     * @return void
+     */
+    public function testAMissingArtifactsTableFailsTheSchemaSubject(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.entries.artifacts_table', self::ABSENT_ARTIFACTS_TABLE);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] OK',
+            '[connections] OK',
+            '[schema] The artifacts table `audit_absent_artifacts` does not exist on connection [testing]; publish and run the migrations'
+                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+            '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
+        ], $output);
+    }
+
+    /**
+     * Missing entries and artifacts tables are each a schema problem, the
+     * entries table's first.
+     *
+     * @return void
+     */
+    public function testMissingEntriesAndArtifactsTablesAreEachAProblem(): void
+    {
+        app(ConfigRepository::class)->set(['audit-log.entries.table' => self::ABSENT_TABLE, 'audit-log.entries.artifacts_table' => self::ABSENT_ARTIFACTS_TABLE]);
+
+        self::assertSame([
+            '[schema] The entries table `audit_absent_entries` does not exist on connection [testing]' . self::PUBLISH,
+            '[schema] The artifacts table `audit_absent_artifacts` does not exist on connection [testing]' . self::PUBLISH,
+        ], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * An artifacts table that lacks a column the package writes and holds one
+     * it does not is a schema problem for each, named as the artifacts table's.
+     *
+     * @return void
+     */
+    public function testAnArtifactsTableOfTheWrongShapeFailsTheSchemaSubject(): void
+    {
+        Schema::table('audit_log_artifacts', static function (Blueprint $table): void {
+            $table->dropColumn('digest');
+        });
+
+        Schema::table('audit_log_artifacts', static function (Blueprint $table): void {
+            $table->string('notes')->nullable();
+        });
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[schema] Column `digest` is missing.',
+            '[schema] Column `notes` is not one the package writes.',
+        ], self::problemsIn($output));
+    }
+
+    /**
+     * A malformed artifacts table's name is reported once, by `config`, and
+     * leaves the entries table's checks to run, so a missing entries table is
+     * still listed under the schema subject.
+     *
+     * @return void
+     */
+    public function testAMalformedArtifactsTableNameLeavesTheEntriesTableChecked(): void
+    {
+        app(ConfigRepository::class)->set(['audit-log.entries.table' => self::ABSENT_TABLE, 'audit-log.entries.artifacts_table' => 'audit-artifacts']);
+
+        self::assertSame([
+            '[config] `audit-log.entries.artifacts_table` must be a table name of 1 to 47 lower-case letters, digits and underscores'
+                . ' that does not start with a digit.',
+            '[schema] The entries table `audit_absent_entries` does not exist on connection [testing]' . self::PUBLISH,
+        ], self::problemsIn($this->check()[1]));
     }
 
     /**
@@ -1901,6 +2014,204 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
+     * An excepted guard `auth.guards` does not configure is the one problem of
+     * its run, listed under `[config]` once however often the list names it,
+     * and leaves out no later subject, since none of them reads it.
+     *
+     * @return void
+     */
+    public function testAnUnconfiguredExceptGuardFailsTheConfigSubject(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.capture.laravel.except_guards', ['missing', 'web', 'missing']);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            sprintf(self::UNCONFIGURED_EXCEPT_GUARD, 'missing'),
+            '[connections] OK',
+            '[schema] OK',
+            '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
+        ], $output);
+    }
+
+    /**
+     * Every excepted guard `auth.guards` configures passes, as does the
+     * wildcard, which names no guard, even with no guard configured.
+     *
+     * @return void
+     */
+    public function testConfiguredExceptGuardsAndTheWildcardPass(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('auth.guards.api', ['driver' => 'token', 'provider' => 'users']);
+        $config->set('audit-log.capture.laravel.except_guards', ['api', 'web']);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set('audit-log.capture.laravel.except_guards', ['*']);
+        $config->set('auth.guards.api', null);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * A malformed list of excepted guards is reported once, by its reader: the
+     * guard check names none of its guards, even one `auth.guards` does not
+     * configure.
+     *
+     * @return void
+     */
+    public function testAMalformedExceptGuardListIsReportedOnce(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.capture.laravel.except_guards', ['missing', '*']);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] `audit-log.capture.laravel.except_guards` must be a list of guard names of 1 to 64 characters, or `[\'*\']`.',
+        ], self::problemsIn($output));
+    }
+
+    /**
+     * Every value at the edge of what a capture setting accepts passes: a guard
+     * of 64 characters, the longest credential key, Gate capture on with both
+     * ability lists, the longest ability and reason code, each bulk bound at
+     * either end of its range, as an integer or the digits `env()` returns, and
+     * the longest artifacts table's name, once the migration has created it.
+     *
+     * @return void
+     */
+    public function testTheCaptureSettingsAcceptEveryGoodValue(): void
+    {
+        $config = app(ConfigRepository::class);
+        $guard  = str_repeat('g', 64);
+
+        $config->set("auth.guards.{$guard}", ['driver' => 'session', 'provider' => 'users']);
+        $config->set([
+            'audit-log.capture.laravel.except_guards'  => [$guard],
+            'audit-log.capture.laravel.identifier_key' => str_repeat('k', 64),
+            'audit-log.capture.gate.enabled'           => true,
+            'audit-log.capture.gate.only_abilities'    => [str_repeat('a', 191)],
+            'audit-log.capture.gate.except_abilities'  => ['viewNova'],
+            'audit-log.capture.gate.reason_codes'      => [str_repeat('r', 64)],
+            'audit-log.capture.bulk.max_members'       => 1,
+            'audit-log.capture.bulk.max_bytes'         => '65536',
+            'audit-log.entries.artifacts_table'        => self::LONGEST_ARTIFACTS_TABLE,
+        ]);
+
+        $this->migrateArtifactsTable();
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set('audit-log.capture.bulk.max_members', '1000000');
+        $config->set('audit-log.capture.bulk.max_bytes', 8388608);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * Every malformed capture setting and the artifacts table's name are listed
+     * by the one run, by their full paths and in the order the settings are
+     * read, after the delivery settings, and none of them leaves out a later
+     * subject, since none of those reads them.
+     *
+     * @return void
+     */
+    public function testEveryMalformedCaptureLeafIsReportedInOneRun(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        foreach (array_reverse(self::BAD_LEAVES, true) as $leaf => $bad) {
+
+            if (!str_starts_with($leaf, 'capture.') && $leaf !== 'entries.artifacts_table') {
+                continue;
+            }
+
+            $config->set("audit-log.{$leaf}", $bad);
+        }
+
+        $capture = [
+            '[config] `audit-log.capture.laravel.except_guards` must be a list of guard names of 1 to 64 characters, or `[\'*\']`.',
+            '[config] `audit-log.capture.laravel.identifier_key` must be 1 to 64 letters, digits, underscores, dots or hyphens,'
+                . ' starting with a letter, a digit or an underscore.',
+            '[config] `audit-log.capture.gate.enabled` must be true or false.',
+            '[config] `audit-log.capture.gate.only_abilities` must be null, or a non-empty list of abilities of 1 to 191 bytes.',
+            '[config] `audit-log.capture.gate.except_abilities` must be a list of abilities of 1 to 191 bytes.',
+            '[config] `audit-log.capture.gate.reason_codes` must be a list of machine-readable codes of 1 to 64 characters:'
+                . ' lower-case letters, digits, `_`, `.`, `:` or `-`, starting with a letter or a digit.',
+            '[config] `audit-log.capture.bulk.max_members` must be an integer from 1 to 1000000.',
+            '[config] `audit-log.capture.bulk.max_bytes` must be an integer from 65536 to 8388608.',
+            '[config] `audit-log.entries.artifacts_table` must be a table name of 1 to 47 lower-case letters, digits and underscores'
+                . ' that does not start with a digit.',
+        ];
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([...$capture, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE], $output);
+
+        $config->set('audit-log.delivery.outbox.connection', 42);
+
+        $delivery = '[config] `audit-log.delivery.outbox.connection` must be a connection name, or null or empty for the storage connection.';
+
+        self::assertSame([$delivery, ...$capture], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Rows of `[the setting, the bad value, the text in it]`: a capture
+     * setting, or the artifacts table's name, in each shape it is refused in.
+     *
+     * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
+     */
+    public static function provideCaptureValuesThatMustNotBePrinted(): iterable
+    {
+        $long = str_repeat(self::SENTINEL, 8);
+
+        yield from [
+            'except guards that are a string'   => ['audit-log.capture.laravel.except_guards', self::SENTINEL, self::SENTINEL],
+            'an except guard too long'          => ['audit-log.capture.laravel.except_guards', [$long], self::SENTINEL],
+            'an except guard with a control'    => ['audit-log.capture.laravel.except_guards', [self::SENTINEL . ''], self::SENTINEL],
+            'an except guard beside a wildcard' => ['audit-log.capture.laravel.except_guards', ['*', self::SENTINEL], self::SENTINEL],
+            'an identifier key'                 => ['audit-log.capture.laravel.identifier_key', self::SENTINEL . ' x', self::SENTINEL],
+            'a Gate flag'                       => ['audit-log.capture.gate.enabled', self::SENTINEL, self::SENTINEL],
+            'only abilities that are a string'  => ['audit-log.capture.gate.only_abilities', self::SENTINEL, self::SENTINEL],
+            'an only ability too long'          => ['audit-log.capture.gate.only_abilities', [$long . $long . $long . $long], self::SENTINEL],
+            'an except ability with a control'  => ['audit-log.capture.gate.except_abilities', [self::SENTINEL . ''], self::SENTINEL],
+            'a reason code'                     => ['audit-log.capture.gate.reason_codes', [self::SENTINEL . ' x'], self::SENTINEL],
+            'a bulk bound on subjects'          => ['audit-log.capture.bulk.max_members', self::SENTINEL, self::SENTINEL],
+            'a bulk bound on bytes'             => ['audit-log.capture.bulk.max_bytes', self::SENTINEL, self::SENTINEL],
+            'an artifacts table'                => ['audit-log.entries.artifacts_table', self::SENTINEL, self::SENTINEL],
+        ];
+    }
+
+    /**
+     * A bad capture setting fails the run with one problem and never appears in
+     * its output, which names the setting by its key.
+     *
+     * @param  string  $setting
+     * @param  array<array-key, string>|string  $value
+     * @param  string  $sentinel
+     * @return void
+     */
+    #[DataProvider('provideCaptureValuesThatMustNotBePrinted')]
+    public function testThePrintedOutputHoldsNoValueOfACaptureSetting(string $setting, array|string $value, string $sentinel): void
+    {
+        app(ConfigRepository::class)->set($setting, $value);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertCount(1, self::problemsIn($output));
+        self::assertStringContainsString("`{$setting}`", implode("\n", $output));
+        self::assertStringNotContainsString($sentinel, implode("\n", $output));
+    }
+
+    /**
      * Rows of `[the settings changed, the one problem the change causes]` for
      * the log id, the integrity tables, sealing, verification and the anchor.
      *
@@ -2000,7 +2311,8 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Run the shipped migration with the settings as the test has them.
+     * Run the shipped entries and artifacts migrations with the settings as the
+     * test has them.
      *
      * @return void
      *
@@ -2009,10 +2321,33 @@ final class CheckCommandTest extends TestCase
      */
     private function migrate(): void
     {
-        $migration = include self::MIGRATION_PATH;
+        foreach (self::MIGRATION_PATHS as $path) {
+
+            $migration = include $path;
+
+            if (!$migration instanceof Migration) {
+                self::fail('An entries or artifacts migration file did not return a Migration instance.');
+            }
+
+            $migration->up(); // @phpstan-ignore method.notFound
+        }
+    }
+
+    /**
+     * Run the shipped artifacts migration with the settings as the test has
+     * them.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateArtifactsTable(): void
+    {
+        $migration = include self::MIGRATION_PATHS[1];
 
         if (!$migration instanceof Migration) {
-            self::fail('Entries migration file did not return a Migration instance.');
+            self::fail('The artifacts migration file did not return a Migration instance.');
         }
 
         $migration->up(); // @phpstan-ignore method.notFound

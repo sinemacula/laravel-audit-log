@@ -21,8 +21,9 @@ use Tests\TestCase;
  * waits on the first's uncommitted row, then resolves against it once it is
  * committed, to a success when the content is the same and a conflict when it
  * differs; on MySQL inside a REPEATABLE READ snapshot that predates the first's
- * commit, through the shared locking read; and a lock wait that times out
- * inside a host transaction propagates as Laravel's `DeadlockException`.
+ * commit, through the shared locking read; a lock wait that times out inside a
+ * host transaction propagates as Laravel's `DeadlockException`; and two writers
+ * of one bundle leave one entry and one artifact.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -198,6 +199,26 @@ final class ConcurrentDuplicatesTest extends TestCase
 
         self::assertSame(DeadlockException::class, $second['outcome']['thrown'] ?? null);
         self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * Two writers of one bundle race: the second's artifact insert waits on the
+     * first's uncommitted artifact and, once both of the first's rows are
+     * committed, finds the bundle stored already, so it succeeds and leaves one
+     * entry and one artifact.
+     *
+     * @return void
+     */
+    public function testConcurrentWritersOfOneBundleLeaveOneEntryAndOneArtifact(): void
+    {
+        $bundle = $this->finaliser()->finalise(RecordFactory::bundled());
+
+        $second = $this->race(fn () => $this->store()->store($bundle), fn () => $this->store()->store($bundle));
+
+        self::assertSame(['stored' => true], $second['outcome']);
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(1, $this->storageConnection()->table(EntrySettings::artifactsTable())->count());
+        self::assertSame($bundle->hmac, $this->storedRow($bundle->record->id)['hmac']);
     }
 
     /**

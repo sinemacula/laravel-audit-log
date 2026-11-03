@@ -14,9 +14,10 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  * captured record is built from it: every field given or filled, the properties
  * and context normalised (`null` when empty), the timing resolved (`null` when
  * the recorder applies its default), the identifier a sign-in was attempted
- * with, raw until it is hashed at capture, and the diagnostics of the property
- * and context keys that collided once cleaned, which hold raw cleaned keys
- * until they are masked. Only `PendingRecord` builds one.
+ * with, raw until it is hashed at capture, the diagnostics of the property and
+ * context keys that collided once cleaned, which hold raw cleaned keys until
+ * they are masked, and a bulk operation's manifest, if it has one. Only
+ * `PendingRecord` builds one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,6 +59,7 @@ final readonly class PendingSnapshot
      * @param  ?string  $identifier
      * @param  list<list<int|string>>  $contextCollisions
      * @param  int  $contextCollisionCount
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
      */
     public function __construct(
 
@@ -152,5 +154,8 @@ final readonly class PendingSnapshot
 
         /** How many context keys collided once cleaned. */
         public int $contextCollisionCount,
+
+        /** What a bulk operation affected, before it is sealed; `null` for any other record. */
+        public ?Manifest $manifest = null,
     ) {}
 }

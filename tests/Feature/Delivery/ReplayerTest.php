@@ -24,6 +24,7 @@ use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
@@ -31,6 +32,7 @@ use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
@@ -44,7 +46,9 @@ use Tests\TestCase;
  * replay adds nothing; every other line is counted apart and left; a store's
  * failure is counted by id and class and stops no other line. From the outbox:
  * failed rows are requeued and drained, delivered receipts are kept, and only
- * the failed destination is called again. A dry run changes nothing.
+ * the failed destination is called again. A bundle is replayed whole, from
+ * either, and one the store keeps no attachments of is counted failed and kept.
+ * A dry run changes nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,7 +61,7 @@ use Tests\TestCase;
 #[CoversClass(SpillLine::class)]
 final class ReplayerTest extends TestCase
 {
-    use InteractsWithAuditStore, InteractsWithOutbox, SeedsTheOutbox;
+    use InteractsWithAuditStore, InteractsWithOutbox, SeedsArtifacts, SeedsTheOutbox;
 
     /** @var string When each test starts. */
     private const string NOW = '2026-11-01T12:00:00.000000Z';
@@ -672,6 +676,170 @@ final class ReplayerTest extends TestCase
     }
 
     /**
+     * A spilled bundle is replayed whole: its entry, which verifies and is the
+     * bytes of the line's record, and its artifact, equal to the attachment the
+     * line held, and `AuditRecorded` follows.
+     *
+     * @return void
+     */
+    public function testASpilledBundleIsReplayedWhole(): void
+    {
+        $record = $this->finalisedRecord(RecordFactory::bundled());
+        $id     = $record->record->id;
+        $said   = [];
+
+        Event::listen(AuditRecorded::class, static function (AuditRecorded $event) use (&$said): void {
+            $said[] = $event->id;
+        });
+
+        $result = $this->replaySpill(self::bundleLineOf($record));
+
+        $attachment = $record->record->attachment;
+        $artifact   = $this->artifactOf($id);
+
+        self::assertNotNull($attachment);
+        self::assertIsArray($artifact);
+
+        $expected = $attachment->envelopeFor($id);
+
+        self::assertSame([1, 0, 0, 0, []], self::tally($result));
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(CanonicalEncoder::encode($record->toArray()), CanonicalEncoder::encode($this->storedRow($id)));
+        self::assertTrue(app(RecordSigner::class)->verifies($this->storedRow($id)));
+        self::assertSame($expected, array_replace($expected, array_intersect_key($artifact, $expected)));
+        self::assertSame([$id], $said);
+    }
+
+    /**
+     * A spilled bundle the bound store keeps no attachments of is counted
+     * failed by its id and the refusal's class, and the store is never handed
+     * it; the line stays in the file, and a plain record beside it is still
+     * replayed.
+     *
+     * @return void
+     */
+    public function testABundleToAStoreKeepingNoAttachmentsIsCountedFailed(): void
+    {
+        $bundle = $this->finalisedRecord(RecordFactory::bundled());
+        $plain  = $this->finalisedRecord();
+        $store  = new PlainStore;
+        $said   = 0;
+
+        Event::listen(AuditRecorded::class, static function () use (&$said): void {
+            $said++;
+        });
+
+        $this->bindStore($store);
+
+        $contents = self::bundleLineOf($bundle) . "\n" . self::lineOf($plain) . "\n";
+        $path     = $this->file($contents);
+        $result   = $this->replayer()->spill($path, false);
+
+        self::assertSame([1, 0, 1, 0, []], self::tally($result));
+        self::assertSame('line 1: failed ' . $bundle->record->id . ' (LogicException)', $result->events()[0]);
+        self::assertSame([$plain->record->id], array_map(static fn (FinalisedRecord $received): string => $received->record->id, $store->received()));
+        self::assertSame(1, $said);
+        self::assertSame($contents, file_get_contents($path));
+    }
+
+    /**
+     * A stack with one destination that keeps no attachments keeps none as a
+     * whole, so a spilled bundle is refused before any destination is handed
+     * it, the one that keeps attachments included.
+     *
+     * @return void
+     */
+    public function testABundleToAStackWithADestinationKeepingNoneIsCountedFailed(): void
+    {
+        $this->bindStore(new StackAuditStore(['database' => $this->store(), 'plain' => new PlainStore]));
+
+        $record = $this->finalisedRecord(RecordFactory::bundled());
+        $result = $this->replaySpill(self::bundleLineOf($record));
+
+        self::assertSame([0, 0, 1, 0, []], self::tally($result));
+        self::assertSame(0, $this->entryCount());
+        self::assertSame(0, $this->artifactsTable()->count());
+    }
+
+    /**
+     * A spilled bundle the store holds already, entry and artifact alike, is a
+     * no-op: counted replayed, with one entry and one artifact left as they
+     * were.
+     *
+     * @return void
+     */
+    public function testAReplayedBundleThatIsStoredAlreadyIsANoOp(): void
+    {
+        $record = $this->finalisedRecord(RecordFactory::bundled());
+        $id     = $record->record->id;
+
+        $this->store()->store($record);
+
+        $row      = CanonicalEncoder::encode($this->storedRow($id));
+        $artifact = $this->artifactOf($id);
+        $result   = $this->replaySpill(self::bundleLineOf($record));
+
+        self::assertSame([1, 0, 0, 0, []], self::tally($result));
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(1, $this->artifactsTable()->count());
+        self::assertSame($row, CanonicalEncoder::encode($this->storedRow($id)));
+        self::assertSame($artifact, $this->artifactOf($id));
+    }
+
+    /**
+     * A failed outbox row holding a bundle is requeued and drained whole: the
+     * entry and its artifact are stored and the row goes.
+     *
+     * @return void
+     */
+    public function testAFailedBundleRowIsReplayedWhole(): void
+    {
+        $record = $this->finalisedRecord(RecordFactory::bundled());
+        $id     = $this->enqueue($record, ['failed_at' => self::NOW, 'attempts' => 10, 'last_error_class' => \LogicException::class]);
+
+        $result = $this->replayer()->outbox(false);
+
+        self::assertSame([1, 0, 0, 0, []], self::tally($result));
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame($record->hmac, $this->storedRow($id)['hmac']);
+        self::assertNotNull($this->artifactOf($id));
+    }
+
+    /**
+     * A failed outbox row holding a bundle that a destination still keeps no
+     * attachments of is retried by the replay's drain and kept, never deleted.
+     *
+     * @return void
+     */
+    public function testAFailedBundleRowToAStoreKeepingNoAttachmentsIsKept(): void
+    {
+        $this->bindStore(new PlainStore);
+
+        $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled()), ['failed_at' => self::NOW, 'attempts' => 10]);
+
+        $result = $this->replayer()->outbox(false);
+
+        self::assertSame(0, $result->replayed());
+        self::assertSame(1, $this->outboxCount());
+        self::assertSame(\LogicException::class, $this->outboxRow($id)['last_error_class'] ?? null);
+    }
+
+    /**
+     * A dry run counts a spilled bundle it would replay and changes nothing.
+     *
+     * @return void
+     */
+    public function testADryRunCountsASpilledBundle(): void
+    {
+        $record = $this->finalisedRecord(RecordFactory::bundled());
+        $result = $this->replayer()->spill($this->file(self::bundleLineOf($record) . "\n"), true);
+
+        self::assertSame([0, 1, 0, 0, []], self::tally($result));
+        self::assertSame(0, $this->entryCount());
+        self::assertSame(0, $this->artifactsTable()->count());
+    }
+
+    /**
      * Rows of `[what is replayed]`.
      *
      * @return iterable<string, array{0: 'outbox'|'spill'}>
@@ -806,6 +974,17 @@ final class ReplayerTest extends TestCase
     private static function lineOf(FinalisedRecord $record): string
     {
         return FailureSpill::line($record->toArray());
+    }
+
+    /**
+     * The spill line of the finalised bulk record: its whole bundle.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @return string
+     */
+    private static function bundleLineOf(FinalisedRecord $record): string
+    {
+        return FailureSpill::line(EnvelopeCodec::envelopeOf($record));
     }
 
     /**

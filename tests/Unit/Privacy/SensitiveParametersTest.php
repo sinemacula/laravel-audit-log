@@ -25,9 +25,11 @@ use SineMacula\Laravel\AuditLog\Privacy\PathMasker;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Concerns\FillsAmbientContext;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
@@ -144,6 +146,18 @@ final class SensitiveParametersTest extends TestCase
             'the owner a value is handled for'    => [FieldPolicy::class, 'handled', 'owner'],
             'the owner a value is sealed for'     => [FieldPolicy::class, 'sealed', 'owner'],
             'the owner a sealer is given'         => [EnvelopeSealer::class, 'seal', 'owner'],
+            'the subjects of a bulk operation'    => [Manifest::class, 'of', 'subjects'],
+            'each subject of a bulk operation'    => [Manifest::class, 'referenceOf', 'subject'],
+            'the members a manifest encodes'      => [Manifest::class, 'encode', 'members'],
+            'the plaintext a manifest reads'      => [Manifest::class, 'readCanonical', 'plaintext'],
+            'the members a manifest holds'        => [Manifest::class, '__construct', 'canonical'],
+            'the manifest a builder is given'     => [PendingRecord::class, 'withManifest', 'manifest'],
+            'the manifest an attachment seals'    => [Attachment::class, 'sealed', 'manifest'],
+            'the members an attachment holds'     => [Attachment::class, '__construct', 'members'],
+            'the attachment a bundle carries'     => [Attachment::class, 'fromEnvelope', 'fields'],
+            'the attachment a record is built on' => [AuditRecord::class, 'fromPending', 'attachment'],
+            'the attachment a record is read on'  => [AuditRecord::class, 'fromEnvelope', 'attachment'],
+            'the attachment a record holds'       => [AuditRecord::class, '__construct', 'attachment'],
         ];
     }
 

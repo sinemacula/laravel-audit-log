@@ -21,10 +21,10 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the schema checks of `audit-log:check`: each table a
- * shipped migration creates, the entries, the outbox, the deliveries, the
- * checkpoints, the checkpoint members and the integrity state, has no problem,
- * and each way a table can differ from it, one at a time, is the one problem
- * reported.
+ * shipped migration creates, the entries, the artifacts, the outbox, the
+ * deliveries, the checkpoints, the checkpoint members and the integrity state,
+ * has no problem, and each way a table can differ from it, one at a time, is
+ * the one problem reported.
  *
  * Each test runs the shipped migration under a table name of its own, then
  * changes the table in one way; Laravel rebuilds the table on SQLite for a
@@ -48,6 +48,9 @@ final class SchemaChecksTest extends TestCase
     /** @var string Absolute path to the shipped entries migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php';
 
+    /** @var string Absolute path to the shipped artifacts migration file. */
+    private const string ARTIFACTS_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000600_create_audit_log_artifacts_table.php';
+
     /** @var string Absolute path to the shipped outbox migration file. */
     private const string OUTBOX_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000100_create_audit_log_outbox_table.php';
 
@@ -62,6 +65,9 @@ final class SchemaChecksTest extends TestCase
 
     /** @var string Absolute path to the shipped integrity state migration file. */
     private const string STATE_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000500_create_audit_log_integrity_state_table.php';
+
+    /** @var string The artifacts table a test migrates and checks. */
+    private const string ARTIFACTS = 'audit_check_artifacts';
 
     /** @var string The checkpoints table a test migrates and checks. */
     private const string CHECKPOINTS = 'audit_check_checkpoints';
@@ -136,6 +142,28 @@ final class SchemaChecksTest extends TestCase
         ],
     ];
 
+    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The type name, full type and collation MySQL and PostgreSQL report for each artifacts column, by name. */
+    private const array ARTIFACTS_REPORTED = [
+        'mysql' => [
+            'id'           => ['char', 'char(36)', 'utf8mb4_0900_bin'],
+            'entry_id'     => ['char', 'char(36)', 'utf8mb4_0900_bin'],
+            'kind'         => ['varchar', 'varchar(16)', 'utf8mb4_0900_bin'],
+            'member_count' => ['int', 'int unsigned', null],
+            'digest'       => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'members'      => ['longtext', 'longtext', 'utf8mb4_0900_bin'],
+            'created_at'   => ['datetime', 'datetime(6)', null],
+        ],
+        'pgsql' => [
+            'id'           => ['uuid', 'uuid', null],
+            'entry_id'     => ['uuid', 'uuid', null],
+            'kind'         => ['varchar', 'character varying(16)', null],
+            'member_count' => ['int4', 'integer', null],
+            'digest'       => ['varchar', 'character varying(64)', null],
+            'members'      => ['text', 'text', null],
+            'created_at'   => ['timestamp', 'timestamp(6) without time zone', null],
+        ],
+    ];
+
     /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The type name, full type and collation MySQL and PostgreSQL report for each checkpoints column, by name. */
     private const array CHECKPOINTS_REPORTED = [
         'mysql' => [
@@ -206,6 +234,7 @@ final class SchemaChecksTest extends TestCase
     protected function tearDown(): void
     {
         Schema::connection(self::CONNECTION)->dropIfExists(self::TABLE);
+        Schema::connection(self::CONNECTION)->dropIfExists(self::ARTIFACTS);
         Schema::connection(self::CONNECTION)->dropIfExists(self::OUTBOX);
         Schema::connection(self::CONNECTION)->dropIfExists(self::DELIVERIES);
         Schema::connection(self::CONNECTION)->dropIfExists(self::CHECKPOINTS);
@@ -937,6 +966,167 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
+     * The artifacts table the shipped migration creates has no problem.
+     *
+     * @return void
+     */
+    public function testTheShippedArtifactsMigrationHasNoProblems(): void
+    {
+        $this->migrateArtifactsTable();
+
+        self::assertSame([], $this->problems(self::ARTIFACTS, self::CONNECTION, TableShape::artifacts()));
+    }
+
+    /**
+     * Rows of `[the column dropped]`: each column of the artifacts table.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideArtifactsColumns(): iterable
+    {
+        foreach (['entry_id', 'kind', 'member_count', 'digest', 'members', 'created_at'] as $column) {
+            yield $column => [$column];
+        }
+    }
+
+    /**
+     * An artifacts table without a column the package writes is a problem,
+     * naming the column.
+     *
+     * @param  string  $column
+     * @return void
+     */
+    #[DataProvider('provideArtifactsColumns')]
+    public function testAMissingArtifactsColumnIsAProblem(string $column): void
+    {
+        $this->migrateArtifactsTable();
+
+        if ($column === 'entry_id') {
+            Schema::connection(self::CONNECTION)->table(self::ARTIFACTS, static function (Blueprint $table): void {
+                $table->dropUnique(self::ARTIFACTS . '_entry_unique');
+            });
+        }
+
+        Schema::connection(self::CONNECTION)->table(self::ARTIFACTS, static function (Blueprint $table) use ($column): void {
+            $table->dropColumn($column);
+        });
+
+        $missing = [sprintf('Column `%s` is missing.', $column)];
+
+        self::assertSame(
+            $column === 'entry_id' ? [...$missing, 'Index `audit_check_artifacts_entry_unique` is missing.'] : $missing,
+            $this->problems(self::ARTIFACTS, self::CONNECTION, TableShape::artifacts()),
+        );
+    }
+
+    /**
+     * A missing artifacts table is the one problem, naming the table by its
+     * label, the connection and how to create it.
+     *
+     * @return void
+     */
+    public function testAMissingArtifactsTableIsNamedByItsLabel(): void
+    {
+        self::assertSame([
+            'The artifacts table `audit_absent_artifacts` does not exist on connection [testing]; publish and run the migrations'
+                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+        ], $this->problems('audit_absent_artifacts', self::CONNECTION, TableShape::artifacts()));
+    }
+
+    /**
+     * An artifacts table whose entry index is not unique is a problem, since an
+     * entry could then have two artifacts.
+     *
+     * @return void
+     */
+    public function testAnArtifactsTableWithoutItsUniqueEntryIsAProblem(): void
+    {
+        $this->migrateArtifactsTable();
+
+        Schema::connection(self::CONNECTION)->table(self::ARTIFACTS, static function (Blueprint $table): void {
+            $table->dropUnique(self::ARTIFACTS . '_entry_unique');
+        });
+
+        Schema::connection(self::CONNECTION)->table(self::ARTIFACTS, static function (Blueprint $table): void {
+            $table->index(['entry_id'], self::ARTIFACTS . '_entry_unique');
+        });
+
+        self::assertSame(['Index `audit_check_artifacts_entry_unique` must be unique.'], $this->problems(self::ARTIFACTS, self::CONNECTION, TableShape::artifacts()));
+    }
+
+    /**
+     * Nullable members and a column the package does not write are each a
+     * problem, the latter in the artifacts' own words.
+     *
+     * @return void
+     */
+    public function testNullableMembersAndAnUnknownArtifactsColumnAreProblems(): void
+    {
+        $this->migrateArtifactsTable();
+
+        Schema::connection(self::CONNECTION)->table(self::ARTIFACTS, static function (Blueprint $table): void {
+            $table->longText('members')->nullable()->change();
+            $table->string('notes')->nullable();
+        });
+
+        self::assertSame([
+            'Column `members` is nullable; it must not be.',
+            'Column `notes` is not one the package writes.',
+        ], $this->problems(self::ARTIFACTS, self::CONNECTION, TableShape::artifacts()));
+    }
+
+    /**
+     * The shipped artifacts table as MySQL and PostgreSQL report it, its
+     * unsigned count and its long encrypted members included, has no problem;
+     * this runs on any engine the suite runs against.
+     *
+     * @param  string  $driver
+     * @return void
+     */
+    #[DataProvider('provideSizedDrivers')]
+    public function testTheShippedArtifactsTableAsEachEngineReportsItHasNoProblems(string $driver): void
+    {
+        $this->migrateArtifactsTable();
+
+        $columns = [];
+
+        foreach (Schema::connection(self::CONNECTION)->getColumns(self::ARTIFACTS) as $column) {
+
+            [$typeName, $type, $collation] = self::ARTIFACTS_REPORTED[$driver][$column['name']];
+
+            $columns[] = ['name' => $column['name'], 'type' => $type, 'type_name' => $typeName, 'collation' => $collation, 'nullable' => $column['nullable']];
+        }
+
+        $this->fake($driver, $columns, self::ARTIFACTS);
+
+        self::assertSame([], $this->problems(self::ARTIFACTS, 'fake', TableShape::artifacts()));
+    }
+
+    /**
+     * Members MySQL reports as `text`, which holds 64 KiB and no more, are a
+     * problem, in the engine's own terms.
+     *
+     * @return void
+     */
+    public function testMembersThatAreNotLongTextOnMySqlAreAProblem(): void
+    {
+        $this->migrateArtifactsTable();
+
+        $columns = [];
+
+        foreach (Schema::connection(self::CONNECTION)->getColumns(self::ARTIFACTS) as $column) {
+
+            [$typeName, $type, $collation] = $column['name'] === 'members' ? ['text', 'text', 'utf8mb4_0900_bin'] : self::ARTIFACTS_REPORTED['mysql'][$column['name']];
+
+            $columns[] = ['name' => $column['name'], 'type' => $type, 'type_name' => $typeName, 'collation' => $collation, 'nullable' => $column['nullable']];
+        }
+
+        $this->fake('mysql', $columns, self::ARTIFACTS);
+
+        self::assertSame(['Column `members` is text; expected longtext.'], $this->problems(self::ARTIFACTS, 'fake', TableShape::artifacts()));
+    }
+
+    /**
      * The checkpoints table the shipped migration creates has no problem.
      *
      * @return void
@@ -1357,6 +1547,28 @@ final class SchemaChecksTest extends TestCase
 
             $migration->up(); // @phpstan-ignore method.notFound
         }
+    }
+
+    /**
+     * Run the shipped artifacts migration under the table's name of this test,
+     * on the test's connection.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateArtifactsTable(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.entries.artifacts_table', self::ARTIFACTS);
+
+        $migration = include self::ARTIFACTS_MIGRATION_PATH;
+
+        if (!$migration instanceof Migration) {
+            self::fail('The artifacts migration file did not return a Migration instance.');
+        }
+
+        $migration->up(); // @phpstan-ignore method.notFound
     }
 
     /**

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Testing;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Container\Container as ContainerContract;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
@@ -32,16 +33,17 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * it is drained. The store contract's clause that an implementation keeps no
  * state is expressly waived for this test double, whose state is the point.
  *
- * It says it is durable and joins a transaction on any connection, so a
- * fail-closed or a transactional record is never refused for want of a store
- * that could keep it.
+ * It says it is durable, joins a transaction on any connection and keeps
+ * attachments, so a fail-closed, a transactional or a bulk record is never
+ * refused for want of a store that could keep it. A bulk record keeps its
+ * attachment, the sealed manifest, on the record `recorded()` returns.
  *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class FakeAuditStore implements DurableAuditStore
+final class FakeAuditStore implements AcceptsAttachments, DurableAuditStore
 {
     /** @var list<\SineMacula\Laravel\AuditLog\Records\FinalisedRecord> The records stored, oldest first. */
     private array $finalised = [];
@@ -129,7 +131,20 @@ final class FakeAuditStore implements DurableAuditStore
     }
 
     /**
-     * The records stored, oldest first, or those of them the filter accepts.
+     * Whether the store keeps a record's attachment: always, so a bulk record
+     * can be tested against the fake.
+     *
+     * @return bool
+     */
+    #[\Override]
+    public function acceptsAttachments(): bool
+    {
+        return true;
+    }
+
+    /**
+     * The records stored, oldest first, or those of them the filter accepts;
+     * a bulk record carries its attachment.
      *
      * @param  (\Closure(\SineMacula\Laravel\AuditLog\Records\AuditRecord): bool)|null  $filter
      * @return list<\SineMacula\Laravel\AuditLog\Records\AuditRecord>

@@ -37,11 +37,19 @@ seam that suite packages and applications register their own events through.
 
 ## Features
 
-- **Automatic capture** of Laravel's authentication events: sign-in, failed sign-in, remember-me restore, sign-out,
-  lockout, registration, verification and password reset - one row each, and none per request.
+- **[Automatic capture](docs/guides/automatic-capture.md)** of Laravel's authentication events: sign-in, failed
+  sign-in, remember-me restore, sign-out, lockout, registration, verification and password reset - one row each, and
+  none per request.
+- **Gate denials**, once turned on: one row per denied check, with the ability, and its arguments only as model
+  references, class names or a marker, never their values.
+- **Model changes**: watch a model's creation, update, deletion, restore and force delete, keeping only the fields
+  named, written once its transaction commits.
+- **Bulk operations**: one entry for an operation on many subjects, with a signed, encrypted manifest of every subject,
+  refused rather than truncated when it is too large.
 - **Manual capture** through `AuditLog::record()` and a fluent builder, filled in with the actor, guard, IP address,
   user agent, origin and request id.
-- **Mapping seam**: register a mapper for any event class or interface and record it with `AuditLog::capture()`.
+- **[Mapping seam](docs/guides/extending.md)**: register a mapper for any event class or interface and record it with
+  `AuditLog::capture()`.
 - **Transaction-safe writes**: a record made inside a transaction is written once it commits, and dropped if it rolls
   back, unless it is written immediately or fail-closed.
 - **Never silently lost**: a failed write is reported, dispatched as an event and spilled to a log channel, without
@@ -77,6 +85,7 @@ php artisan migrate
 | `storage.connection`                        | `null`                         | `AUDIT_LOG_STORAGE_CONNECTION`                        | The connection the tables live on; `null` or empty for the default connection.                                                                  |
 | `storage.maintenance_connection`            | `null`                         | `AUDIT_LOG_STORAGE_MAINTENANCE_CONNECTION`            | The connection pruning, holds and erasure run through, to the same database with a user of its own; `null` or empty for the storage connection. |
 | `entries.table`                             | `audit_log_entries`            | `AUDIT_LOG_ENTRIES_TABLE`                             | The entries table: 1 to 47 lower-case letters, digits and underscores, not starting with a digit.                                               |
+| `entries.artifacts_table`                   | `audit_log_artifacts`          | `AUDIT_LOG_ENTRIES_ARTIFACTS_TABLE`                   | The table of each bulk operation's manifest, beside its entry on the storage connection: the same grammar as the entries table.                 |
 | `integrity.keys`                            | `[]`                           | -                                                     | A map of key ids to secrets of at least 32 bytes that sign and verify entries; empty to derive the key from `app.key`.                          |
 | `integrity.current`                         | `null`                         | `AUDIT_LOG_INTEGRITY_CURRENT`                         | The key in `integrity.keys` that signs new entries.                                                                                             |
 | `integrity.log_id`                          | `null`                         | `AUDIT_LOG_INTEGRITY_LOG_ID`                          | The log every seal names, 1 to 64 letters, digits, dots, underscores or hyphens; `null` or empty for `source.id`. Set before the first seal.    |
@@ -101,6 +110,14 @@ php artisan migrate
 | `context.request_id_header`                 | `X-Request-Id`                 | `AUDIT_LOG_CONTEXT_REQUEST_ID_HEADER`                 | The header a trusted request id comes in.                                                                                                       |
 | `context.trust_traceparent`                 | `false`                        | `AUDIT_LOG_CONTEXT_TRUST_TRACEPARENT`                 | Whether a `traceparent` from a trusted proxy is believed.                                                                                       |
 | `definitions.require_registered`            | `false`                        | `AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED`            | Whether a code with no registered definition is refused, rather than taking the permissive definition.                                          |
+| `capture.laravel.except_guards`             | `[]`                           | -                                                     | The guards whose authentication events are not recorded, matched against the event's guard; `['*']` for every event.                            |
+| `capture.laravel.identifier_key`            | `email`                        | `AUDIT_LOG_CAPTURE_LARAVEL_IDENTIFIER_KEY`            | The one credential a failed sign-in or a lockout is read for, stored as `redaction.identifiers` says.                                           |
+| `capture.gate.enabled`                      | `false`                        | `AUDIT_LOG_CAPTURE_GATE_ENABLED`                      | Whether Gate denials are recorded. Only denials are; allowed checks never are.                                                                  |
+| `capture.gate.only_abilities`               | `null`                         | -                                                     | The only abilities whose denials are recorded, compared exactly; `null` for every ability.                                                      |
+| `capture.gate.except_abilities`             | `[]`                           | -                                                     | The abilities whose denials are never recorded, compared exactly; it wins over `capture.gate.only_abilities`.                                   |
+| `capture.gate.reason_codes`                 | `[]`                           | -                                                     | The machine-readable codes a denial's response may give that are kept as its reason; any other is never kept.                                   |
+| `capture.bulk.max_members`                  | `100000`                       | `AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS`                  | The most subjects a bulk operation's manifest holds, from 1 to 1000000; a larger one is refused, never truncated.                               |
+| `capture.bulk.max_bytes`                    | `4194304`                      | `AUDIT_LOG_CAPTURE_BULK_MAX_BYTES`                    | The most a bulk operation's encoded manifest may hold, from 65536 to 8388608; a larger one is refused, never truncated.                         |
 | `source.id`                                 | `null`                         | `AUDIT_LOG_SOURCE_ID`                                 | The deployment records come from, 1 to 64 characters; `null` or empty for a slug of `app.name`.                                                 |
 | `source.region`                             | `null`                         | `AUDIT_LOG_SOURCE_REGION`                             | The region records come from, 1 to 32 characters; `null` or empty for none.                                                                     |
 | `redaction.keys`                            | `[]`                           | -                                                     | More key names to redact, merged with the built-ins, which cannot be removed.                                                                   |
@@ -227,6 +244,53 @@ a property: it is stored as a keyed hash, so failed attempts correlate without k
 ```php
 AuditLog::event('app.sign_in_failed')->withIdentifier($email)->failed('invalid_credentials')->record();
 ```
+
+### Automatic capture
+
+Laravel's authentication events are recorded with no code at all, and Gate denials once `capture.gate.enabled` is on.
+Map an event of your own, or an interface its events share, from a service provider's `boot()`, and it is recorded
+whenever it is dispatched:
+
+```php
+AuditLog::map(OrderShipped::class, OrderShippedMapper::class);
+```
+
+A mapper implements `EventMapper`: it sets the code and the fields on the builder it is given and returns it, or returns
+`null` to skip the event. An event that is never dispatched is captured through its mapper directly. A captured record
+is written at once, and a failure is reported rather than thrown, unless it ended a transaction the application had
+open:
+
+```php
+AuditLog::capture($event);
+```
+
+Watch a model's changes from `boot()` too, keeping only the fields named:
+
+```php
+AuditLog::watch(Invoice::class, as: 'invoice', fields: ['status', 'amount']);
+```
+
+Record one bulk operation with the manifest of every subject it affected, sealed beside its entry and written after
+commit like any record. The bound store must keep attachments, as the database store does:
+
+```php
+AuditLog::bulk('invoice.voided', $invoices)->record();
+```
+
+What is captured, and the gaps where nothing can be, is in
+[the automatic-capture guide](docs/guides/automatic-capture.md); mapping another package's events, with one row per
+sign-in, is in [the extending guide](docs/guides/extending.md).
+
+### Guides
+
+| Guide                                                 | Covers                                                                                                            |
+|-------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| [Automatic capture](docs/guides/automatic-capture.md) | Laravel's authentication events, excluded guards, Gate denials, model changes, bulk operations, gaps and failures |
+| [Extending](docs/guides/extending.md)                 | Extension points, mapping another package's events, one row per sign-in, correlation ids and contributors         |
+| [Events](docs/guides/events.md)                       | The events the package dispatches, and alerting on a failed write, a failed capture or an integrity failure       |
+| [Operations](docs/guides/operations.md)               | Scheduling sealing and verification, monitoring, anchoring, keys, grants and what sealing costs                   |
+
+The contracts behind them, for maintainers and reviewers, are in [docs/design](docs/design/README.md).
 
 ## Requirements
 

@@ -19,6 +19,14 @@ into every listener and every queue that handles one. Tasks a listener can do ar
 - Neither holds a value of the record, and neither holds the text of an exception, whose message can hold the row. So
   neither can carry anything into a listener, a queue payload or `failed_jobs` that a reader of the record would need
   permission for, beyond the id and the code.
+- `Events\AuditCaptureFailed` means an event could not be captured. It carries the `eventClass`, the `mapperClass` and
+  the `exceptionClass`, and nothing else, each named as `get_debug_type()` names it: no value of the event or of the
+  record it would have made, and no text of the exception. `mapperClass` is the mapper or the package listener that
+  translated the event, and `null` when more than one mapping matched it; for a watched model, `eventClass` is the
+  model's class. It is dispatched once for each failed capture, inside the write guard: as the capture fails, or, for a
+  model change written after its commit, when that commit runs the write. A capture whose write failed dispatches
+  `AuditWriteFailed` first, and any other failure is reported as a `Capture\CaptureFailedException`, which names the
+  same three classes and has no previous exception.
 - `Events\IntegrityCheckFailed` means sealing or verification found the log altered, incomplete or unverifiable, a
   `--strict` verification found a seal the anchor does not confirm, or a verification stopped before it could say. It
   carries the `command` (`seal` or `verify`), the `integrity` and `anchoring` maps, the `finding`, the `firstBadId`,
@@ -101,7 +109,8 @@ into every listener and every queue that handles one. Tasks a listener can do ar
 ## Implementation Anchors
 
 - `src/Contracts/AuditLogEvent.php`; `src/Events/AuditRecorded.php`; `src/Events/AuditWriteFailed.php`;
-  `src/Events/IntegrityCheckFailed.php`.
+  `src/Events/AuditCaptureFailed.php`; `src/Events/IntegrityCheckFailed.php`.
+- `src/Capture/CaptureFailedException.php`: `of()`.
 - `src/Console/IntegrityAlarm.php`: `raise()`, `report()`; `src/Integrity/IntegrityCheckFailedException.php`: `of()`,
   `stopped()`; `src/Integrity/VerificationSummary.php`: `toEvent()`; `src/Console/SealCommand.php`,
   `src/Console/VerifyCommand.php`.
@@ -114,6 +123,9 @@ into every listener and every queue that handles one. Tasks a listener can do ar
 - `tests/Unit/Events/AuditRecordedTest.php` `testCarriesTheIdCodeAndCategory`, `testCarriesNothingElse`,
   `testIsAnAuditLogEvent`
 - `tests/Unit/Events/AuditWriteFailedTest.php` `testCarriesTheFourFieldsAndNothingElse`, `testIsAPackageEvent`
+- `tests/Unit/Events/AuditCaptureFailedTest.php` `testItCarriesOnlyClassNames`, `testItIsAPackageEvent`
+- `tests/Unit/Capture/CaptureFailedExceptionTest.php` `testTheMessageNamesOnlyTheClasses`,
+  `testAnAmbiguityNamesNoMapper`, `testItHasNoPrevious`, `testAnAnonymousClassIsNamedWithoutItsFile`
 - `tests/Unit/Events/IntegrityCheckFailedTest.php` `testCarriesItsFieldsAndNothingElse`, `testCarriesAStoppedRun`,
   `testIsAnAuditLogEvent`
 - `tests/Unit/Integrity/IntegrityCheckFailedExceptionTest.php` `testTheMessageIsPinned`,

@@ -11,6 +11,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Log\LogManager;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Delivery\DeliveryCoordinator;
@@ -29,8 +30,10 @@ use Tests\Concerns\CapturesLogLines;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SearchesForSecrets;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Stores\CallbackStore;
 use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
@@ -41,8 +44,10 @@ use Tests\TestCase;
  * before the call; a stack's destinations each tried, and a retry reaching only
  * those still without the record; the transaction a database destination shares
  * with its receipt; destinations that come and go; the claim renewed before
- * each call and each receipt, and nothing further written once it is lost; and
- * the write guard around each call.
+ * each call and each receipt, and nothing further written once it is lost; the
+ * write guard around each call; and a bundle handed whole to each destination
+ * that keeps attachments, while one that keeps none is refused before it is
+ * called, as its own failure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(StaleClaimException::class)]
 final class DeliveryCoordinatorTest extends TestCase
 {
-    use CapturesLogLines, InteractsWithAuditStore, InteractsWithOutbox, SearchesForSecrets, SeedsTheOutbox;
+    use CapturesLogLines, InteractsWithAuditStore, InteractsWithOutbox, SearchesForSecrets, SeedsArtifacts, SeedsTheOutbox;
 
     /** @var string When each test starts. */
     private const string NOW = '2026-11-01T12:00:00.000000Z';
@@ -804,6 +809,189 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
+     * A destination of a stack that keeps no attachments, whether it says so or
+     * implements no contract to say anything, is asked before it is called and
+     * refused a bundle: its attempt is counted, its receipt keeps the refusal's
+     * class and stays undelivered, and it is never handed the bundle. The
+     * destinations that keep attachments, before and after it, are still tried
+     * and each has the bundle whole.
+     *
+     * @return void
+     */
+    public function testADestinationKeepingNoAttachmentsFailsAndTheOthersAreTried(): void
+    {
+        $first   = self::storeSaying(true);
+        $refuses = self::storeSaying(false);
+        $plain   = new PlainStore;
+
+        $this->bindStore(new StackAuditStore([
+            'first'    => $first,
+            'refuses'  => $refuses,
+            'plain'    => $plain,
+            'database' => app(DatabaseAuditStore::class),
+        ]));
+
+        [$record, $claim] = $this->claimedBundle();
+
+        $id     = $record->record->id;
+        $result = $this->coordinator()->deliver($record, $claim);
+
+        self::assertSame(DeliveryOutcome::INCOMPLETE, $result->outcome);
+        self::assertSame(\LogicException::class, $result->failure()->exceptionClass);
+        self::assertSame('plain', $result->failure()->destination);
+        self::assertSame(PlainStore::class, $result->failure()->store);
+        self::assertSame([], $refuses->received);
+        self::assertSame(1, $refuses->asked);
+        self::assertSame(0, $plain->calls());
+        self::assertSame([$record], $first->received);
+        self::assertSame(1, $this->entryCount());
+        self::assertNotNull($this->artifactOf($id));
+
+        foreach (['refuses', 'plain'] as $name) {
+            self::assertSame(1, $this->receipt($id, $name)['attempts'] ?? null, "The receipt of {$name} counts no attempt.");
+            self::assertSame(\LogicException::class, $this->receipt($id, $name)['last_error_class'] ?? null, "The receipt of {$name} keeps no refusal.");
+            self::assertNull($this->receipt($id, $name)['delivered_at'] ?? null, "The receipt of {$name} says it was delivered.");
+        }
+
+        foreach (['first', 'database'] as $name) {
+            self::assertSame(self::NOW, $this->receipt($id, $name)['delivered_at'] ?? null, "The receipt of {$name} is not delivered.");
+        }
+    }
+
+    /**
+     * A record without an attachment asks no destination whether it keeps
+     * attachments, and is handed even to one that says it keeps none.
+     *
+     * @return void
+     */
+    public function testARecordWithoutAnAttachmentAsksNoDestination(): void
+    {
+        $keeps   = self::storeSaying(true);
+        $refuses = self::storeSaying(false);
+
+        $this->bindStore(new StackAuditStore(['keeps' => $keeps, 'refuses' => $refuses]));
+
+        [$record, $claim] = $this->claimedRecord();
+
+        self::assertSame(DeliveryOutcome::COMPLETE, $this->coordinator()->deliver($record, $claim)->outcome);
+        self::assertSame(0, $keeps->asked);
+        self::assertSame(0, $refuses->asked);
+        self::assertSame([$record], $keeps->received);
+        self::assertSame([$record], $refuses->received);
+    }
+
+    /**
+     * A single store that keeps no attachments is the one destination refused:
+     * its attempt counted, its receipt keeping the refusal's class, and the
+     * failure naming the store's class and no destination.
+     *
+     * @return void
+     */
+    public function testABundleToASingleStoreKeepingNoAttachmentsIsItsFailure(): void
+    {
+        $store = $this->bindStore(new PlainStore);
+
+        [$record, $claim] = $this->claimedBundle();
+
+        $result  = $this->coordinator()->deliver($record, $claim);
+        $receipt = $this->receipt($record->record->id, DeliveryCoordinator::STORE_DESTINATION);
+
+        self::assertSame(DeliveryOutcome::INCOMPLETE, $result->outcome);
+        self::assertSame(0, $store->calls());
+        self::assertSame(\LogicException::class, $result->failure()->exceptionClass);
+        self::assertSame(PlainStore::class, $result->failure()->store);
+        self::assertNull($result->failure()->destination);
+        self::assertIsArray($receipt);
+        self::assertSame(1, $receipt['attempts']);
+        self::assertSame(\LogicException::class, $receipt['last_error_class']);
+        self::assertNull($receipt['delivered_at']);
+    }
+
+    /**
+     * A destination that keeps no attachments is refused inside no transaction:
+     * the refusal comes before a database destination's shared transaction
+     * would begin, so no statement of the refused attempt runs inside one, and
+     * no entry or artifact is written.
+     *
+     * @return void
+     */
+    public function testARefusedDestinationOpensNoTransaction(): void
+    {
+        $levels = [];
+
+        $this->bindStore(new PlainStore);
+
+        [$record, $claim] = $this->claimedBundle();
+
+        DB::connection(self::CONNECTION)->beforeExecuting(static function (string $query, array $bindings, $connection) use (&$levels): void {
+            $levels[] = $connection->transactionLevel();
+        });
+
+        self::assertSame(DeliveryOutcome::INCOMPLETE, $this->coordinator()->deliver($record, $claim)->outcome);
+        self::assertNotSame([], $levels);
+        self::assertSame([0], array_values(array_unique($levels)));
+        self::assertSame(0, $this->entryCount());
+        self::assertSame(0, $this->artifactsTable()->count());
+    }
+
+    /**
+     * Once the destination that refused a bundle keeps attachments, the next
+     * delivery of the row hands it the bundle, and the destination that had it
+     * already is not called again.
+     *
+     * @return void
+     */
+    public function testADestinationThatKeepsAttachmentsOnTheRetryHasTheBundle(): void
+    {
+        $kept = self::storeSaying(true);
+
+        $this->bindStore(new StackAuditStore(['kept' => $kept, 'later' => new PlainStore]));
+
+        [$record, $claim] = $this->claimedBundle();
+
+        self::assertSame(DeliveryOutcome::INCOMPLETE, $this->coordinator()->deliver($record, $claim)->outcome);
+
+        $later = self::storeSaying(true);
+
+        $this->bindStore(new StackAuditStore(['kept' => $kept, 'later' => $later]));
+
+        self::assertSame(DeliveryOutcome::COMPLETE, $this->coordinator()->deliver($record, $this->reclaimed($record->record->id))->outcome);
+        self::assertSame([$record], $kept->received);
+        self::assertSame([$record], $later->received);
+        self::assertSame(2, $this->receipt($record->record->id, 'later')['attempts'] ?? null);
+    }
+
+    /**
+     * A bundle reaches each destination that keeps attachments whole: the
+     * database stores its entry and its artifact, and another destination is
+     * handed the record with its attachment, byte for byte the envelope that
+     * was written.
+     *
+     * @return void
+     */
+    public function testABundleReachesEachDestinationWhole(): void
+    {
+        $other = self::storeSaying(true);
+
+        $this->bindStore(new StackAuditStore(['database' => app(DatabaseAuditStore::class), 'other' => $other]));
+
+        [$record, $claim] = $this->claimedBundle();
+
+        self::assertSame(DeliveryOutcome::COMPLETE, $this->coordinator()->deliver($record, $claim)->outcome);
+
+        $codec    = app(EnvelopeCodec::class);
+        $artifact = $this->artifactOf($record->record->id);
+
+        self::assertCount(1, $other->received);
+        self::assertNotNull($other->received[0]->record->attachment);
+        self::assertSame($codec->encode($record), $codec->encode($other->received[0]));
+        self::assertSame(1, $this->entryCount());
+        self::assertIsArray($artifact);
+        self::assertSame($record->record->attachment?->id, $artifact['id']);
+        self::assertSame($record->record->attachment?->members, $artifact['members']);
+    }
+
+    /**
      * A record, finalised, put in the outbox and claimed now.
      *
      * @return array{0: \SineMacula\Laravel\AuditLog\Records\FinalisedRecord, 1: \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim}
@@ -811,6 +999,19 @@ final class DeliveryCoordinatorTest extends TestCase
     private function claimedRecord(): array
     {
         $record = $this->finalisedRecord();
+
+        return [$record, $this->reclaimed($this->enqueue($record))];
+    }
+
+    /**
+     * A bulk record carrying its attachment, finalised, put in the outbox and
+     * claimed now.
+     *
+     * @return array{0: \SineMacula\Laravel\AuditLog\Records\FinalisedRecord, 1: \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim}
+     */
+    private function claimedBundle(): array
+    {
+        $record = $this->finalisedRecord(RecordFactory::bundled());
 
         return [$record, $this->reclaimed($this->enqueue($record))];
     }
@@ -938,6 +1139,60 @@ final class DeliveryCoordinatorTest extends TestCase
 
             throw new \DomainException('Down.');
         }, participatesOn: []);
+    }
+
+    /**
+     * A destination that says whether it keeps attachments as told, counting
+     * each time it is asked, and keeps every record it is handed.
+     *
+     * @param  bool  $keeps
+     * @return object{received: list<\SineMacula\Laravel\AuditLog\Records\FinalisedRecord>, asked: int}&\SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments
+     */
+    private static function storeSaying(bool $keeps): AcceptsAttachments
+    {
+        return new class ($keeps) implements AcceptsAttachments {
+            /** @var list<\SineMacula\Laravel\AuditLog\Records\FinalisedRecord> The records received, oldest first. */
+            public array $received = [];
+
+            /** @var int How many times the store was asked whether it keeps attachments. */
+            public int $asked = 0;
+
+            /**
+             * Constructor.
+             *
+             * @param  bool  $keeps
+             */
+            public function __construct(
+
+                /** Whether the store says it keeps attachments. */
+                private readonly bool $keeps,
+            ) {}
+
+            /**
+             * Keep the record.
+             *
+             * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+             * @return void
+             */
+            #[\Override]
+            public function store(#[\SensitiveParameter] FinalisedRecord $record): void
+            {
+                $this->received[] = $record;
+            }
+
+            /**
+             * Count the question and answer as told.
+             *
+             * @return bool
+             */
+            #[\Override]
+            public function acceptsAttachments(): bool
+            {
+                $this->asked++;
+
+                return $this->keeps;
+            }
+        };
     }
 
     /**

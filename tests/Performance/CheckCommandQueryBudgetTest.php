@@ -15,6 +15,7 @@ use SineMacula\Laravel\AuditLog\Console\DeliveryChecks;
 use SineMacula\Laravel\AuditLog\Console\EngineChecks;
 use SineMacula\Laravel\AuditLog\Console\IntegrityChecks;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
+use SineMacula\Laravel\AuditLog\Console\TableShape;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use Tests\Concerns\SealsEntries;
 
@@ -23,10 +24,10 @@ use Tests\Concerns\SealsEntries;
  * the schema and, on MySQL, of the session and the table's engine, whatever the
  * tables hold, and never writes, begins a savepoint or rolls back. In sync mode
  * the delivery checks read configuration alone, so a run reads what the engine
- * and schema checks of the entries table and the integrity checks of the
- * checkpoints, checkpoint members and integrity state tables read; in outbox
- * mode they read the outbox and deliveries tables' schema too, and still write
- * nothing.
+ * and schema checks of the entries table, the schema checks of the artifacts
+ * table and the integrity checks of the checkpoints, checkpoint members and
+ * integrity state tables read; in outbox mode they read the outbox and
+ * deliveries tables' schema too, and still write nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,8 +41,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 {
     use SealsEntries;
 
-    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for the entries table and for each integrity table. */
-    private const int MAX_STATEMENTS = 16;
+    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for the entries table, for the artifacts table and for each integrity table. */
+    private const int MAX_STATEMENTS = 20;
 
     /** @var int How many times a sync run's statements an outbox run may make. */
     private const int OUTBOX_FACTOR = 2;
@@ -66,7 +67,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A passing run makes at most sixteen statements, none of them a write, and
+     * A passing run makes at most twenty statements, none of them a write, and
      * begins no savepoint and makes no rollback, on every engine.
      *
      * @return void
@@ -145,8 +146,10 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * A sync run reads exactly what the engine and schema checks of the entries
-     * table and the integrity checks read on their own, so the delivery checks
-     * add no statement, and the bound of sixteen still holds.
+     * table, the schema checks of the artifacts table and the integrity checks
+     * read on their own, so the delivery checks add no statement, and the bound
+     * of twenty still holds: the four statements the artifacts table's schema
+     * check reads on SQLite raised it from sixteen.
      *
      * @return void
      */
@@ -161,6 +164,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         $this->capture(static function () use ($database, $integrity): void {
             (new EngineChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
             (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
+            (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_artifacts', TableShape::artifacts());
             $integrity->problems();
         });
 

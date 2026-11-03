@@ -37,14 +37,17 @@ return [
     | The table the entries live in (`audit_log_entries` by default): 1 to 47
     | lower-case letters, digits and underscores that does not start with a
     | digit, so every index the migration names after it fits PostgreSQL's 63
-    | characters, the connection's table prefix included. Any other value fails
-    | closed when it is read, and `audit-log:check` reports it. Set it before
-    | migrating: changing it later moves no table.
+    | characters, the connection's table prefix included. `artifacts_table`
+    | (`audit_log_artifacts` by default) holds each bulk operation's manifest
+    | beside its entry, on the storage connection, with the same grammar. Any
+    | other value fails closed when it is read, and `audit-log:check` reports
+    | it. Set both before migrating: changing one later moves no table.
     |
     */
 
     'entries' => [
-        'table' => env('AUDIT_LOG_ENTRIES_TABLE', 'audit_log_entries'),
+        'table'           => env('AUDIT_LOG_ENTRIES_TABLE', 'audit_log_entries'),
+        'artifacts_table' => env('AUDIT_LOG_ENTRIES_ARTIFACTS_TABLE', 'audit_log_artifacts'),
     ],
 
     /*
@@ -205,6 +208,59 @@ return [
 
     'definitions' => [
         'require_registered' => env('AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED', false),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Capture
+    |---------------------------------------------------------------------------
+    |
+    | What the package records on its own. Laravel's authentication events are
+    | always listened to. `laravel.except_guards` is a list of guard names, none
+    | by default, matched against the guard an event names, or `['*']` to record
+    | none of them; an event that names no guard (`Lockout`, `Registered`,
+    | `Verified`, `PasswordReset`, `PasswordResetLinkSent`) is skipped only
+    | under `['*']`. `laravel.identifier_key` is the one credential a failed
+    | sign-in or a lockout is read for, `email` by default, of 1 to 64 letters,
+    | digits, underscores, dots or hyphens, and it is stored as
+    | `redaction.identifiers` says, as a keyed hash or not at all; no other
+    | credential is ever read.
+    |
+    | Gate capture is off by default: `gate.enabled`, a real boolean, turns it
+    | on, and it records denials only. `gate.only_abilities` is `null` for every
+    | ability, the default, or a non-empty list, and `gate.except_abilities` a
+    | list, none by default, which wins over it; each holds ability names of 1
+    | to 191 bytes, compared exactly, so name abilities with literal strings
+    | rather than building them from data. `gate.reason_codes` lists the
+    | machine-readable codes a denial's response may give that are kept as its
+    | reason, none by default: the code is data the application controls, so one
+    | that is not listed is never kept.
+    |
+    | `bulk.max_members` is the most subjects a bulk operation's manifest holds,
+    | from 1 to 1000000 and 100000 by default, and `bulk.max_bytes` the most its
+    | encoded list may hold, from 65536 to 8388608 and 4194304 by default; a
+    | manifest over either is refused, never truncated. A malformed value fails
+    | closed when it is read, and `audit-log:check` reports it, as it does an
+    | excepted guard `auth.guards` does not configure. All of them may change on
+    | any deploy.
+    |
+    */
+
+    'capture' => [
+        'laravel' => [
+            'except_guards'  => [],
+            'identifier_key' => env('AUDIT_LOG_CAPTURE_LARAVEL_IDENTIFIER_KEY', 'email'),
+        ],
+        'gate' => [
+            'enabled'          => env('AUDIT_LOG_CAPTURE_GATE_ENABLED', false),
+            'only_abilities'   => null,
+            'except_abilities' => [],
+            'reason_codes'     => [],
+        ],
+        'bulk' => [
+            'max_members' => env('AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS', 100000),
+            'max_bytes'   => env('AUDIT_LOG_CAPTURE_BULK_MAX_BYTES', 4194304),
+        ],
     ],
 
     /*

@@ -7,14 +7,16 @@ namespace Tests\Unit\Stores;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\NullAuditStore;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the store that keeps nothing: every call succeeds, and it
- * never says it is durable or joins a transaction.
+ * Unit tests for the store that keeps nothing: every call succeeds, it never
+ * says it is durable or joins a transaction, and it accepts a bulk record's
+ * attachment, keeping nothing of it either.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,6 +42,25 @@ final class NullAuditStoreTest extends TestCase
 
         self::assertInstanceOf(DurableAuditStore::class, $store);
         self::assertSame([], get_object_vars($store));
+        self::assertSame([], (new \ReflectionObject($store))->getProperties());
+    }
+
+    /**
+     * It accepts attachments, since it keeps nothing of any record, so nothing
+     * of a bulk record is lost more than of another; storing a bundle succeeds
+     * and keeps nothing.
+     *
+     * @return void
+     */
+    public function testItAcceptsAttachmentsAndKeepsNothing(): void
+    {
+        $store = new NullAuditStore;
+
+        self::assertInstanceOf(AcceptsAttachments::class, $store);
+        self::assertTrue($store->acceptsAttachments());
+
+        $store->store(RecordFactory::finalisedBundle());
+
         self::assertSame([], (new \ReflectionObject($store))->getProperties());
     }
 

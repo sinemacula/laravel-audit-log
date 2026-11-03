@@ -30,6 +30,7 @@ use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
@@ -44,8 +45,9 @@ use Tests\TestCase;
  * reporting it then and only then; fails and keeps a row it cannot decrypt or
  * verify, and one that killed its worker too often; never lets a first worker
  * that outlived its lease change what a new owner did; runs from a fixed due
- * instant, so it always ends; refuses to run inside a transaction; and says
- * every failure inside the write guard.
+ * instant, so it always ends; refuses to run inside a transaction; says every
+ * failure inside the write guard; and delivers a bundle whole, or keeps its row
+ * for a retry while a destination keeps no attachments.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(DrainResult::class)]
 final class OutboxDrainerTest extends TestCase
 {
-    use InteractsWithAuditStore, InteractsWithOutbox, SeedsTheOutbox;
+    use InteractsWithAuditStore, InteractsWithOutbox, SeedsArtifacts, SeedsTheOutbox;
 
     /** @var string When each test starts. */
     private const string NOW = '2026-11-01T12:00:00.000000Z';
@@ -1359,6 +1361,118 @@ final class OutboxDrainerTest extends TestCase
         $this->enqueue($this->finalisedRecord());
 
         self::assertSame([1, 0, 1, 0, 0], self::tally($this->drain()));
+    }
+
+    /**
+     * A row holding a bundle is delivered whole: the database keeps its entry,
+     * which verifies, and its artifact, equal to the attachment the row held,
+     * then the row is deleted.
+     *
+     * @return void
+     */
+    public function testABundleIsDeliveredWhole(): void
+    {
+        $record = $this->finalisedRecord(RecordFactory::bundled());
+        $id     = $this->enqueue($record);
+
+        $result     = $this->drain();
+        $artifact   = $this->artifactOf($id);
+        $attachment = $record->record->attachment;
+
+        self::assertSame([1, 0, 0, 0, 0], self::tally($result));
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame(1, $this->entryCount());
+        self::assertTrue(app(RecordSigner::class)->verifies($this->storedRow($id)));
+        self::assertNotNull($attachment);
+        self::assertIsArray($artifact);
+        $expected = $attachment->envelopeFor($id);
+
+        self::assertSame($expected, array_replace($expected, array_intersect_key($artifact, $expected)));
+        self::assertSame(1, $this->artifactsTable()->count());
+    }
+
+    /**
+     * A row holding a bundle for a stack with a destination that keeps no
+     * attachments is retried, never deleted: the database has the bundle, the
+     * destination that keeps none was never handed it, and the row keeps the
+     * refusal's class for its next attempt.
+     *
+     * @return void
+     */
+    public function testABundleToAStoreKeepingNoAttachmentsIsKeptForRetry(): void
+    {
+        $plain = new PlainStore;
+
+        $this->bindStore(new StackAuditStore(['database' => app(DatabaseAuditStore::class), 'plain' => $plain]));
+
+        $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled()));
+
+        $result = $this->drain();
+        $row    = $this->outboxRow($id);
+
+        self::assertSame([0, 1, 0, 0, 0], self::tally($result));
+        self::assertIsArray($row);
+        self::assertSame(1, $row['attempts']);
+        self::assertSame(\LogicException::class, $row['last_error_class']);
+        self::assertSame('2026-11-01T12:01:00.000000Z', $row['available_at']);
+        self::assertNull($row['failed_at']);
+        self::assertSame(0, $plain->calls());
+        self::assertSame(1, $this->entryCount());
+        self::assertNotNull($this->artifactOf($id));
+    }
+
+    /**
+     * At its last attempt, a row holding a bundle that its store keeps no
+     * attachments of is failed and kept for a replay, never deleted, and the
+     * refusal is reported once by its class, naming the store.
+     *
+     * @return void
+     */
+    public function testABundleRefusedAtItsLastAttemptIsFailedAndKept(): void
+    {
+        $handler = $this->recordingHandler();
+        $record  = $this->finalisedRecord(RecordFactory::bundled());
+
+        $this->bindStore(new PlainStore);
+
+        $id = $this->enqueue($record, ['attempts' => 9]);
+
+        $result = $this->drain();
+        $row    = $this->outboxRow($id);
+        $report = self::onlyReport($handler);
+
+        self::assertSame([0, 0, 1, 0, 0], self::tally($result));
+        self::assertIsArray($row);
+        self::assertSame(self::NOW, $row['failed_at']);
+        self::assertSame(\LogicException::class, $row['last_error_class']);
+        self::assertSame($record->record->id, $report->recordId);
+        self::assertSame(PlainStore::class, $report->store);
+        self::assertSame(\LogicException::class, $report->exceptionClass);
+        self::assertSame(0, $this->entryCount());
+        self::assertSame(0, $this->artifactsTable()->count());
+    }
+
+    /**
+     * A row holding a bundle that its store refused is delivered once the store
+     * bound keeps attachments, and only then deleted.
+     *
+     * @return void
+     */
+    public function testARefusedBundleIsDeliveredOnceTheStoreKeepsAttachments(): void
+    {
+        $this->bindStore(new PlainStore);
+
+        $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled()));
+
+        self::assertSame([0, 1, 0, 0, 0], self::tally($this->drain()));
+
+        $this->bindStore(app(DatabaseAuditStore::class));
+        $this->moveClockTo('2026-11-01T12:01:00.000000Z');
+
+        self::assertSame([1, 0, 0, 0, 0], self::tally($this->drain()));
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame(1, $this->entryCount());
+        self::assertNotNull($this->artifactOf($id));
     }
 
     /**

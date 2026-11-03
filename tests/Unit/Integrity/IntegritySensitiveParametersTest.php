@@ -8,6 +8,7 @@ use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Encryption\Encrypter;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -22,6 +23,7 @@ use SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityKey;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
@@ -94,6 +96,7 @@ final class IntegritySensitiveParametersTest extends TestCase
         IntegrityKey::class,
         IntegritySettings::class,
         KeyRing::class,
+        ManifestVerifier::class,
         RecordSigner::class,
         SealSigner::class,
         Sealer::class,
@@ -106,6 +109,7 @@ final class IntegritySensitiveParametersTest extends TestCase
         SealSigner::class . '::signature.key',
         SegmentVerifier::class . '::memberFinding.entry',
         SegmentVerifier::class . '::entryFinding.entry',
+        ManifestVerifier::class . '::descriptorOf.entry',
         Sealer::class . '::isLostToAConcurrentWriter.exception',
         Anchorer::class . '::classOf.failure',
         IntegrityAlarm::class . '::report.exception',
@@ -694,6 +698,7 @@ final class IntegritySensitiveParametersTest extends TestCase
 
         self::assertTrue(self::holdsText($entry, self::SECRET));
 
+        $database = new DatabaseManager(new Container, new ConnectionFactory(new Container));
         $verifier = new SegmentVerifier(
             new SealSigner(self::ring(['keys' => [self::KEY_ID => self::LONG_SECRET], 'current' => self::KEY_ID])),
             new RecordSigner(self::ring(['keys' => 'not a map'])),
@@ -701,7 +706,8 @@ final class IntegritySensitiveParametersTest extends TestCase
             new SealSettings(new Repository),
             new NullPruneLedger,
             new NullAnchor,
-            new DatabaseManager(new Container, new ConnectionFactory(new Container)),
+            $database,
+            new ManifestVerifier($database, new Encrypter(str_repeat('k', 32), 'aes-256-cbc')),
         );
 
         $thrown = self::thrownBy(self::memberFindingOf($verifier, $entry));

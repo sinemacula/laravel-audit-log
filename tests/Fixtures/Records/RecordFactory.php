@@ -5,10 +5,14 @@ declare(strict_types = 1);
 namespace Tests\Fixtures\Records;
 
 use Illuminate\Config\Repository;
+use Illuminate\Encryption\Encrypter;
 use Illuminate\Support\Str;
 use Ramsey\Uuid\Uuid;
 use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
+use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
+use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer;
 use SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher;
 use SineMacula\Laravel\AuditLog\Privacy\IpMinimiser;
@@ -17,16 +21,20 @@ use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
+use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 
 /**
  * Records for tests: captured records built through the public builder, as an
- * application builds them, and records of a shape capture never produces.
+ * application builds them, bulk records carrying their sealed manifest, and
+ * records of a shape capture never produces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,11 +46,23 @@ final class RecordFactory
     /** @var string When the activity of every captured record occurred, unless a test gives another time. */
     public const string OCCURRED_AT = '2026-11-01T12:00:00.123456Z';
 
+    /** @var string When a finalised bundle was recorded: after its activity occurred. */
+    public const string RECORDED_AT = '2026-11-01T12:00:01.654321Z';
+
+    /** @var string The type of every member of a bulk record's manifest. */
+    public const string MEMBER_TYPE = 'App\Models\Invoice';
+
     /** @var string The application key minimising derives any hash from. */
     private const string APP_KEY = '0123456789abcdef0123456789abcdef';
 
     /** @var string The code of the permissive definition minimising defaults to; not the builder's, which may have none. */
     private const string PERMISSIVE_CODE = 'invoice.approved';
+
+    /** @var string The key of the test encrypter: the `app.key` the Feature and Integration tests configure, so their encrypter opens what it sealed. */
+    private const string ENCRYPTION_KEY = 'laravel-audit-log test key!!!!!!';
+
+    /** @var int The greatest canonical form a bulk record's manifest may encode to, in bytes: the setting's greatest. */
+    private const int BULK_MAX_BYTES = 8388608;
 
     /**
      * Disallow instantiation; utility container only.
@@ -78,6 +98,88 @@ final class RecordFactory
         } finally {
             Str::createUuidsNormally();
         }
+    }
+
+    /**
+     * A captured bulk record of approved invoices, by a user, for an
+     * organisation, over HTTP, carrying its manifest sealed under the test
+     * encrypter: members `App\Models\Invoice` 1 to the number given, its
+     * descriptor at `properties._audit.manifest`.
+     *
+     * @param  int  $members
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     */
+    public static function bundled(int $members = 3): AuditRecord
+    {
+        $manifest = Manifest::of(self::members($members), max($members, 1), self::BULK_MAX_BYTES);
+
+        $builder = (new PendingRecord)
+            ->event('invoice.bulk_approved')
+            ->by(Reference::of('user', '42'))
+            ->forTenant(Reference::of('organisation', 'org_01'))
+            ->correlatedWith('app:ticket-123')
+            ->withProperties(['batch' => 'march'])
+            ->withManifest($manifest);
+
+        $builder->fillOrigin(Origin::HTTP);
+        $builder->fillGuard('web');
+        $builder->fillClient('203.0.113.7', 'Mozilla/5.0');
+
+        $minimised  = self::minimisedOf($builder);
+        $attachment = Attachment::sealed($manifest, self::encrypter());
+
+        return AuditRecord::fromPending($builder, $minimised, 1, 'finance', self::instant(self::OCCURRED_AT), 'app-eu-1', 'eu-west-2', $attachment);
+    }
+
+    /**
+     * The bulk record of `bundled()` finalised at `RECORDED_AT` and signed
+     * under the key derived from the `app.key` the Feature and Integration
+     * tests configure, so their key ring verifies it.
+     *
+     * @param  int  $members
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     * @throws \UnexpectedValueException
+     * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
+     */
+    public static function finalisedBundle(int $members = 3): FinalisedRecord
+    {
+        $config = new Repository(['app' => ['key' => 'base64:' . base64_encode(self::ENCRYPTION_KEY)]]);
+
+        return (new RecordSigner(new KeyRing(new IntegritySettings($config))))->sign(self::bundled($members), self::RECORDED_AT);
+    }
+
+    /**
+     * The test encrypter bulk records are sealed under: AES-256-CBC with the
+     * `app.key` the Feature and Integration tests configure.
+     *
+     * @return \Illuminate\Encryption\Encrypter
+     *
+     * @throws \RuntimeException
+     */
+    public static function encrypter(): Encrypter
+    {
+        return new Encrypter(self::ENCRYPTION_KEY, 'aes-256-cbc');
+    }
+
+    /**
+     * References to `App\Models\Invoice` 1 to the number given, in order.
+     *
+     * @param  int  $count
+     * @return list<\SineMacula\Laravel\AuditLog\Records\Reference>
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function members(int $count): array
+    {
+        return array_map(static fn (int $id): Reference => Reference::of(self::MEMBER_TYPE, $id), $count < 1 ? [] : range(1, $count));
     }
 
     /**

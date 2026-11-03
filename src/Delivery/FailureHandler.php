@@ -50,6 +50,16 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
  * commit callback. Every step, and a bound spill, runs inside the write guard,
  * so a record made from inside one is refused rather than written.
  *
+ * A record captured from an event carries its capture's signal, and always
+ * follows the `REPORT` rule. Once the steps have run, the signal is told the
+ * failure once, as fatal when it is thrown to the capture. A synchronous
+ * capture's failure fatal to an open transaction is thrown as for any record;
+ * a deferred one's runs inside a commit callback, long after the capture
+ * returned, so it is reported instead, inside the write guard, and never
+ * thrown. The work it records has already committed, so the record is spilled
+ * first, at once and bound to no transaction, as the only trace left of it. A
+ * signal whose callback fails stops no step.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -73,28 +83,48 @@ final readonly class FailureHandler
      * throw what the rule, or a failure fatal to an open transaction, requires.
      * With a transaction to bind to, the spill waits for that transaction's
      * commit, and is dropped when the failure shows the transaction was already
-     * aborted.
+     * aborted. With a capture's signal, the signal is then told the failure
+     * once, and a deferred capture's fatal failure is spilled at once and
+     * reported, not thrown.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  ?\Illuminate\Database\DatabaseTransactionRecord  $commitBound
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \Illuminate\Database\DeadlockException
      * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
-    public function handle(#[\SensitiveParameter] FailedWrite $failed, FailureRule $rule, ?DatabaseTransactionRecord $commitBound = null): void
-    {
+    public function handle(
+        #[\SensitiveParameter] FailedWrite $failed,
+        FailureRule $rule,
+        ?DatabaseTransactionRecord $commitBound = null,
+        #[\SensitiveParameter] ?CaptureSignal $capture = null,
+    ): void {
         $exception = $this->exceptionOf($failed->failure, $failed->operation, $failed, $failed->connection);
         $fatal     = $this->fatalOf($failed->failure, $exception, $failed->openConnections(), $failed->hostOpen);
         $guard     = $this->container->make(WriteGuard::class);
+
+        if ($fatal !== null && $capture?->isDeferred() === true) {
+            $guard->during(fn (): ?\RuntimeException => $this->attempt(fn () => $this->spillNow($failed), FailedOperation::SPILL, $failed, false));
+        }
 
         $secondary = $guard->during(fn (): ?\RuntimeException => $this->steps($guard, $failed, $rule, $fatal === null, $exception, $commitBound));
 
         $thrown = $fatal ?? $secondary ?? ($rule === FailureRule::REPORT ? null : $exception);
 
+        $capture?->fail($exception->exceptionClass, $thrown !== null && !$capture->isDeferred());
+
         if ($thrown === null) {
+            return;
+        }
+
+        if ($capture?->isDeferred() === true) {
+
+            $this->reportDeferred($thrown);
+
             return;
         }
 
@@ -116,15 +146,51 @@ final readonly class FailureHandler
      */
     public function abandon(#[\SensitiveParameter] AuditRecord $record, #[\SensitiveParameter] \Throwable $aborted, FailedOperation $operation, string $store): void
     {
-        $exception = new AuditWriteFailedException(WriteDiagnostics::of($aborted, $record->id, $record->event, $operation, $store));
+        $this->reportDeferred(new AuditWriteFailedException(WriteDiagnostics::of($aborted, $record->id, $record->event, $operation, $store)));
+    }
 
+    /**
+     * Report what a deferred capture's write let out beyond the failure path,
+     * named by its class alone, and tell the capture's signal, so nothing
+     * leaves the commit callback the write runs in. A reporter that fails is
+     * ignored, and a signal already told keeps its first failure.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @param  \Throwable  $failure
+     * @param  \SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation  $operation
+     * @param  string  $store
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @return void
+     */
+    public function contain(
+        #[\SensitiveParameter] AuditRecord $record,
+        #[\SensitiveParameter] \Throwable $failure,
+        FailedOperation $operation,
+        string $store,
+        #[\SensitiveParameter] CaptureSignal $capture,
+    ): void {
+        $this->abandon($record, $failure, $operation, $store);
+
+        $capture->fail(get_debug_type($failure), false);
+    }
+
+    /**
+     * Report a sanitised failure that cannot be thrown, because it would leave
+     * a commit callback, inside the write guard. A reporter that fails is
+     * ignored: no commit callback may throw.
+     *
+     * @param  \RuntimeException  $thrown
+     * @return void
+     */
+    private function reportDeferred(#[\SensitiveParameter] \RuntimeException $thrown): void
+    {
         try {
-            $this->container->make(WriteGuard::class)->during(function () use ($exception): void {
-                $this->container->make(ExceptionHandler::class)->report($exception);
+            $this->container->make(WriteGuard::class)->during(function () use ($thrown): void {
+                $this->container->make(ExceptionHandler::class)->report($thrown);
             });
         } catch (\Throwable) {
-            // The work was undone and the record with it, and there is nowhere
-            // left to say so
+            // The write ran inside a commit callback, which nothing may leave,
+            // and there is nowhere left to say so
         }
     }
 

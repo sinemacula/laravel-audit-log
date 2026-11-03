@@ -24,8 +24,16 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  *
  * It holds only minimised values: its IP address, context and properties are
  * what `RecordMinimiser` left of the builder's, and the note, the identifier
- * hash and the diagnostics of what was removed sit at `properties._audit`, last
- * and after the caller's keys, written there by that minimiser.
+ * hash, a bulk operation's manifest descriptor and the diagnostics of what was
+ * removed sit at `properties._audit`, last and after the caller's keys, written
+ * there by that minimiser.
+ *
+ * A bulk record carries its attachment, the sealed manifest of what the
+ * operation affected. The attachment is carried, not signed, and is never in
+ * the envelope: the record is bound to it by the descriptor it signs at
+ * `properties._audit.manifest`, which names the attachment's id, digest and
+ * count, so a record with the descriptor is built only with the attachment it
+ * describes, and a record without one only with none.
  *
  * The delivery pipeline later finalises it, once, adding the time it was
  * recorded and its integrity fields; nothing here knows of that. A record kept
@@ -45,6 +53,12 @@ final readonly class AuditRecord
 
     /** @var int Longest source region, in characters: the `source_region` column. */
     public const int SOURCE_REGION_MAX_CHARACTERS = 32;
+
+    /** @var string The key the package's metadata sits under, last in the properties. */
+    private const string METADATA_KEY = '_audit';
+
+    /** @var string The key the manifest descriptor sits under in the metadata. */
+    private const string MANIFEST_KEY = 'manifest';
 
     /**
      * Constructor.
@@ -83,6 +97,7 @@ final readonly class AuditRecord
      * @param  ?array<array-key, mixed>  $context
      * @param  ?array<array-key, mixed>  $properties
      * @param  string  $occurredAt
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Attachment  $attachment
      */
     private function __construct(
 
@@ -182,6 +197,10 @@ final readonly class AuditRecord
 
         /** When the activity happened, as ISO-8601 UTC with microseconds. */
         public string $occurredAt,
+
+        /** The bulk operation's sealed manifest, carried and bound by the signed descriptor; `null` for any other record. */
+        #[\SensitiveParameter]
+        public ?Attachment $attachment = null,
     ) {}
 
     /**
@@ -189,19 +208,28 @@ final readonly class AuditRecord
      * times, its provenance and its import fields included. Only the codec
      * calls it, having verified the envelope, so it never minimises, sanitises
      * or checks a value beyond its type; a field missing, or of another type,
-     * is refused.
+     * is refused. A bundle's attachment comes with it, and must be the one its
+     * signed descriptor describes; a record with a descriptor and no
+     * attachment, or with an attachment and no descriptor, is refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<array-key, mixed>  $fields
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Attachment  $attachment
      * @return self
      *
      * @throws \InvalidArgumentException
      *
      * @internal
      */
-    public static function fromEnvelope(#[\SensitiveParameter] array $fields): self
+    public static function fromEnvelope(#[\SensitiveParameter] array $fields, #[\SensitiveParameter] ?Attachment $attachment = null): self
     {
+        $properties = self::arrayOf($fields, 'properties');
+
+        if (!self::isBound($properties, $attachment)) {
+            throw new \InvalidArgumentException('A record\'s manifest and its attachment must describe the same artifact.');
+        }
+
         return new self(
             id: self::stringOf($fields, 'id'),
             recordVersion: self::integerOf($fields, 'record_version'),
@@ -233,8 +261,9 @@ final readonly class AuditRecord
             ip: self::nullableOf($fields, 'ip'),
             userAgent: self::nullableOf($fields, 'user_agent'),
             context: self::arrayOf($fields, 'context'),
-            properties: self::arrayOf($fields, 'properties'),
+            properties: $properties,
             occurredAt: self::stringOf($fields, 'occurred_at'),
+            attachment: $attachment,
         );
     }
 
@@ -243,7 +272,12 @@ final readonly class AuditRecord
      * once, with what minimising left of its IP address, context and
      * properties, the event version and category of its code's definition, the
      * instant the activity happened, and the source it was captured on. The
-     * origin must have been filled.
+     * origin must have been filled. A bulk builder's record takes the
+     * attachment of its own manifest, which its minimised properties describe,
+     * and any other record takes none.
+     *
+     * Its parameters are the record's parts, each from its own stage of the
+     * pipeline, so none groups naturally with another.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
@@ -252,12 +286,15 @@ final readonly class AuditRecord
      * @param  \DateTimeInterface  $occurredAt
      * @param  string  $sourceId
      * @param  ?string  $sourceRegion
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Attachment  $attachment
      * @return self
      *
      * @throws \InvalidArgumentException
      * @throws \LogicException
      *
      * @internal
+     *
+     * @SuppressWarnings("php:S107")
      */
     public static function fromPending(
         #[\SensitiveParameter]
@@ -268,6 +305,8 @@ final readonly class AuditRecord
         \DateTimeInterface $occurredAt,
         string $sourceId,
         ?string $sourceRegion = null,
+        #[\SensitiveParameter]
+        ?Attachment $attachment = null,
     ): self {
         $snapshot = $pending->consume();
         $origin   = self::originOf($snapshot);
@@ -275,6 +314,7 @@ final readonly class AuditRecord
         assert($snapshot->code instanceof EventCode);
 
         self::checkSource($sourceId, $sourceRegion);
+        self::checkAttachment($snapshot, $minimised, $attachment);
 
         [$actorType, $actorId]         = self::pair($snapshot->actor);
         [$subjectType, $subjectId]     = self::pair($snapshot->subject);
@@ -314,6 +354,7 @@ final readonly class AuditRecord
             context: $minimised->context,
             properties: $minimised->properties,
             occurredAt: self::utc($occurredAt),
+            attachment: $attachment,
         );
     }
 
@@ -369,6 +410,49 @@ final readonly class AuditRecord
             'properties'       => $this->properties,
             'occurred_at'      => $this->occurredAt,
         ];
+    }
+
+    /**
+     * Refuse an attachment that is not the snapshot's own manifest sealed, or
+     * that the minimised properties do not describe, and a bulk snapshot
+     * without one.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Attachment  $attachment
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    private static function checkAttachment(#[\SensitiveParameter] PendingSnapshot $snapshot, Minimised $minimised, #[\SensitiveParameter] ?Attachment $attachment): void
+    {
+        if ($snapshot->manifest?->id !== $attachment?->id || !self::isBound($minimised->properties, $attachment)) {
+            throw new \LogicException('A bulk record is built with the attachment of its own manifest, and any other record with none.');
+        }
+    }
+
+    /**
+     * Whether the attachment is the one the properties' signed descriptor
+     * describes: none without a descriptor, and with one, exactly the
+     * attachment it names.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  ?array<array-key, mixed>  $properties
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Attachment  $attachment
+     * @return bool
+     */
+    private static function isBound(#[\SensitiveParameter] ?array $properties, #[\SensitiveParameter] ?Attachment $attachment): bool
+    {
+        $metadata = $properties[self::METADATA_KEY] ?? null;
+
+        if (!is_array($metadata) || !array_key_exists(self::MANIFEST_KEY, $metadata)) {
+            return $attachment === null;
+        }
+
+        $descriptor = $metadata[self::MANIFEST_KEY];
+
+        return $attachment !== null && is_array($descriptor) && $attachment->describes($descriptor);
     }
 
     /**

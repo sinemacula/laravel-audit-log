@@ -9,6 +9,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
@@ -22,8 +23,9 @@ use Tests\Unit\Stubs\Enums\StubNumberedActivity;
 
 /**
  * Feature tests for the audit store tests bind in place of the database store:
- * how it is bound, what it holds and gives back, that a failing one throws and
- * holds nothing, and that it says it is durable and joins any transaction.
+ * how it is bound, what it holds and gives back, a bulk record's attachment
+ * included, that a failing one throws and holds nothing, and that it says it is
+ * durable, joins any transaction and keeps attachments.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -325,6 +327,33 @@ final class FakeAuditStoreTest extends TestCase
     {
         self::assertTrue(FakeAuditStore::fake()->participatesIn($connection));
         self::assertTrue(FakeAuditStore::failing(new \RuntimeException('The store is down.'))->participatesIn($connection));
+    }
+
+    /**
+     * The fake keeps attachments, failing or not, so a bulk record can be
+     * tested against it; the record `recorded()` returns carries the very
+     * attachment the store was handed, and `finalised()` the very bundle.
+     *
+     * @return void
+     */
+    public function testTheFakeKeepsTheAttachment(): void
+    {
+        $fake   = FakeAuditStore::fake();
+        $bundle = $this->finaliser()->finalise(RecordFactory::bundled(5));
+
+        self::assertInstanceOf(AcceptsAttachments::class, $fake);
+        self::assertTrue($fake->acceptsAttachments());
+        self::assertTrue(FakeAuditStore::failing(new \RuntimeException('The store is down.'))->acceptsAttachments());
+
+        $fake->store($bundle);
+
+        $attachment = $fake->recorded()[0]->attachment;
+
+        self::assertNotNull($attachment);
+        self::assertSame($bundle->record->attachment, $attachment);
+        self::assertSame(5, $attachment->memberCount);
+        self::assertSame([$bundle], $fake->finalised());
+        self::assertTrue($fake->hasRecorded('invoice.bulk_approved'));
     }
 
     /**

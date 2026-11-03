@@ -5,18 +5,24 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Delivery;
 
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 
 /**
  * What the bound audit store says of itself: whether a return is durable,
- * whether a write joins a transaction on a connection, and its class.
+ * whether a write joins a transaction on a connection, whether it keeps a
+ * record's attachment, and its class.
  *
  * The store is resolved from the container on every call, so a store bound
  * later is the one read, and nothing is kept between calls. A store that does
  * not implement `Contracts\DurableAuditStore` is neither durable nor joins any
- * transaction. Reading through this class is the only way the package outside
- * the delivery reaches the store, so only the delivery writes to it.
+ * transaction, and one that does not implement `Contracts\AcceptsAttachments`
+ * keeps no attachment. Whether a store keeps attachments is one rule, which
+ * judges a store given as it judges the bound one, so a drain that calls each
+ * destination of a stack in turn can refuse the one that keeps none. Reading
+ * through this class is the only way the package outside the delivery reaches
+ * the store, so only the delivery writes to it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,6 +31,9 @@ use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
  */
 final readonly class StoreCapabilities
 {
+    /** @var string The refusal of an attachment, by the class of the store that keeps none. */
+    private const string NO_ATTACHMENTS = 'The store %s does not keep attachments, so a bulk operation cannot be stored there. Bind one that does, such as the database store.';
+
     /**
      * Constructor.
      *
@@ -67,6 +76,36 @@ final readonly class StoreCapabilities
     }
 
     /**
+     * Whether the bound store keeps a record's attachment with its entry.
+     *
+     * @return bool
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    public function acceptsAttachments(): bool
+    {
+        return self::keepsAttachments($this->store());
+    }
+
+    /**
+     * Refuse a record's attachment when the bound store keeps none, naming the
+     * store's class.
+     *
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \LogicException
+     */
+    public function assertAcceptsAttachments(): void
+    {
+        $store = $this->store();
+
+        if (!self::keepsAttachments($store)) {
+            throw self::refuseAttachmentsTo($store);
+        }
+    }
+
+    /**
      * The bound store's class, as `get_debug_type()` names it, so an anonymous
      * store names no file path.
      *
@@ -77,6 +116,31 @@ final readonly class StoreCapabilities
     public function storeClass(): string
     {
         return get_debug_type($this->store());
+    }
+
+    /**
+     * Whether the store keeps a record's attachment with its entry: only when
+     * it implements `Contracts\AcceptsAttachments` and says so.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
+     * @return bool
+     */
+    public static function keepsAttachments(AuditStore $store): bool
+    {
+        return $store instanceof AcceptsAttachments && $store->acceptsAttachments();
+    }
+
+    /**
+     * The refusal of an attachment to the store, which keeps none, naming its
+     * class as `get_debug_type()` names it, so an anonymous store names no file
+     * path.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
+     * @return \LogicException
+     */
+    public static function refuseAttachmentsTo(AuditStore $store): \LogicException
+    {
+        return new \LogicException(sprintf(self::NO_ATTACHMENTS, get_debug_type($store)));
     }
 
     /**

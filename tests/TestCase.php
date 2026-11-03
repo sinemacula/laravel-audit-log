@@ -44,6 +44,7 @@ abstract class TestCase extends OrchestraTestCase
         'audit-log.storage.connection'             => null,
         'audit-log.storage.maintenance_connection' => null,
         'audit-log.entries.table'                  => EntrySettings::DEFAULT_TABLE,
+        'audit-log.entries.artifacts_table'        => EntrySettings::DEFAULT_ARTIFACTS_TABLE,
         'audit-log.delivery.outbox.connection'     => null,
         'audit-log.delivery.outbox.table'          => DeliveryTables::DEFAULT_OUTBOX,
         'audit-log.delivery.deliveries_table'      => DeliveryTables::DEFAULT_DELIVERIES,
@@ -130,19 +131,19 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migrations so the entries, outbox, deliveries,
-     * checkpoints, checkpoint members and integrity state tables exist for
-     * tests that use them, each on the connection its settings name when they
-     * run.
+     * Run the package's shipped migrations so the entries, artifacts, outbox,
+     * deliveries, checkpoints, checkpoint members and integrity state tables
+     * exist for tests that use them, each on the connection its settings name
+     * when they run.
      *
      * A test may point the storage settings elsewhere once the tables exist;
      * `tearDown()` puts them back before the migrations are rolled back. On a
      * persistent database (MySQL, PostgreSQL) creating and dropping the tables
-     * costs more than most tests themselves, so while all six are on the
+     * costs more than most tests themselves, so while all seven are on the
      * worker's connection they are kept from one test to the next. Each test
      * starts by comparing their schema and migration records with what the
      * migrations left: when they match it deletes their rows, otherwise it
-     * migrates them afresh. When any table is on another connection, all six
+     * migrates them afresh. When any table is on another connection, all seven
      * are migrated for the test and dropped when it ends.
      *
      * @return void
@@ -251,6 +252,7 @@ abstract class TestCase extends OrchestraTestCase
 
         return [
             [$storage, EntrySettings::table()],
+            [$storage, EntrySettings::artifactsTable()],
             [DeliveryTables::outboxConnection() ?? $default, DeliveryTables::outboxTable()],
             [$storage, DeliveryTables::deliveriesTable()],
             [$storage, IntegrityTables::checkpointsTable()],

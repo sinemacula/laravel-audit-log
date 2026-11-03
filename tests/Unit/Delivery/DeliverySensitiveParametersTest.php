@@ -15,6 +15,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
 use SineMacula\Laravel\AuditLog\Database\AfterCommit;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
+use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\DeliveryCoordinator;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule;
 use SineMacula\Laravel\AuditLog\Delivery\FailedWrite;
@@ -96,11 +97,11 @@ final class DeliverySensitiveParametersTest extends TestCase
     /** @var list<string> The names a parameter holding a payload goes by, the token's among them. */
     private const array PAYLOAD_NAMES = ['record', 'finalised', 'failure', 'exception', 'payload', 'json', 'line', 'envelope', 'row', 'fields', 'event', 'value', 'token'];
 
-    /** @var list<class-string> The types a parameter holding a payload goes by; any class of exception is one too. */
-    private const array PAYLOAD_TYPES = [AuditRecord::class, FinalisedRecord::class, FailedWrite::class, \Closure::class];
+    /** @var list<class-string> The types a parameter holding a payload goes by, a capture's signal among them since it holds the capture's closure; any class of exception is one too. */
+    private const array PAYLOAD_TYPES = [AuditRecord::class, FinalisedRecord::class, FailedWrite::class, CaptureSignal::class, \Closure::class];
 
     /** @var string What a closure's parameter holding a payload is typed as, read from the source, where no type can be resolved. */
-    private const string PAYLOAD_TYPE_IN_SOURCE = '/\b(?:AuditRecord|FinalisedRecord|FailedWrite|Closure|Throwable|\w*Exception)\b/';
+    private const string PAYLOAD_TYPE_IN_SOURCE = '/\b(?:AuditRecord|FinalisedRecord|FailedWrite|CaptureSignal|Closure|Throwable|\w*Exception)\b/';
 
     /** @var array<string, string> The parameters that go by a payload's name and hold only one fixed case of an enum, as `class::method.parameter`, each with that enum. */
     private const array FIXED_CASES = [
@@ -117,6 +118,7 @@ final class DeliverySensitiveParametersTest extends TestCase
     /** @var list<class-string> The classes the scan must find a payload parameter in. */
     private const array MUST_HOLD_ONE = [
         AfterCommit::class,
+        CaptureSignal::class,
         CefFormatter::class,
         DatabaseAuditStore::class,
         DeliveryCoordinator::class,
@@ -255,6 +257,7 @@ final class DeliverySensitiveParametersTest extends TestCase
             'a nullable class of exception' => ['nullableException', true],
             'one of a union of exceptions'  => ['unionOfExceptions', true],
             'a closure'                     => ['typedClosure', true],
+            'a capture\'s signal'           => ['typedSignal', true],
             'a string named `json`'         => ['json', true],
             'a string named `token`'        => ['token', true],
             'an array named `row`'          => ['row', true],
@@ -290,6 +293,7 @@ final class DeliverySensitiveParametersTest extends TestCase
              * @param  ?\RuntimeException  $nullableException
              * @param  \LogicException|\RuntimeException  $unionOfExceptions
              * @param  \Closure(): void  $typedClosure
+             * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $typedSignal
              * @param  string  $json
              * @param  string  $token
              * @param  array<string, string>  $row
@@ -315,6 +319,8 @@ final class DeliverySensitiveParametersTest extends TestCase
                 \LogicException|\RuntimeException $unionOfExceptions,
                 #[\SensitiveParameter]
                 \Closure $typedClosure,
+                #[\SensitiveParameter]
+                ?CaptureSignal $typedSignal,
                 #[\SensitiveParameter]
                 string $json,
                 #[\SensitiveParameter]
@@ -448,6 +454,7 @@ final class DeliverySensitiveParametersTest extends TestCase
             'a failure'           => [['?\RuntimeException $thing'], ['thing']],
             'a marked failure'    => [['#[\SensitiveParameter] \Throwable $thing'], []],
             'a closure'           => [['\Closure $work'], ['work']],
+            'a capture\'s signal' => [['?CaptureSignal $capture'], ['capture']],
             'a value and an id'   => [['string $id', 'mixed $value'], ['value']],
             'neither'             => [['Connection $nested', 'string $id'], []],
             'two payloads marked' => [['#[\SensitiveParameter] array $row', '#[\SensitiveParameter] string $json'], []],
@@ -514,6 +521,51 @@ final class DeliverySensitiveParametersTest extends TestCase
 
         self::assertSame(self::SECRET, $unmarked(self::SECRET)->getTrace()[0]['args'][0] ?? null);
         self::assertInstanceOf(\SensitiveParameterValue::class, $marked(self::SECRET)->getTrace()[0]['args'][0] ?? null);
+    }
+
+    /**
+     * A synchronous capture's failure fatal to an open transaction is thrown
+     * through the failure handler, whose frame hides the capture's signal, and
+     * with it the closure the capture made, as it hides the failed write.
+     *
+     * @return void
+     */
+    public function testAStackFrameOfACapturesFatalFailureHidesItsSignal(): void
+    {
+        $container = new Container;
+
+        $container->instance(WriteGuard::class, new WriteGuard);
+        $container->instance(DispatcherContract::class, new Dispatcher($container));
+
+        $told   = [];
+        $held   = self::SECRET;
+        $signal = new CaptureSignal(static function (string $exceptionClass) use (&$told, $held): void {
+            $told[$exceptionClass] = $held;
+        });
+        $driver  = new \PDOException('Deadlock found when trying to get lock ' . self::SECRET);
+        $failure = new QueryException('testing', 'insert into "audit_log_entries" ("note") values (?)', [self::SECRET], $driver);
+        $record  = RecordFactory::captured(['note' => self::SECRET]);
+        $failed  = new FailedWrite($record, null, $failure, FailedOperation::STORE, DatabaseAuditStore::class, 'testing', true, ['testing']);
+        $thrown  = null;
+
+        self::assertTrue(self::holdsText($signal, self::SECRET));
+
+        try {
+            (new FailureHandler($container))->handle($failed, FailureRule::REPORT, null, $signal);
+        } catch (DeadlockException $caught) {
+            $thrown = $caught;
+        }
+
+        self::assertInstanceOf(DeadlockException::class, $thrown);
+        self::assertTrue($signal->isFatal());
+        self::assertSame([QueryException::class => self::SECRET], $told);
+
+        $handles = static fn (array $frame): bool => $frame['function'] === 'handle' && ($frame['class'] ?? null) === FailureHandler::class;
+        $frames  = array_values(array_filter($thrown->getTrace(), $handles));
+
+        self::assertCount(1, $frames);
+        self::assertInstanceOf(\SensitiveParameterValue::class, $frames[0]['args'][3] ?? null);
+        self::assertHoldsNoSecret($thrown->getTrace(), 'the frames');
     }
 
     /**

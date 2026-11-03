@@ -5,41 +5,59 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog;
 
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
-use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
+use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
+use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
+use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
-use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
-use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
-use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
+use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
+use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
-use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
-use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
-use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
 
 /**
  * The package's way in: records an activity, or gives a builder that records
- * one, and takes the definitions and contributors an application registers
- * while it boots.
+ * one, captures an event through its mapper, and takes the definitions,
+ * contributors, event mappers and watched models an application registers while
+ * it boots.
  *
  * A recorded activity runs one pipeline: its definition is found, its timing is
  * checked, the contributors fill its gaps in order, what they leave is
- * minimised, the record is built from that with the clock's time and the
- * configured source, and it is delivered, after commit unless the builder chose
- * otherwise. A refusal before the record is built, a minimiser's failure among
- * them, stores nothing and leaves the builder usable, and a failed write
- * follows the failure policy.
+ * minimised, a bulk operation's manifest is sealed, the record is built from
+ * that with the clock's time and the configured source, and it is delivered,
+ * after commit unless the builder chose otherwise. A refusal before the record
+ * is built, a minimiser's failure among them, stores nothing and leaves the
+ * builder usable, and a failed write follows the failure policy. The pipeline
+ * runs with the definitions and contributors this recorder was made with.
+ *
+ * An event is captured through the mapper registered for its class, or for the
+ * one parent class or interface of it that is mapped: the first mapping
+ * listens, through one wildcard listener, for every event the application
+ * dispatches, and an application that maps nothing pays nothing. A captured
+ * record is written at once, and a capture never throws into the code that
+ * dispatched its event but for a failure fatal to an open transaction. A
+ * watched model's changes are captured from its own Eloquent events, and a bulk
+ * operation is one explicit record carrying the manifest of what it affected,
+ * refused up front while the bound store keeps no attachment.
  *
  * A singleton that outlives requests under Octane, so it holds only frozen
- * registration data: contributors, runtime state, the clock, the store and the
- * finaliser are all resolved from the current container on every capture.
+ * registration data, its definitions and contributors. The event mappers and
+ * the model watcher, which every capture reads from the container, are resolved
+ * from it for each registration, so the recorder never holds the dispatcher a
+ * watch listens with, nor anything that holds a request; both are frozen once
+ * the application has booted. Runtime state, the clock, the store, the
+ * finaliser and the capture's own state are all resolved from the current
+ * container on every capture.
  *
  * @api
  *
@@ -185,6 +203,103 @@ final readonly class Recorder
     }
 
     /**
+     * Register the mapper for an event class or interface, while the
+     * application boots, leaving the subtypes excepted unmapped. The first
+     * mapping listens for every event the application dispatches, once.
+     *
+     * @param  string  $classOrInterface
+     * @param  string  $mapper
+     * @param  list<string>  $except
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public function map(string $classOrInterface, string $mapper, array $except = []): void
+    {
+        $container = Container::getInstance();
+        $mappers   = $container->make(MapperRegistry::class);
+        $first     = !$mappers->hasMappings();
+
+        $mappers->map($classOrInterface, $mapper, $except);
+
+        if (!$first) {
+            return;
+        }
+
+        $container->make(Dispatcher::class)->listen('*', CaptureMappedEvent::class);
+    }
+
+    /**
+     * Capture the event through the mapper registered for it, and return the
+     * record written, or `null` when nothing was: no mapping applies, the event
+     * has been captured already or is being mapped now, its mapper skipped it,
+     * or the capture failed, which is reported and dispatched as
+     * `AuditCaptureFailed`. Nothing is thrown but a failure fatal to an open
+     * transaction.
+     *
+     * @param  object  $event
+     * @return ?\SineMacula\Laravel\AuditLog\Records\AuditRecord
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \Illuminate\Database\DeadlockException
+     * @throws \RuntimeException
+     */
+    public function capture(#[\SensitiveParameter] object $event): ?AuditRecord
+    {
+        return Container::getInstance()->make(CaptureCoordinator::class)->mapped($event);
+    }
+
+    /**
+     * Watch exactly the model class under the segment, while the application
+     * boots, keeping the fields: a name given alone is retained, and a name
+     * given as a key is handled as its value says.
+     *
+     * @param  string  $model
+     * @param  string  $as
+     * @param  array<int|string, \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling|string>  $fields
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public function watch(string $model, string $as, array $fields): void
+    {
+        Container::getInstance()->make(ModelWatcher::class)->watch($model, $as, $fields);
+    }
+
+    /**
+     * A builder for a bulk operation on the subjects, which writes nothing
+     * until its `record()` and is written after commit by default, like any
+     * explicit record. It carries the manifest of the subjects, each once,
+     * which is sealed when it is recorded; a manifest over its configured
+     * bounds is refused, never truncated, and so is any bulk operation while
+     * the bound store keeps no attachment.
+     *
+     * @param  \BackedEnum|string  $code
+     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     */
+    public function bulk(\BackedEnum|string $code, #[\SensitiveParameter] iterable $subjects): PendingRecord
+    {
+        $container = Container::getInstance();
+
+        $container->make(StoreCapabilities::class)->assertAcceptsAttachments();
+
+        $settings = $container->make(CaptureSettings::class);
+        $manifest = Manifest::of($subjects, $settings->bulkMaxMembers(), $settings->bulkMaxBytes());
+
+        return $this->event($code)->withManifest($manifest);
+    }
+
+    /**
      * Refuse a disclosure code whose registered definition would not keep the
      * purpose.
      *
@@ -203,17 +318,15 @@ final readonly class Recorder
     }
 
     /**
-     * The pipeline a builder's `record()` runs: nothing is consumed until the
-     * definition and the timing have been accepted and the record minimised, so
-     * a refusal of any of them leaves the builder usable. Minimising takes a
-     * snapshot of its own, because the first predates what the contributors
-     * filled; that first one stays for the definition, the timing and the
-     * connection, which they cannot change.
+     * Write the builder's record through the pipeline of the definitions and
+     * contributors this recorder was made with, never one the container holds,
+     * so a recorder made with its own keeps them.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \Illuminate\Contracts\Encryption\EncryptException
      * @throws \InvalidArgumentException
      * @throws \JsonException
      * @throws \LogicException
@@ -223,30 +336,6 @@ final readonly class Recorder
      */
     private function write(#[\SensitiveParameter] PendingRecord $pending): AuditRecord
     {
-        $container = Container::getInstance();
-        $snapshot  = $pending->snapshot();
-
-        assert($snapshot->code instanceof EventCode);
-
-        $definition = $this->catalogue->definitionFor($snapshot->code, $container->make(DefinitionSettings::class)->requiresRegistered());
-        $delivery   = $container->make(RecordDelivery::class);
-        $timing     = $snapshot->timing ?? Timing::AFTER_COMMIT;
-
-        $delivery->check($timing, $snapshot->connection, $snapshot->failClosed);
-
-        $contribution = new Contribution($pending);
-
-        foreach ($this->contributors->classes() as $contributor) {
-            $container->make($contributor)->contribute($contribution);
-        }
-
-        $minimised  = $container->make(RecordMinimiser::class)->minimise($pending->snapshot(), $definition);
-        $source     = $container->make(SourceSettings::class);
-        $occurredAt = $container->make(Clock::class)->now();
-        $record     = AuditRecord::fromPending($pending, $minimised, $definition->version, $definition->category, $occurredAt, $source->id(), $source->region());
-
-        $delivery->deliver($record, $timing, $snapshot->connection, $snapshot->failClosed);
-
-        return $record;
+        return (new RecordPipeline($this->catalogue, $this->contributors))->write($pending);
     }
 }

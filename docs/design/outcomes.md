@@ -71,31 +71,34 @@ each, named after its id.
 - Rolled back when shared means on a connection the host's transaction is open on. A dedicated connection is outside it,
   and the write is kept whatever the host does.
 
-| Row id                           | Timing                              | Mode                               | Policy | Written            | On a failed write                                | On the host's rollback  | `record()` returning means       |
-|----------------------------------|-------------------------------------|------------------------------------|--------|--------------------|--------------------------------------------------|-------------------------|----------------------------------|
-| `after-commit-sync-report`       | after commit                        | sync                               | report | at the commit      | spill, report, event; the commit stands          | dropped                 | captured, in memory              |
-| `after-commit-sync-throw`        | after commit                        | sync                               | throw  | at the commit      | spill, event; throws from the commit             | dropped                 | captured, in memory              |
-| `after-commit-none-open`         | after commit                        | sync                               | report | now                | spill, report, event                             | none open               | stored, or in the spill          |
-| `after-commit-outbox-same`       | after commit                        | outbox, selected on its connection | report | now, inside it     | report, event at once; spill bound to the commit | row and spill gone      | a row that commits with the host |
-| `after-commit-outbox-same-throw` | after commit                        | same                               | throw  | now, inside it     | event; spill bound; throws now                   | row and spill gone      | a row that commits with the host |
-| `after-commit-outbox-other`      | after commit                        | outbox, selected elsewhere         | report | at that commit     | spill, report, event                             | dropped                 | captured, in memory              |
-| `immediately-sync-report`        | immediately                         | sync                               | report | now                | spill, report, event                             | rolled back when shared | stored, or in the spill          |
-| `immediately-sync-throw`         | immediately                         | sync                               | throw  | now                | spill, event; throws                             | rolled back when shared | stored                           |
-| `immediately-outbox`             | immediately                         | outbox                             | report | now                | spill, report, event                             | rolled back when shared | a row, or in the spill           |
-| `transactional-sync`             | transactional                       | sync                               | any    | now, inside it     | event; throws; no spill                          | rolled back             | stored inside it                 |
-| `transactional-outbox`           | transactional                       | outbox                             | any    | now, inside it     | event; throws; no spill                          | rolled back             | a row inside it                  |
-| `fail-closed-sync`               | immediately                         | sync                               | any    | now                | spill, event; throws                             | rolled back when shared | stored                           |
-| `fail-closed-outbox`             | immediately                         | outbox                             | any    | now                | spill, event; throws                             | rolled back when shared | a row                            |
-| `fail-closed-transactional`      | transactional                       | either                             | any    | now, inside it     | event; throws; no spill                          | rolled back             | inside it                        |
-| `host-deadlock`                  | any, host open                      | any                                | any    | -                  | event; `DeadlockException`; no spill             | the host's              | -                                |
-| `host-connection-lost`           | any, host open                      | any                                | any    | -                  | event; `AuditWriteFailedException`; no spill     | the host's              | -                                |
-| `aborted-postgres-host`          | immediately                         | sync                               | report | never              | spill, report, event; no fatal error             | rolled back             | in the spill                     |
-| `failed-finalise`                | immediately                         | sync                               | report | never              | unsigned spill, report, event                    | -                       | in the spill, unreplayable       |
-| `inside-a-store`                 | any                                 | any                                | report | never              | one report of a `\LogicException`                | -                       | captured, unwritten              |
-| `inside-a-store-strict`          | `failClosed()` or `transactional()` | any                                | any    | never              | `\LogicException`                                | -                       | does not return                  |
-| `drain-transient`                | outbox drain                        | outbox                             | -      | on a later attempt | receipt and row's error class, backoff           | -                       | -                                |
-| `drain-final`                    | outbox drain                        | outbox                             | -      | never, kept        | `failed_at`, report, event; never deleted        | -                       | -                                |
-| `drain-undecryptable`            | outbox drain                        | outbox                             | -      | never, kept        | `failed_at`, report by id; never deleted         | -                       | -                                |
+| Row id                           | Timing                              | Mode                               | Policy  | Written            | On a failed write                                                                                                               | On the host's rollback  | `record()` returning means                      |
+|----------------------------------|-------------------------------------|------------------------------------|---------|--------------------|---------------------------------------------------------------------------------------------------------------------------------|-------------------------|-------------------------------------------------|
+| `after-commit-sync-report`       | after commit                        | sync                               | report  | at the commit      | spill, report, event; the commit stands                                                                                         | dropped                 | captured, in memory                             |
+| `after-commit-sync-throw`        | after commit                        | sync                               | throw   | at the commit      | spill, event; throws from the commit                                                                                            | dropped                 | captured, in memory                             |
+| `after-commit-none-open`         | after commit                        | sync                               | report  | now                | spill, report, event                                                                                                            | none open               | stored, or in the spill                         |
+| `after-commit-outbox-same`       | after commit                        | outbox, selected on its connection | report  | now, inside it     | report, event at once; spill bound to the commit                                                                                | row and spill gone      | a row that commits with the host                |
+| `after-commit-outbox-same-throw` | after commit                        | same                               | throw   | now, inside it     | event; spill bound; throws now                                                                                                  | row and spill gone      | a row that commits with the host                |
+| `after-commit-outbox-other`      | after commit                        | outbox, selected elsewhere         | report  | at that commit     | spill, report, event                                                                                                            | dropped                 | captured, in memory                             |
+| `immediately-sync-report`        | immediately                         | sync                               | report  | now                | spill, report, event                                                                                                            | rolled back when shared | stored, or in the spill                         |
+| `immediately-sync-throw`         | immediately                         | sync                               | throw   | now                | spill, event; throws                                                                                                            | rolled back when shared | stored                                          |
+| `immediately-outbox`             | immediately                         | outbox                             | report  | now                | spill, report, event                                                                                                            | rolled back when shared | a row, or in the spill                          |
+| `transactional-sync`             | transactional                       | sync                               | any     | now, inside it     | event; throws; no spill                                                                                                         | rolled back             | stored inside it                                |
+| `transactional-outbox`           | transactional                       | outbox                             | any     | now, inside it     | event; throws; no spill                                                                                                         | rolled back             | a row inside it                                 |
+| `fail-closed-sync`               | immediately                         | sync                               | any     | now                | spill, event; throws                                                                                                            | rolled back when shared | stored                                          |
+| `fail-closed-outbox`             | immediately                         | outbox                             | any     | now                | spill, event; throws                                                                                                            | rolled back when shared | a row                                           |
+| `fail-closed-transactional`      | transactional                       | either                             | any     | now, inside it     | event; throws; no spill                                                                                                         | rolled back             | inside it                                       |
+| `host-deadlock`                  | any, host open                      | any                                | any     | -                  | event; `DeadlockException`; no spill                                                                                            | the host's              | -                                               |
+| `host-connection-lost`           | any, host open                      | any                                | any     | -                  | event; `AuditWriteFailedException`; no spill                                                                                    | the host's              | -                                               |
+| `aborted-postgres-host`          | immediately                         | sync                               | report  | never              | spill, report, event; no fatal error                                                                                            | rolled back             | in the spill                                    |
+| `failed-finalise`                | immediately                         | sync                               | report  | never              | unsigned spill, report, event                                                                                                   | -                       | in the spill, unreplayable                      |
+| `inside-a-store`                 | any                                 | any                                | report  | never              | one report of a `\LogicException`                                                                                               | -                       | captured, unwritten                             |
+| `inside-a-store-strict`          | `failClosed()` or `transactional()` | any                                | any     | never              | `\LogicException`                                                                                                               | -                       | does not return                                 |
+| `drain-transient`                | outbox drain                        | outbox                             | -       | on a later attempt | receipt and row's error class, backoff                                                                                          | -                       | -                                               |
+| `drain-final`                    | outbox drain                        | outbox                             | -       | never, kept        | `failed_at`, report, event; never deleted                                                                                       | -                       | -                                               |
+| `drain-undecryptable`            | outbox drain                        | outbox                             | -       | never, kept        | `failed_at`, report by id; never deleted                                                                                        | -                       | -                                               |
+| `captured-report`                | immediately, captured               | any                                | ignored | now                | spill, report, event, `AuditCaptureFailed`; nothing thrown                                                                      | rolled back when shared | `capture()`: stored, or `null` and in the spill |
+| `captured-host-fatal`            | immediately, captured, host open    | any                                | ignored | -                  | event, `AuditCaptureFailed`; a sanitised `DeadlockException`, `AuditWriteFailedException` or `CaptureFailedException`; no spill | the host's              | -                                               |
+| `captured-model-after-commit`    | after the model's commit            | any                                | ignored | at the commit      | spill, report, event, `AuditCaptureFailed`; the commit stands                                                                   | dropped                 | the save returns; captured, in memory           |
 
 What the table cannot say in a cell:
 
@@ -148,6 +151,22 @@ What the table cannot say in a cell:
   An ordinary record comes back unwritten, since it would fail or be refused the same way, and repeats inside one window
   are not reported again. A strict one is refused, because returning would break its guarantee, and left uncaught inside
   the store it is a failure of the write around it.
+- The `captured-` rows hold for every record captured from an event: a mapped event, Laravel's authentication events, a
+  Gate denial and a watched model's change. A capture follows the `report` rule and never reads `failure.mode`, so
+  `throw` never reaches the code that dispatched the event, and a capture is never `failClosed()` or `transactional()`.
+  A failed write is spilled, reported and said once, as `AuditWriteFailed`, then `AuditCaptureFailed` is dispatched
+  once and the capture returns `null`.
+- `captured-host-fatal` is the one failure a capture lets out. A deadlock or a lost connection that ended a transaction
+  open on its connection, during a capture written now, propagates sanitised: a deadlock as a `DeadlockException`, as
+  `host-deadlock` does; a connection the write itself lost as a `Stores\AuditWriteFailedException`, as
+  `host-connection-lost` does; and a connection lost before the write, in a contributor or the minimiser, as a
+  `Capture\CaptureFailedException`. `AuditCaptureFailed` is still dispatched once. The transactions open are read
+  before the capture runs, because Laravel forgets one whose connection is lost. A watched model's change built at its
+  event, and its outbox insert made inside the model's own transaction, are written now in this sense.
+- `captured-model-after-commit` never throws from the commit. Whatever its write lets out, a host-fatal failure
+  included, is reported and said, because the business data has already committed and the save that changed it
+  returned long ago. Its record is spilled too, even when its failure ended a transaction still open on the storage
+  connection, since the change it records has committed and the spill is the only trace left of it.
 - `drain-transient` is not reported, because a retry is expected to succeed; only `drain-final` is. An outage of the
   deliveries table is such a failure, so it backs off like any other. Only a row that kills its worker too often is
   failed as `abandoned` and reported, so it cannot loop forever. A failed row is delivered only by `audit-log:replay`.
@@ -157,11 +176,11 @@ What the table cannot say in a cell:
 A record has exactly one timing, and `record()` returns the captured record (`AuditRecord`) whichever it is. The timing
 decides when that record is stored, and so what its return promises:
 
-| Timing            | Default for                                              | When it is written                                                                                                               | On the host's rollback                                                            | What `record()` returning means                                                                       |
-|-------------------|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| `afterCommit()`   | explicit records: `record()`, `event()` and `accessed()` | at the selected transaction's outermost commit; now when none is selected, or in outbox mode when it is on the outbox connection | dropped unwritten, by the selected transaction or one around it on its connection | captured and held in memory; already written only when none was selected, or in a row inside the host |
-| `immediately()`   | captured records (`capture()`) and `failClosed()`        | now, in a savepoint when the connection has an open transaction                                                                  | rolled back on a shared connection; kept on a dedicated one                       | written, or under `report` in the spill; durable once any transaction open on the connection commits  |
-| `transactional()` | nothing: it is always asked for                          | now, inside the open transaction on the connection, in a savepoint                                                               | rolled back with it, always                                                       | written inside that transaction; durable only when it commits                                         |
+| Timing            | Default for                                                        | When it is written                                                                                                               | On the host's rollback                                                            | What `record()` returning means                                                                       |
+|-------------------|--------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| `afterCommit()`   | explicit records: `record()`, `event()`, `accessed()` and `bulk()` | at the selected transaction's outermost commit; now when none is selected, or in outbox mode when it is on the outbox connection | dropped unwritten, by the selected transaction or one around it on its connection | captured and held in memory; already written only when none was selected, or in a row inside the host |
+| `immediately()`   | captured records (`capture()`) and `failClosed()`                  | now, in a savepoint when the connection has an open transaction                                                                  | rolled back on a shared connection; kept on a dedicated one                       | written, or under `report` in the spill; durable once any transaction open on the connection commits  |
+| `transactional()` | nothing: it is always asked for                                    | now, inside the open transaction on the connection, in a savepoint                                                               | rolled back with it, always                                                       | written inside that transaction; durable only when it commits                                         |
 
 - The connection is the storage connection in sync mode and the outbox connection in outbox mode.
 - A return is a written record only when a failed write would have thrown: with `failClosed()`, `transactional()` or
@@ -195,6 +214,17 @@ decides when that record is stored, and so what its return promises:
 - **The gap stays for `after-commit-outbox-other`.** With the selected transaction on another connection, the outbox row
   is inserted after that commit, and two connections share no commit, so a process that dies between the two loses the
   record. Pin the outbox connection, or use `transactional()` on it, to close it.
+
+### Captured Records
+
+- A captured record is written immediately under `report`, whatever `failure.mode` says, so a capture inside a
+  transaction is written in a savepoint and rolled back with the host on a shared connection.
+- Model changes are the exception, the one captured source that waits for commit. A watched model's record is built and
+  minimised when its event fires, then written after the commit of the transaction open on the model's own connection,
+  `$model->getConnection()->getName()`, and dropped by its rollback. In outbox mode, with the outbox on that connection,
+  its row is inserted inside the transaction, as `after-commit-outbox-same` is.
+- A mapper never chooses a timing, `failClosed()` or `transactional()`: a mapped record that sets any of them is a
+  contained capture failure, and writes nothing.
 
 ### Immediately and the Savepoint
 
@@ -297,7 +327,9 @@ decides when that record is stored, and so what its return promises:
 - `src/Database/FailureClassifier.php`: `sanitisedDeadlock()`, `masked()`, `isConcurrencyError()`, `isLostConnection()`,
   `connectionOf()`.
 - `src/Runtime/WriteGuard.php`: `during()`.
-- `src/Events/AuditRecorded.php`, `src/Events/AuditWriteFailed.php`.
+- `src/Events/AuditRecorded.php`, `src/Events/AuditWriteFailed.php`, `src/Events/AuditCaptureFailed.php`.
+- `src/Capture/CaptureCoordinator.php`: `mapped()`, `captured()`; `src/Delivery/CaptureSignal.php`: `defer()`, `fail()`;
+  `src/Capture/ModelChangeDescriber.php`.
 
 ## Authoritative Tests
 
@@ -307,7 +339,8 @@ decides when that record is stored, and so what its return promises:
   `testRowImmediatelyOutbox`, `testRowTransactionalSync`, `testRowTransactionalOutbox`, `testRowFailClosedSync`,
   `testRowFailClosedOutbox`, `testRowFailClosedTransactional`, `testRowHostDeadlock`, `testRowHostConnectionLost`,
   `testRowAbortedPostgresHost`, `testRowFailedFinalise`, `testRowInsideAStore`, `testRowInsideAStoreStrict`,
-  `testRowDrainTransient`, `testRowDrainFinal`, `testRowDrainUndecryptable`, `testEveryRowOfTheTableHasATest`,
+  `testRowDrainTransient`, `testRowDrainFinal`, `testRowDrainUndecryptable`, `testRowCapturedReport`,
+  `testRowCapturedHostFatal`, `testRowCapturedModelAfterCommit`, `testEveryRowOfTheTableHasATest`,
   `testEveryRowOfTheTableHasEachColumn`, `testADeadlockAtACommitWithNothingOpenFollowsThePolicy`,
   `testADeadlockAtAnotherCommitInsideAHostIsTheHosts`,
   `testAnAfterCommitSpillWaitsForATransactionStillOpenOnItsConnection`,
@@ -396,7 +429,13 @@ decides when that record is stored, and so what its return promises:
   `testADeferredReportModeFailureLeavesLaterCallbacksRunning`, `testAHostFatalWriteFailurePropagatesInReportMode`,
   `testADeadlockWithNothingOpenFollowsTheRule`, `testAFailedFinaliseFollowsThePolicy`,
   `testAnAfterCommitFailureInsideAnOpenStorageTransactionBindsItsSpill`,
-  `testARecordInsideAStoreIsRefusedReportedAndReturned`
+  `testARecordInsideAStoreIsRefusedReportedAndReturned`, `testACaptureFollowsTheReportRuleUnderTheThrowMode`,
+  `testACaptureIgnoresAMalformedFailureMode`, `testADeferredCapturesFailureIsSignalledAtCommit`,
+  `testADeferredCaptureNeverThrowsFromTheCommit`
+- `tests/Feature/Capture/CaptureCoordinatorTest.php` `testAWriteFailureIsHandledOnce`,
+  `testTheThrowFailureModeIsIgnored`, `testAMapperChoosingTheTimingIsContained`
+- `tests/Integration/Capture/ModelChangeTimingTest.php` `testAChangeIsWrittenOnlyWhenItsTransactionCommits`,
+  `testARolledBackChangeIsNeverRecorded`, `testADeferredWriteFailureIsSignalledAfterCommit`
 
 ## Change Triggers
 
@@ -413,3 +452,4 @@ Update this note when any of the following change:
 - where a spill goes, when it is written, or what discards it
 - what the outbox writes inside a transaction, or what the drain does with a failure
 - what `AuditRecorded` carries or means, or how a listener's failure is handled
+- when a captured record is written, which rule it follows, or what its failure lets out

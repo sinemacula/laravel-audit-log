@@ -36,8 +36,9 @@ use Tests\TestCase;
  * transaction and in a savepoint inside one; a duplicate resolved to success
  * only when the existing row verifies with the same captured content, to a
  * conflict when it does not, and propagated when it cannot be verified or no
- * row holds the id; and a host transaction left usable by one failed audit
- * statement, on SQLite, MySQL and PostgreSQL alike.
+ * row holds the id; a record without an attachment written as before, never
+ * touching the artifacts table; and a host transaction left usable by one
+ * failed audit statement, on SQLite, MySQL and PostgreSQL alike.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -157,6 +158,38 @@ final class DatabaseAuditStoreTest extends TestCase
         self::assertSame([0], $levels);
         self::assertSame(0, $this->storageConnection()->transactionLevel());
         self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * A record without an attachment is still one insert into the entries
+     * table, and outside a transaction the store opens none for it: nothing is
+     * read from or written to the artifacts table.
+     *
+     * @return void
+     */
+    public function testARecordWithoutAnAttachmentIsStillOneInsert(): void
+    {
+        $connection = $this->storageConnection();
+        $statements = [];
+        $began      = 0;
+
+        Event::listen(TransactionBeginning::class, static function () use (&$began): void {
+            $began++;
+        });
+
+        $connection->beforeExecuting(static function (string $query) use (&$statements): void {
+            $statements[] = $query;
+        });
+
+        $this->store()->store($this->finalised());
+
+        self::assertCount(1, $statements);
+        self::assertStringStartsWith('insert into', $statements[0]);
+        self::assertStringContainsString(EntrySettings::table(), $statements[0]);
+        self::assertStringNotContainsString(EntrySettings::artifactsTable(), $statements[0]);
+        self::assertSame(0, $began);
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(0, $connection->table(EntrySettings::artifactsTable())->count());
     }
 
     /**

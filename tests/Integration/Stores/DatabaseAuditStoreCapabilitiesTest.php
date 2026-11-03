@@ -9,8 +9,10 @@ use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithReadWriteSplit;
@@ -19,9 +21,9 @@ use Tests\TestCase;
 
 /**
  * Integration tests for what the database store says of itself: it is durable,
- * and it joins a transaction on the storage connection and on no other, which
- * follows the storage setting; and, through a read/write split whose replica
- * refuses every write, that its insert goes to the writer.
+ * it keeps attachments, and it joins a transaction on the storage connection
+ * and on no other, which follows the storage setting; and, through a read/write
+ * split whose replica refuses every write, that its insert goes to the writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,6 +70,25 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
         $this->useAnotherStorageConnection();
 
         self::assertTrue($this->store()->isDurable());
+    }
+
+    /**
+     * It keeps attachments, whatever the configuration, and is the bound store
+     * the delivery finds keeping them by default.
+     *
+     * @return void
+     */
+    public function testItAcceptsAttachments(): void
+    {
+        $store = $this->store();
+
+        self::assertInstanceOf(AcceptsAttachments::class, $store);
+        self::assertTrue($store->acceptsAttachments());
+        self::assertTrue(app(StoreCapabilities::class)->acceptsAttachments());
+
+        $this->useAnotherStorageConnection();
+
+        self::assertTrue($this->store()->acceptsAttachments());
     }
 
     /**

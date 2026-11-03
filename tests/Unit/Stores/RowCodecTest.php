@@ -633,6 +633,62 @@ final class RowCodecTest extends TestCase
     }
 
     /**
+     * A bulk record's artifact row holds every column of the artifacts table,
+     * in table order: the attachment as it was sealed, the record's id as its
+     * entry, and the record's recorded time as the entry stores it.
+     *
+     * @return void
+     */
+    public function testTheArtifactRowHasEveryColumn(): void
+    {
+        $record     = RecordFactory::bundled();
+        $attachment = $record->attachment;
+
+        self::assertNotNull($attachment);
+
+        $row = (new RowCodec)->encodeAttachment(self::finalised($record));
+
+        self::assertSame([
+            'id'           => $attachment->id,
+            'entry_id'     => $record->id,
+            'kind'         => 'bulk',
+            'member_count' => 3,
+            'digest'       => $attachment->digest,
+            'members'      => $attachment->members,
+            'created_at'   => '2026-11-01 12:00:01.000001',
+        ], $row);
+    }
+
+    /**
+     * The artifact's time is the entry's recorded time, written exactly as the
+     * entry's row writes it, never the time the activity occurred.
+     *
+     * @return void
+     */
+    public function testTheArtifactsTimeIsTheEntrysRecordedTime(): void
+    {
+        $finalised = self::finalised(RecordFactory::bundled(), '2026-11-01T12:30:00.654321Z');
+        $codec     = new RowCodec;
+
+        self::assertSame($codec->encode($finalised)['recorded_at'], $codec->encodeAttachment($finalised)['created_at']);
+        self::assertNotSame($codec->encode($finalised)['occurred_at'], $codec->encodeAttachment($finalised)['created_at']);
+    }
+
+    /**
+     * Only a bulk record has an artifact row: a record without an attachment is
+     * refused.
+     *
+     * @return void
+     */
+    public function testARecordWithoutAnAttachmentHasNoArtifactRow(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Only a bulk record has an attachment to store.');
+
+        (new RowCodec)->encodeAttachment(self::finalised());
+    }
+
+    /**
      * The record, the row and every value a helper takes are marked sensitive,
      * and so is a previous exception, which can hold a value in its message: a
      * frame of a trace never carries the record.
@@ -655,6 +711,7 @@ final class RowCodecTest extends TestCase
 
         self::assertSame([
             'encode($record)',
+            'encodeAttachment($record)',
             'decode($row)',
             'encodeJson($value)',
             'decodeValue($value)',
