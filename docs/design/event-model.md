@@ -19,6 +19,24 @@ into every listener and every queue that handles one. Tasks a listener can do ar
 - Neither holds a value of the record, and neither holds the text of an exception, whose message can hold the row. So
   neither can carry anything into a listener, a queue payload or `failed_jobs` that a reader of the record would need
   permission for, beyond the id and the code.
+- `Events\IntegrityCheckFailed` means sealing or verification found the log altered, incomplete or unverifiable, a
+  `--strict` verification found a seal the anchor does not confirm, or a verification stopped before it could say. It
+  carries the `command` (`seal` or `verify`), the `integrity` and `anchoring` maps, the `finding`, the `firstBadId`,
+  the `head` and `remoteHead` sequences and whether the run was `complete`, and nothing else: no value of an entry and
+  no text of an exception.
+- Both of its maps always list every status by its value, zero-filled and in enum order, from sealing and verification
+  alike. `integrity` counts segments (`valid`, `pruned`, `incomplete`, `unverifiable`, `tampered`) and `anchoring`
+  counts segments (`anchored`, `unanchored`, `unavailable`, `contradicted`); a seal run's alarm counts its one failing
+  condition once, so entries it skipped as malformed count 1 under `unverifiable`, never one per entry.
+- `firstBadId` is a lower-case UUID or `null`: an id read from a table that was altered, which may hold a line break or
+  a control character, is dropped before the event is dispatched, and the reported exception writes it `none`.
+- It is dispatched by `audit-log:verify` for a run that fails at its strictness or stops (with no `finding`, `complete`
+  `false`), and by `audit-log:seal` for a refused head, entries that cannot be sealed, an anchor conflict and a refused
+  seal, each never `complete` and with no head. It is not dispatched for a seal run stopped by anything else, a
+  malformed anchor setting among them, which is reported as an `Integrity\SealFailedException` alone, nor for an
+  anchor that is only unavailable, which warns. Each dispatch is followed by the report of an
+  `Integrity\IntegrityCheckFailedException` built from the event, or the stopped run's, through
+  `Console\IntegrityAlarm`.
 - Accepted is not always durable. For a `transactional()` write, or a write inside a transaction still open on the
   storage connection, the record is durable only when that transaction commits, and `outcomes.md` says when that is.
 - Each event is dispatched outside the write it describes, so a listener never takes part in that write.
@@ -38,6 +56,8 @@ into every listener and every queue that handles one. Tasks a listener can do ar
    then dispatches `AuditRecorded`, only when that delete changed a row, so a stale worker dispatches nothing.
 3. A spill replay dispatches `AuditRecorded` for each record the store accepts, and a dry run dispatches nothing.
 4. A listener registered with Laravel's dispatcher receives the event, and a queued listener is queued as any other.
+5. An integrity run that fails dispatches `IntegrityCheckFailed` once, after it has printed its verdict, and then
+   reports its `IntegrityCheckFailedException`.
 
 ## Failure / Edge Cases
 
@@ -60,6 +80,10 @@ into every listener and every queue that handles one. Tasks a listener can do ar
   at the first listener that throws, so the listeners behind it do not run for that record.
 - An `AuditWriteFailed` listener's exception is contained the same way, in its own step, and stops neither the spill nor
   the report.
+- An `IntegrityCheckFailed` listener's exception is reported as it threw and goes no further: the run's
+  `IntegrityCheckFailedException` is still reported after it, and the run still exits 1. A reporter that fails too is
+  ignored, since the failure is already printed. Laravel stops the dispatch at the first listener that throws, so the
+  listeners behind it do not run for that alarm.
 - The exception to both: a deadlock or a lost connection raised by a listener, or by the reporter of a listener's
   failure, on a connection with a transaction open has ended that transaction without Laravel knowing, whichever
   connection it is, so it propagates sanitised, as a `DeadlockException` Laravel can still retry or a
@@ -76,7 +100,11 @@ into every listener and every queue that handles one. Tasks a listener can do ar
 
 ## Implementation Anchors
 
-- `src/Contracts/AuditLogEvent.php`; `src/Events/AuditRecorded.php`; `src/Events/AuditWriteFailed.php`.
+- `src/Contracts/AuditLogEvent.php`; `src/Events/AuditRecorded.php`; `src/Events/AuditWriteFailed.php`;
+  `src/Events/IntegrityCheckFailed.php`.
+- `src/Console/IntegrityAlarm.php`: `raise()`, `report()`; `src/Integrity/IntegrityCheckFailedException.php`: `of()`,
+  `stopped()`; `src/Integrity/VerificationSummary.php`: `toEvent()`; `src/Console/SealCommand.php`,
+  `src/Console/VerifyCommand.php`.
 - `src/Delivery/RecordedNotifier.php`: `notify()`; `src/Delivery/FailureHandler.php`: `handle()`.
 - `src/Delivery/OutboxDrainer.php`: `drain()`; `src/Delivery/Replayer.php`: `spill()`.
 - `src/Runtime/WriteGuard.php`: `during()`, `isActive()`.
@@ -86,6 +114,17 @@ into every listener and every queue that handles one. Tasks a listener can do ar
 - `tests/Unit/Events/AuditRecordedTest.php` `testCarriesTheIdCodeAndCategory`, `testCarriesNothingElse`,
   `testIsAnAuditLogEvent`
 - `tests/Unit/Events/AuditWriteFailedTest.php` `testCarriesTheFourFieldsAndNothingElse`, `testIsAPackageEvent`
+- `tests/Unit/Events/IntegrityCheckFailedTest.php` `testCarriesItsFieldsAndNothingElse`, `testCarriesAStoppedRun`,
+  `testIsAnAuditLogEvent`
+- `tests/Unit/Integrity/IntegrityCheckFailedExceptionTest.php` `testTheMessageIsPinned`,
+  `testAnIdThatIsNoUuidIsNeverNamed`
+- `tests/Feature/Console/IntegrityAlarmTest.php` `testDispatchesTheEventThenReportsIt`,
+  `testAListenerThatFailsIsReportedAndHidesNothing`, `testAReporterThatFailsStopsNothing`,
+  `testAnIdThatIsNoUuidNeverReachesAListener`
+- `tests/Feature/Integrity/IntegrityAlertingTest.php` `testEveryMapHoldsEveryStatus`,
+  `testAListenerThatThrowsDoesNotHideTheFailure`
+- `tests/Feature/Console/SealCommandTest.php` `testASkippedEntryAlarms`, `testAMalformedAnchorSettingStillSeals`
+- `tests/Feature/Console/VerifyCommandTest.php` `testAStoppedRunAlarms`, `testAMalformedAnchorSettingAlarms`
 - `tests/Feature/Recording/AuditRecordedDispatchTest.php` `testDispatchedAfterAWrite`,
   `testCarriesOnlyTheIdCodeAndCategory`, `testAThrowingListenerIsReportedAndTheRowExists`,
   `testAThrowingListenerNeverReachesTheCaller`, `testDispatchedForAWriteLaterRolledBack`,

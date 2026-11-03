@@ -141,6 +141,31 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
+     * PostgreSQL's lock timeout is known by its SQLSTATE at the root of the
+     * chain, from the driver's error information or its code, whatever its
+     * message, and is no concurrency error or lost connection as Laravel
+     * recognises them, so a host's savepoint still recovers it; any other
+     * failure, a deadlock or the same SQLSTATE only in a message among them, is
+     * none.
+     *
+     * @return void
+     */
+    public function testKnowsAPostgresLockTimeout(): void
+    {
+        $classifier = new FailureClassifier;
+        $message    = 'SQLSTATE[55P03]: Lock not available: 7 ERROR:  canceling statement due to lock timeout';
+        $byInfo     = self::wrapped(self::pdoFailure($message, ['55P03', 7, ''], 0));
+        $byCode     = self::pdoFailure('The statement was cancelled.', null, '55P03');
+
+        self::assertTrue($classifier->isLockTimeout($byInfo));
+        self::assertTrue($classifier->isLockTimeout($byCode));
+        self::assertFalse($classifier->isConcurrencyError($byInfo));
+        self::assertFalse($classifier->isLostConnection($byInfo));
+        self::assertFalse($classifier->isLockTimeout(self::pdoFailure('SQLSTATE[40P01]: deadlock detected', ['40P01', 7, ''], '40P01')));
+        self::assertFalse($classifier->isLockTimeout(new \RuntimeException($message)));
+    }
+
+    /**
      * Rows of `[failure]`: failures a savepoint recovers, and failures that
      * only look like an aborted host.
      *

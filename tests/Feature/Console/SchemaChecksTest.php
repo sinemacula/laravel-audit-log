@@ -21,9 +21,10 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the schema checks of `audit-log:check`: each table a
- * shipped migration creates, the entries, the outbox and the deliveries, has no
- * problem, and each way a table can differ from it, one at a time, is the one
- * problem reported.
+ * shipped migration creates, the entries, the outbox, the deliveries, the
+ * checkpoints, the checkpoint members and the integrity state, has no problem,
+ * and each way a table can differ from it, one at a time, is the one problem
+ * reported.
  *
  * Each test runs the shipped migration under a table name of its own, then
  * changes the table in one way; Laravel rebuilds the table on SQLite for a
@@ -52,6 +53,24 @@ final class SchemaChecksTest extends TestCase
 
     /** @var string Absolute path to the shipped deliveries migration file. */
     private const string DELIVERIES_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000200_create_audit_log_deliveries_table.php';
+
+    /** @var string Absolute path to the shipped checkpoints migration file. */
+    private const string CHECKPOINTS_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000300_create_audit_log_checkpoints_table.php';
+
+    /** @var string Absolute path to the shipped checkpoint members migration file. */
+    private const string MEMBERS_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000400_create_audit_log_checkpoint_members_table.php';
+
+    /** @var string Absolute path to the shipped integrity state migration file. */
+    private const string STATE_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000500_create_audit_log_integrity_state_table.php';
+
+    /** @var string The checkpoints table a test migrates and checks. */
+    private const string CHECKPOINTS = 'audit_check_checkpoints';
+
+    /** @var string The checkpoint members table a test migrates and checks. */
+    private const string MEMBERS = 'audit_check_members';
+
+    /** @var string The integrity state table a test migrates and checks. */
+    private const string STATE = 'audit_check_state';
 
     /** @var string The outbox table a test migrates and checks. */
     private const string OUTBOX = 'audit_check_outbox';
@@ -117,6 +136,52 @@ final class SchemaChecksTest extends TestCase
         ],
     ];
 
+    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The type name, full type and collation MySQL and PostgreSQL report for each checkpoints column, by name. */
+    private const array CHECKPOINTS_REPORTED = [
+        'mysql' => [
+            'id'                 => ['char', 'char(36)', 'utf8mb4_0900_bin'],
+            'sequence'           => ['bigint', 'bigint', null],
+            'log_id'             => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'previous_id'        => ['char', 'char(36)', 'utf8mb4_0900_bin'],
+            'previous_digest'    => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'member_count'       => ['int', 'int', null],
+            'members_digest'     => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'seal_digest'        => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'first_recorded_at'  => ['datetime', 'datetime(6)', null],
+            'last_recorded_at'   => ['datetime', 'datetime(6)', null],
+            'sealed_at'          => ['datetime', 'datetime(6)', null],
+            'signer'             => ['varchar', 'varchar(16)', 'utf8mb4_0900_bin'],
+            'key_id'             => ['varchar', 'varchar(32)', 'utf8mb4_0900_bin'],
+            'algorithm_version'  => ['smallint', 'smallint', null],
+            'signature'          => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'anchor'             => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'anchor_receipt'     => ['json', 'json', null],
+            'anchored_at'        => ['datetime', 'datetime(6)', null],
+            'anchor_error_class' => ['varchar', 'varchar(191)', 'utf8mb4_0900_bin'],
+        ],
+        'pgsql' => [
+            'id'                 => ['uuid', 'uuid', null],
+            'sequence'           => ['int8', 'bigint', null],
+            'log_id'             => ['varchar', 'character varying(64)', null],
+            'previous_id'        => ['uuid', 'uuid', null],
+            'previous_digest'    => ['varchar', 'character varying(64)', null],
+            'member_count'       => ['int4', 'integer', null],
+            'members_digest'     => ['varchar', 'character varying(64)', null],
+            'seal_digest'        => ['varchar', 'character varying(64)', null],
+            'first_recorded_at'  => ['timestamp', 'timestamp(6) without time zone', null],
+            'last_recorded_at'   => ['timestamp', 'timestamp(6) without time zone', null],
+            'sealed_at'          => ['timestamp', 'timestamp(6) without time zone', null],
+            'signer'             => ['varchar', 'character varying(16)', null],
+            'key_id'             => ['varchar', 'character varying(32)', null],
+            'algorithm_version'  => ['int2', 'smallint', null],
+            'signature'          => ['varchar', 'character varying(64)', null],
+            'anchor'             => ['varchar', 'character varying(64)', null],
+            'anchor_receipt'     => ['json', 'json', null],
+            'anchored_at'        => ['timestamp', 'timestamp(6) without time zone', null],
+            'anchor_error_class' => ['varchar', 'character varying(191)', null],
+        ],
+    ];
+
     /**
      * Run the shipped migration for `TABLE` on the test's connection.
      *
@@ -143,6 +208,9 @@ final class SchemaChecksTest extends TestCase
         Schema::connection(self::CONNECTION)->dropIfExists(self::TABLE);
         Schema::connection(self::CONNECTION)->dropIfExists(self::OUTBOX);
         Schema::connection(self::CONNECTION)->dropIfExists(self::DELIVERIES);
+        Schema::connection(self::CONNECTION)->dropIfExists(self::CHECKPOINTS);
+        Schema::connection(self::CONNECTION)->dropIfExists(self::MEMBERS);
+        Schema::connection(self::CONNECTION)->dropIfExists(self::STATE);
 
         if (app(ConfigRepository::class)->has('database.connections.prefixed')) {
             Schema::connection('prefixed')->dropIfExists(self::LONG_TABLE);
@@ -839,6 +907,260 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
+     * The index sealing pages the entries by is a problem when it is missing.
+     *
+     * @return void
+     */
+    public function testAMissingRecordedIndexIsAProblem(): void
+    {
+        $this->alter(static function (Blueprint $table): void {
+            $table->dropIndex(self::TABLE . '_recorded_index');
+        });
+
+        self::assertSame(['Index `audit_check_entries_recorded_index` is missing.'], $this->problems());
+    }
+
+    /**
+     * An index under the recorded index's name over the time alone is a
+     * problem, since entries recorded in the same microsecond would have no
+     * order to page by.
+     *
+     * @return void
+     */
+    public function testARecordedIndexWithoutTheIdIsAProblem(): void
+    {
+        $this->replaceIndex(self::TABLE . '_recorded_index', static function (Blueprint $table): void {
+            $table->index(['recorded_at'], self::TABLE . '_recorded_index');
+        });
+
+        self::assertSame(['Index `audit_check_entries_recorded_index` covers (`recorded_at`); expected (`recorded_at`, `id`).'], $this->problems());
+    }
+
+    /**
+     * The checkpoints table the shipped migration creates has no problem.
+     *
+     * @return void
+     */
+    public function testTheShippedCheckpointsMigrationHasNoProblems(): void
+    {
+        $this->migrateIntegrityTables();
+
+        self::assertSame([], $this->problems(self::CHECKPOINTS, self::CONNECTION, TableShape::checkpoints()));
+    }
+
+    /**
+     * The checkpoint members table the shipped migration creates has no
+     * problem.
+     *
+     * @return void
+     */
+    public function testTheShippedMembersMigrationHasNoProblems(): void
+    {
+        $this->migrateIntegrityTables();
+
+        self::assertSame([], $this->problems(self::MEMBERS, self::CONNECTION, TableShape::members()));
+    }
+
+    /**
+     * The integrity state table the shipped migration creates has no problem.
+     *
+     * @return void
+     */
+    public function testTheShippedStateMigrationHasNoProblems(): void
+    {
+        $this->migrateIntegrityTables();
+
+        self::assertSame([], $this->problems(self::STATE, self::CONNECTION, TableShape::state()));
+    }
+
+    /**
+     * Rows of `[the table, its shape, how it is named]`: an integrity table
+     * that does not exist is named by its own label.
+     *
+     * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Console\TableShape, 2: string}>
+     */
+    public static function provideMissingIntegrityTables(): iterable
+    {
+        yield from [
+            'the checkpoints'        => ['audit_absent_checkpoints', TableShape::checkpoints(), 'checkpoints'],
+            'the checkpoint members' => ['audit_absent_members', TableShape::members(), 'checkpoint members'],
+            'the integrity state'    => ['audit_absent_state', TableShape::state(), 'integrity state'],
+        ];
+    }
+
+    /**
+     * An integrity table that does not exist is the one problem, naming the
+     * table by its label, the connection and how to create it.
+     *
+     * @param  string  $table
+     * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
+     * @param  string  $label
+     * @return void
+     */
+    #[DataProvider('provideMissingIntegrityTables')]
+    public function testAMissingIntegrityTableIsNamedByItsLabel(string $table, TableShape $shape, string $label): void
+    {
+        self::assertSame([
+            sprintf('The %s table `%s` does not exist on connection [testing]; publish and run the migrations', $label, $table)
+                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+        ], $this->problems($table, self::CONNECTION, $shape));
+    }
+
+    /**
+     * A members table whose entry index is not unique is a problem, since an
+     * entry could then be held by two seals.
+     *
+     * @return void
+     */
+    public function testAMembersTableWithoutItsUniqueEntryIsAProblem(): void
+    {
+        $this->migrateIntegrityTables();
+
+        Schema::connection(self::CONNECTION)->table(self::MEMBERS, static function (Blueprint $table): void {
+            $table->dropUnique(self::MEMBERS . '_entry_unique');
+        });
+
+        Schema::connection(self::CONNECTION)->table(self::MEMBERS, static function (Blueprint $table): void {
+            $table->index(['entry_id'], self::MEMBERS . '_entry_unique');
+        });
+
+        self::assertSame(['Index `audit_check_members_entry_unique` must be unique.'], $this->problems(self::MEMBERS, self::CONNECTION, TableShape::members()));
+    }
+
+    /**
+     * A members table keyed by the entry alone is a problem, in the order the
+     * key must take.
+     *
+     * @return void
+     */
+    public function testAMembersTableKeyedOtherwiseIsAProblem(): void
+    {
+        $this->migrateIntegrityTables();
+
+        Schema::connection(self::CONNECTION)->table(self::MEMBERS, static function (Blueprint $table): void {
+            $table->dropPrimary(self::MEMBERS . '_primary');
+        });
+
+        Schema::connection(self::CONNECTION)->table(self::MEMBERS, static function (Blueprint $table): void {
+            $table->primary(['entry_id', 'checkpoint_id'], self::MEMBERS . '_primary');
+        });
+
+        self::assertSame(['The primary key must be (`checkpoint_id`, `entry_id`).'], $this->problems(self::MEMBERS, self::CONNECTION, TableShape::members()));
+    }
+
+    /**
+     * A checkpoints table without its unique sequence is a problem, since two
+     * sealers could then both extend the head.
+     *
+     * @return void
+     */
+    public function testACheckpointsTableWithoutItsUniqueSequenceIsAProblem(): void
+    {
+        $this->migrateIntegrityTables();
+
+        Schema::connection(self::CONNECTION)->table(self::CHECKPOINTS, static function (Blueprint $table): void {
+            $table->dropUnique(self::CHECKPOINTS . '_sequence_unique');
+        });
+
+        self::assertSame(['Index `audit_check_checkpoints_sequence_unique` is missing.'], $this->problems(self::CHECKPOINTS, self::CONNECTION, TableShape::checkpoints()));
+    }
+
+    /**
+     * A column of the checkpoints table the package does not write is a
+     * problem, in the seals' own words.
+     *
+     * @return void
+     */
+    public function testAnUnknownCheckpointsColumnIsAProblem(): void
+    {
+        $this->migrateIntegrityTables();
+
+        Schema::connection(self::CONNECTION)->table(self::CHECKPOINTS, static function (Blueprint $table): void {
+            $table->string('notes')->nullable();
+        });
+
+        self::assertSame(['Column `notes` is not one the package writes, so no seal covers it.'], $this->problems(self::CHECKPOINTS, self::CONNECTION, TableShape::checkpoints()));
+    }
+
+    /**
+     * A state value that is not text is a problem, in the engine's own terms.
+     *
+     * @return void
+     */
+    public function testAStateValueThatIsNotTextIsAProblem(): void
+    {
+        $this->migrateIntegrityTables();
+
+        Schema::connection(self::CONNECTION)->table(self::STATE, static function (Blueprint $table): void {
+            $table->string('value', 100)->change();
+        });
+
+        $type = $this->driver() === 'sqlite' ? 'varchar' : 'varchar(100)';
+
+        self::assertSame(["Column `value` is {$type}; expected text."], $this->problems(self::STATE, self::CONNECTION, TableShape::state()));
+    }
+
+    /**
+     * The shipped checkpoints table as MySQL and PostgreSQL report it, its big
+     * integer sequence and its receipt included, has no problem; this runs on
+     * any engine the suite runs against.
+     *
+     * @param  string  $driver
+     * @return void
+     */
+    #[DataProvider('provideSizedDrivers')]
+    public function testTheShippedCheckpointsTableAsEachEngineReportsItHasNoProblems(string $driver): void
+    {
+        $this->migrateIntegrityTables();
+
+        $this->fake($driver, self::reportedCheckpoints($driver), self::CHECKPOINTS);
+
+        self::assertSame([], $this->problems(self::CHECKPOINTS, 'fake', TableShape::checkpoints()));
+    }
+
+    /**
+     * Rows of `[a driver, the column changed, its type name, its full type, the
+     * problem]`: what MySQL or PostgreSQL could report for a checkpoints column
+     * of the big integer family or a digest, and how it is described.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: string, 3: string, 4: string}>
+     */
+    public static function provideReportedCheckpointsTypes(): iterable
+    {
+        yield from [
+            'a sequence as an integer on MySQL'      => ['mysql', 'sequence', 'int', 'int', 'Column `sequence` is int; expected bigint.'],
+            'a sequence as an integer on PostgreSQL' => ['pgsql', 'sequence', 'int4', 'integer', 'Column `sequence` is int4; expected int8.'],
+            'a longer digest on MySQL'               => ['mysql', 'seal_digest', 'varchar', 'varchar(128)', 'Column `seal_digest` is varchar(128); expected varchar(64).'],
+            'a receipt as jsonb on PostgreSQL'       => ['pgsql', 'anchor_receipt', 'jsonb', 'jsonb', 'Column `anchor_receipt` is jsonb; expected json.'],
+        ];
+    }
+
+    /**
+     * Each checkpoints column MySQL or PostgreSQL could report otherwise is the
+     * one problem, in the engine's own terms.
+     *
+     * @param  string  $driver
+     * @param  string  $column
+     * @param  string  $typeName
+     * @param  string  $type
+     * @param  string  $problem
+     * @return void
+     */
+    #[DataProvider('provideReportedCheckpointsTypes')]
+    public function testEachEngineReportsACheckpointsColumnInItsOwnTerms(string $driver, string $column, string $typeName, string $type, string $problem): void
+    {
+        $this->migrateIntegrityTables();
+
+        $columns = array_map(static fn (array $reported): array => $reported['name'] === $column
+            ? [...$reported, 'type_name' => $typeName, 'type' => $type]
+            : $reported, self::reportedCheckpoints($driver));
+
+        $this->fake($driver, $columns, self::CHECKPOINTS);
+
+        self::assertSame([$problem], $this->problems(self::CHECKPOINTS, 'fake', TableShape::checkpoints()));
+    }
+
+    /**
      * The problems the checks find on the connection's table, against the shape
      * given or, when none is, the entries table's.
      *
@@ -871,6 +1193,28 @@ final class SchemaChecksTest extends TestCase
         foreach (Schema::connection(self::CONNECTION)->getColumns(self::OUTBOX) as $column) {
 
             [$typeName, $type, $collation] = self::OUTBOX_REPORTED[$driver][$column['name']];
+
+            $columns[] = ['name' => $column['name'], 'type' => $type, 'type_name' => $typeName, 'collation' => $collation, 'nullable' => $column['nullable']];
+        }
+
+        return $columns;
+    }
+
+    /**
+     * The shipped checkpoints table's columns as the driver reports them: their
+     * names and nullability as the test's engine created them, their types and
+     * MySQL's collation as the driver would report them.
+     *
+     * @param  string  $driver
+     * @return list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>
+     */
+    private static function reportedCheckpoints(string $driver): array
+    {
+        $columns = [];
+
+        foreach (Schema::connection(self::CONNECTION)->getColumns(self::CHECKPOINTS) as $column) {
+
+            [$typeName, $type, $collation] = self::CHECKPOINTS_REPORTED[$driver][$column['name']];
 
             $columns[] = ['name' => $column['name'], 'type' => $type, 'type_name' => $typeName, 'collation' => $collation, 'nullable' => $column['nullable']];
         }
@@ -1009,6 +1353,36 @@ final class SchemaChecksTest extends TestCase
 
             if (!$migration instanceof Migration) {
                 self::fail('A delivery migration file did not return a Migration instance.');
+            }
+
+            $migration->up(); // @phpstan-ignore method.notFound
+        }
+    }
+
+    /**
+     * Run the shipped checkpoints, checkpoint members and integrity state
+     * migrations under the tables' names of this test, on the test's
+     * connection.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateIntegrityTables(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.integrity.checkpoints_table' => self::CHECKPOINTS,
+            'audit-log.integrity.members_table'     => self::MEMBERS,
+            'audit-log.integrity.state_table'       => self::STATE,
+        ]);
+
+        foreach ([self::CHECKPOINTS_MIGRATION_PATH, self::MEMBERS_MIGRATION_PATH, self::STATE_MIGRATION_PATH] as $path) {
+
+            $migration = include $path;
+
+            if (!$migration instanceof Migration) {
+                self::fail('An integrity migration file did not return a Migration instance.');
             }
 
             $migration->up(); // @phpstan-ignore method.notFound

@@ -13,16 +13,20 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DeliveryChecks;
 use SineMacula\Laravel\AuditLog\Console\EngineChecks;
+use SineMacula\Laravel\AuditLog\Console\IntegrityChecks;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
+use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use Tests\Concerns\SealsEntries;
 
 /**
  * Statement-budget contract for `audit-log:check`: a run makes a few reads of
  * the schema and, on MySQL, of the session and the table's engine, whatever the
- * table holds, and never writes, begins a savepoint or rolls back. In sync mode
+ * tables hold, and never writes, begins a savepoint or rolls back. In sync mode
  * the delivery checks read configuration alone, so a run reads what the engine
- * and schema checks of the entries table read; in outbox mode they read the
- * outbox and deliveries tables' schema too, at most twice as much again, and
- * still write nothing.
+ * and schema checks of the entries table and the integrity checks of the
+ * checkpoints, checkpoint members and integrity state tables read; in outbox
+ * mode they read the outbox and deliveries tables' schema too, and still write
+ * nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,13 +35,16 @@ use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
  */
 #[CoversClass(CheckCommand::class)]
 #[CoversClass(DeliveryChecks::class)]
+#[CoversClass(IntegrityChecks::class)]
 final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 {
-    /** @var int The most statements a run may make on any engine. */
-    private const int MAX_STATEMENTS = 8;
+    use SealsEntries;
+
+    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for the entries table and for each integrity table. */
+    private const int MAX_STATEMENTS = 16;
 
     /** @var int How many times a sync run's statements an outbox run may make. */
-    private const int OUTBOX_FACTOR = 3;
+    private const int OUTBOX_FACTOR = 2;
 
     /**
      * Register the command with the console kernel, which keeps the test
@@ -59,7 +66,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A passing run makes at most eight statements, none of them a write, and
+     * A passing run makes at most sixteen statements, none of them a write, and
      * begins no savepoint and makes no rollback, on every engine.
      *
      * @return void
@@ -79,7 +86,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A run reads no more with 200 entries in the table than with none.
+     * A run reads no more with 200 entries in the table, every one of them
+     * sealed, than with none.
      *
      * @return void
      */
@@ -91,18 +99,54 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
         DB::table('audit_log_entries')->insert(array_map(self::row(...), range(1, 200)));
 
+        $this->sealAt('2026-11-02 00:00:00');
+        $this->sealAll();
+
         $this->capture(fn (): int => $this->check());
 
         $full = $this->capturedStatements();
 
         self::assertSame(200, DB::table('audit_log_entries')->count());
+        self::assertSame(200, DB::table(IntegrityTables::membersTable())->count());
+        self::assertNotSame([], $this->seals());
         self::assertSame($empty, $full);
     }
 
     /**
+     * The integrity checks write nothing, begin no savepoint and make no
+     * rollback, whatever the integrity tables hold, and leave every seal,
+     * member and progress row as it was.
+     *
+     * @return void
+     */
+    public function testTheIntegrityChecksWriteNothing(): void
+    {
+        DB::table('audit_log_entries')->insert(array_map(self::row(...), range(1, 20)));
+
+        $this->sealAt('2026-11-02 00:00:00');
+        $this->sealAll();
+
+        $before = $this->integrityRows();
+        $checks = app(IntegrityChecks::class);
+
+        $this->capture(static fn (): array => $checks->problems());
+
+        $statements = implode(' | ', $this->capturedStatements());
+
+        self::assertNotSame([], $this->capturedStatements());
+        self::assertSame([], $this->capturedWrites(), "Statements: {$statements}");
+        self::assertSame(0, $this->capturedSavepoints());
+        self::assertSame(0, $this->capturedRollbacks());
+
+        self::assertSame(0, $this->capture(fn (): int => $this->check()));
+        self::assertSame([], $this->capturedWrites());
+        self::assertSame($before, $this->integrityRows());
+    }
+
+    /**
      * A sync run reads exactly what the engine and schema checks of the entries
-     * table read on their own, so the delivery checks add no statement, and the
-     * bound of eight still holds.
+     * table and the integrity checks read on their own, so the delivery checks
+     * add no statement, and the bound of sixteen still holds.
      *
      * @return void
      */
@@ -112,9 +156,12 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
         assert($database instanceof DatabaseManager);
 
-        $this->capture(static function () use ($database): void {
+        $integrity = app(IntegrityChecks::class);
+
+        $this->capture(static function () use ($database, $integrity): void {
             (new EngineChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
             (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
+            $integrity->problems();
         });
 
         $baseline = $this->capturedStatements();
@@ -126,11 +173,11 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * An outbox run reads the outbox and deliveries tables' schema as well, so
-     * more than a sync run, but at most three times as much.
+     * more than a sync run, but at most twice as much.
      *
      * @return void
      */
-    public function testAnOutboxRunReadsAtMostThreeTimesASyncRun(): void
+    public function testAnOutboxRunReadsAtMostTwiceASyncRun(): void
     {
         $this->capture(fn (): int => $this->check());
 
@@ -187,6 +234,26 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         assert($kernel instanceof Kernel);
 
         return $kernel->call('audit-log:check');
+    }
+
+    /**
+     * Every row of the integrity tables, by table, in key order.
+     *
+     * @return array<string, list<array<string, scalar|null>>>
+     */
+    private function integrityRows(): array
+    {
+        $rows = [];
+
+        foreach ([IntegrityTables::checkpointsTable() => 'id', IntegrityTables::membersTable() => 'entry_id', IntegrityTables::stateTable() => 'name'] as $table => $key) {
+
+            /** @var list<array<string, scalar|null>> $read */
+            $read = array_map(static fn (object $row): array => (array) $row, DB::table($table)->orderBy($key)->get()->all());
+
+            $rows[$table] = $read;
+        }
+
+        return $rows;
     }
 
     /**

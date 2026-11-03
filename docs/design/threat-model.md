@@ -9,6 +9,10 @@ Whoever decides what an application records should read it first: a secret that 
 stays there for as long as the row is kept. How each step works is in `redaction.md`, and how a record travels is in
 `delivery.md`.
 
+It also records what the log's integrity does not promise. Signing, sealing and anchoring make a change to a stored
+record detectable; they do not make a record true, show that everything that happened was recorded, or hold against
+whoever holds the integrity key. How each of them works is in `integrity.md`.
+
 ## Invariants
 
 - Minimising happens at capture, so nothing raw rests in a deferred callback, event or row. A record written after
@@ -23,6 +27,12 @@ stays there for as long as the row is kept. How each step works is in `redaction
   personal data for as long as the key exists.
 - The references in the columns, such as `actor_id` and `subject_id`, are stored as given, since a log that names no one
   is no evidence. Minimising is about what the payload keeps, not who it names.
+- Verification detects a change and neither prevents nor repairs one; the grants and triggers in `storage.md` are what
+  refuse one. A row's HMAC, a seal's signature and a prune record's are all made under the integrity key ring, and a
+  seal key is derived from the ring key it names, so whoever holds the ring can make each of them; only an anchor holds
+  evidence outside the application's reach.
+- Every integrity failure is reported by its class, a finding and ids alone: `IntegrityCheckFailed`, its exception and
+  the commands' output hold no value of an entry, no key and no failure's message.
 
 ## Success Path
 
@@ -50,6 +60,13 @@ stays there for as long as the row is kept. How each step works is in `redaction
   section says.
 - Reading the queue's storage gives the identifiers and the actor's reference, as `context-resolution.md` says, and no
   property, because a record's payload never travels in the job's hidden Context.
+- A writer of the database without the integrity key can still change or delete rows. A change to a sealed entry, a seal
+  or a member, and a deletion of any of them, is found by the next verification, except a deletion of the newest seals
+  with their members and entries, which only the anchor finds. A row it inserts is found too: an entry with a junk HMAC
+  is sealed and then fails, a copy of a seal stored outside the chain at a sequence below 1 is found with the member
+  rows tied to it, and an unsealed entry dated so far ahead that no seal takes it is found rather than pending for good.
+  Marking a seal unreadable to hide the deletion of its segment breaks the next seal's link, and the receipt columns it
+  may edit decide nothing, since the anchor's own head says which seals it holds.
 
 ## Limits Of Key Matching
 
@@ -127,6 +144,36 @@ not only who can read this server.
   file is complete, since a line deleted from one leaves nothing to find. Replaying an old line adds nothing, but only
   because the store already holds its id.
 
+## Limits Of Integrity
+
+Signing, sealing and anchoring are evidence that the log has not changed since it was written, and nothing more. Each
+limit below holds however the package is configured.
+
+- **Not non-repudiation.** An HMAC is not non-repudiation. The key that verifies a row or a seal is the key that made
+  it, so a signature shows that the log is as a holder of the key wrote it, never which holder, and cannot show a third
+  party that the application, rather than someone else with the key, wrote it.
+- **Fabrication.** A compromised writer can still add fabricated records. Whatever runs as the application records
+  through the same path, and its records are signed and sealed like any other: a seal shows they have not changed since,
+  not that they were honest.
+- **What was never captured.** No seal proves that an uncaptured event happened. A seal holds what was recorded; an
+  activity the application never recorded, or a record lost before it was stored, leaves nothing to find.
+- **Before the seal.** A row deleted before its membership commits is undetectable: no seal names it, so nothing says it
+  was there. The guarantee is that deletion is detectable once membership is committed, and the gap is the time an entry
+  waits for its seal.
+- **The tail.** Deleting the newest seals, with their members and entries, leaves a shorter chain that verifies, so tail
+  loss needs an independently retained witness: the anchor, whose head the local log must reach. Without one, a
+  truncated tail is undetectable.
+- **The key.** Anyone holding the integrity key can forge seals: rewrite entries, members and seals together, sign them
+  again and pass verification. Only an anchor's earlier witness limits that, for the seals it held before the forgery,
+  which can then no longer be replaced.
+- **Exposure.** Anchoring bounds exposure without removing it: rows not yet sealed and seals not yet anchored can still
+  be rewritten by whoever holds the database and the key. No timer bounds that exposure: a stopped scheduler or a
+  backlog extends it. The package records the progress of sealing, the sweep, anchoring and verification instead, for
+  monitoring to alert on when it goes stale.
+- **Compliance.** Installing the package is not compliance. It supplies evidence and the checks of it; deciding what is
+  recorded, how long it is kept, who can read it and its keys, how the anchor is configured, and who answers an alert
+  remain the operator's.
+
 ## Implementation Anchors
 
 - `src/Stores/FailureSpill.php`: `line()`; `src/Delivery/OutboxWriter.php`: `write()`; `src/Delivery/SpillReader.php`;
@@ -140,6 +187,8 @@ not only who can read this server.
   `src/Contracts/FieldEncrypter.php`: `encrypt()`.
 - `src/Privacy/PathMasker.php`: `property()`, `context()`; `src/Privacy/OmissionLog.php`: `toArray()`.
 - `src/Records/Concerns/DescribesTheActivity.php`: `withProperties()`, `withNote()`, `withIdentifier()`.
+- `src/Integrity/SealSigner.php`: `sealKey()`; `src/Integrity/Verifier.php`: `verify()`;
+  `src/Contracts/CheckpointAnchor.php`: `latest()`; `src/Database/IntegrityProgress.php`.
 
 ## Authoritative Tests
 
@@ -176,6 +225,15 @@ not only who can read this server.
   `testAPlantedSecretIsInNoEvent`
 - `tests/Feature/Delivery/ReplayerTest.php` `testATamperedLineIsSkippedAndCounted`,
   `testAnUnsignedLineIsSkippedAndCounted`
+- `tests/Unit/Documentation/DocumentationTest.php` `testTheThreatModelStatesEachLimitOfIntegrity`
+- `tests/Feature/Integrity/TamperingTest.php` `testAPreSealDeletionIsUndetectable`,
+  `testTailTruncationWithoutAnAnchorIsUndetectable`, `testTailTruncationWithLocalReceiptsClearedIsTampered`,
+  `testAForgedChainWithTheKeyAndNoAnchorVerifies`, `testAForgedChainWithTheKeyIsCaughtByTheAnchor`,
+  `testAForgedChainCannotBeAnchoredOverTheOneHeld`, `testAnInsertedEntryWithoutTheKeyIsSealedThenTampered`,
+  `testAPhantomSealAtSequenceZeroIsFound`, `testAFarFutureEntryIsNeverPendingForGood`,
+  `testMarkingASealUnreadableNeverHidesItsDeletedSegment`, `testEditingTheAnchorColumnsChangesNothing`
+- `tests/Feature/Integrity/IntegrityAlertingTest.php` `testTheEventIsPayloadFree`
+- `tests/Feature/Integrity/SealerTest.php` `testTheLastRunIsRecordedEvenWithNothingToSeal`
 
 ## Change Triggers
 
@@ -189,3 +247,4 @@ Update this note when any of the following change:
 - what a diagnostic may hold
 - what the spill or the outbox holds, or how either is protected
 - what signing a line establishes
+- what sealing, anchoring or verification leaves undetectable, or what a held key can forge

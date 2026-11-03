@@ -11,6 +11,7 @@ use Orchestra\Testbench\TestCase as OrchestraTestCase;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
@@ -46,6 +47,9 @@ abstract class TestCase extends OrchestraTestCase
         'audit-log.delivery.outbox.connection'     => null,
         'audit-log.delivery.outbox.table'          => DeliveryTables::DEFAULT_OUTBOX,
         'audit-log.delivery.deliveries_table'      => DeliveryTables::DEFAULT_DELIVERIES,
+        'audit-log.integrity.checkpoints_table'    => IntegrityTables::DEFAULT_CHECKPOINTS,
+        'audit-log.integrity.members_table'        => IntegrityTables::DEFAULT_MEMBERS,
+        'audit-log.integrity.state_table'          => IntegrityTables::DEFAULT_STATE,
     ];
 
     /** @var array<string, true> Worker databases this process has created. */
@@ -126,18 +130,19 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migrations so the entries, outbox and
-     * deliveries tables exist for tests that use them, each on the connection
-     * its settings name when they run.
+     * Run the package's shipped migrations so the entries, outbox, deliveries,
+     * checkpoints, checkpoint members and integrity state tables exist for
+     * tests that use them, each on the connection its settings name when they
+     * run.
      *
      * A test may point the storage settings elsewhere once the tables exist;
      * `tearDown()` puts them back before the migrations are rolled back. On a
      * persistent database (MySQL, PostgreSQL) creating and dropping the tables
-     * costs more than most tests themselves, so while all three are on the
+     * costs more than most tests themselves, so while all six are on the
      * worker's connection they are kept from one test to the next. Each test
      * starts by comparing their schema and migration records with what the
      * migrations left: when they match it deletes their rows, otherwise it
-     * migrates them afresh. When any table is on another connection, all three
+     * migrates them afresh. When any table is on another connection, all six
      * are migrated for the test and dropped when it ends.
      *
      * @return void
@@ -248,6 +253,9 @@ abstract class TestCase extends OrchestraTestCase
             [$storage, EntrySettings::table()],
             [DeliveryTables::outboxConnection() ?? $default, DeliveryTables::outboxTable()],
             [$storage, DeliveryTables::deliveriesTable()],
+            [$storage, IntegrityTables::checkpointsTable()],
+            [$storage, IntegrityTables::membersTable()],
+            [$storage, IntegrityTables::stateTable()],
         ];
     }
 

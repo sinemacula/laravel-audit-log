@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\AuditLog;
 
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Events\TransactionCommitting;
@@ -19,16 +20,23 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
+use SineMacula\Laravel\AuditLog\Console\IntegritySchedule;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
+use SineMacula\Laravel\AuditLog\Console\SealCommand;
+use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\CommitQueue;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
+use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorFactory;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
@@ -42,21 +50,28 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
 
 /**
  * Package service provider: registers the package's configuration, its clock,
- * integrity settings, key ring, store and field encrypter, the recorder with
- * its catalogue and contributors, the scoped runtime state, the listeners that
- * track execution frames and carry context into jobs, the global middleware
- * that enters an HTTP frame, its publishing tags (the configuration and the
- * migrations, which it never loads itself) and the `audit-log:check`,
- * `audit-log:drain` and `audit-log:replay` console commands. It adds no route
- * and schedules nothing.
+ * integrity settings, key ring, store and field encrypter, the anchor seals are
+ * kept in and the prune ledger, the recorder with its catalogue and
+ * contributors, the scoped runtime state, the listeners that track execution
+ * frames and carry context into jobs, the global middleware that enters an HTTP
+ * frame, its publishing tags (the configuration and the migrations, which it
+ * never loads itself) and the `audit-log:check`, `audit-log:drain`,
+ * `audit-log:replay`, `audit-log:seal` and `audit-log:verify` console commands.
+ * It adds no route.
+ *
+ * In the console it schedules sealing, the sweep and a strict verification,
+ * each of which its schedule setting can turn off, once the application
+ * resolves its schedule; a malformed schedule is reported and schedules nothing
+ * for that run.
  *
  * Binding `AuditStore` is the only seam for where records go: there is no
  * manager and no driver registry. The delivery classes are autowired for each
- * capture, so none outlives a request.
+ * capture, so none outlives a request. The anchor is made from the settings on
+ * each resolution, so a changed setting takes effect without a restart.
  *
  * Registration of definitions and contributors is frozen once the application
- * has booted, so a long-lived worker registers once. Booting issues no query
- * and reads no setting that could stop it, so a malformed one reaches
+ * has booted, so a long-lived worker registers once. Booting still issues no
+ * query and reads no setting that could stop it, so a malformed one reaches
  * `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -74,6 +89,9 @@ final class AuditLogServiceProvider extends ServiceProvider
         '2026_11_02_000000_create_audit_log_entries_table.php',
         '2026_11_02_000100_create_audit_log_outbox_table.php',
         '2026_11_02_000200_create_audit_log_deliveries_table.php',
+        '2026_11_02_000300_create_audit_log_checkpoints_table.php',
+        '2026_11_02_000400_create_audit_log_checkpoint_members_table.php',
+        '2026_11_02_000500_create_audit_log_integrity_state_table.php',
     ];
 
     /**
@@ -83,8 +101,9 @@ final class AuditLogServiceProvider extends ServiceProvider
      * made before this provider registers is kept, so a store, a clock or an
      * encrypter bound earlier is never replaced by the package's (an
      * `AuditStore` by `DatabaseAuditStore`, a `Clock` by `SystemClock`, a
-     * `FieldEncrypter` by `NoFieldEncrypter`), and one made after replaces the
-     * default, as any later binding does.
+     * `FieldEncrypter` by `NoFieldEncrypter`, a `PruneLedger` by
+     * `NullPruneLedger`, a `CheckpointAnchor` by the configured anchor), and
+     * one made after replaces the default, as any later binding does.
      *
      * @return void
      */
@@ -101,6 +120,8 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->singletonIf(KeyRing::class);
         $this->app->singletonIf(AuditStore::class, DatabaseAuditStore::class);
         $this->app->singletonIf(FieldEncrypter::class, NoFieldEncrypter::class);
+        $this->app->singletonIf(PruneLedger::class, NullPruneLedger::class);
+        $this->app->bindIf(CheckpointAnchor::class, static fn (Application $app): CheckpointAnchor => $app->make(AnchorFactory::class)->make());
         $this->app->singletonIf(EventCatalogue::class);
         $this->app->singletonIf(ContributorRegistry::class);
         $this->app->singletonIf(Recorder::class);
@@ -120,6 +141,7 @@ final class AuditLogServiceProvider extends ServiceProvider
     {
         $this->registerPublishing();
         $this->registerCommands();
+        $this->registerSchedule();
         $this->registerListeners();
         $this->registerHttpFrame();
         $this->freezeRegistrationOnceBooted();
@@ -164,7 +186,24 @@ final class AuditLogServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->commands([CheckCommand::class, DrainCommand::class, ReplayCommand::class]);
+        $this->commands([CheckCommand::class, DrainCommand::class, ReplayCommand::class, SealCommand::class, VerifyCommand::class]);
+    }
+
+    /**
+     * Schedule sealing, the sweep and the strict verification once the
+     * application resolves its schedule, when running in the console.
+     *
+     * @return void
+     */
+    protected function registerSchedule(): void
+    {
+        if (!$this->app->runningInConsole()) {
+            return;
+        }
+
+        $this->callAfterResolving(Schedule::class, static function (Schedule $schedule, Application $app): void {
+            $app->make(IntegritySchedule::class)->register($schedule);
+        });
     }
 
     /**

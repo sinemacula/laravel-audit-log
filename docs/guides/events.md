@@ -1,15 +1,16 @@
 # Events
 
-The package tells the application what became of each record through two events. Neither holds a value of the record,
-so a listener can pass one to an alerting tool or a queue without copying personal data.
+The package tells the application what became of each record, and of the log as a whole, through three events. None
+holds a value of a record, so a listener can pass one to an alerting tool or a queue without copying personal data.
 
-| Event                                                 | Dispatched when                 | Carries                                           |
-|-------------------------------------------------------|---------------------------------|---------------------------------------------------|
-| `SineMacula\Laravel\AuditLog\Events\AuditRecorded`    | The store has accepted a record | `id`, `code` and `category`                       |
-| `SineMacula\Laravel\AuditLog\Events\AuditWriteFailed` | A record could not be written   | `id`, `code`, the `store` and `exception` classes |
+| Event                                                     | Dispatched when                                                                             | Carries                                                                                                         |
+|-----------------------------------------------------------|---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `SineMacula\Laravel\AuditLog\Events\AuditRecorded`        | The store has accepted a record                                                             | `id`, `code` and `category`                                                                                     |
+| `SineMacula\Laravel\AuditLog\Events\AuditWriteFailed`     | A record could not be written                                                               | `id`, `code`, the `store` and `exception` classes                                                               |
+| `SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed` | Sealing or verifying found the log altered, incomplete or unverifiable, or a verify stopped | `command`, the `integrity` and `anchoring` counts, `finding`, `firstBadId`, `head`, `remoteHead` and `complete` |
 
-Both implement `SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent`, and neither is sent anywhere unless a listener is
-registered. [The event model](../design/event-model.md) has the exact timing, and
+All three implement `SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent`, and none is sent anywhere unless a listener
+is registered. [The event model](../design/event-model.md) has the exact timing of each, and
 [outcomes](../design/outcomes.md) has what each timing, mode and failure guarantees.
 
 ## Alert on a failed write
@@ -42,6 +43,52 @@ Event::listen(static function (AuditWriteFailed $event): void {
 - Do not record from this listener. The write it reports just failed, so a record made here is refused, as the last
   section says.
 
+## Alert on an integrity failure
+
+Listen for `IntegrityCheckFailed`. It fires from the scheduled runs of `audit-log:seal` and `audit-log:verify`, and from
+one started by hand, when a run finds the log altered, incomplete or unverifiable, when a `--strict` verification finds
+a seal the anchor does not confirm, and when a verification stops before it can say:
+
+```php
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
+
+Event::listen(static function (IntegrityCheckFailed $event): void {
+    Log::channel('ops')->critical('The audit log failed an integrity check.', [
+        'command'      => $event->command,
+        'integrity'    => $event->integrity,
+        'anchoring'    => $event->anchoring,
+        'finding'      => $event->finding,
+        'first_bad_id' => $event->firstBadId,
+        'head'         => $event->head,
+        'remote_head'  => $event->remoteHead,
+        'complete'     => $event->complete,
+    ]);
+});
+```
+
+- It carries no value of a record: only the command, counts, the code of the first finding, the id of the first seal
+  or entry it was found at, and sequence numbers. It is safe to forward as it is.
+- `integrity` counts segments by `valid`, `pruned`, `incomplete`, `unverifiable` and `tampered`, and `anchoring` by
+  `anchored`, `unanchored`, `unavailable` and `contradicted`. Both always list every status, zero-filled, whichever
+  command fired, so a listener reads one shape. An alarm from `audit-log:seal` counts its one failing condition once:
+  entries it skipped as malformed count 1 under `unverifiable`, whatever their number, which its output prints.
+- `firstBadId` is a lower-case UUID or `null`. An id read from an altered table that is no UUID, which could put a line
+  break or a control character in a log, is never passed on.
+- A verification that stopped, because something it reads failed under it or an anchor setting is malformed, has no
+  `finding`, and `complete` is `false`: the log's integrity was not established either way. An event from
+  `audit-log:seal` is never `complete` either, because sealing does not check the whole log. A seal run stopped by
+  anything but a refused head dispatches no event: it is reported as a
+  `SineMacula\Laravel\AuditLog\Integrity\SealFailedException` alone.
+- A listener that throws is reported as it threw, as any listener of the package's events is, and the package's own
+  report of the failure still follows it.
+- The package also reports a `SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException` for the same run, so
+  route the package's reports to the same place.
+- A scheduled run that never happens raises nothing: a stopped scheduler or a worker that is down dispatches no event.
+  Monitor the progress the package records for the last seal, the last anchoring and the last full verification, as
+  the operations guide describes, and alert when it goes stale.
+
 ## Alert on a stored record
 
 Listen for `AuditRecorded` and match on the code:
@@ -68,8 +115,8 @@ Event::listen(static function (AuditRecorded $event): void {
 
 ## Use a queued listener
 
-An event holds only ids, codes and class names, so a queue payload or a `failed_jobs` row of a listener holds nothing
-else of the record. Use `ShouldQueueAfterCommit` so a listener does not run for a record that then rolls back:
+An event holds only ids, codes, counts and class names, so a queue payload or a `failed_jobs` row of a listener holds
+nothing else of the record. Use `ShouldQueueAfterCommit` so a listener does not run for a record that then rolls back:
 
 ```php
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;

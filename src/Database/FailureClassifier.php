@@ -50,6 +50,9 @@ final class FailureClassifier
 {
     use DetectsConcurrencyErrors, DetectsLostConnections;
 
+    /** @var string The SQLSTATE of a PostgreSQL statement cancelled by its lock timeout. */
+    private const string LOCK_TIMEOUT_STATE = '55P03';
+
     /** @var string The SQLSTATE of a statement run in a PostgreSQL transaction that is already aborted. */
     private const string ABORTED_HOST_STATE = '25P02';
 
@@ -113,6 +116,21 @@ final class FailureClassifier
         $root = self::rootOf($failure);
 
         return !self::quotesValues($root) && $this->causedByConcurrencyError($root);
+    }
+
+    /**
+     * Whether the failure is a statement PostgreSQL cancelled because it waited
+     * longer than `lock_timeout` for a lock (SQLSTATE `55P03`), read at the
+     * root of the chain. Laravel recognises MySQL's lock wait timeout as a
+     * concurrency error but not this one, which a caller that retries a whole
+     * transaction can treat the same way.
+     *
+     * @param  \Throwable  $failure
+     * @return bool
+     */
+    public function isLockTimeout(#[\SensitiveParameter] \Throwable $failure): bool
+    {
+        return self::stateOf(self::rootOf($failure)) === self::LOCK_TIMEOUT_STATE;
     }
 
     /**

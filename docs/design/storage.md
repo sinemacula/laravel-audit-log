@@ -5,9 +5,10 @@
 This note records where and how entries are kept: the entries table and its columns, indexes and engine options, the
 connections the table lives on and is maintained through, the grants each needs, the read model that never writes, and
 how the database store inserts a finalised record, resolves a duplicate and leaves a host transaction usable. It also
-records the two tables delivery works from, the outbox and the receipts, and the connection each is on. The table is
-evidence, so what each column holds, how a time or an id is written and what the store may do to a row are fixed here; a
-change to any of them changes what every stored row means.
+records the two tables delivery works from, the outbox and the receipts, and the connection each is on, the three tables
+integrity works from, the checkpoints, their members and the integrity state, and the grants and optional triggers that
+keep the log append-only, as SQL the tests run. The table is evidence, so what each column holds, how a time or an id is
+written and what the store may do to a row are fixed here; a change to any of them changes what every stored row means.
 
 ## Invariants
 
@@ -27,9 +28,10 @@ change to any of them changes what every stored row means.
   is never bound into a query, because the grammar's format drops microseconds and the session's time zone would move
   the instant.
 - No timestamps and no foreign keys.
-- The nine secondary indexes are named after the configured table: `<table>_actor_index`, `_subject_index`,
-  `_principal_index`, `_tenant_index`, `_event_index`, `_category_index`, `_correlate_index`, `_occurred_index`, and
-  the unique `_source_unique` over `source_id` and `source_record_id`. The longest suffix is 16 characters, so
+- The ten secondary indexes are named after the configured table: `<table>_actor_index`, `_subject_index`,
+  `_principal_index`, `_tenant_index`, `_event_index`, `_category_index`, `_correlate_index`, `_occurred_index`,
+  `_recorded_index` over `recorded_at` and `id`, which sealing pages through in that order, and the unique
+  `_source_unique` over `source_id` and `source_record_id`. The longest suffix is 16 characters, so
   `entries.table` is 1 to 47 lower-case letters, digits and underscores that does not start with a digit
   (`Database\EntrySettings`), and `audit-log:check` holds the prefixed name to 47 too, so every name fits PostgreSQL's
   63. Capitals are refused because every engine reports index names in lower case and MySQL's
@@ -50,6 +52,28 @@ change to any of them changes what every stored row means.
   `delivered_at` and `last_error_class`. A receipt holds nothing of the record and is kept once its record is delivered.
 - Both tables follow the entries table where it applies: the table name's grammar, no foreign keys, and on MySQL
   `utf8mb4_0900_bin` and `InnoDB`. Delivery is in `delivery.md`.
+- `integrity.checkpoints_table` (`audit_log_checkpoints` by default), `integrity.members_table`
+  (`audit_log_checkpoint_members`) and `integrity.state_table` (`audit_log_integrity_state`) are always on the storage
+  connection, beside the entries they describe, and no setting moves them (`Database\IntegrityTables`). Each follows
+  the entries table: the table name's grammar, no foreign keys, and on MySQL `utf8mb4_0900_bin` and `InnoDB`, so a seal
+  and its members commit together.
+- The checkpoints table holds one seal per row, in 19 columns: the 15 a seal is inserted with (`id`, `sequence`,
+  `log_id`, `previous_id`, `previous_digest`, `member_count`, `members_digest`, `seal_digest`, `first_recorded_at`,
+  `last_recorded_at`, `sealed_at`, `signer`, `key_id`, `algorithm_version`, `signature`), then the four anchor columns
+  (`anchor`, `anchor_receipt`, `anchored_at`, `anchor_error_class`). Every digest and the signature are `string(64)`,
+  as `hmac` is; `sequence` is a signed `bigInteger`, every time `dateTime(6)` and `anchor_receipt` `json`. Its indexes
+  are the unique `<table>_sequence_unique`, so two sealers can never both extend the head, and `<table>_anchored_index`
+  over `anchored_at` and `sequence`, what the anchorer reads.
+- The anchor columns are the only ones written after a seal is inserted: `Integrity\Anchorer` writes them, a cache of
+  the anchor's receipt and never the authority. Nothing else updates or deletes a seal, and nothing updates or deletes
+  a member.
+- The members table has `checkpoint_id`, `entry_id` and `hmac` (`string(64)`, the entry's HMAC when it was sealed),
+  keyed by `<table>_primary` over the seal and the entry, with the unique `<table>_entry_unique` on `entry_id`: an
+  entry belongs to at most one seal. A member is written once, with its seal.
+- The integrity state table has `name` (`string(64)`, its primary key), `value` (`text`, a JSON map of scalars) and
+  `updated_at` (`dateTime(6)`): the operational progress of sealing, anchoring, the sweep and verification
+  (`Database\IntegrityProgress`). It is never evidence, so its rows may be updated and deleted and no trigger covers
+  it.
 - The migrations are published under `audit-log-migrations` and never loaded from the package. Each runs on its own
   table's connection (the entries' `getConnection()` is `StorageConnection::name()`), and a collision guard refuses to
   create a table over an existing one, naming the setting that renames it, such as `entries.table`.
@@ -57,12 +81,12 @@ change to any of them changes what every stored row means.
   `storage.maintenance_connection` is the one pruning, holds and erasure will run through (`null` or empty for the
   storage connection). Both must reach the same physical database, the maintenance connection with credentials of its
   own; nothing writes through it yet. A value that is neither a connection name nor `null` or empty fails closed.
-- Grants: the application's writer needs `SELECT` and `INSERT` on the entries table and nothing else, on every engine.
-  The MySQL duplicate lookup inside a transaction is a shared locking read, which needs `SELECT` alone, never
-  `FOR UPDATE`. The maintenance user has the privileges its operations need, and nothing runs DDL at runtime. Triggers
-  refusing `UPDATE` and `DELETE` are optional and documented with integrity. In outbox mode the writer also needs
-  `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the outbox and `SELECT`, `INSERT` and `UPDATE` on the receipts; only the
-  entries table stays append-only.
+- Grants: to record, the application's writer needs `SELECT` and `INSERT` on the entries table and nothing else, on
+  every engine. The MySQL duplicate lookup inside a transaction is a shared locking read, which needs `SELECT` alone,
+  never `FOR UPDATE`. Sealing, anchoring, the sweep and verification need the grants under Grants And Triggers below,
+  where the optional triggers are too; the maintenance user has the privileges its operations need, and nothing runs
+  DDL at runtime. In outbox mode the writer also needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the outbox and
+  `SELECT`, `INSERT` and `UPDATE` on the receipts; only the entries and the integrity evidence stay append-only.
 - The read model, `Models\AuditEntry`, takes its table and connection from the settings, has a string key, no
   timestamps and nothing mass assignable, and refuses every model write with `ImmutableEntryException`: `save()`,
   `saveQuietly()`, `update()`, `updateQuietly()`, `push()`, `touch()`, `delete()`, `deleteQuietly()`,
@@ -95,6 +119,9 @@ change to any of them changes what every stored row means.
 - A dedicated storage connection, reaching the same database under a connection name of its own, keeps the audit
   writes out of the host's transactions: on it the store never needs a savepoint, which is the configuration for an
   application that records many entries in one transaction.
+- The integrity migrations create the checkpoints, the members and the integrity state tables on the storage connection.
+  Run as the tables' owner once the users exist, the documented grants give a writer what recording, sealing, anchoring,
+  the sweep and verification need, and the documented triggers leave every one of them working.
 
 ## Failure / Edge Cases
 
@@ -107,6 +134,242 @@ change to any of them changes what every stored row means.
 - A storage connection that is not a Laravel database connection, without savepoints, is refused with a
   `\LogicException`.
 - A model write on an entry throws `ImmutableEntryException` before any statement runs.
+- A writer granted only the documented privileges is refused, by the engine, an update of an immutable checkpoint
+  column, an update or a delete of a member, a delete of a seal, a `TRUNCATE` of any of the package's tables and any
+  DDL; the maintenance user is refused everything but reading and deleting entries and reading the evidence.
+- Under the documented triggers, an update of an entry or a member, a change to an immutable checkpoint column, a
+  delete of a member or a seal, and a delete of an entry by anyone but the maintenance user are refused with an error
+  naming the table and the statement, such as `audit_log_entries refuses DELETE`; the tables' owner is refused too.
+
+## Grants And Triggers
+
+The grants are what keep the log append-only; the triggers are an optional second line on the same tables. Both are
+the SQL below, which the integration tests run as written, each block found by the marker line before it. Replace
+`app_db`, `audit_writer` and `audit_maintenance` with your database and users. Create the users first, run each block
+as the tables' owner, and rename a table in the SQL when its setting renames it.
+
+- The writer, the application's user, is granted `SELECT` and `INSERT` on the entries, the checkpoints and the
+  members, `UPDATE` on the checkpoints' four anchor columns alone, and `SELECT`, `INSERT`, `UPDATE` and `DELETE` on
+  the integrity state table. That is everything recording, sealing, anchoring and verification need, and the `DELETE`
+  is for the sweep, which forgets its cursor when it completes. A `TRUNCATE` and any change to an entry, a member or an
+  immutable checkpoint column are refused by the engine; column grants exist on MySQL and PostgreSQL only.
+- For pruning, the maintenance user is granted `DELETE` on the entries alone, because pruning keeps every checkpoint
+  and member, and `SELECT` on the entries, the checkpoints and the members.
+- There is no DDL for the application user: no documented user holds `DROP`, `TRUNCATE`, `TRIGGER` or `ALTER`, or
+  creates anything. On PostgreSQL before 15, also revoke `CREATE` on the `public` schema from `PUBLIC`.
+- Verification needs `SELECT` on the entries, the checkpoints and the members, and the user that runs
+  `audit-log:verify` also needs `SELECT`, `INSERT` and `UPDATE` on the integrity state table, where a full run records
+  that it completed. On PostgreSQL every user also needs `CONNECT` on the database and `USAGE` on the schema, which
+  grant no table privilege.
+- The triggers refuse every change except a maintenance delete of an entry. Each table gets `<table>_no_update` and
+  `<table>_no_delete`: an entry is never updated and only the maintenance user deletes one, a member is never updated
+  or deleted, and a seal is never deleted, while an update that changes any of its 15 immutable columns is refused and
+  one of the four anchor columns alone is allowed. Every refusal is an error naming the table and the statement.
+- On PostgreSQL, the delete trigger allows the maintenance user by `current_user`. On MySQL, `CURRENT_USER()` in a
+  trigger is the definer, so the MySQL triggers read `USER()`, compared byte for byte. `USER()` is the name the client
+  gave, so on MySQL the grants, not the triggers, are the boundary: install the triggers as a second line, or prefer
+  grants alone.
+- A row trigger never fires on `TRUNCATE`, so PostgreSQL also gets `<table>_no_truncate`, a statement trigger on each
+  of the three tables. On MySQL `TRUNCATE` needs `DROP`, which no documented user holds, and fires no trigger, so the
+  grants alone refuse it.
+- The tables' owner can drop the triggers: they guard against the application's users, not against the owner. A
+  trigger refuses the owner's own update or delete while it is installed.
+- SQLite has no users, so its triggers refuse every update and delete, with no maintenance exception, and pruning on
+  SQLite drops and recreates the delete trigger in the prune's own transaction, as the last block shows. A prune that
+  fails before `COMMIT` is rolled back, and the rollback restores the trigger. SQLite has no grants at all.
+
+### MySQL
+
+<!-- sql: mysql-grants -->
+
+```sql
+GRANT SELECT, INSERT ON app_db.audit_log_entries TO 'audit_writer'@'%';
+GRANT SELECT, INSERT ON app_db.audit_log_checkpoints TO 'audit_writer'@'%';
+GRANT UPDATE (anchor, anchor_receipt, anchored_at, anchor_error_class)
+    ON app_db.audit_log_checkpoints TO 'audit_writer'@'%';
+GRANT SELECT, INSERT ON app_db.audit_log_checkpoint_members TO 'audit_writer'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE ON app_db.audit_log_integrity_state TO 'audit_writer'@'%';
+
+GRANT SELECT, DELETE ON app_db.audit_log_entries TO 'audit_maintenance'@'%';
+GRANT SELECT ON app_db.audit_log_checkpoints TO 'audit_maintenance'@'%';
+GRANT SELECT ON app_db.audit_log_checkpoint_members TO 'audit_maintenance'@'%';
+```
+
+<!-- sql: mysql-triggers -->
+
+```sql
+DELIMITER //
+
+CREATE TRIGGER audit_log_entries_no_update BEFORE UPDATE ON audit_log_entries FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_entries refuses UPDATE';
+END//
+
+CREATE TRIGGER audit_log_entries_no_delete BEFORE DELETE ON audit_log_entries FOR EACH ROW
+BEGIN
+    IF CAST(SUBSTRING_INDEX(USER(), '@', 1) AS BINARY) <> 'audit_maintenance' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_entries refuses DELETE';
+    END IF;
+END//
+
+CREATE TRIGGER audit_log_checkpoints_no_update BEFORE UPDATE ON audit_log_checkpoints FOR EACH ROW
+BEGIN
+    IF NOT (OLD.id <=> NEW.id
+        AND OLD.sequence <=> NEW.sequence
+        AND OLD.log_id <=> NEW.log_id
+        AND OLD.previous_id <=> NEW.previous_id
+        AND OLD.previous_digest <=> NEW.previous_digest
+        AND OLD.member_count <=> NEW.member_count
+        AND OLD.members_digest <=> NEW.members_digest
+        AND OLD.seal_digest <=> NEW.seal_digest
+        AND OLD.first_recorded_at <=> NEW.first_recorded_at
+        AND OLD.last_recorded_at <=> NEW.last_recorded_at
+        AND OLD.sealed_at <=> NEW.sealed_at
+        AND OLD.signer <=> NEW.signer
+        AND OLD.key_id <=> NEW.key_id
+        AND OLD.algorithm_version <=> NEW.algorithm_version
+        AND OLD.signature <=> NEW.signature) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_checkpoints refuses UPDATE';
+    END IF;
+END//
+
+CREATE TRIGGER audit_log_checkpoints_no_delete BEFORE DELETE ON audit_log_checkpoints FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_checkpoints refuses DELETE';
+END//
+
+CREATE TRIGGER audit_log_checkpoint_members_no_update BEFORE UPDATE ON audit_log_checkpoint_members FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_checkpoint_members refuses UPDATE';
+END//
+
+CREATE TRIGGER audit_log_checkpoint_members_no_delete BEFORE DELETE ON audit_log_checkpoint_members FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_checkpoint_members refuses DELETE';
+END//
+
+DELIMITER ;
+```
+
+### PostgreSQL
+
+<!-- sql: pgsql-grants -->
+
+```sql
+GRANT CONNECT ON DATABASE app_db TO audit_writer, audit_maintenance;
+GRANT USAGE ON SCHEMA public TO audit_writer, audit_maintenance;
+
+GRANT SELECT, INSERT ON audit_log_entries, audit_log_checkpoints, audit_log_checkpoint_members TO audit_writer;
+GRANT UPDATE (anchor, anchor_receipt, anchored_at, anchor_error_class) ON audit_log_checkpoints TO audit_writer;
+GRANT SELECT, INSERT, UPDATE, DELETE ON audit_log_integrity_state TO audit_writer;
+
+GRANT SELECT, DELETE ON audit_log_entries TO audit_maintenance;
+GRANT SELECT ON audit_log_checkpoints, audit_log_checkpoint_members TO audit_maintenance;
+```
+
+<!-- sql: pgsql-triggers -->
+
+```sql
+CREATE OR REPLACE FUNCTION audit_log_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION '% refuses %', TG_TABLE_NAME, TG_OP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION audit_log_refuse_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_user <> 'audit_maintenance' THEN
+        RAISE EXCEPTION '% refuses %', TG_TABLE_NAME, TG_OP;
+    END IF;
+
+    RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER audit_log_entries_no_update BEFORE UPDATE ON audit_log_entries
+    FOR EACH ROW EXECUTE FUNCTION audit_log_refuse();
+CREATE TRIGGER audit_log_entries_no_delete BEFORE DELETE ON audit_log_entries
+    FOR EACH ROW EXECUTE FUNCTION audit_log_refuse_delete();
+CREATE TRIGGER audit_log_entries_no_truncate BEFORE TRUNCATE ON audit_log_entries
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_refuse();
+
+CREATE TRIGGER audit_log_checkpoints_no_update BEFORE UPDATE ON audit_log_checkpoints
+    FOR EACH ROW
+    WHEN ((OLD.id, OLD.sequence, OLD.log_id, OLD.previous_id, OLD.previous_digest, OLD.member_count,
+        OLD.members_digest, OLD.seal_digest, OLD.first_recorded_at, OLD.last_recorded_at, OLD.sealed_at, OLD.signer,
+        OLD.key_id, OLD.algorithm_version, OLD.signature)
+        IS DISTINCT FROM (NEW.id, NEW.sequence, NEW.log_id, NEW.previous_id, NEW.previous_digest, NEW.member_count,
+        NEW.members_digest, NEW.seal_digest, NEW.first_recorded_at, NEW.last_recorded_at, NEW.sealed_at, NEW.signer,
+        NEW.key_id, NEW.algorithm_version, NEW.signature))
+    EXECUTE FUNCTION audit_log_refuse();
+CREATE TRIGGER audit_log_checkpoints_no_delete BEFORE DELETE ON audit_log_checkpoints
+    FOR EACH ROW EXECUTE FUNCTION audit_log_refuse();
+CREATE TRIGGER audit_log_checkpoints_no_truncate BEFORE TRUNCATE ON audit_log_checkpoints
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_refuse();
+
+CREATE TRIGGER audit_log_checkpoint_members_no_update BEFORE UPDATE ON audit_log_checkpoint_members
+    FOR EACH ROW EXECUTE FUNCTION audit_log_refuse();
+CREATE TRIGGER audit_log_checkpoint_members_no_delete BEFORE DELETE ON audit_log_checkpoint_members
+    FOR EACH ROW EXECUTE FUNCTION audit_log_refuse();
+CREATE TRIGGER audit_log_checkpoint_members_no_truncate BEFORE TRUNCATE ON audit_log_checkpoint_members
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_refuse();
+```
+
+### SQLite
+
+<!-- sql: sqlite-triggers -->
+
+```sql
+CREATE TRIGGER audit_log_entries_no_update BEFORE UPDATE ON audit_log_entries
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_entries refuses UPDATE');
+END;
+
+CREATE TRIGGER audit_log_entries_no_delete BEFORE DELETE ON audit_log_entries
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_entries refuses DELETE');
+END;
+
+CREATE TRIGGER audit_log_checkpoints_no_update
+BEFORE UPDATE OF id, sequence, log_id, previous_id, previous_digest, member_count, members_digest, seal_digest,
+    first_recorded_at, last_recorded_at, sealed_at, signer, key_id, algorithm_version, signature
+ON audit_log_checkpoints
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_checkpoints refuses UPDATE');
+END;
+
+CREATE TRIGGER audit_log_checkpoints_no_delete BEFORE DELETE ON audit_log_checkpoints
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_checkpoints refuses DELETE');
+END;
+
+CREATE TRIGGER audit_log_checkpoint_members_no_update BEFORE UPDATE ON audit_log_checkpoint_members
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_checkpoint_members refuses UPDATE');
+END;
+
+CREATE TRIGGER audit_log_checkpoint_members_no_delete BEFORE DELETE ON audit_log_checkpoint_members
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_checkpoint_members refuses DELETE');
+END;
+```
+
+<!-- sql: sqlite-prune -->
+
+```sql
+BEGIN IMMEDIATE;
+
+DROP TRIGGER audit_log_entries_no_delete;
+
+-- the prune's deletes and its record go here
+
+CREATE TRIGGER audit_log_entries_no_delete BEFORE DELETE ON audit_log_entries
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_entries refuses DELETE');
+END;
+
+COMMIT;
+```
 
 ## Seams Left
 
@@ -120,7 +383,13 @@ change to any of them changes what every stored row means.
 
 - `database/migrations/2026_11_02_000000_create_audit_log_entries_table.php`,
   `database/migrations/2026_11_02_000100_create_audit_log_outbox_table.php`,
-  `database/migrations/2026_11_02_000200_create_audit_log_deliveries_table.php`.
+  `database/migrations/2026_11_02_000200_create_audit_log_deliveries_table.php`,
+  `database/migrations/2026_11_02_000300_create_audit_log_checkpoints_table.php`,
+  `database/migrations/2026_11_02_000400_create_audit_log_checkpoint_members_table.php`,
+  `database/migrations/2026_11_02_000500_create_audit_log_integrity_state_table.php`.
+- `src/Database/IntegrityTables.php`: `checkpointsTable()`, `membersTable()`, `stateTable()`;
+  `src/Database/IntegrityProgress.php`: `put()`, `forget()`.
+- `src/Integrity/CheckpointWriter.php`: the seal and member inserts; `src/Integrity/Anchorer.php`: the anchor columns.
 - `src/Database/DeliveryTables.php`: `outboxTable()`, `deliveriesTable()`; `src/Delivery/Outbox.php`,
   `src/Delivery/Receipts.php`.
 - `src/Database/StorageConnection.php`: `name()`, `forMaintenance()`; `src/Database/EntrySettings.php`: `table()`;
@@ -128,8 +397,10 @@ change to any of them changes what every stored row means.
 - `src/Stores/DatabaseAuditStore.php`: `store()`; `src/Stores/RowCodec.php`; `src/Support/StoredTime.php`.
 - `src/Models/AuditEntry.php`, `src/Casts/UtcInstant.php`.
 - `src/Console/SchemaChecks.php`, `src/Console/EngineChecks.php`, `src/Console/DeliveryChecks.php`,
-  `src/Console/TableShape.php`.
-- `src/AuditLogServiceProvider.php`: `registerPublishing()`; `config/audit-log.php`: `storage`, `entries`, `delivery`.
+  `src/Console/IntegrityChecks.php`, `src/Console/TableShape.php`.
+- `src/AuditLogServiceProvider.php`: `registerPublishing()`; `config/audit-log.php`: `storage`, `entries`, `delivery`,
+  `integrity`.
+- The grants and triggers above, run as written by `tests/Concerns/RunsDocumentedSql.php`.
 
 ## Authoritative Tests
 
@@ -174,17 +445,50 @@ change to any of them changes what every stored row means.
   `testAnOutboxOnItsOwnConnectionIsCheckedThere`
 - `tests/Feature/Console/EngineChecksTest.php` `testMariaDbThroughTheMySqlDriverIsRefusedThoughLaravelStripsItsVersion`,
   `testOnMySqlTheWriterIsCheckedNotTheReplica`
+- `tests/Integration/Migration/CheckpointsTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
+  `testKeepsTheColumnsInOrder`, `testTheSequenceIsUnique`, `testIndexesWhatTheAnchorerReads`,
+  `testEveryIndexNameFitsAtTheLongestTableName`, `testSizesEveryStringColumn`, `testTheSequenceIsABigInteger`,
+  `testStoresEveryTimeToTheMicrosecond`, `testTheReceiptIsJsonNeverJsonb`, `testTheAnchorColumnsAreWrittenAfterTheSeal`,
+  `testHasNoForeignKeys`, `testOnMySqlEveryCharacterColumnIsBinaryWithoutPadding`, `testOnMySqlTheTableIsInnoDb`
+- `tests/Integration/Migration/CheckpointMembersTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
+  `testTheKeyIsTheCheckpointAndTheEntry`, `testIndexesTheEntryAlone`, `testAnEntryBelongsToAtMostOneSeal`,
+  `testHasNoForeignKeys`, `testOnMySqlTheTableIsInnoDb`
+- `tests/Integration/Migration/IntegrityStateTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
+  `testTheNameIsThePrimaryKey`, `testTheValueIsText`, `testStoresTheTimeToTheMicrosecond`, `testHasNoForeignKeys`
+- `tests/Integration/Migration/IntegrityMigrationsConnectionTest.php` `testTheIntegrityTablesFollowTheStorageConnection`,
+  `testTheyStayOnTheStorageConnectionWhenTheOutboxMoves`
+- `tests/Feature/Database/IntegrityTablesTest.php` `testTheTablesHaveTheirDefaults`, `testRefusesAMalformedTable`
+- `tests/Unit/Documentation/DocumentedSqlTest.php` `testEachBlockIsMarked`, `testEveryBlockUsesOnlyThePlaceholders`,
+  `testTheStorageNoteStatesWhatItMust`, `testTheTriggersCoverEveryImmutableCheckpointColumn`,
+  `testEachEngineDocumentsEveryTrigger`, `testTheGrantsAreExactlyTheDocumentedPrivileges`,
+  `testNoGrantGivesDdlOrTruncate`, `testTheSqlitePruneRecreatesTheDocumentedDeleteTrigger`
+- `tests/Integration/Integrity/AppendOnlyTriggersTest.php` `testTheDocumentedTriggersInstall`,
+  `testAnEntryUpdateIsRefused`, `testAMemberUpdateAndDeleteAreRefused`, `testAnImmutableCheckpointUpdateIsRefused`,
+  `testAnAnchorColumnUpdateIsAllowed`, `testACheckpointDeleteIsRefused`,
+  `testTheTriggerRefusesADeleteByAnyoneButTheMaintenanceUser`, `testTheMaintenanceUserMayDeleteAnEntry`,
+  `testOnMySqlTheTriggerComparesTheNameExactly`, `testTheDocumentedSqlitePruneDeletesAndRestoresTheTrigger`,
+  `testAFailedSqlitePruneRolledBackKeepsTheTrigger`, `testATruncateIsRefusedOnPostgres`, `testTheStateTableIsNotCovered`,
+  `testSealingAndAnchoringStillWorkUnderTheTriggers`
+- `tests/Integration/Integrity/LeastPrivilegeSealerTest.php`
+  `testAWriterGrantedExactlyTheDocumentedPrivilegesSealsAnchorsAndVerifies`,
+  `testAWriterGrantedExactlyTheDocumentedPrivilegesCompletesASweep`,
+  `testTheWriterCannotChangeAnImmutableCheckpointColumn`, `testTheWriterCannotDeleteAMemberOrACheckpoint`,
+  `testTheWriterCannotTruncateAnyIntegrityTable`, `testTheWriterCannotRunDdl`,
+  `testTheMaintenanceUserIsGrantedOnlyTheEntriesDelete`
 
 ## Change Triggers
 
 Update this note when any of the following change:
 
-- a column, its type, its length or its nullability, in any of the three tables
+- a column, its type, its length or its nullability, in any of the package's tables
+- an integrity table's columns or indexes
 - the connection the outbox or the receipts are on
 - the precision of `occurred_at` or `recorded_at`
 - an index, its name or its columns
 - the table name's grammar or its length
 - the MySQL collation or engine, or a supported engine or version
 - the grants the store or the drain needs
+- a grant or a trigger in the documented SQL
+- the columns written after a seal is inserted
 - how the store inserts, opens a savepoint or resolves a duplicate
 - a model write path, or one the query builder forwards

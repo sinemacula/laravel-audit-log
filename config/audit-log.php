@@ -67,11 +67,83 @@ return [
     |
     |     'keys' => ['k2026' => env('AUDIT_LOG_INTEGRITY_KEY_K2026')],
     |
+    | Entries are sealed in batches: a seal is a signed checkpoint of the ids
+    | and HMACs of the entries it holds, chained to the seal before it, so
+    | `audit-log:verify` finds an entry or a seal that was changed, removed or
+    | added. `log_id` names the chain: 1 to 64 letters, digits, dots,
+    | underscores or hyphens, starting with a letter or a digit, or `null` or
+    | empty, the default, for `source.id`, which must then fit the same grammar.
+    | `checkpoints_table`, `members_table` and `state_table` name the seals, the
+    | entries each holds and the progress of sealing, anchoring and
+    | verification, all on the storage connection, with the entries table's
+    | grammar. Set the log id and the tables before the first seal and never
+    | change them: sealing refuses to extend a chain of another log id, and
+    | changing a table moves none.
+    |
+    | `seal.schedule` (every five minutes) and `seal.sweep_schedule` (daily) are
+    | when the package schedules `audit-log:seal` and `audit-log:seal --sweep`,
+    | and `verify.schedule` (daily) when it schedules a strict verification that
+    | sweeps first, `audit-log:verify --strict --sweep-first`: cron expressions,
+    | or `null` or empty to schedule nothing and run that command elsewhere. A
+    | malformed schedule schedules nothing for its run and is reported, never
+    | thrown. `seal.batch` is the most entries one seal holds, from 100 to 50000
+    | and 5000 by default. `seal.max_batches` is the most seals one run writes,
+    | from 1 to 100000 and 100 by default. `seal.lookback_seconds` is how far
+    | before the latest entry a recent pass sealed a run looks for entries
+    | recorded late, from 0 to 2592000 and 3600 by default, and must exceed the
+    | worst clock skew between servers. `seal.settle_seconds` is how long an
+    | entry waits after it is recorded before a seal may hold it, from 0 to 3600
+    | and 0 by default. `seal.max_attempts` is how many attempts a seal gets
+    | against a concurrent sealer, from 1 to 100 and 5 by default.
+    | `verify.max_unsealed_age_seconds` is how old an unsealed entry may grow
+    | before verification calls the log incomplete, from 600 to 31536000 and
+    | 90000 (25 hours) by default: more than a day, because an entry recorded
+    | later than the lookback waits for the daily sweep. These may change on any
+    | deploy.
+    |
+    | `anchor.driver` is `null` by default, which keeps the seals in the
+    | database alone, or `disk`, which writes each seal's digest once under
+    | `anchor.path` (`audit-log-anchors` by default: 1 to 191 characters of
+    | segments of letters, digits, dots, underscores and hyphens, joined by
+    | single slashes) on `anchor.disk` (`null` or empty for
+    | `filesystems.default`), so verification finds a log rewritten or cut short
+    | against it. `anchor.batch` is how many seals one run anchors, from 1 to
+    | 10000 and 100 by default. The anchor holds only on a write-once (WORM)
+    | store that the application's credentials cannot overwrite or delete, such
+    | as a bucket under object lock; on any other disk it is a copy an attacker
+    | can rewrite. Moving the disk or the path anchors every seal again at the
+    | new place. A malformed value fails closed when it is read, and
+    | `audit-log:check` reports it, as it does a disk `filesystems.disks` does
+    | not configure.
+    |
     */
 
     'integrity' => [
-        'keys'    => [],
-        'current' => env('AUDIT_LOG_INTEGRITY_CURRENT'),
+        'keys'              => [],
+        'current'           => env('AUDIT_LOG_INTEGRITY_CURRENT'),
+        'log_id'            => env('AUDIT_LOG_INTEGRITY_LOG_ID'),
+        'checkpoints_table' => env('AUDIT_LOG_INTEGRITY_CHECKPOINTS_TABLE', 'audit_log_checkpoints'),
+        'members_table'     => env('AUDIT_LOG_INTEGRITY_MEMBERS_TABLE', 'audit_log_checkpoint_members'),
+        'state_table'       => env('AUDIT_LOG_INTEGRITY_STATE_TABLE', 'audit_log_integrity_state'),
+        'seal'              => [
+            'schedule'         => env('AUDIT_LOG_INTEGRITY_SEAL_SCHEDULE', '*/5 * * * *'),
+            'sweep_schedule'   => env('AUDIT_LOG_INTEGRITY_SEAL_SWEEP_SCHEDULE', '15 3 * * *'),
+            'batch'            => env('AUDIT_LOG_INTEGRITY_SEAL_BATCH', 5000),
+            'max_batches'      => env('AUDIT_LOG_INTEGRITY_SEAL_MAX_BATCHES', 100),
+            'lookback_seconds' => env('AUDIT_LOG_INTEGRITY_SEAL_LOOKBACK_SECONDS', 3600),
+            'settle_seconds'   => env('AUDIT_LOG_INTEGRITY_SEAL_SETTLE_SECONDS', 0),
+            'max_attempts'     => env('AUDIT_LOG_INTEGRITY_SEAL_MAX_ATTEMPTS', 5),
+        ],
+        'verify' => [
+            'schedule'                 => env('AUDIT_LOG_INTEGRITY_VERIFY_SCHEDULE', '45 3 * * *'),
+            'max_unsealed_age_seconds' => env('AUDIT_LOG_INTEGRITY_VERIFY_MAX_UNSEALED_AGE_SECONDS', 90000),
+        ],
+        'anchor' => [
+            'driver' => env('AUDIT_LOG_INTEGRITY_ANCHOR_DRIVER', 'null'),
+            'disk'   => env('AUDIT_LOG_INTEGRITY_ANCHOR_DISK'),
+            'path'   => env('AUDIT_LOG_INTEGRITY_ANCHOR_PATH', 'audit-log-anchors'),
+            'batch'  => env('AUDIT_LOG_INTEGRITY_ANCHOR_BATCH', 100),
+        ],
     ],
 
     /*

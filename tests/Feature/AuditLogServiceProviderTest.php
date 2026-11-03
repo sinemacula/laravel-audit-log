@@ -8,6 +8,10 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Console\Application as ConsoleApplication;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Console\Scheduling\Event as ScheduledEvent;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Container\Container;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Events\TransactionCommitting;
 use Illuminate\Database\Migrations\Migrator;
@@ -30,15 +34,21 @@ use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
+use SineMacula\Laravel\AuditLog\Console\SealCommand;
+use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\CommitQueue;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
+use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
@@ -58,8 +68,9 @@ use Tests\TestCase;
 /**
  * Feature tests for the package AuditLogServiceProvider: the configuration it
  * merges, the defaults it binds, the files it publishes under each tag, the
- * migrations it never loads, the commands it registers in the console only, the
- * listeners and middleware it adds, and that it freezes registration at boot.
+ * migrations it never loads, the commands it registers and the runs it
+ * schedules in the console only, the listeners and middleware it adds, and that
+ * it freezes registration at boot.
  *
  * The class runs no migration of its own, so the migrator's paths are what the
  * provider leaves there.
@@ -85,6 +96,9 @@ final class AuditLogServiceProviderTest extends TestCase
         '2026_11_02_000000_create_audit_log_entries_table.php',
         '2026_11_02_000100_create_audit_log_outbox_table.php',
         '2026_11_02_000200_create_audit_log_deliveries_table.php',
+        '2026_11_02_000300_create_audit_log_checkpoints_table.php',
+        '2026_11_02_000400_create_audit_log_checkpoint_members_table.php',
+        '2026_11_02_000500_create_audit_log_integrity_state_table.php',
     ];
 
     /**
@@ -229,6 +243,28 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * Running in the console, as a test does, the seal command is there.
+     *
+     * @return void
+     */
+    public function testTheSealCommandIsRegistered(): void
+    {
+        self::assertArrayHasKey('audit-log:seal', Artisan::all());
+        self::assertInstanceOf(SealCommand::class, Artisan::all()['audit-log:seal']);
+    }
+
+    /**
+     * Running in the console, as a test does, the verify command is there.
+     *
+     * @return void
+     */
+    public function testTheVerifyCommandIsRegistered(): void
+    {
+        self::assertArrayHasKey('audit-log:verify', Artisan::all());
+        self::assertInstanceOf(VerifyCommand::class, Artisan::all()['audit-log:verify']);
+    }
+
+    /**
      * Outside the console no command is registered.
      *
      * @return void
@@ -262,6 +298,7 @@ final class AuditLogServiceProviderTest extends TestCase
             'the key ring'           => [KeyRing::class, KeyRing::class],
             'the store'              => [AuditStore::class, DatabaseAuditStore::class],
             'the field encrypter'    => [FieldEncrypter::class, NoFieldEncrypter::class],
+            'the prune ledger'       => [PruneLedger::class, NullPruneLedger::class],
             'the catalogue'          => [EventCatalogue::class, EventCatalogue::class],
             'the contributors'       => [ContributorRegistry::class, ContributorRegistry::class],
             'the recorder'           => [Recorder::class, Recorder::class],
@@ -286,6 +323,132 @@ final class AuditLogServiceProviderTest extends TestCase
 
         self::assertInstanceOf($default, $resolved);
         self::assertSame($resolved, app($abstract));
+    }
+
+    /**
+     * The anchor is the null anchor when none is configured, made afresh on
+     * each resolution, so a changed setting takes effect on the next one.
+     *
+     * @return void
+     */
+    public function testTheAnchorIsTheNullAnchorResolvedAfreshEachTime(): void
+    {
+        $anchor = app(CheckpointAnchor::class);
+
+        self::assertInstanceOf(NullAnchor::class, $anchor);
+        self::assertNotSame($anchor, app(CheckpointAnchor::class));
+    }
+
+    /**
+     * The anchor follows the settings from one resolution to the next, and a
+     * malformed driver fails closed when the anchor is resolved, not before.
+     *
+     * @return void
+     */
+    public function testTheAnchorReadsTheSettingsOnEachResolution(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.integrity.anchor.driver', null);
+
+        self::assertInstanceOf(NullAnchor::class, app(CheckpointAnchor::class));
+
+        app(ConfigRepository::class)->set('audit-log.integrity.anchor.driver', 's3');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('`audit-log.integrity.anchor.driver` must be `null` or `disk`.');
+
+        app(CheckpointAnchor::class);
+    }
+
+    /**
+     * Running in the console, the application's schedule holds sealing every
+     * five minutes, the sweep and the strict verification daily, and nothing
+     * else of the package's.
+     *
+     * @return void
+     */
+    public function testTheScheduleHoldsTheThreeRuns(): void
+    {
+        self::assertSame([
+            'audit-log:seal'                          => '*/5 * * * *',
+            'audit-log:seal --sweep'                  => '15 3 * * *',
+            'audit-log:verify --strict --sweep-first' => '45 3 * * *',
+        ], self::packageRuns(app(Schedule::class)));
+    }
+
+    /**
+     * Outside the console the provider schedules nothing: it adds no callback
+     * for when the schedule is resolved.
+     *
+     * @return void
+     *
+     * @throws \ReflectionException
+     */
+    public function testNothingIsScheduledOutsideTheConsole(): void
+    {
+        $app = $this->app;
+
+        assert($app instanceof Application);
+
+        $callbacks = new \ReflectionProperty(Container::class, 'afterResolvingCallbacks');
+        $before    = $callbacks->getValue($app);
+        $running   = new \ReflectionProperty($app, 'isRunningInConsole');
+
+        $running->setValue($app, false);
+
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerSchedule'))->invoke(new AuditLogServiceProvider($app));
+
+        self::assertSame($before, $callbacks->getValue($app));
+
+        $running->setValue($app, true);
+
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerSchedule'))->invoke(new AuditLogServiceProvider($app));
+
+        self::assertNotSame($before, $callbacks->getValue($app));
+    }
+
+    /**
+     * A schedule resolved before the provider boots is given the runs at once.
+     *
+     * @return void
+     */
+    public function testAScheduleResolvedEarlierIsGivenTheRuns(): void
+    {
+        $app = $this->app;
+
+        assert($app instanceof Application);
+
+        $schedule = new Schedule;
+
+        $app->instance(Schedule::class, $schedule);
+
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerSchedule'))->invoke(new AuditLogServiceProvider($app));
+
+        self::assertSame(['audit-log:seal', 'audit-log:seal --sweep', 'audit-log:verify --strict --sweep-first'], array_keys(self::packageRuns($schedule)));
+    }
+
+    /**
+     * A malformed schedule stops neither boot nor the schedule: the application
+     * boots, its schedule resolves with the other two runs, and the malformed
+     * setting is reported by its key.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('malformTheSealSchedule')]
+    public function testAMalformedScheduleDoesNotStopBoot(): void
+    {
+        $reported = [];
+        $handler  = \Mockery::mock(ExceptionHandler::class);
+
+        $handler->shouldReceive('report')->andReturnUsing(static function (\Throwable $exception) use (&$reported): void {
+            $reported[] = $exception->getMessage();
+        });
+
+        $this->app?->instance(ExceptionHandler::class, $handler);
+        $this->app?->forgetInstance(Schedule::class);
+
+        self::assertTrue($this->app?->isBooted());
+        self::assertSame(['audit-log:seal --sweep', 'audit-log:verify --strict --sweep-first'], array_keys(self::packageRuns(app(Schedule::class))));
+        self::assertSame(['`audit-log.integrity.seal.schedule` must be a cron expression, or null or empty to schedule nothing.'], $reported);
     }
 
     /**
@@ -523,7 +686,24 @@ final class AuditLogServiceProviderTest extends TestCase
             'audit-log.definitions.require_registered' => 'yes',
             'audit-log.source.id'                      => 42,
             'audit-log.source.region'                  => 42,
+            'audit-log.integrity.log_id'               => '../escape',
+            'audit-log.integrity.checkpoints_table'    => 'Seals',
+            'audit-log.integrity.seal.schedule'        => 'often',
+            'audit-log.integrity.seal.batch'           => 'many',
+            'audit-log.integrity.anchor.driver'        => 's3',
+            'audit-log.integrity.anchor.path'          => '../anchors',
         ]);
+    }
+
+    /**
+     * Give the sealing schedule a value that is not a cron expression.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function malformTheSealSchedule(Application $app): void
+    {
+        $app->make(ConfigRepository::class)->set('audit-log.integrity.seal.schedule', 'every five minutes');
     }
 
     /**
@@ -547,6 +727,43 @@ final class AuditLogServiceProviderTest extends TestCase
     protected function withoutServedFiles(Application $app): void
     {
         $app->make(ConfigRepository::class)->set('filesystems.disks.local.serve', false);
+    }
+
+    /**
+     * The package's runs on the schedule, each command after `artisan` with its
+     * cron expression.
+     *
+     * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
+     * @return array<string, string>
+     */
+    private static function packageRuns(Schedule $schedule): array
+    {
+        $runs = [];
+
+        foreach ($schedule->events() as $event) {
+
+            $command = self::commandOf($event);
+
+            if ($command === null) {
+                continue;
+            }
+
+            $runs[$command] = $event->expression;
+        }
+
+        return $runs;
+    }
+
+    /**
+     * The package command a scheduled event runs, as it follows `artisan`, or
+     * `null` for any other event.
+     *
+     * @param  \Illuminate\Console\Scheduling\Event  $event
+     * @return ?string
+     */
+    private static function commandOf(ScheduledEvent $event): ?string
+    {
+        return preg_match('/\'artisan\' (audit-log:.+)\z/', (string) $event->command, $matches) === 1 ? $matches[1] : null;
     }
 
     /**

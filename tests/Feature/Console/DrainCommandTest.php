@@ -359,7 +359,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * The package schedules nothing: the application runs the command.
+     * The package schedules no drain: the application runs the command.
      *
      * @return void
      */
@@ -367,7 +367,7 @@ final class DrainCommandTest extends TestCase
     {
         $events = app(Schedule::class)->events();
 
-        self::assertSame([], array_values(array_filter($events, static fn (ScheduledEvent $event): bool => str_contains((string) $event->command, 'audit-log'))));
+        self::assertSame([], array_values(array_filter($events, static fn (ScheduledEvent $event): bool => str_contains((string) $event->command, 'audit-log:drain'))));
     }
 
     /**

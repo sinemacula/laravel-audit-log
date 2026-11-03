@@ -6,6 +6,7 @@ namespace Tests\Feature\Console;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Contracts\Filesystem\Factory;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\MySqlConnection;
@@ -59,38 +60,79 @@ final class CheckCommandTest extends TestCase
     /** @var string A secret one byte short of the 32 an integrity key needs. */
     private const string SHORT_SECRET = 'a-secret-one-byte-short-of-32!!';
 
+    /** @var list<string> Absolute paths to the shipped integrity migration files, in the order they run. */
+    private const array INTEGRITY_MIGRATION_PATHS = [
+        __DIR__ . '/../../../database/migrations/2026_11_02_000300_create_audit_log_checkpoints_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_000400_create_audit_log_checkpoint_members_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_000500_create_audit_log_integrity_state_table.php',
+    ];
+
+    /** @var array<string, string> The integrity tables a test migrates under names of their own, by the setting that names each; PostgreSQL's index names would clash with the defaults'. */
+    private const array CUSTOM_INTEGRITY_TABLES = [
+        'audit-log.integrity.checkpoints_table' => 'audit_custom_checkpoints',
+        'audit-log.integrity.members_table'     => 'audit_custom_members',
+        'audit-log.integrity.state_table'       => 'audit_custom_state',
+    ];
+
+    /** @var string What a missing table is asked to be created by, after its name and connection. */
+    private const string PUBLISH = '; publish and run the migrations (`vendor:publish --tag=audit-log-migrations`, then `migrate`).';
+
+    /** @var string How a log id that does not fit its grammar is refused. */
+    private const string MALFORMED_LOG_ID = '[config] `audit-log.integrity.log_id` must be 1 to 64 letters, digits, dots, underscores or hyphens,'
+        . ' starting with a letter or a digit.';
+
+    /** @var string What a disk anchor's disk that is not configured is reported as. */
+    private const string UNCONFIGURED_DISK = '[integrity] The disk [anchors] that `audit-log.integrity.anchor.disk` names is not configured in `filesystems.disks`.';
+
     /** @var string The configured table no test migrates. */
     private const string ABSENT_TABLE = 'audit_absent_entries';
 
     /** @var array<string, int|string> A value the check refuses for each leaf of the package's configuration, by its path under `audit-log`. */
     private const array BAD_LEAVES = [
-        'storage.connection'              => 123,
-        'storage.maintenance_connection'  => 123,
-        'entries.table'                   => 'audit-log',
-        'integrity.keys'                  => 'x',
-        'integrity.current'               => 'k1',
-        'actor.guards'                    => 'web',
-        'context.trust_request_id'        => 'yes',
-        'context.request_id_header'       => 'X Request',
-        'context.trust_traceparent'       => 'yes',
-        'definitions.require_registered'  => '1',
-        'source.id'                       => 42,
-        'source.region'                   => 42,
-        'redaction.keys'                  => 'password',
-        'redaction.key'                   => 'short',
-        'redaction.identifiers'           => 'maybe',
-        'redaction.ip'                    => 'partial',
-        'redaction.max_bytes'             => 8191,
-        'redaction.max_context_bytes'     => 1023,
-        'failure.mode'                    => 'maybe',
-        'failure.log_channel'             => 42,
-        'delivery.mode'                   => 'queue',
-        'delivery.outbox.connection'      => 42,
-        'delivery.outbox.table'           => 'audit-outbox',
-        'delivery.outbox.lease_seconds'   => 29,
-        'delivery.outbox.max_attempts'    => 0,
-        'delivery.outbox.backoff_seconds' => 0,
-        'delivery.deliveries_table'       => 'audit-deliveries',
+        'storage.connection'                        => 123,
+        'storage.maintenance_connection'            => 123,
+        'entries.table'                             => 'audit-log',
+        'integrity.keys'                            => 'x',
+        'integrity.current'                         => 'k1',
+        'actor.guards'                              => 'web',
+        'context.trust_request_id'                  => 'yes',
+        'context.request_id_header'                 => 'X Request',
+        'context.trust_traceparent'                 => 'yes',
+        'definitions.require_registered'            => '1',
+        'source.id'                                 => 42,
+        'source.region'                             => 42,
+        'redaction.keys'                            => 'password',
+        'redaction.key'                             => 'short',
+        'redaction.identifiers'                     => 'maybe',
+        'redaction.ip'                              => 'partial',
+        'redaction.max_bytes'                       => 8191,
+        'redaction.max_context_bytes'               => 1023,
+        'failure.mode'                              => 'maybe',
+        'failure.log_channel'                       => 42,
+        'delivery.mode'                             => 'queue',
+        'delivery.outbox.connection'                => 42,
+        'delivery.outbox.table'                     => 'audit-outbox',
+        'delivery.outbox.lease_seconds'             => 29,
+        'delivery.outbox.max_attempts'              => 0,
+        'delivery.outbox.backoff_seconds'           => 0,
+        'delivery.deliveries_table'                 => 'audit-deliveries',
+        'integrity.log_id'                          => '../escape',
+        'integrity.checkpoints_table'               => 'Seals',
+        'integrity.members_table'                   => 'seal-members',
+        'integrity.state_table'                     => '1state',
+        'integrity.seal.schedule'                   => 'often',
+        'integrity.seal.sweep_schedule'             => 'nightly',
+        'integrity.seal.batch'                      => 99,
+        'integrity.seal.max_batches'                => 0,
+        'integrity.seal.lookback_seconds'           => 2592001,
+        'integrity.seal.settle_seconds'             => 3601,
+        'integrity.seal.max_attempts'               => 0,
+        'integrity.verify.schedule'                 => '60 * * * *',
+        'integrity.verify.max_unsealed_age_seconds' => 599,
+        'integrity.anchor.driver'                   => 's3',
+        'integrity.anchor.disk'                     => 42,
+        'integrity.anchor.path'                     => '../anchors',
+        'integrity.anchor.batch'                    => 0,
     ];
 
     /** @var array<string, array<string, string>|string> An explicit ring whose settings all pass, so none of them reads `app.key`. */
@@ -209,6 +251,10 @@ final class CheckCommandTest extends TestCase
     {
         if (app(ConfigRepository::class)->has('database.connections.custom')) {
             Schema::connection('custom')->dropIfExists(self::CUSTOM_TABLE);
+
+            foreach (self::CUSTOM_INTEGRITY_TABLES as $table) {
+                Schema::connection('custom')->dropIfExists($table);
+            }
         }
 
         foreach ($this->files as $file) {
@@ -239,7 +285,8 @@ final class CheckCommandTest extends TestCase
 
     /**
      * A table of another name on a connection of its own, with a table prefix
-     * and an explicit key ring, passes once the migration has run there.
+     * and an explicit key ring, passes once the migrations have run there, the
+     * integrity tables' included.
      *
      * @return void
      */
@@ -253,11 +300,17 @@ final class CheckCommandTest extends TestCase
         $config->set('audit-log.entries.table', self::CUSTOM_TABLE);
         $config->set('audit-log.integrity.keys', ['k1' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         $config->set('audit-log.integrity.current', 'k1');
+        $config->set(self::CUSTOM_INTEGRITY_TABLES);
 
         $this->migrate();
 
+        [, $before] = $this->check();
+
+        $this->migrateIntegrityTables();
+
         [$code, $output] = $this->check();
 
+        self::assertContains('[integrity] The checkpoints table `audit_custom_checkpoints` does not exist on connection [custom]' . self::PUBLISH, $before);
         self::assertTrue(Schema::connection('custom')->hasTable(self::CUSTOM_TABLE));
         self::assertSame(0, $code);
         self::assertSame(self::EVERY_SUBJECT_OK, $output);
@@ -435,6 +488,7 @@ final class CheckCommandTest extends TestCase
                 ['audit-log.delivery.outbox.backoff_seconds' => 'soon'],
                 '[config] `audit-log.delivery.outbox.backoff_seconds` must be an integer from 1 to 3600.',
             ],
+            ...self::badIntegritySettings(),
         ];
     }
 
@@ -580,9 +634,9 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The engine's problems are listed with the table's: here a MySQL session
+     * The engine's problems are listed with the tables': here a MySQL session
      * that is not strict, on a connection that answers as MySQL would and holds
-     * no table.
+     * no table, so the integrity tables are missing too.
      *
      * @return void
      */
@@ -610,8 +664,10 @@ final class CheckCommandTest extends TestCase
         self::assertSame([
             '[schema] The storage connection does not run in strict mode; set `strict` to true on the connection, so a value that does not fit fails instead of'
                 . ' being cut.',
-            '[schema] The entries table `audit_log_entries` does not exist on connection [fake]; publish and run the migrations'
-                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+            '[schema] The entries table `audit_log_entries` does not exist on connection [fake]' . self::PUBLISH,
+            '[integrity] The checkpoints table `audit_log_checkpoints` does not exist on connection [fake]' . self::PUBLISH,
+            '[integrity] The checkpoint members table `audit_log_checkpoint_members` does not exist on connection [fake]' . self::PUBLISH,
+            '[integrity] The integrity state table `audit_log_integrity_state` does not exist on connection [fake]' . self::PUBLISH,
         ], self::problemsIn($output));
     }
 
@@ -887,7 +943,8 @@ final class CheckCommandTest extends TestCase
      * boolean either way, the longest guard, header, source id and region,
      * counted in characters, an id and a region left empty, and a redaction key
      * of exactly 32 bytes in either form, each mode, and each budget at its
-     * minimum and its ceiling, as an integer or the digits `env()` returns.
+     * minimum and its ceiling, as an integer or the digits `env()` returns. A
+     * source id that is no log id needs a log id of its own.
      *
      * @return void
      */
@@ -895,6 +952,8 @@ final class CheckCommandTest extends TestCase
     {
         $config = app(ConfigRepository::class);
         $guard  = str_repeat('g', 64);
+
+        $config->set('audit-log.integrity.log_id', 'app-eu-1');
 
         $config->set("auth.guards.{$guard}", ['driver' => 'session', 'provider' => 'users']);
         $config->set('audit-log.actor.guards', [$guard]);
@@ -1001,7 +1060,9 @@ final class CheckCommandTest extends TestCase
     /**
      * Every malformed setting a settings group holds is listed by the one run,
      * by its full path and in the order the settings are read, so a deploy
-     * pipeline never has to fix them one run at a time.
+     * pipeline never has to fix them one run at a time. The source id is read
+     * first, by the integrity settings, since with no log id it is the log id,
+     * and is listed once.
      *
      * @return void
      */
@@ -1018,11 +1079,11 @@ final class CheckCommandTest extends TestCase
         $config->set('audit-log.definitions.require_registered', '1');
 
         self::assertSame([
+            '[config] `audit-log.source.id` must be from 1 to 64 characters, with no control characters.',
             '[config] `audit-log.actor.guards` must be null, or a list of guard names of 1 to 64 characters.',
             self::MALFORMED_TRUST_REQUEST_ID,
             '[config] `audit-log.context.request_id_header` must be a header name of 1 to 64 characters.',
             self::MALFORMED_TRUST_TRACEPARENT,
-            '[config] `audit-log.source.id` must be from 1 to 64 characters, with no control characters.',
             '[config] `audit-log.source.region` must be null or empty, or from 1 to 32 characters, with no control characters.',
             '[config] `audit-log.definitions.require_registered` must be true or false.',
         ], self::problemsIn($this->check()[1]));
@@ -1260,6 +1321,233 @@ final class CheckCommandTest extends TestCase
             '[delivery] OK',
             self::SPILL_NOTE,
         ], $output);
+    }
+
+    /**
+     * A missing integrity table is an integrity problem, named by its label,
+     * and every other subject still passes.
+     *
+     * @return void
+     */
+    public function testAMissingIntegrityTableIsAnIntegrityProblem(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.integrity.members_table', 'audit_absent_members');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] OK',
+            '[connections] OK',
+            '[schema] OK',
+            '[integrity] The checkpoint members table `audit_absent_members` does not exist on connection [testing]' . self::PUBLISH,
+            '[delivery] OK',
+            self::SPILL_NOTE,
+        ], $output);
+    }
+
+    /**
+     * With the `disk` driver an anchor disk that is not configured is an
+     * integrity problem, which is gone once the disk is configured, and the
+     * disk is never resolved.
+     *
+     * @return void
+     */
+    public function testAnUnconfiguredAnchorDiskIsAProblem(): void
+    {
+        $spy = \Mockery::mock(Factory::class);
+
+        $spy->shouldReceive('disk')->never();
+
+        $this->app?->instance(Factory::class, $spy);
+        $this->app?->instance('filesystem', $spy);
+
+        $config = app(ConfigRepository::class);
+
+        $config->set(['audit-log.integrity.anchor.driver' => 'disk', 'audit-log.integrity.anchor.disk' => 'anchors']);
+
+        self::assertSame([1, ['[config] OK', '[connections] OK', '[schema] OK', self::UNCONFIGURED_DISK, '[delivery] OK', self::SPILL_NOTE]], $this->check());
+
+        $config->set('filesystems.disks.anchors', ['driver' => 'local', 'root' => sys_get_temp_dir() . '/audit-log-anchors']);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * With no anchor configured no disk is needed: a disk setting naming
+     * nothing configured passes.
+     *
+     * @return void
+     */
+    public function testTheNullAnchorNeedsNoDisk(): void
+    {
+        app(ConfigRepository::class)->set(['audit-log.integrity.anchor.driver' => null, 'audit-log.integrity.anchor.disk' => 'anchors']);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * A malformed sealing, anchor or integrity table setting is listed under
+     * `config`, and the integrity tables and the disk are then not checked: the
+     * subject still says its key signs.
+     *
+     * @return void
+     */
+    public function testAMalformedSealSettingSkipsTheIntegrityTables(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.integrity.seal.batch'    => 99,
+            'audit-log.integrity.members_table' => 'audit_absent_members',
+            'audit-log.integrity.anchor.driver' => 'disk',
+            'audit-log.integrity.anchor.disk'   => 'anchors',
+        ]);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] `audit-log.integrity.seal.batch` must be an integer from 100 to 50000.',
+            '[connections] OK',
+            '[schema] OK',
+            '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
+        ], $output);
+    }
+
+    /**
+     * A malformed storage connection leaves the integrity tables unchecked,
+     * though the subject is listed, since its key settings pass.
+     *
+     * @return void
+     */
+    public function testAMalformedStorageConnectionSkipsTheIntegrityTables(): void
+    {
+        app(ConfigRepository::class)->set(['audit-log.storage.connection' => 123, 'audit-log.integrity.members_table' => 'audit_absent_members']);
+
+        self::assertSame([
+            1,
+            ['[config] `audit-log.storage.connection` must be a connection name, or null or empty for the default connection.', '[integrity] OK', self::SPILL_NOTE],
+        ], $this->check());
+    }
+
+    /**
+     * A malformed integrity key setting leaves the subject out altogether, so
+     * neither the tables nor the disk are checked.
+     *
+     * @return void
+     */
+    public function testAMalformedKeySettingLeavesTheIntegrityTablesOut(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.integrity.keys'          => 'x',
+            'audit-log.integrity.members_table' => 'audit_absent_members',
+        ]);
+
+        [, $output] = $this->check();
+
+        self::assertSame(['[config] `audit-log.integrity.keys` must be a map of key ids to secrets, or empty to derive the key from `app.key`.'], self::problemsIn($output));
+        self::assertNotContains('[integrity] OK', $output);
+    }
+
+    /**
+     * Every malformed log id, table, sealing, verification and anchor setting
+     * is listed by the one run, by its full path and in the order they are
+     * read.
+     *
+     * @return void
+     */
+    public function testEveryMalformedIntegrityLeafIsReportedInOneRun(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        foreach (array_reverse(self::BAD_LEAVES, true) as $leaf => $bad) {
+
+            if (!str_starts_with($leaf, 'integrity.') || in_array($leaf, ['integrity.keys', 'integrity.current'], true)) {
+                continue;
+            }
+
+            $config->set("audit-log.{$leaf}", $bad);
+        }
+
+        $table = ' must be a table name of 1 to 47 lower-case letters, digits and underscores that does not start with a digit.';
+        $cron  = ' must be a cron expression, or null or empty to schedule nothing.';
+
+        self::assertSame([
+            self::MALFORMED_LOG_ID,
+            '[config] `audit-log.integrity.checkpoints_table`' . $table,
+            '[config] `audit-log.integrity.members_table`' . $table,
+            '[config] `audit-log.integrity.state_table`' . $table,
+            '[config] `audit-log.integrity.seal.batch` must be an integer from 100 to 50000.',
+            '[config] `audit-log.integrity.seal.max_batches` must be an integer from 1 to 100000.',
+            '[config] `audit-log.integrity.seal.lookback_seconds` must be an integer from 0 to 2592000.',
+            '[config] `audit-log.integrity.seal.settle_seconds` must be an integer from 0 to 3600.',
+            '[config] `audit-log.integrity.seal.max_attempts` must be an integer from 1 to 100.',
+            '[config] `audit-log.integrity.verify.max_unsealed_age_seconds` must be an integer from 600 to 31536000.',
+            '[config] `audit-log.integrity.seal.schedule`' . $cron,
+            '[config] `audit-log.integrity.seal.sweep_schedule`' . $cron,
+            '[config] `audit-log.integrity.verify.schedule`' . $cron,
+            '[config] `audit-log.integrity.anchor.driver` must be `null` or `disk`.',
+            '[config] `audit-log.integrity.anchor.disk` must be a disk name of 1 to 64 characters, or null or empty for the default disk.',
+            '[config] `audit-log.integrity.anchor.path` must be 1 to 191 characters of path segments of letters, digits, dots, underscores and hyphens,'
+                . ' separated by single slashes, with no `.` or `..` segment.',
+            '[config] `audit-log.integrity.anchor.batch` must be an integer from 1 to 10000.',
+        ], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Rows of `[the setting, the bad value, the text in it]`: an integrity
+     * setting in each shape it is refused in.
+     *
+     * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
+     */
+    public static function provideIntegrityValuesThatMustNotBePrinted(): iterable
+    {
+        $long = str_repeat(self::SENTINEL, 8);
+
+        yield from [
+            'a log id'                      => ['audit-log.integrity.log_id', self::SENTINEL . '/x', self::SENTINEL],
+            'a log id that is a list'       => ['audit-log.integrity.log_id', [self::SENTINEL], self::SENTINEL],
+            'a source id that is no log id' => ['audit-log.source.id', self::SENTINEL . ' x', self::SENTINEL],
+            'a checkpoints table'           => ['audit-log.integrity.checkpoints_table', self::SENTINEL, self::SENTINEL],
+            'a members table'               => ['audit-log.integrity.members_table', self::SENTINEL, self::SENTINEL],
+            'a state table'                 => ['audit-log.integrity.state_table', self::SENTINEL, self::SENTINEL],
+            'a sealing schedule'            => ['audit-log.integrity.seal.schedule', self::SENTINEL, self::SENTINEL],
+            'a sweep schedule'              => ['audit-log.integrity.seal.sweep_schedule', self::SENTINEL, self::SENTINEL],
+            'a verification schedule'       => ['audit-log.integrity.verify.schedule', [self::SENTINEL], self::SENTINEL],
+            'a batch'                       => ['audit-log.integrity.seal.batch', self::SENTINEL, self::SENTINEL],
+            'a number of batches'           => ['audit-log.integrity.seal.max_batches', self::SENTINEL, self::SENTINEL],
+            'a lookback'                    => ['audit-log.integrity.seal.lookback_seconds', self::SENTINEL, self::SENTINEL],
+            'a settle'                      => ['audit-log.integrity.seal.settle_seconds', self::SENTINEL, self::SENTINEL],
+            'a number of seal attempts'     => ['audit-log.integrity.seal.max_attempts', self::SENTINEL, self::SENTINEL],
+            'an overdue age'                => ['audit-log.integrity.verify.max_unsealed_age_seconds', self::SENTINEL, self::SENTINEL],
+            'an anchor driver'              => ['audit-log.integrity.anchor.driver', self::SENTINEL, self::SENTINEL],
+            'an anchor disk too long'       => ['audit-log.integrity.anchor.disk', $long, self::SENTINEL],
+            'an anchor disk that is a list' => ['audit-log.integrity.anchor.disk', [self::SENTINEL], self::SENTINEL],
+            'an anchor path'                => ['audit-log.integrity.anchor.path', '../' . self::SENTINEL, self::SENTINEL],
+            'an anchor batch'               => ['audit-log.integrity.anchor.batch', self::SENTINEL, self::SENTINEL],
+        ];
+    }
+
+    /**
+     * A bad integrity setting fails the run and never appears in its output,
+     * which names the setting by its key.
+     *
+     * @param  string  $setting
+     * @param  array<array-key, string>|string  $value
+     * @param  string  $sentinel
+     * @return void
+     */
+    #[DataProvider('provideIntegrityValuesThatMustNotBePrinted')]
+    public function testThePrintedOutputHoldsNoValueOfAnIntegritySetting(string $setting, array|string $value, string $sentinel): void
+    {
+        app(ConfigRepository::class)->set($setting, $value);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertCount(1, self::problemsIn($output));
+        self::assertStringNotContainsString($sentinel, implode("\n", $output));
     }
 
     /**
@@ -1613,6 +1901,54 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
+     * Rows of `[the settings changed, the one problem the change causes]` for
+     * the log id, the integrity tables, sealing, verification and the anchor.
+     *
+     * @return array<string, array{0: array<string, array<array-key, int|string>|int|string|null>, 1: string}>
+     */
+    private static function badIntegritySettings(): array
+    {
+        $table  = ' must be a table name of 1 to 47 lower-case letters, digits and underscores that does not start with a digit.';
+        $cron   = ' must be a cron expression, or null or empty to schedule nothing.';
+        $named  = static fn (string $leaf, string $rest): string => "[config] `audit-log.integrity.{$leaf}`{$rest}";
+        $number = static fn (string $leaf, int $least, int $most): string => $named($leaf, sprintf(' must be an integer from %d to %d.', $least, $most));
+        $path   = ' must be 1 to 191 characters of path segments of letters, digits, dots, underscores and hyphens, separated by single slashes,'
+            . ' with no `.` or `..` segment.';
+        $source = '[config] `audit-log.integrity.log_id` is empty, so `audit-log.source.id` is the log id, and it must be 1 to 64 letters, digits,'
+            . ' dots, underscores or hyphens, starting with a letter or a digit.';
+
+        return [
+            'a log id with a slash'                  => [['audit-log.integrity.log_id' => 'app/eu'], self::MALFORMED_LOG_ID],
+            'a log id starting with a dot'           => [['audit-log.integrity.log_id' => '.app'], self::MALFORMED_LOG_ID],
+            'a log id of 65 characters'              => [['audit-log.integrity.log_id' => str_repeat('l', 65)], self::MALFORMED_LOG_ID],
+            'a log id that is a number'              => [['audit-log.integrity.log_id' => 42], self::MALFORMED_LOG_ID],
+            'a source id that is no log id'          => [['audit-log.source.id' => 'billing eu'], $source],
+            'a checkpoints table with capitals'      => [['audit-log.integrity.checkpoints_table' => 'Seals'], $named('checkpoints_table', $table)],
+            'a members table with a hyphen'          => [['audit-log.integrity.members_table' => 'seal-members'], $named('members_table', $table)],
+            'a state table of 48 characters'         => [['audit-log.integrity.state_table' => str_repeat('s', 48)], $named('state_table', $table)],
+            'a sealing schedule that is a word'      => [['audit-log.integrity.seal.schedule' => 'often'], $named('seal.schedule', $cron)],
+            'a sweep schedule out of range'          => [['audit-log.integrity.seal.sweep_schedule' => '15 25 * * *'], $named('seal.sweep_schedule', $cron)],
+            'a verification schedule that is a list' => [['audit-log.integrity.verify.schedule' => ['45 3 * * *']], $named('verify.schedule', $cron)],
+            'a batch under its minimum'              => [['audit-log.integrity.seal.batch' => 99], $number('seal.batch', 100, 50000)],
+            'a batch over its ceiling'               => [['audit-log.integrity.seal.batch' => 50001], $number('seal.batch', 100, 50000)],
+            'no batches'                             => [['audit-log.integrity.seal.max_batches' => 0], $number('seal.max_batches', 1, 100000)],
+            'a lookback over its ceiling'            => [['audit-log.integrity.seal.lookback_seconds' => 2592001], $number('seal.lookback_seconds', 0, 2592000)],
+            'a negative settle'                      => [['audit-log.integrity.seal.settle_seconds' => -1], $number('seal.settle_seconds', 0, 3600)],
+            'no seal attempts'                       => [['audit-log.integrity.seal.max_attempts' => 0], $number('seal.max_attempts', 1, 100)],
+            'an overdue age under its minimum'       => [['audit-log.integrity.verify.max_unsealed_age_seconds' => 599], $number('verify.max_unsealed_age_seconds', 600, 31536000)],
+            'an anchor driver that is unknown'       => [['audit-log.integrity.anchor.driver' => 's3'], $named('anchor.driver', ' must be `null` or `disk`.')],
+            'an anchor driver in capitals'           => [['audit-log.integrity.anchor.driver' => 'DISK'], $named('anchor.driver', ' must be `null` or `disk`.')],
+            'an anchor disk of 65 characters'        => [
+                ['audit-log.integrity.anchor.disk' => str_repeat('d', 65)],
+                $named('anchor.disk', ' must be a disk name of 1 to 64 characters, or null or empty for the default disk.'),
+            ],
+            'an anchor path that leaves its place'  => [['audit-log.integrity.anchor.path' => 'anchors/../../etc'], $named('anchor.path', $path)],
+            'an anchor batch over its ceiling'      => [['audit-log.integrity.anchor.batch' => 10001], $number('anchor.batch', 1, 10000)],
+            'an anchor disk that is not configured' => [['audit-log.integrity.anchor.driver' => 'disk', 'audit-log.integrity.anchor.disk' => 'anchors'], self::UNCONFIGURED_DISK],
+        ];
+    }
+
+    /**
      * Run the command and return its exit code and its output lines.
      *
      * @return array{0: int, 1: list<string>}
@@ -1680,6 +2016,29 @@ final class CheckCommandTest extends TestCase
         }
 
         $migration->up(); // @phpstan-ignore method.notFound
+    }
+
+    /**
+     * Run the shipped integrity migrations with the settings as the test has
+     * them.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateIntegrityTables(): void
+    {
+        foreach (self::INTEGRITY_MIGRATION_PATHS as $path) {
+
+            $migration = include $path;
+
+            if (!$migration instanceof Migration) {
+                self::fail('An integrity migration file did not return a Migration instance.');
+            }
+
+            $migration->up(); // @phpstan-ignore method.notFound
+        }
     }
 
     /**

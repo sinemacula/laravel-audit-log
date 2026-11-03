@@ -7,13 +7,20 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Console\SealCommand;
+use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
+use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
@@ -31,24 +38,29 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 /**
  * A drift guard for the README, the guides in docs/guides and the design notes
  * in docs/design: every outcome, origin, provenance, field handling, key owner,
- * IP mode, identifier mode, failure mode, delivery mode, failed operation and
- * envelope failure, every configuration key and every method of the recorder is
+ * IP mode, identifier mode, failure mode, delivery mode, failed operation,
+ * envelope failure, integrity status, anchoring status, finding and anchor
+ * driver, every configuration key and every method of the recorder is
  * documented; every package event has a row in the events table and in the
  * events guide; every `AuditLog::` call shown exists or is planned; every
- * design note, the redaction note, the threat model and the delivery note among
- * them, exists, has the standard sections and is listed in the index, which
- * ends with the standard sentence; the notes state what they must, and the
- * threat model opens with the limits of key matching; the redaction note lists
- * every entry of the matcher and every IP mode, and never calls key matching
- * fail-closed; every redaction, failure and delivery setting's environment
- * variable is in the README; the outcomes table has exactly its rows, and no
- * document says a failed record is not true; the documented spill channel is
- * the one the tests use, and the spill and the outbox are called personal data;
- * every test a note cites and every file it anchors exists, and no document
- * cites a file kept out of the repository, a milestone or another package of
- * the suite, or describes a transition from a release that does not exist; the
- * vocabulary reserves every prefix and every shipped code sits under one; and
- * every example is valid and neutral, naming no other package of the suite.
+ * design note, the redaction note, the threat model, the delivery note and the
+ * integrity note among them, exists, has the standard sections and is listed in
+ * the index, which ends with the standard sentence; the notes state what they
+ * must, and the threat model opens with the limits of key matching and states
+ * each limit of integrity; the redaction note lists every entry of the matcher
+ * and every IP mode, and never calls key matching fail-closed; the integrity
+ * note has a row for every status and finding; every redaction, failure,
+ * delivery and integrity setting's environment variable is in the README; the
+ * operations guide has its sections, names every integrity command, option and
+ * progress name, and claims nothing beyond its measurements; the outcomes table
+ * has exactly its rows, and no document says a failed record is not true; the
+ * documented spill channel is the one the tests use, and the spill and the
+ * outbox are called personal data; every test a note cites and every file it
+ * anchors exists, and no document cites a file kept out of the repository, a
+ * milestone or another package of the suite, or describes a transition from a
+ * release that does not exist; the vocabulary reserves every prefix and every
+ * shipped code sits under one; and every example is valid and neutral, naming
+ * no other package of the suite.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -74,6 +86,10 @@ final class DocumentationTest extends TestCase
         DeliveryMode::class,
         FailedOperation::class,
         EnvelopeFailure::class,
+        IntegrityStatus::class,
+        AnchorStatus::class,
+        Finding::class,
+        AnchorDriver::class,
     ];
 
     /** @var list<string> The sections of every design note, in order. */
@@ -119,6 +135,51 @@ final class DocumentationTest extends TestCase
 
     /** @var string The events guide. */
     private const string EVENTS_GUIDE = '/docs/guides/events.md';
+
+    /** @var string The integrity note. */
+    private const string INTEGRITY_NOTE = '/docs/design/integrity.md';
+
+    /** @var string The operations guide. */
+    private const string OPERATIONS_GUIDE = '/docs/guides/operations.md';
+
+    /** @var list<string> The sections of the operations guide, in order. */
+    private const array OPERATIONS_SECTIONS = [
+        'Schedule',
+        'Monitor',
+        'Anchor outside the application',
+        'Keys and their lifetimes',
+        'Grants and triggers',
+        'Sealing at volume',
+        'Compliance',
+    ];
+
+    /** @var list<string> What the threat model says integrity does not promise, each in its own section. */
+    private const array INTEGRITY_LIMITS = [
+        'An HMAC is not non-repudiation',
+        'A compromised writer can still add fabricated records',
+        'No seal proves that an uncaptured event happened',
+        'A row deleted before its membership commits is undetectable',
+        'deletion is detectable once membership is committed',
+        'tail loss needs an independently retained witness',
+        'Anyone holding the integrity key can forge seals',
+        'Anchoring bounds exposure without removing it',
+        'No timer bounds that exposure: a stopped scheduler or a backlog extends it',
+        'Installing the package is not compliance',
+    ];
+
+    /** @var string The sentence the operations guide limits its measurements with. */
+    private const string ONE_MACHINE = 'These measurements show one machine and claim nothing beyond it.';
+
+    /** @var string A claim no measurement of one machine supports, however the words are wrapped. */
+    private const string BEYOND_MEASUREMENT = '/\b(?:scales?|scalable|scaling|guarantee[sd]?|any\s+(?:size|volume|load)|unbounded|unlimited|production[\s-]ready'
+        . '|fast\s+enough|blazing)\b/i';
+
+    /** @var string What the disk anchor's guarantees rest on, on S3. */
+    private const string OBJECT_LOCK = 'Object Lock in compliance mode with a retention period and a bucket policy denying version deletion';
+
+    /** @var string Why Object Lock alone is not enough. */
+    private const string NEW_VERSION = 'A new version hides an anchored object from an ordinary read, '
+        . 'so the anchor also needs writes that cannot replace an existing object';
 
     /** @var string The sentence both the threat model and the delivery note state about the spill and the outbox. */
     private const string PERSONAL_DATA = 'The spill and the outbox hold personal data';
@@ -899,6 +960,14 @@ final class DocumentationTest extends TestCase
             'alerting on a record'               => [self::EVENTS_GUIDE, 'Alert on a stored record'],
             'what a listener may do'             => [self::EVENTS_GUIDE, 'What a listener may do'],
         ];
+
+        yield from self::integrityStatements();
+
+        foreach (self::INTEGRITY_LIMITS as $limit) {
+            yield 'the threat model: ' . $limit => [self::THREAT_MODEL, $limit];
+        }
+
+        yield from self::operationsStatements();
     }
 
     /**
@@ -924,15 +993,16 @@ final class DocumentationTest extends TestCase
     {
         yield from [
             'redaction'    => [self::REDACTION_NOTE, ['Key Matching', 'Field Rules', 'Budgets And Omission', 'IP Modes']],
-            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox']],
+            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox', 'Limits Of Integrity']],
             'delivery'     => [self::DELIVERY_NOTE, ['Spill Channel', 'Claims And Receipts', 'Replay', 'Stores And Capabilities', 'Formatters']],
+            'integrity'    => [self::INTEGRITY_NOTE, ['Seals', 'Anchors', 'Verification', 'Pruning And Erasure', 'Alerting And Progress', 'Seams Left']],
         ];
     }
 
     /**
-     * The redaction note, the threat model and the delivery note have their own
-     * sections, in order, between the failure and edge cases and the
-     * implementation anchors.
+     * The redaction note, the threat model, the delivery note and the integrity
+     * note have their own sections, in order, between the failure and edge
+     * cases and the implementation anchors.
      *
      * @param  string  $note
      * @param  list<string>  $extra
@@ -979,6 +1049,21 @@ final class DocumentationTest extends TestCase
     public function testTheThreatModelStatesTheBruteForceLimit(): void
     {
         self::assertStringContainsString(self::BRUTE_FORCE_LIMIT, self::collapsed(self::section(self::read(self::THREAT_MODEL), 'Keys And Brute Force')));
+    }
+
+    /**
+     * The threat model states in its own section each limit of the log's
+     * integrity, however the lines are wrapped.
+     *
+     * @return void
+     */
+    public function testTheThreatModelStatesEachLimitOfIntegrity(): void
+    {
+        $section = self::collapsed(self::section(self::read(self::THREAT_MODEL), 'Limits Of Integrity'));
+
+        foreach (self::INTEGRITY_LIMITS as $limit) {
+            self::assertStringContainsString($limit, $section, sprintf('The threat model\'s limits of integrity do not say: %s.', $limit));
+        }
     }
 
     /**
@@ -1103,6 +1188,168 @@ final class DocumentationTest extends TestCase
 
         foreach ($variables[0] as $variable) {
             self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+        }
+    }
+
+    /**
+     * The integrity settings for sealing, anchoring and verification read from
+     * the environment are named in the README, and there are as many as the
+     * settings that read one.
+     *
+     * @return void
+     */
+    public function testEveryIntegrityLeafNamesItsEnvVarInTheReadme(): void
+    {
+        preg_match_all('/\bAUDIT_LOG_INTEGRITY_(?:LOG|CHECKPOINTS|MEMBERS|STATE|SEAL|VERIFY|ANCHOR)_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
+
+        self::assertCount(17, $variables[0], 'The configuration does not read the integrity environment variables it should.');
+
+        foreach ($variables[0] as $variable) {
+            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+        }
+    }
+
+    /**
+     * Every integrity status, anchoring status and finding has a row of its own
+     * in the integrity note's tables, and each finding's row names the status
+     * the finding gives, so the table cannot drift from the code.
+     *
+     * @return void
+     */
+    public function testTheIntegrityNoteHasARowForEveryStatusAndFinding(): void
+    {
+        $section = self::section(self::read(self::INTEGRITY_NOTE), 'Verification');
+
+        foreach ([...IntegrityStatus::cases(), ...AnchorStatus::cases()] as $status) {
+            self::assertSame(1, preg_match('/^\| `' . $status->value . '` +\|/m', $section), sprintf('The integrity note has no row for `%s`.', $status->value));
+        }
+
+        foreach (Finding::cases() as $finding) {
+
+            $row = '/^\| `' . $finding->value . '` +\| `' . $finding->status()->value . '` +\|/m';
+
+            self::assertSame(1, preg_match($row, $section), sprintf('The integrity note has no row for `%s` giving `%s`.', $finding->value, $finding->status()->value));
+        }
+    }
+
+    /**
+     * The operations guide opens with its title and has its sections, in order.
+     *
+     * @return void
+     */
+    public function testTheOperationsGuideHasItsSections(): void
+    {
+        $guide = self::withoutCodeBlocks(self::read(self::OPERATIONS_GUIDE));
+
+        preg_match_all('/^## (.+)$/m', $guide, $sections);
+
+        self::assertStringStartsWith("# Operations\n", $guide);
+        self::assertSame(self::OPERATIONS_SECTIONS, $sections[1]);
+    }
+
+    /**
+     * The operations guide's section on sealing at volume shows plans of both
+     * engines in code blocks, names the engines and both sizes measured, and
+     * the sentence that limits them, and claims nothing beyond them, however
+     * the words are wrapped.
+     *
+     * @return void
+     */
+    public function testTheOperationsGuideMakesNoClaimBeyondItsMeasurement(): void
+    {
+        $section = self::section(self::read(self::OPERATIONS_GUIDE), 'Sealing at volume');
+        $prose   = self::collapsed(self::withoutCodeBlocks($section));
+
+        preg_match_all('/^ *```text\n/m', $section, $plans);
+
+        self::assertStringContainsString(self::ONE_MACHINE, $prose);
+
+        foreach (['`EXPLAIN FORMAT=TREE`', '`EXPLAIN (ANALYZE, BUFFERS)`', 'MySQL 8.4', 'PostgreSQL 17', '100,000', '1,000,000'] as $fact) {
+            self::assertStringContainsString($fact, $prose);
+        }
+
+        self::assertGreaterThanOrEqual(4, count($plans[0]), 'The operations guide does not show a plan of each query on each engine.');
+        self::assertSame(0, preg_match(self::BEYOND_MEASUREMENT, $prose), 'The operations guide claims more than its measurements show.');
+    }
+
+    /**
+     * The pattern for a claim beyond a measurement finds each form, across a
+     * wrapped line, and not a word that merely resembles one.
+     *
+     * @return void
+     */
+    public function testTheBeyondMeasurementPatternFindsEachForm(): void
+    {
+        foreach (['it scales', 'Scalable', 'scaling up', 'guaranteed', 'at any size', "any\n  volume", 'unbounded', 'production-ready', "fast\n  enough"] as $claim) {
+            self::assertSame(1, preg_match(self::BEYOND_MEASUREMENT, $claim), $claim);
+        }
+
+        foreach (['the lookback window', 'a sweep of 1,000,000 entries', 'each run reads', 'a bound', 'any server'] as $text) {
+            self::assertSame(0, preg_match(self::BEYOND_MEASUREMENT, $text), $text);
+        }
+    }
+
+    /**
+     * Rows of `[text]`: the name of each integrity command, and each of its
+     * options, in code type, as the commands declare them.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideIntegrityCommands(): iterable
+    {
+        foreach ([new SealCommand, new VerifyCommand] as $command) {
+
+            $name = (string) $command->getName();
+
+            yield $name => ['`' . $name . '`'];
+
+            foreach ($command->getDefinition()->getOptions() as $option) {
+                yield $name . ' --' . $option->getName() => ['`--' . $option->getName() . '`'];
+            }
+        }
+    }
+
+    /**
+     * Each integrity command and each of its options is named in the operations
+     * guide.
+     *
+     * @param  string  $text
+     * @return void
+     */
+    #[DataProvider('provideIntegrityCommands')]
+    public function testEveryCommandIsDocumented(string $text): void
+    {
+        self::assertStringContainsString($text, self::read(self::OPERATIONS_GUIDE), sprintf('The operations guide does not name %s.', $text));
+    }
+
+    /**
+     * The commands' rows are read from what the commands declare, both commands
+     * and every option, so the check above is not empty by construction.
+     *
+     * @return void
+     */
+    public function testTheCommandRowsAreEveryDeclaredOption(): void
+    {
+        $rows = array_map(static fn (array $row): string => $row[0], iterator_to_array(self::provideIntegrityCommands()));
+
+        self::assertSame(['`audit-log:seal`', '`--sweep`', '`audit-log:verify`', '`--from`', '`--to`', '`--json`', '`--strict`', '`--sweep-first`'], array_values($rows));
+    }
+
+    /**
+     * Every progress name the package records is named in the operations
+     * guide's section on monitoring, which says what a stale one means.
+     *
+     * @return void
+     */
+    public function testTheOperationsGuideNamesEveryProgressName(): void
+    {
+        $names   = array_values(array_filter((new \ReflectionClass(IntegrityProgress::class))->getConstants(\ReflectionClassConstant::IS_PUBLIC), is_string(...)));
+        $section = self::section(self::read(self::OPERATIONS_GUIDE), 'Monitor');
+
+        self::assertCount(8, $names, 'The progress names are not the ones the guide was written for.');
+
+        foreach ($names as $name) {
+            self::assertStringContainsString('`' . $name . '`', $section, sprintf('The operations guide does not name the progress `%s`.', $name));
         }
     }
 
@@ -1332,6 +1579,85 @@ final class DocumentationTest extends TestCase
         foreach (['AUDIT_LOG_REDACTION_KEY', 'audit-log:check', 'BL-', 'sinemacula/laravel-audit-log'] as $text) {
             self::assertSame(0, preg_match(self::LOCAL_ONLY, $text), $text);
         }
+    }
+
+    /**
+     * Rows of `[note, statement]`: what the integrity note must say, each a
+     * rule of sealing, anchoring and verification, and the inputs the golden
+     * vectors are computed from.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    private static function integrityStatements(): array
+    {
+        $note = self::INTEGRITY_NOTE;
+
+        return [
+            'membership is sealed'        => [$note, 'Membership, not ordering, is what is sealed'],
+            'recording is unchanged'      => [$note, 'no application-level lock or inline chain is added to recording'],
+            'the settle delay'            => [$note, 'The settle delay is an operational delay, not a correctness mechanism'],
+            'no savepoint retry'          => [$note, 'A savepoint retry is never used'],
+            'the chain'                   => [$note, 'The chain is over seal digests'],
+            'the historical key'          => [$note, 'Verification selects the historical key by the stored id, never the current key'],
+            'no reused key id'            => [$note, 'a key id is never reused for different material'],
+            'the key lifetimes'           => [$note, 'separate lifetimes for encryption keys, row-HMAC keys and seal-verification keys'],
+            'an idempotent anchor'        => [$note, 'Anchoring the same seal again returns the same receipt'],
+            'the receipt is a cache'      => [$note, 'The receipt columns are a cache, never the authority'],
+            'an empty remote'             => [$note, 'An empty remote with a non-empty local log is `unanchored`'],
+            'pruning excuses nothing'     => [$note, 'Pruning never excuses a bad signature, a broken chain or an anchor contradiction'],
+            'a ranged run'                => [$note, 'A ranged run never establishes the integrity of the whole log'],
+            'object lock'                 => [$note, self::OBJECT_LOCK],
+            'a new version'               => [$note, self::NEW_VERSION],
+            'conditional guarantees'      => [$note, 'These guarantees are conditional on that configuration'],
+            'a writable disk'             => [$note, 'A disk the application can overwrite or delete is no anchor'],
+            'the anchoring grace'         => [$note, 'A seal sealed within 15 minutes of a strict run\'s start does not fail it while it waits for its anchoring'],
+            'no repair'                   => [$note, 'Verification never repairs and never re-signs'],
+            'the seal key'                => [$note, '`hash_hkdf(\'sha256\', $secret, 32, \'sinemacula/audit-log:seal:v1\', \'\')`'],
+            'the derivation\'s info'      => [$note, 'the info `sinemacula/audit-log:seal:v1`'],
+            'the derivation\'s salt'      => [$note, 'an empty salt'],
+            'the derivation\'s length'    => [$note, 'a length of 32 bytes'],
+            'the seal label'              => [$note, 'the label `audit-log:seal:v1`, a line feed and the 64 hex characters of the seal digest'],
+            'the prune label'             => [$note, 'the label `audit-log:prune:v1`, a line feed'],
+            'the digest\'s encoding'      => [$note, 'the lower-case hex SHA-256 of the canonical encoding of the envelope'],
+            'the members digest\'s order' => [$note, 'sorted bytewise by `entry_id`'],
+            'the golden vectors'          => [$note, '`tests/Fixtures/Integrity/seal-v1.json`'],
+        ];
+    }
+
+    /**
+     * Rows of `[guide, statement]`: what the operations guide must say, each a
+     * caveat of running the integrity commands.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    private static function operationsStatements(): array
+    {
+        $guide = self::OPERATIONS_GUIDE;
+
+        return [
+            'a missed run'               => [$guide, 'a missed scheduled run raises nothing'],
+            'one machine'                => [$guide, self::ONE_MACHINE],
+            'the lookback reads'         => [$guide, 'the recent pass reads the whole lookback window every run'],
+            'the lookback trades'        => [$guide, 'the lookback trades latency against cost'],
+            'the clock skew'             => [$guide, 'The lookback must exceed the worst clock skew between the servers that record'],
+            'sqlite in wal'              => [$guide, 'On SQLite use WAL: in rollback-journal mode a sealer\'s read blocks every writer\'s commit until its transaction ends'],
+            'discovery probes'           => [$guide, 'about two existence checks per doubling of the log'],
+            'the head settles'           => [$guide, 'the head settles every seal\'s anchoring with no further request'],
+            'bounded timeouts'           => [$guide, 'The anchor disk must have bounded timeouts'],
+            'in the background'          => [$guide, '`runInBackground()`'],
+            'a stale lock'               => [$guide, '`php artisan schedule:clear-cache`'],
+            'replayed records'           => [$guide, 'The scheduled verification sweeps first'],
+            'the guide\'s object lock'   => [$guide, self::OBJECT_LOCK],
+            'the guide\'s new version'   => [$guide, self::NEW_VERSION],
+            'the guide\'s conditions'    => [$guide, 'These guarantees are conditional on that configuration'],
+            'no sdk'                     => [$guide, 'no S3 SDK dependency'],
+            'without overlapping'        => [$guide, '`withoutOverlapping()`'],
+            'on one server'              => [$guide, '`onOneServer()`'],
+            'the grants'                 => [$guide, 'Grants And Triggers'],
+            'the alert'                  => [$guide, '`IntegrityCheckFailed`'],
+            'the guide\'s key lifetimes' => [$guide, 'a key id is never reused for different material'],
+            'the guide\'s compliance'    => [$guide, 'Installing the package is not compliance'],
+        ];
     }
 
     /**

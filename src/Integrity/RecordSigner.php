@@ -137,7 +137,7 @@ final readonly class RecordSigner
      * @throws \UnexpectedValueException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
      */
-    public function verifies(array $row): bool
+    public function verifies(#[\SensitiveParameter] array $row): bool
     {
         $signed = self::columns($row, [...self::SIGNED_COLUMNS, self::HMAC_COLUMN]);
         $hmac   = self::storedHmac($signed[self::HMAC_COLUMN]);
@@ -162,7 +162,7 @@ final readonly class RecordSigner
      *
      * @throws \UnexpectedValueException
      */
-    public function capturedDigest(array $row): string
+    public function capturedDigest(#[\SensitiveParameter] array $row): string
     {
         return hash('sha256', CanonicalEncoder::encode(self::columns($row, self::CAPTURED_COLUMNS)));
     }
@@ -179,7 +179,7 @@ final readonly class RecordSigner
      *
      * @throws \UnexpectedValueException
      */
-    private static function columns(array $row, array $columns): array
+    private static function columns(#[\SensitiveParameter] array $row, array $columns): array
     {
         $values = [];
 

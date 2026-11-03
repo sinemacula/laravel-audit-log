@@ -247,7 +247,8 @@ final class EntriesTableSchemaTest extends TestCase
 
     /**
      * Each lookup has its own index, its columns in the order the lookup uses
-     * them and named after the table with a short suffix, and a source's own
+     * them and named after the table with a short suffix, sealing pages the
+     * entries by the time each was recorded and then its id, and a source's own
      * record id is unique within the source.
      *
      * @return void
@@ -267,6 +268,7 @@ final class EntriesTableSchemaTest extends TestCase
             [self::TABLE . '_event_index', ['event', 'occurred_at'], false],
             [self::TABLE . '_occurred_index', ['occurred_at'], false],
             [self::TABLE . '_principal_index', ['principal_type', 'principal_id', 'occurred_at'], false],
+            [self::TABLE . '_recorded_index', ['recorded_at', 'id'], false],
             [self::TABLE . '_source_unique', ['source_id', 'source_record_id'], true],
             [self::TABLE . '_subject_index', ['subject_type', 'subject_id', 'occurred_at'], false],
             [self::TABLE . '_tenant_index', ['tenant_type', 'tenant_id', 'occurred_at'], false],
@@ -289,7 +291,7 @@ final class EntriesTableSchemaTest extends TestCase
         $indexes = array_filter(Schema::getIndexes(self::TABLE), static fn (array $index): bool => !$sqlite || !$index['primary']);
         $lengths = array_map(strlen(...), array_column($indexes, 'name'));
 
-        self::assertCount($sqlite ? 9 : 10, $lengths);
+        self::assertCount($sqlite ? 10 : 11, $lengths);
         self::assertSame(63, max($lengths));
     }
 
