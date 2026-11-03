@@ -9,6 +9,11 @@ parameters:
         - %currentWorkingDirectory%/database
         - %currentWorkingDirectory%/tests
 
+    # The sandbox installs the analysis stack, not the project, so the package's
+    # classes are autoloaded here for larastan, which instantiates models
+    bootstrapFiles:
+        - %currentWorkingDirectory%/.qlty/configs/autoload.php
+
     paths:
         - src
         - database
