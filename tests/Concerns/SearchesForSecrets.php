@@ -157,7 +157,7 @@ trait SearchesForSecrets
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @param  \Closure  $closure
+     * @param  \Closure(): mixed  $closure
      * @return array<array-key, mixed>
      */
     private static function partsOfClosure(\Closure $closure): array

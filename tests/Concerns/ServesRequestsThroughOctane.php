@@ -83,6 +83,8 @@ trait ServesRequestsThroughOctane
 
         $response = $client->responses[$responses];
 
+        self::assertInstanceOf(Response::class, $response);
+
         $this->restoreRootApplication($request, $response);
 
         return TestResponse::fromBaseResponse($response);

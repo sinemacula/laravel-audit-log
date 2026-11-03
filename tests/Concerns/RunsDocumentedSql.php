@@ -357,7 +357,7 @@ trait RunsDocumentedSql
      * `SUPER` while binary logging is on (1419), never another error under the
      * same SQLSTATE, such as a syntax error.
      *
-     * @param  \Closure  $statement
+     * @param  \Closure(): void  $statement
      * @param  string  $driver
      * @param  string  $what
      * @return void
@@ -380,7 +380,7 @@ trait RunsDocumentedSql
      * Run the statement and assert a documented trigger refuses it, naming the
      * table and the statement.
      *
-     * @param  \Closure  $statement
+     * @param  \Closure(): void  $statement
      * @param  string  $table
      * @param  'DELETE'|'TRUNCATE'|'UPDATE'  $operation
      * @return void
@@ -396,7 +396,7 @@ trait RunsDocumentedSql
      * The query exception the statement fails with, failing the test when it
      * succeeds.
      *
-     * @param  \Closure  $statement
+     * @param  \Closure(): void  $statement
      * @param  string  $what
      * @return \Illuminate\Database\QueryException
      */

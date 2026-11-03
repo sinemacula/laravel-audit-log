@@ -161,13 +161,16 @@ trait SealsEntries
      */
     protected function membersOf(string $sealId): array
     {
-        /** @var list<string> $members */
-        return DB::connection(StorageConnection::name())
+        $members = DB::connection(StorageConnection::name())
             ->table(IntegrityTables::membersTable())
             ->where('checkpoint_id', $sealId)
             ->orderBy('entry_id')
             ->pluck('entry_id')
             ->all();
+
+        self::assertContainsOnlyString($members);
+
+        return array_values($members);
     }
 
     /**
