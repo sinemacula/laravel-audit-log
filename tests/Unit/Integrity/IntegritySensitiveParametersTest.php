@@ -934,7 +934,7 @@ final class IntegritySensitiveParametersTest extends TestCase
         foreach ($thrown->getTrace() as $frame) {
             $class = $frame['class'] ?? null;
 
-            if (!in_array($class, $classes, true) || str_starts_with($frame['function'], '{closure')) {
+            if (!in_array($class, $classes, true) || str_contains($frame['function'], '{closure')) {
                 continue;
             }
 
