@@ -16,6 +16,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\TestCase;
 
@@ -276,8 +277,9 @@ final class TransactionalTimingTest extends TestCase
             AuditLog::event(self::CODE)->transactional()->record();
 
             self::fail('Expected the audit insert to fail.');
-        } catch (QueryException $exception) {
-            self::assertStringStartsWith('insert into', $exception->getSql());
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(QueryException::class, $exception->exceptionClass);
+            self::assertNotNull($exception->sqlState);
         }
 
         self::assertSame(1, $this->host()->transactionLevel());
@@ -311,8 +313,9 @@ final class TransactionalTimingTest extends TestCase
             });
 
             self::fail('Expected the audit insert to fail.');
-        } catch (QueryException $exception) {
-            self::assertStringStartsWith('insert into', $exception->getSql());
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(QueryException::class, $exception->exceptionClass);
+            self::assertNotNull($exception->sqlState);
         }
 
         self::assertSame(0, $this->host()->transactionLevel());

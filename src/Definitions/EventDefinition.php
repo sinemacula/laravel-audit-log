@@ -4,14 +4,16 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Definitions;
 
+use SineMacula\Laravel\AuditLog\Contracts\OcsfMapper;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
  * What an application declares about one event code: the version of its payload
- * contract, the category stored on every row, and the rules for the fields of
- * its properties, with how a field no rule names is handled.
+ * contract, the category stored on every row, the rules for the fields of its
+ * properties, with how a field no rule names is handled, and the mapper, if
+ * any, that classifies its records in OCSF.
  *
  * A definition is immutable: every fluent method returns a new instance and
  * leaves the original as it was. A registered code drops the fields no rule
@@ -53,6 +55,7 @@ final readonly class EventDefinition
      * @param  string  $category
      * @param  array<string, \SineMacula\Laravel\AuditLog\Definitions\FieldRule>  $rules
      * @param  \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling  $unlisted
+     * @param  ?class-string<\SineMacula\Laravel\AuditLog\Contracts\OcsfMapper>  $ocsfMapper
      *
      * @throws \InvalidArgumentException
      */
@@ -72,6 +75,9 @@ final readonly class EventDefinition
 
         /** How a field no rule names is handled. */
         public FieldHandling $unlisted,
+
+        /** The class of the mapper that classifies the code's records in OCSF, at this version only; `null` for none. */
+        public ?string $ocsfMapper = null,
     ) {
         if ($version < self::MIN_VERSION || $version > self::MAX_VERSION) {
             throw new \InvalidArgumentException(sprintf('An event definition\'s version must be from %d to %d.', self::MIN_VERSION, self::MAX_VERSION));
@@ -98,7 +104,7 @@ final readonly class EventDefinition
      */
     public static function for(\BackedEnum|string $code): self
     {
-        return new self(EventCode::of($code)->value, self::MIN_VERSION, self::DEFAULT_CATEGORY, [], FieldHandling::DROP);
+        return new self(EventCode::of($code)->value, self::MIN_VERSION, self::DEFAULT_CATEGORY, [], FieldHandling::DROP, null);
     }
 
     /**
@@ -115,7 +121,7 @@ final readonly class EventDefinition
      */
     public static function permissive(EventCode $code): self
     {
-        return new self($code->value, self::MIN_VERSION, self::DEFAULT_CATEGORY, [], FieldHandling::RETAIN);
+        return new self($code->value, self::MIN_VERSION, self::DEFAULT_CATEGORY, [], FieldHandling::RETAIN, null);
     }
 
     /**
@@ -128,7 +134,7 @@ final readonly class EventDefinition
      */
     public function version(int $version): self
     {
-        return new self($this->code, $version, $this->category, $this->rules, $this->unlisted);
+        return new self($this->code, $version, $this->category, $this->rules, $this->unlisted, $this->ocsfMapper);
     }
 
     /**
@@ -142,7 +148,7 @@ final readonly class EventDefinition
      */
     public function category(string $category): self
     {
-        return new self($this->code, $this->version, $category, $this->rules, $this->unlisted);
+        return new self($this->code, $this->version, $category, $this->rules, $this->unlisted, $this->ocsfMapper);
     }
 
     /**
@@ -244,7 +250,7 @@ final readonly class EventDefinition
 
         ksort($rules, SORT_STRING);
 
-        return new self($this->code, $this->version, $this->category, $rules, $this->unlisted);
+        return new self($this->code, $this->version, $this->category, $rules, $this->unlisted, $this->ocsfMapper);
     }
 
     /**
@@ -258,20 +264,41 @@ final readonly class EventDefinition
      */
     public function unlisted(FieldHandling $handling): self
     {
-        return new self($this->code, $this->version, $this->category, $this->rules, $handling);
+        return new self($this->code, $this->version, $this->category, $this->rules, $handling, $this->ocsfMapper);
+    }
+
+    /**
+     * The definition with its records classified in OCSF by the mapper, a class
+     * implementing `OcsfMapper` that the formatter makes from the container.
+     * The mapping applies only to records of the definition's version: a record
+     * of any other version is projected as a Base Event. A definition keeps the
+     * class name, never an instance.
+     *
+     * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\OcsfMapper>  $mapper
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function ocsf(string $mapper): self
+    {
+        if (!class_exists($mapper) || !is_subclass_of($mapper, OcsfMapper::class)) {
+            throw new \InvalidArgumentException(sprintf('`%s` is not a class implementing `OcsfMapper`.', $mapper));
+        }
+
+        return new self($this->code, $this->version, $this->category, $this->rules, $this->unlisted, $mapper);
     }
 
     /**
      * Whether the other definition has the same code, version, category,
-     * unlisted handling and rules.
+     * unlisted handling, OCSF mapper and rules.
      *
      * @param  self  $other
      * @return bool
      */
     public function equals(self $other): bool
     {
-        $mine   = [$this->code, $this->version, $this->category, $this->unlisted];
-        $theirs = [$other->code, $other->version, $other->category, $other->unlisted];
+        $mine   = [$this->code, $this->version, $this->category, $this->unlisted, $this->ocsfMapper];
+        $theirs = [$other->code, $other->version, $other->category, $other->unlisted, $other->ocsfMapper];
 
         return $mine === $theirs && $this->hasEqualRules($other);
     }
@@ -354,7 +381,7 @@ final readonly class EventDefinition
      */
     private function withRules(FieldHandling $handling, array $paths): self
     {
-        $definition = new self($this->code, $this->version, $this->category, $this->rules, $this->unlisted);
+        $definition = new self($this->code, $this->version, $this->category, $this->rules, $this->unlisted, $this->ocsfMapper);
 
         foreach ($paths as $path) {
             $definition = $definition->rule($path, $handling);

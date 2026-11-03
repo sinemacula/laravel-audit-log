@@ -18,6 +18,13 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   is built, and no object, enum or model is ever in it.
 - Its `id` is a UUID version 7 made from the time it occurred, so records captured in one millisecond still sort in the
   order they were captured. `occurred_at` is ISO-8601 in UTC with microseconds (`2026-10-31T23:34:56.789012Z`).
+- A record kept in the outbox or a spill line comes back only through `Records\EnvelopeCodec`, the one decoder, which
+  holds the envelope to its version's schema and verifies its signature first. It then calls
+  `AuditRecord::fromEnvelope()`, so the record keeps its id, its times and its provenance, and is never minimised,
+  sanitised or finalised again. That method checks only each field's type, and it is `@internal`, because nothing but
+  the codec has verified what it is given. `FinalisedRecord` holds the decoded JSON columns and returns them from
+  `toArray()`, since an array cannot tell `{}` from `[]`, nor a map with sequential numeric keys from a list, and the
+  bytes must encode as they were signed.
 - Three versions are kept apart. `record_version` is the envelope's format, `RecordVersion::CURRENT` (1); the event
   version is the payload contract of the code's definition (see `event-definitions.md`); the integrity version belongs
   to the finalised record. `RecordVersion::check()` refuses any record version this release does not support with an
@@ -200,7 +207,10 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 
 ## Implementation Anchors
 
-- `src/Records/AuditRecord.php`: `fromPending()`, `toArray()`.
+- `src/Records/AuditRecord.php`: `fromPending()`, `fromEnvelope()`, `toArray()`; `src/Records/FinalisedRecord.php`:
+  `decoded()`.
+- `src/Records/EnvelopeCodec.php`: `encode()`, `decode()`; `src/Records/EnvelopeRejectedException.php`,
+  `src/Records/Enums/EnvelopeFailure.php`.
 - `src/Records/PendingRecord.php`: `record()`, `NOTE_MAX_BYTES`; `src/Records/PendingSnapshot.php`.
 - `src/Records/Contribution.php`: `fillActor()`, `isActorSettled()`; `src/Contracts/ContextContributor.php`:
   `contribute()`.
@@ -221,7 +231,15 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testOccurredAtIsUtcWithMicroseconds`, `testTheEventVersionAndCategoryAreTheCallers`,
   `testProvenanceIsCapturedAndTheImportFieldsAreNull`, `testReferencesArePairsOrAbsent`,
   `testTheNoteIsStoredUnderTheReservedMetadata`, `testAnOwnedNoteIsNeverStoredInPlaintext`,
-  `testABuilderWithoutAnOriginIsALogicError`, `testTheRecordStoresTheMinimisedValues`
+  `testABuilderWithoutAnOriginIsALogicError`, `testTheRecordStoresTheMinimisedValues`, `testAnEnvelopeKeepsEveryField`,
+  `testAnEnvelopeKeepsItsProvenance`, `testAnEnvelopeOfAnotherTypeIsRefused`, `testAnEnvelopeWithoutAFieldIsRefused`,
+  `testTheEnvelopeParameterIsSensitive`
+- `tests/Unit/Records/FinalisedRecordTest.php` `testADecodedRecordReturnsItsColumnsAsDecoded`,
+  `testADecodedRecordKeepsTableOrder`, `testADecodedRecordIsCheckedLikeAnyOther`
+- `tests/Unit/Records/EnvelopeCodecTest.php` `testDecodingGivesTheSameCanonicalBytes`, `testDecodingKeepsEveryColumn`,
+  `testNothingIsMinimisedOrSanitisedAgain`, `testTheProvenanceIsKept`, `testTheIdAndTimesAreKept`
+- `tests/Integration/Records/EnvelopeStoreRoundTripTest.php` `testADecodedRecordStoresARowEqualToTheEnvelope`,
+  `testAMapWithSequentialNumericKeysSurvivesTheEngine`
 - `tests/Unit/Records/RecordVersionTest.php` `testTheCurrentVersionIsOneAndSupported`, `testAnUnknownVersionIsRefused`
 - `tests/Unit/Records/EventCodeTest.php` `testRefusesAnInvalidCode`, `testTheLengthIsCheckedFirstAndInBytes`,
   `testRefusesTheReservedPrefix`, `testAcceptsCodesThatOnlyResembleTheReservedPrefix`
@@ -273,3 +291,4 @@ Update this note when any of the following change:
 - the note cap, where a note is stored, or what `properties._audit` holds
 - what the builder refuses, or when it is used up
 - what a `Contribution` can fill or read
+- how a record is rebuilt from its envelope, or what that keeps

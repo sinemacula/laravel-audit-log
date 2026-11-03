@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Concerns\InteractsWithAuditStore;
@@ -171,22 +172,23 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * What a failing fake throws comes through the recorder to the caller, and
-     * it holds nothing.
+     * Under the `throw` mode what a failing fake throws comes through the
+     * recorder to the caller, sanitised, and it holds nothing.
      *
      * @return void
      */
     public function testFailingPropagatesThroughTheRecorder(): void
     {
-        $failure = new \RuntimeException('The store is down.');
-        $fake    = FakeAuditStore::failing($failure);
+        config()->set('audit-log.failure.mode', 'throw');
+
+        $fake = FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
         try {
             AuditLog::record(self::CODE);
 
             self::fail('Expected the failure to propagate.');
-        } catch (\RuntimeException $exception) {
-            self::assertSame($failure, $exception);
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(\RuntimeException::class, $exception->exceptionClass);
         }
 
         self::assertSame(0, $fake->count());

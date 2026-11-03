@@ -28,7 +28,10 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  * and after the caller's keys, written there by that minimiser.
  *
  * The delivery pipeline later finalises it, once, adding the time it was
- * recorded and its integrity fields; nothing here knows of that.
+ * recorded and its integrity fields; nothing here knows of that. A record kept
+ * in the outbox or a spill line is rebuilt from its envelope only by the codec,
+ * after its signature verifies, with every field as it was signed: its id,
+ * times and provenance are kept, and it is never minimised again.
  *
  * @api
  *
@@ -180,6 +183,60 @@ final readonly class AuditRecord
         /** When the activity happened, as ISO-8601 UTC with microseconds. */
         public string $occurredAt,
     ) {}
+
+    /**
+     * The record an envelope holds, with every field kept as given: its id, its
+     * times, its provenance and its import fields included. Only the codec
+     * calls it, having verified the envelope, so it never minimises, sanitises
+     * or checks a value beyond its type; a field missing, or of another type,
+     * is refused.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     *
+     * @internal
+     */
+    public static function fromEnvelope(#[\SensitiveParameter] array $fields): self
+    {
+        return new self(
+            id: self::stringOf($fields, 'id'),
+            recordVersion: self::integerOf($fields, 'record_version'),
+            event: self::stringOf($fields, 'event'),
+            eventVersion: self::integerOf($fields, 'event_version'),
+            category: self::stringOf($fields, 'category'),
+            outcome: self::stringOf($fields, 'outcome'),
+            reason: self::nullableOf($fields, 'reason'),
+            actorType: self::nullableOf($fields, 'actor_type'),
+            actorId: self::nullableOf($fields, 'actor_id'),
+            subjectType: self::nullableOf($fields, 'subject_type'),
+            subjectId: self::nullableOf($fields, 'subject_id'),
+            principalType: self::nullableOf($fields, 'principal_type'),
+            principalId: self::nullableOf($fields, 'principal_id'),
+            tenantType: self::nullableOf($fields, 'tenant_type'),
+            tenantId: self::nullableOf($fields, 'tenant_id'),
+            credentialId: self::nullableOf($fields, 'credential_id'),
+            guard: self::nullableOf($fields, 'guard'),
+            sessionId: self::nullableOf($fields, 'session_id'),
+            requestId: self::nullableOf($fields, 'request_id'),
+            traceId: self::nullableOf($fields, 'trace_id'),
+            correlationId: self::nullableOf($fields, 'correlation_id'),
+            origin: self::nullableOf($fields, 'origin'),
+            provenance: self::stringOf($fields, 'provenance'),
+            sourceId: self::stringOf($fields, 'source_id'),
+            sourceRegion: self::nullableOf($fields, 'source_region'),
+            sourceRecordId: self::nullableOf($fields, 'source_record_id'),
+            importBatchId: self::nullableOf($fields, 'import_batch_id'),
+            ip: self::nullableOf($fields, 'ip'),
+            userAgent: self::nullableOf($fields, 'user_agent'),
+            context: self::arrayOf($fields, 'context'),
+            properties: self::arrayOf($fields, 'properties'),
+            occurredAt: self::stringOf($fields, 'occurred_at'),
+        );
+    }
 
     /**
      * The captured record of the pending record, which this uses up: built
@@ -371,6 +428,112 @@ final readonly class AuditRecord
     private static function pair(?Reference $reference): array
     {
         return $reference === null ? [null, null] : [$reference->type, $reference->id];
+    }
+
+    /**
+     * The envelope's field, which must be present; a field holding `null` is
+     * present.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  string  $key
+     * @return mixed
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function fieldOf(#[\SensitiveParameter] array $fields, string $key): mixed
+    {
+        if (!array_key_exists($key, $fields)) {
+            throw new \InvalidArgumentException(sprintf('An envelope has no `%s` field.', $key));
+        }
+
+        return $fields[$key];
+    }
+
+    /**
+     * The envelope's field, which must be a string.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  string  $key
+     * @return string
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function stringOf(#[\SensitiveParameter] array $fields, string $key): string
+    {
+        $value = self::fieldOf($fields, $key);
+
+        return is_string($value) ? $value : throw self::mistyped($key, 'a string');
+    }
+
+    /**
+     * The envelope's field, which must be a string or `null`.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  string  $key
+     * @return ?string
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function nullableOf(#[\SensitiveParameter] array $fields, string $key): ?string
+    {
+        $value = self::fieldOf($fields, $key);
+
+        return $value === null || is_string($value) ? $value : throw self::mistyped($key, 'a string or null');
+    }
+
+    /**
+     * The envelope's field, which must be an integer.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  string  $key
+     * @return int
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function integerOf(#[\SensitiveParameter] array $fields, string $key): int
+    {
+        $value = self::fieldOf($fields, $key);
+
+        return is_int($value) ? $value : throw self::mistyped($key, 'an integer');
+    }
+
+    /**
+     * The envelope's field, which must be an array or `null`.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  string  $key
+     * @return ?array<array-key, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function arrayOf(#[\SensitiveParameter] array $fields, string $key): ?array
+    {
+        $value = self::fieldOf($fields, $key);
+
+        return $value === null || is_array($value) ? $value : throw self::mistyped($key, 'an array or null');
+    }
+
+    /**
+     * The refusal of an envelope's field of another type, naming the field and
+     * what it must be, never its value.
+     *
+     * @param  string  $key
+     * @param  string  $what
+     * @return \InvalidArgumentException
+     */
+    private static function mistyped(string $key, string $what): \InvalidArgumentException
+    {
+        return new \InvalidArgumentException(sprintf('An envelope\'s `%s` must be %s.', $key, $what));
     }
 
     /**

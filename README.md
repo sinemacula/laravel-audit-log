@@ -70,29 +70,39 @@ php artisan vendor:publish --tag=audit-log-migrations
 php artisan migrate
 ```
 
-| Key                              | Default             | Env                                        | What it does                                                                                                                                    |
-|----------------------------------|---------------------|--------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| `storage.connection`             | `null`              | `AUDIT_LOG_STORAGE_CONNECTION`             | The connection the tables live on; `null` or empty for the default connection.                                                                  |
-| `storage.maintenance_connection` | `null`              | `AUDIT_LOG_STORAGE_MAINTENANCE_CONNECTION` | The connection pruning, holds and erasure run through, to the same database with a user of its own; `null` or empty for the storage connection. |
-| `entries.table`                  | `audit_log_entries` | `AUDIT_LOG_ENTRIES_TABLE`                  | The entries table: 1 to 47 lower-case letters, digits and underscores, not starting with a digit.                                               |
-| `integrity.keys`                 | `[]`                | -                                          | A map of key ids to secrets of at least 32 bytes that sign and verify entries; empty to derive the key from `app.key`.                          |
-| `integrity.current`              | `null`              | `AUDIT_LOG_INTEGRITY_CURRENT`              | The key in `integrity.keys` that signs new entries.                                                                                             |
-| `actor.guards`                   | `null`              | -                                          | The guards the ambient actor is read from, in order; `null` for the default guard.                                                              |
-| `context.trust_request_id`       | `false`             | `AUDIT_LOG_CONTEXT_TRUST_REQUEST_ID`       | Whether a request id from a trusted proxy is believed.                                                                                          |
-| `context.request_id_header`      | `X-Request-Id`      | `AUDIT_LOG_CONTEXT_REQUEST_ID_HEADER`      | The header a trusted request id comes in.                                                                                                       |
-| `context.trust_traceparent`      | `false`             | `AUDIT_LOG_CONTEXT_TRUST_TRACEPARENT`      | Whether a `traceparent` from a trusted proxy is believed.                                                                                       |
-| `definitions.require_registered` | `false`             | `AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED` | Whether a code with no registered definition is refused, rather than taking the permissive definition.                                          |
-| `source.id`                      | `null`              | `AUDIT_LOG_SOURCE_ID`                      | The deployment records come from, 1 to 64 characters; `null` or empty for a slug of `app.name`.                                                 |
-| `source.region`                  | `null`              | `AUDIT_LOG_SOURCE_REGION`                  | The region records come from, 1 to 32 characters; `null` or empty for none.                                                                     |
-| `redaction.keys`                 | `[]`                | -                                          | More key names to redact, merged with the built-ins, which cannot be removed.                                                                   |
-| `redaction.key`                  | `null`              | `AUDIT_LOG_REDACTION_KEY`                  | The key identifiers, pseudonyms and IP hashes use, of at least 32 bytes; `null` or empty to derive it from `app.key`.                           |
-| `redaction.identifiers`          | `hash`              | `AUDIT_LOG_REDACTION_IDENTIFIERS`          | Whether a sign-in identifier is stored as a keyed hash (`hash`) or not at all (`drop`).                                                         |
-| `redaction.ip`                   | `full`              | `AUDIT_LOG_REDACTION_IP`                   | How the IP address is stored: `full`, `truncate`, `hash`, `drop` or `encrypt`.                                                                  |
-| `redaction.max_bytes`            | `16384`             | `AUDIT_LOG_REDACTION_MAX_BYTES`            | The most the encoded properties may hold, from 8192 to 16777216; the largest fields are omitted beyond it.                                      |
-| `redaction.max_context_bytes`    | `4096`              | `AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES`    | The most the encoded context may hold, from 1024 to 16777216.                                                                                   |
+| Key                               | Default                | Env                                         | What it does                                                                                                                                    |
+|-----------------------------------|------------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `storage.connection`              | `null`                 | `AUDIT_LOG_STORAGE_CONNECTION`              | The connection the tables live on; `null` or empty for the default connection.                                                                  |
+| `storage.maintenance_connection`  | `null`                 | `AUDIT_LOG_STORAGE_MAINTENANCE_CONNECTION`  | The connection pruning, holds and erasure run through, to the same database with a user of its own; `null` or empty for the storage connection. |
+| `entries.table`                   | `audit_log_entries`    | `AUDIT_LOG_ENTRIES_TABLE`                   | The entries table: 1 to 47 lower-case letters, digits and underscores, not starting with a digit.                                               |
+| `integrity.keys`                  | `[]`                   | -                                           | A map of key ids to secrets of at least 32 bytes that sign and verify entries; empty to derive the key from `app.key`.                          |
+| `integrity.current`               | `null`                 | `AUDIT_LOG_INTEGRITY_CURRENT`               | The key in `integrity.keys` that signs new entries.                                                                                             |
+| `actor.guards`                    | `null`                 | -                                           | The guards the ambient actor is read from, in order; `null` for the default guard.                                                              |
+| `context.trust_request_id`        | `false`                | `AUDIT_LOG_CONTEXT_TRUST_REQUEST_ID`        | Whether a request id from a trusted proxy is believed.                                                                                          |
+| `context.request_id_header`       | `X-Request-Id`         | `AUDIT_LOG_CONTEXT_REQUEST_ID_HEADER`       | The header a trusted request id comes in.                                                                                                       |
+| `context.trust_traceparent`       | `false`                | `AUDIT_LOG_CONTEXT_TRUST_TRACEPARENT`       | Whether a `traceparent` from a trusted proxy is believed.                                                                                       |
+| `definitions.require_registered`  | `false`                | `AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED`  | Whether a code with no registered definition is refused, rather than taking the permissive definition.                                          |
+| `source.id`                       | `null`                 | `AUDIT_LOG_SOURCE_ID`                       | The deployment records come from, 1 to 64 characters; `null` or empty for a slug of `app.name`.                                                 |
+| `source.region`                   | `null`                 | `AUDIT_LOG_SOURCE_REGION`                   | The region records come from, 1 to 32 characters; `null` or empty for none.                                                                     |
+| `redaction.keys`                  | `[]`                   | -                                           | More key names to redact, merged with the built-ins, which cannot be removed.                                                                   |
+| `redaction.key`                   | `null`                 | `AUDIT_LOG_REDACTION_KEY`                   | The key identifiers, pseudonyms and IP hashes use, of at least 32 bytes; `null` or empty to derive it from `app.key`.                           |
+| `redaction.identifiers`           | `hash`                 | `AUDIT_LOG_REDACTION_IDENTIFIERS`           | Whether a sign-in identifier is stored as a keyed hash (`hash`) or not at all (`drop`).                                                         |
+| `redaction.ip`                    | `full`                 | `AUDIT_LOG_REDACTION_IP`                    | How the IP address is stored: `full`, `truncate`, `hash`, `drop` or `encrypt`.                                                                  |
+| `redaction.max_bytes`             | `16384`                | `AUDIT_LOG_REDACTION_MAX_BYTES`             | The most the encoded properties may hold, from 8192 to 16777216; the largest fields are omitted beyond it.                                      |
+| `redaction.max_context_bytes`     | `4096`                 | `AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES`     | The most the encoded context may hold, from 1024 to 16777216.                                                                                   |
+| `failure.mode`                    | `report`               | `AUDIT_LOG_FAILURE_MODE`                    | What a failed write does: `report` it and carry on, or `throw`. A `failClosed()` or `transactional()` record always throws.                     |
+| `failure.log_channel`             | `null`                 | `AUDIT_LOG_FAILURE_LOG_CHANNEL`             | The channel a failed record is spilled to, which holds personal data; `null` or empty for the default channel.                                  |
+| `delivery.mode`                   | `sync`                 | `AUDIT_LOG_DELIVERY_MODE`                   | How a record reaches its store: `sync`, or `outbox` for a drain to deliver it.                                                                  |
+| `delivery.outbox.connection`      | `null`                 | `AUDIT_LOG_DELIVERY_OUTBOX_CONNECTION`      | The connection the outbox table lives on; `null` or empty for the storage connection.                                                           |
+| `delivery.outbox.table`           | `audit_log_outbox`     | `AUDIT_LOG_DELIVERY_OUTBOX_TABLE`           | The outbox table: the same grammar as the entries table.                                                                                        |
+| `delivery.outbox.lease_seconds`   | `300`                  | `AUDIT_LOG_DELIVERY_OUTBOX_LEASE_SECONDS`   | How long a drain's claim on a row lasts, from 30 to 86400.                                                                                      |
+| `delivery.outbox.max_attempts`    | `10`                   | `AUDIT_LOG_DELIVERY_OUTBOX_MAX_ATTEMPTS`    | How many attempts a row gets before it is failed and kept, from 1 to 1000.                                                                      |
+| `delivery.outbox.backoff_seconds` | `60`                   | `AUDIT_LOG_DELIVERY_OUTBOX_BACKOFF_SECONDS` | How long the first retry waits, doubling up to an hour, from 1 to 3600.                                                                         |
+| `delivery.deliveries_table`       | `audit_log_deliveries` | `AUDIT_LOG_DELIVERY_DELIVERIES_TABLE`       | The table of each destination's receipts, on the storage connection: the same grammar as the entries table.                                     |
 
 Run `php artisan audit-log:check` in a deploy pipeline: it reports every malformed setting, missing connection, schema
-problem and unusable key at once, exits non-zero on any, and writes nothing.
+problem and unusable key at once, exits non-zero on any, and writes nothing. It also says whether the spill channel is
+the one a replay can read, and fails on one that would fail together with the store.
 
 ## Usage
 
@@ -137,6 +147,32 @@ AuditLog::event('invoice.approved')->on($invoice)->immediately()->record();     
 AuditLog::event('invoice.approved')->on($invoice)->transactional()->record();        // atomic with an open transaction
 AuditLog::event('invoice.approved')->on($invoice)->failClosed()->record();           // now, and a failure must throw
 ```
+
+A `failClosed()` record needs a durable store and a `transactional()` record a store that joins the transaction, unless
+the outbox acknowledges for it.
+
+A failed write does not break the request by default: the record is spilled to `failure.log_channel` as one line, the
+failure is reported without any value of the record, `AuditWriteFailed` is dispatched, and the code carries on. With
+`failure.mode` set to `throw`, or for a `failClosed()` record, the record is spilled and the failure is thrown. A
+`transactional()` record always throws and is never spilled, because it describes work that has not committed. Either
+way the failure thrown holds the record's id and code, and none of its values. Replay the spilled lines once the store
+is back:
+
+```bash
+php artisan audit-log:replay --spill=storage/logs/audit-spill.log
+```
+
+To write a record in the application's own transaction and deliver it separately, migrate the outbox and set
+`delivery.mode` to `outbox`, then schedule the drain; the package schedules nothing:
+
+```php
+Schedule::command('audit-log:drain --until-empty')->everyMinute();
+```
+
+A row on the connection the application's transactions run on commits exactly when they do. Delivery is at least once,
+in no guaranteed order, and a row that keeps failing is kept rather than deleted, for `audit-log:replay --outbox` to
+requeue. See [delivery](docs/design/delivery.md) for what each mode guarantees and how to configure a spill channel a
+replay can read.
 
 Register event definitions and your own context contributors from a service provider's `boot()`; registration is refused
 once the application has booted:

@@ -7,19 +7,22 @@ namespace Tests\Unit\Definitions;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Contracts\OcsfMapper;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Definitions\FieldRule;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
+use Tests\Fixtures\Export\ApprovedInvoiceMapper;
+use Tests\Fixtures\Export\MisclassifyingMapper;
 
 /**
  * Unit tests for the event definition: its defaults, the versions and
  * categories it keeps and refuses, its immutability, the rules its shorthands
  * add, the duplicate and unreachable rules it refuses in either order, the
  * order it keeps its rules in, which rule decides a field, which rule lies
- * beneath a path, and equality.
+ * beneath a path, the OCSF mapper it names and keeps, and equality.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -792,6 +795,123 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
+     * A definition names no OCSF mapper until `ocsf()` names one, and then
+     * keeps its class name, never an instance; the permissive default names
+     * none.
+     *
+     * @return void
+     */
+    public function testOcsfNamesAMapper(): void
+    {
+        $definition = EventDefinition::for(self::CODE);
+
+        self::assertNull($definition->ocsfMapper);
+        self::assertNull(EventDefinition::permissive(EventCode::of(self::CODE))->ocsfMapper);
+        self::assertSame(ApprovedInvoiceMapper::class, $definition->ocsf(ApprovedInvoiceMapper::class)->ocsfMapper);
+    }
+
+    /**
+     * Naming a mapper returns a new definition, equal to the original in every
+     * other part, and leaves the original without one.
+     *
+     * @return void
+     */
+    public function testOcsfLeavesTheOriginalAsItWas(): void
+    {
+        $original = EventDefinition::for(self::CODE)->version(2)->category('finance')->retain('amount');
+        $mapped   = $original->ocsf(ApprovedInvoiceMapper::class);
+
+        self::assertNotSame($original, $mapped);
+        self::assertNull($original->ocsfMapper);
+        self::assertTrue($original->equals(EventDefinition::for(self::CODE)->version(2)->category('finance')->retain('amount')));
+        self::assertSame([$original->code, $original->version, $original->category], [$mapped->code, $mapped->version, $mapped->category]);
+        self::assertSame([$original->rules, $original->unlisted], [$mapped->rules, $mapped->unlisted]);
+    }
+
+    /**
+     * Rows of `[fluent call]`: a call of each fluent method but `ocsf()`.
+     *
+     * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Definitions\EventDefinition): \SineMacula\Laravel\AuditLog\Definitions\EventDefinition}>
+     */
+    public static function provideMapperKeepingCalls(): iterable
+    {
+        yield from [
+            'version'      => [static fn (EventDefinition $definition): EventDefinition => $definition->version(2)],
+            'category'     => [static fn (EventDefinition $definition): EventDefinition => $definition->category('finance')],
+            'retain'       => [static fn (EventDefinition $definition): EventDefinition => $definition->retain('amount')],
+            'redact'       => [static fn (EventDefinition $definition): EventDefinition => $definition->redact('amount')],
+            'pseudonymise' => [static fn (EventDefinition $definition): EventDefinition => $definition->pseudonymise('email')],
+            'encrypt'      => [static fn (EventDefinition $definition): EventDefinition => $definition->encrypt('card_holder', KeyOwner::SUBJECT)],
+            'drop'         => [static fn (EventDefinition $definition): EventDefinition => $definition->drop('notes')],
+            'rule'         => [static fn (EventDefinition $definition): EventDefinition => $definition->rule('amount', FieldHandling::RETAIN)],
+            'unlisted'     => [static fn (EventDefinition $definition): EventDefinition => $definition->unlisted(FieldHandling::RETAIN)],
+        ];
+    }
+
+    /**
+     * Every other fluent method keeps the mapper the definition names, so the
+     * order a definition is built in does not lose it.
+     *
+     * @param  \Closure(\SineMacula\Laravel\AuditLog\Definitions\EventDefinition): \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $call
+     * @return void
+     */
+    #[DataProvider('provideMapperKeepingCalls')]
+    public function testEveryFluentMethodKeepsTheMapper(\Closure $call): void
+    {
+        $definition = EventDefinition::for(self::CODE)->ocsf(ApprovedInvoiceMapper::class);
+
+        self::assertSame(ApprovedInvoiceMapper::class, $call($definition)->ocsfMapper);
+    }
+
+    /**
+     * Rows of `[class name]`: names that are not of a class implementing the
+     * mapper contract.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideNonMappers(): iterable
+    {
+        yield from [
+            'no class'                => ['Tests\Fixtures\Export\NoSuchMapper'],
+            'a class that is not one' => [\stdClass::class],
+            'the contract itself'     => [OcsfMapper::class],
+            'an empty name'           => [''],
+        ];
+    }
+
+    /**
+     * A name that is not of a class implementing `OcsfMapper` is refused,
+     * naming it.
+     *
+     * @param  string  $mapper
+     * @return void
+     */
+    #[DataProvider('provideNonMappers')]
+    public function testRefusesAnOcsfMapperThatIsNoMapper(string $mapper): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(sprintf('`%s` is not a class implementing `OcsfMapper`.', $mapper));
+
+        // @phpstan-ignore argument.type (the refusal is what is under test)
+        EventDefinition::for(self::CODE)->ocsf($mapper);
+    }
+
+    /**
+     * Two definitions alike but for the mapper they name are different
+     * definitions, so registering a code twice with different mappers
+     * conflicts.
+     *
+     * @return void
+     */
+    public function testADifferentMapperIsADifferentDefinition(): void
+    {
+        $definition = EventDefinition::for(self::CODE);
+
+        self::assertFalse($definition->ocsf(ApprovedInvoiceMapper::class)->equals($definition->ocsf(MisclassifyingMapper::class)));
+        self::assertTrue($definition->ocsf(ApprovedInvoiceMapper::class)->equals($definition->ocsf(ApprovedInvoiceMapper::class)));
+    }
+
+    /**
      * Rows of `[one definition, another, whether they are equal]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Definitions\EventDefinition, 1: \SineMacula\Laravel\AuditLog\Definitions\EventDefinition, 2: bool}>
@@ -813,12 +933,15 @@ final class EventDefinitionTest extends TestCase
             'another rule handling'  => [EventDefinition::for(self::CODE)->retain('a'), EventDefinition::for(self::CODE)->redact('a'), false],
             'another rule owner'     => [$base, $reowned, false],
             'the permissive default' => [EventDefinition::for('x.y'), EventDefinition::permissive(EventCode::of('x.y')), false],
+            'a mapper and none'      => [$base, $base->ocsf(ApprovedInvoiceMapper::class), false],
+            'the same mapper'        => [$base->ocsf(ApprovedInvoiceMapper::class), $rebuilt->ocsf(ApprovedInvoiceMapper::class), true],
         ];
     }
 
     /**
      * Two definitions are equal only when their code, version, category,
-     * unlisted handling and every rule are, and equality is symmetric.
+     * unlisted handling, OCSF mapper and every rule are, and equality is
+     * symmetric.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $one
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $another

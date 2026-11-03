@@ -6,9 +6,11 @@ namespace SineMacula\Laravel\AuditLog\Stores;
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\ConnectionResolverInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
-use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
@@ -54,12 +56,17 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * under 64, or give the audit log a storage connection of its own, on which the
  * host's transactions are not open, so no savepoint is used.
  *
+ * It is durable, since a return is a committed insert or a write inside the
+ * host's transaction, and it participates in a transaction on the storage
+ * connection alone. An application names it as one destination of a
+ * `StackAuditStore`.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @internal
  */
-final readonly class DatabaseAuditStore implements AuditStore
+final readonly class DatabaseAuditStore implements DurableAuditStore
 {
     /**
      * Constructor.
@@ -98,7 +105,7 @@ final readonly class DatabaseAuditStore implements AuditStore
      * @throws \Throwable
      */
     #[\Override]
-    public function store(FinalisedRecord $record): void
+    public function store(#[\SensitiveParameter] FinalisedRecord $record): void
     {
         $connection = $this->connection();
         $table      = EntrySettings::table();
@@ -109,6 +116,35 @@ final readonly class DatabaseAuditStore implements AuditStore
         } catch (UniqueConstraintViolationException $exception) {
             $this->resolveDuplicate($connection, $table, $record, $exception);
         }
+    }
+
+    /**
+     * Whether a return is a durable acknowledgement: always, since a return is
+     * a committed insert, or one inside the host's transaction that commits
+     * with it.
+     *
+     * @return bool
+     */
+    #[\Override]
+    public function isDurable(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Whether a write commits and rolls back with a transaction on the
+     * connection: only on the storage connection, compared by its resolved
+     * name.
+     *
+     * @param  string  $connection
+     * @return bool
+     *
+     * @throws \InvalidArgumentException
+     */
+    #[\Override]
+    public function participatesIn(string $connection): bool
+    {
+        return $connection === StorageConnection::resolvedName();
     }
 
     /**
@@ -133,7 +169,9 @@ final readonly class DatabaseAuditStore implements AuditStore
     /**
      * Insert the row with one plain insert: alone outside a transaction, and in
      * a savepoint of one attempt inside one, so a failed insert rolls back to
-     * it and leaves the host transaction as it was.
+     * it and leaves the host transaction as it was. Laravel decides that
+     * rollback from the failure's message, so it is given the failure masked: a
+     * record's value must not read as a deadlock and cost the savepoint.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $table
@@ -142,7 +180,7 @@ final readonly class DatabaseAuditStore implements AuditStore
      *
      * @throws \Throwable
      */
-    private function insert(Connection $connection, string $table, array $row): void
+    private function insert(Connection $connection, string $table, #[\SensitiveParameter] array $row): void
     {
         if ($connection->transactionLevel() === 0) {
             $connection->table($table)->insert($row);
@@ -150,7 +188,13 @@ final readonly class DatabaseAuditStore implements AuditStore
             return;
         }
 
-        $connection->transaction(static fn (Connection $nested): bool => $nested->table($table)->insert($row));
+        $connection->transaction(static function (Connection $nested) use ($table, $row): void {
+            try {
+                $nested->table($table)->insert($row);
+            } catch (QueryException $exception) { // @phpstan-ignore catch.neverThrown
+                throw FailureClassifier::masked($exception);
+            }
+        });
     }
 
     /**
@@ -170,8 +214,14 @@ final readonly class DatabaseAuditStore implements AuditStore
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
      * @throws \SineMacula\Laravel\AuditLog\Stores\RecordConflictException
      */
-    private function resolveDuplicate(Connection $connection, string $table, FinalisedRecord $record, UniqueConstraintViolationException $exception): void
-    {
+    private function resolveDuplicate(
+        Connection $connection,
+        string $table,
+        #[\SensitiveParameter]
+        FinalisedRecord $record,
+        #[\SensitiveParameter]
+        UniqueConstraintViolationException $exception,
+    ): void {
         $query = $connection->table($table)->useWritePdo()->where('id', $record->record->id);
 
         if ($connection->getDriverName() === 'mysql' && $connection->transactionLevel() > 0) {
@@ -206,7 +256,7 @@ final readonly class DatabaseAuditStore implements AuditStore
      * @throws \UnexpectedValueException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
      */
-    private function conflictWith(FinalisedRecord $record, array $stored): ?RecordConflictException
+    private function conflictWith(#[\SensitiveParameter] FinalisedRecord $record, #[\SensitiveParameter] array $stored): ?RecordConflictException
     {
         $id = $record->record->id;
 

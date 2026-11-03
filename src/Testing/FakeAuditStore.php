@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\AuditLog\Testing;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Container\Container as ContainerContract;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
@@ -27,15 +28,20 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * transaction commits and never when it is rolled back, but a record an
  * immediate or a transactional write stored stays held here if the host rolls
  * back afterwards; rollback and atomicity are for tests against a real
- * database. The store contract's clause that an implementation keeps no state
- * is expressly waived for this test double, whose state is the point.
+ * database. Under `delivery.mode = outbox` a record reaches the fake only when
+ * it is drained. The store contract's clause that an implementation keeps no
+ * state is expressly waived for this test double, whose state is the point.
+ *
+ * It says it is durable and joins a transaction on any connection, so a
+ * fail-closed or a transactional record is never refused for want of a store
+ * that could keep it.
  *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class FakeAuditStore implements AuditStore
+final class FakeAuditStore implements DurableAuditStore
 {
     /** @var list<\SineMacula\Laravel\AuditLog\Records\FinalisedRecord> The records stored, oldest first. */
     private array $finalised = [];
@@ -87,13 +93,39 @@ final class FakeAuditStore implements AuditStore
      * @throws \Throwable
      */
     #[\Override]
-    public function store(FinalisedRecord $record): void
+    public function store(#[\SensitiveParameter] FinalisedRecord $record): void
     {
         if ($this->failure !== null) {
             throw $this->failure;
         }
 
         $this->finalised[] = $record;
+    }
+
+    /**
+     * Whether a return is a durable acknowledgement: always, so a fail-closed
+     * record can be tested against the fake.
+     *
+     * @return bool
+     */
+    #[\Override]
+    public function isDurable(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Whether a write joins a transaction on the connection: always, so a
+     * transactional record can be tested against the fake, whatever its
+     * connection.
+     *
+     * @param  string  $connection
+     * @return bool
+     */
+    #[\Override]
+    public function participatesIn(string $connection): bool
+    {
+        return true;
     }
 
     /**

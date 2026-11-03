@@ -16,14 +16,16 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  * connection. `immediately()` writes now. `transactional()` writes inside the
  * open transaction on the connection, the storage connection by default, atomic
  * with it: it needs that transaction, and a connection other than the storage
- * connection needs the outbox on it. Those conditions are checked when the
- * record is written. A second, different timing is refused; the same one again
- * changes nothing. Without a timing the recorder applies the default: after
- * commit for an explicit record, immediately for a captured one.
+ * connection needs the outbox on it. It also needs a store that joins that
+ * transaction, or the outbox on that connection. Those conditions are checked
+ * when the record is written. A second, different timing is refused; the same
+ * one again changes nothing. Without a timing the recorder applies the default:
+ * after commit for an explicit record, immediately for a captured one.
  *
  * `failClosed()` makes a failed write throw, so returning means the insert
  * succeeded; it is written immediately unless it is transactional, and never
- * after commit, whichever is called first.
+ * after commit, whichever is called first. It needs a durable store, unless the
+ * outbox acknowledges for it.
  *
  * The methods sit in a trait only so the builder stays within the number of
  * methods one class may declare; they are `PendingRecord`'s public surface.
@@ -91,8 +93,9 @@ trait ChoosesDelivery
     /**
      * Write the record inside the open transaction on the connection, the
      * storage connection by default, atomic with it. The transaction must be
-     * open, and a connection other than the storage connection must hold the
-     * outbox; both are checked when the record is written. A failed write
+     * open, a connection other than the storage connection must hold the
+     * outbox, and the store must join the transaction unless the outbox holds
+     * the record; each is checked when the record is written. A failed write
      * always throws, and the caller must not catch it and commit.
      *
      * @param  ?string  $connection
@@ -111,8 +114,10 @@ trait ChoosesDelivery
     /**
      * Make a failed write throw, so returning means the insert succeeded; it is
      * durable once any enclosing transaction on the storage connection commits.
-     * The record is written immediately unless it is transactional, and never
-     * after commit. Calling it again changes nothing.
+     * It needs a durable store, unless the outbox acknowledges for it, which is
+     * checked when the record is written. The record is written immediately
+     * unless it is transactional, and never after commit. Calling it again
+     * changes nothing.
      *
      * @return self
      *

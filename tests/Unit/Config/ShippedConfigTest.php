@@ -68,6 +68,33 @@ final class ShippedConfigTest extends TestCase
     /** @var string Env var holding the budget of the context. */
     private const string REDACTION_MAX_CONTEXT_BYTES_ENV = 'AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES';
 
+    /** @var string Env var naming what a failed write does. */
+    private const string FAILURE_MODE_ENV = 'AUDIT_LOG_FAILURE_MODE';
+
+    /** @var string Env var naming the channel of the spill lines. */
+    private const string FAILURE_LOG_CHANNEL_ENV = 'AUDIT_LOG_FAILURE_LOG_CHANNEL';
+
+    /** @var string Env var naming how a record reaches its store. */
+    private const string DELIVERY_MODE_ENV = 'AUDIT_LOG_DELIVERY_MODE';
+
+    /** @var string Env var naming the outbox's connection. */
+    private const string OUTBOX_CONNECTION_ENV = 'AUDIT_LOG_DELIVERY_OUTBOX_CONNECTION';
+
+    /** @var string Env var naming the outbox's table. */
+    private const string OUTBOX_TABLE_ENV = 'AUDIT_LOG_DELIVERY_OUTBOX_TABLE';
+
+    /** @var string Env var holding how long a drain's claim lasts. */
+    private const string OUTBOX_LEASE_ENV = 'AUDIT_LOG_DELIVERY_OUTBOX_LEASE_SECONDS';
+
+    /** @var string Env var holding how many attempts a row gets. */
+    private const string OUTBOX_ATTEMPTS_ENV = 'AUDIT_LOG_DELIVERY_OUTBOX_MAX_ATTEMPTS';
+
+    /** @var string Env var holding how long the first retry waits. */
+    private const string OUTBOX_BACKOFF_ENV = 'AUDIT_LOG_DELIVERY_OUTBOX_BACKOFF_SECONDS';
+
+    /** @var string Env var naming the receipts table. */
+    private const string DELIVERIES_TABLE_ENV = 'AUDIT_LOG_DELIVERY_DELIVERIES_TABLE';
+
     /** @var list<string> Every env var the shipped file reads. */
     private const array ENVS = [
         self::CONNECTION_ENV,
@@ -85,6 +112,15 @@ final class ShippedConfigTest extends TestCase
         self::REDACTION_IP_ENV,
         self::REDACTION_MAX_BYTES_ENV,
         self::REDACTION_MAX_CONTEXT_BYTES_ENV,
+        self::FAILURE_MODE_ENV,
+        self::FAILURE_LOG_CHANNEL_ENV,
+        self::DELIVERY_MODE_ENV,
+        self::OUTBOX_CONNECTION_ENV,
+        self::OUTBOX_TABLE_ENV,
+        self::OUTBOX_LEASE_ENV,
+        self::OUTBOX_ATTEMPTS_ENV,
+        self::OUTBOX_BACKOFF_ENV,
+        self::DELIVERIES_TABLE_ENV,
     ];
 
     /**
@@ -371,15 +407,6 @@ final class ShippedConfigTest extends TestCase
      */
     public function testTheShippedLeavesArePinned(): void
     {
-        $config = $this->config();
-        $leaves = [];
-
-        foreach ($config as $section => $settings) {
-            foreach (array_keys($settings) as $key) {
-                $leaves[] = $section . '.' . $key;
-            }
-        }
-
         self::assertSame([
             'storage.connection',
             'storage.maintenance_connection',
@@ -399,7 +426,16 @@ final class ShippedConfigTest extends TestCase
             'redaction.ip',
             'redaction.max_bytes',
             'redaction.max_context_bytes',
-        ], $leaves);
+            'failure.mode',
+            'failure.log_channel',
+            'delivery.mode',
+            'delivery.outbox.connection',
+            'delivery.outbox.table',
+            'delivery.outbox.lease_seconds',
+            'delivery.outbox.max_attempts',
+            'delivery.outbox.backoff_seconds',
+            'delivery.deliveries_table',
+        ], self::leavesOf($this->config()));
     }
 
     /**
@@ -520,13 +556,173 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * With nothing in the environment a failed write is reported.
+     *
+     * @return void
+     */
+    public function testTheFailureModeDefaultsToReport(): void
+    {
+        putenv(self::FAILURE_MODE_ENV);
+
+        self::assertSame('report', $this->config()['failure']['mode']);
+    }
+
+    /**
+     * What a failed write does is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheFailureModeIsReadFromTheEnvironment(): void
+    {
+        putenv(self::FAILURE_MODE_ENV . '=throw');
+
+        self::assertSame('throw', $this->config()['failure']['mode']);
+    }
+
+    /**
+     * With nothing in the environment no channel is named, so a spill line goes
+     * to the default channel.
+     *
+     * @return void
+     */
+    public function testTheSpillChannelDefaultsToNone(): void
+    {
+        putenv(self::FAILURE_LOG_CHANNEL_ENV);
+
+        self::assertNull($this->config()['failure']['log_channel']);
+    }
+
+    /**
+     * The channel of the spill lines is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheSpillChannelIsReadFromTheEnvironment(): void
+    {
+        putenv(self::FAILURE_LOG_CHANNEL_ENV . '=audit-spill');
+
+        self::assertSame('audit-spill', $this->config()['failure']['log_channel']);
+    }
+
+    /**
+     * With nothing in the environment a record goes straight to its store.
+     *
+     * @return void
+     */
+    public function testTheDeliveryModeDefaultsToSync(): void
+    {
+        putenv(self::DELIVERY_MODE_ENV);
+
+        self::assertSame('sync', $this->config()['delivery']['mode']);
+    }
+
+    /**
+     * How a record reaches its store is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheDeliveryModeIsReadFromTheEnvironment(): void
+    {
+        putenv(self::DELIVERY_MODE_ENV . '=outbox');
+
+        self::assertSame('outbox', $this->config()['delivery']['mode']);
+    }
+
+    /**
+     * With nothing in the environment the outbox has its defaults, on the
+     * storage connection.
+     *
+     * @return void
+     */
+    public function testTheOutboxHasItsDefaults(): void
+    {
+        self::assertSame([
+            'connection'      => null,
+            'table'           => 'audit_log_outbox',
+            'lease_seconds'   => 300,
+            'max_attempts'    => 10,
+            'backoff_seconds' => 60,
+        ], $this->config()['delivery']['outbox']);
+    }
+
+    /**
+     * Each outbox setting is read from its own env var, raw, so a malformed
+     * number fails closed when it is read rather than casting to `0`.
+     *
+     * @return void
+     */
+    public function testTheOutboxIsReadFromTheEnvironment(): void
+    {
+        putenv(self::OUTBOX_CONNECTION_ENV . '=business');
+        putenv(self::OUTBOX_TABLE_ENV . '=audit_waiting');
+        putenv(self::OUTBOX_LEASE_ENV . '=600');
+        putenv(self::OUTBOX_ATTEMPTS_ENV . '=5');
+        putenv(self::OUTBOX_BACKOFF_ENV . '=30');
+
+        self::assertSame([
+            'connection'      => 'business',
+            'table'           => 'audit_waiting',
+            'lease_seconds'   => '600',
+            'max_attempts'    => '5',
+            'backoff_seconds' => '30',
+        ], $this->config()['delivery']['outbox']);
+    }
+
+    /**
+     * With nothing in the environment the receipts have their own table.
+     *
+     * @return void
+     */
+    public function testTheDeliveriesTableHasItsDefault(): void
+    {
+        putenv(self::DELIVERIES_TABLE_ENV);
+
+        self::assertSame('audit_log_deliveries', $this->config()['delivery']['deliveries_table']);
+    }
+
+    /**
+     * The receipts table is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheDeliveriesTableIsReadFromTheEnvironment(): void
+    {
+        putenv(self::DELIVERIES_TABLE_ENV . '=audit_receipts');
+
+        self::assertSame('audit_receipts', $this->config()['delivery']['deliveries_table']);
+    }
+
+    /**
+     * The dotted leaves of a settings map, a list or an empty map being one
+     * leaf.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $settings
+     * @param  string  $prefix
+     * @return list<string>
+     */
+    private static function leavesOf(array $settings, string $prefix = ''): array
+    {
+        $leaves = [];
+
+        foreach ($settings as $key => $value) {
+            $leaves = is_array($value) && $value !== [] && !array_is_list($value)
+                ? [...$leaves, ...self::leavesOf($value, "{$prefix}{$key}.")]
+                : [...$leaves, "{$prefix}{$key}"];
+        }
+
+        return $leaves;
+    }
+
+    /**
      * Load the shipped configuration file afresh.
      *
      * @formatter:off
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -534,7 +730,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
         $config = require self::CONFIG;
 
         return $config;

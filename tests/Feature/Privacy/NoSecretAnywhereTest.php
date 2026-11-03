@@ -17,12 +17,14 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\ContextContributor;
+use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
+use SineMacula\Laravel\AuditLog\Delivery\CommitFlush;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
@@ -35,7 +37,10 @@ use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
+use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
+use Tests\Concerns\CapturesLogLines;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Privacy\MalformedFieldEncrypter;
@@ -56,8 +61,8 @@ use Tests\Unit\Stubs\StubUser;
  * `AuditLog::event()`, and a helper on the stack takes the key, never the
  * payload, or the search would find the test's own frame.
  *
- * The outbox and the spill do not exist yet, so nothing here searches them;
- * their assertions arrive with them.
+ * A failed write is searched under the `throw` mode, so what is thrown can be
+ * searched too, and a spill line is searched with the rest of the log.
  *
  * It claims no coverage because a fresh application for every key under every
  * search is the slowest class in the suite: a mutant whose covering tests
@@ -74,7 +79,7 @@ use Tests\Unit\Stubs\StubUser;
 #[CoversNothing]
 final class NoSecretAnywhereTest extends TestCase
 {
-    use InteractsWithAuditStore, SearchesForSecrets;
+    use CapturesLogLines, InteractsWithAuditStore, SearchesForSecrets;
 
     /** @var string The code every test records. */
     private const string CODE = 'invoice.approved';
@@ -120,7 +125,7 @@ final class NoSecretAnywhereTest extends TestCase
 
         app(ConfigRepository::class)->set('logging.default', 'null');
 
-        Event::listen(MessageLogged::class, function (MessageLogged $line): void {
+        $this->onLogLine(function (MessageLogged $line): void {
             $this->logged[] = $line;
         });
     }
@@ -278,9 +283,10 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * An after-commit capture waits in the transaction manager as a closure:
-     * the search reaches the record inside it, finds no secret there, and finds
-     * none in the row the commit writes.
+     * An after-commit capture waits in the transaction manager as a closure
+     * holding the record sealed, so a frame holding the transaction cannot
+     * reach it: the search reaches the record once unsealed, finds no secret
+     * there, and finds none in the row the commit writes.
      *
      * @param  string  $key
      * @return void
@@ -297,7 +303,20 @@ final class NoSecretAnywhereTest extends TestCase
 
         self::assertInstanceOf(DatabaseTransactionsManager::class, $manager);
         self::assertSame(1, $manager->getPendingTransactions()->sum(static fn (DatabaseTransactionRecord $transaction): int => count($transaction->getCallbacks())));
-        self::assertTrue(self::holdsText($manager, $record->id), 'The search must reach the deferred record.');
+        $flush = (new \ReflectionFunction($manager->getPendingTransactions()->sole()->getCallbacks()[0]))->getClosureThis();
+
+        self::assertInstanceOf(CommitFlush::class, $flush);
+        $entries = (new \ReflectionProperty($flush, 'entries'))->getValue($flush);
+
+        self::assertIsArray($entries);
+        self::assertIsArray($entries[0]);
+        self::assertInstanceOf(\Closure::class, $entries[0]['work']);
+        $sealed = (new \ReflectionFunction($entries[0]['work']))->getClosureUsedVariables()['sealed'] ?? null;
+
+        self::assertInstanceOf(\SensitiveParameterValue::class, $sealed);
+        self::assertFalse(self::holdsText($manager, $record->id), 'The deferred record must be out of reach of a frame holding the transaction.');
+        self::assertTrue(self::holdsText($sealed->getValue(), $record->id), 'The search must reach the deferred record.');
+        self::assertHoldsNoSecret($sealed->getValue(), 'the deferred record');
         self::assertHoldsNoSecret($manager, 'the transaction manager');
         self::assertSame(0, $this->entryCount());
 
@@ -376,9 +395,9 @@ final class NoSecretAnywhereTest extends TestCase
     #[DataProvider('provideFailClosed')]
     public function testAFailedWriteHoldsNoSecret(bool $failClosed): void
     {
-        $failure = new \RuntimeException(self::STORE_FAILURE);
+        self::throwOnAFailedWrite();
 
-        FakeAuditStore::failing($failure);
+        FakeAuditStore::failing(new \RuntimeException(self::STORE_FAILURE));
 
         $thrown = $this->assertTheCaptureLeavesNoSecret(static function () use ($failClosed): void {
             $pending = self::planted(self::KEY);
@@ -386,7 +405,8 @@ final class NoSecretAnywhereTest extends TestCase
             ($failClosed ? $pending->failClosed() : $pending)->record();
         });
 
-        self::assertSame($failure, $thrown);
+        self::assertInstanceOf(AuditWriteFailedException::class, $thrown);
+        self::assertSame(\RuntimeException::class, $thrown->exceptionClass);
     }
 
     /**
@@ -418,6 +438,7 @@ final class NoSecretAnywhereTest extends TestCase
     #[DataProvider('provideFailClosed')]
     public function testAGarbageIpHoldingASecretIsInNoFailure(bool $failClosed): void
     {
+        self::throwOnAFailedWrite();
         self::bindThrowingStore();
 
         $this->assertTheCaptureLeavesNoSecret(static function () use ($failClosed): void {
@@ -438,6 +459,7 @@ final class NoSecretAnywhereTest extends TestCase
     #[DataProvider('provideFailClosed')]
     public function testAStoreThrowingInsideTheWriteHoldsNoSecret(bool $failClosed): void
     {
+        self::throwOnAFailedWrite();
         self::bindThrowingStore();
 
         $thrown = $this->assertTheCaptureLeavesNoSecret(static function () use ($failClosed): void {
@@ -446,7 +468,8 @@ final class NoSecretAnywhereTest extends TestCase
             ($failClosed ? $pending->failClosed() : $pending)->record();
         });
 
-        self::assertInstanceOf(\RuntimeException::class, $thrown);
+        self::assertInstanceOf(AuditWriteFailedException::class, $thrown);
+        self::assertSame(\RuntimeException::class, $thrown->exceptionClass);
         self::assertContains(Recorder::class, array_column($thrown->getTrace(), 'class'));
     }
 
@@ -458,6 +481,7 @@ final class NoSecretAnywhereTest extends TestCase
      */
     public function testADeferredWriteThatFailsHoldsNoSecret(): void
     {
+        self::throwOnAFailedWrite();
         self::bindThrowingStore();
 
         $connection = $this->storageConnection();
@@ -469,18 +493,21 @@ final class NoSecretAnywhereTest extends TestCase
             $connection->commit();
         });
 
-        self::assertSame(self::STORE_FAILURE, $thrown?->getMessage());
+        self::assertInstanceOf(AuditWriteFailedException::class, $thrown);
+        self::assertSame(\RuntimeException::class, $thrown->exceptionClass);
     }
 
     /**
      * The database's own refusal of an insert quotes the query's bindings in
-     * its message and keeps them on the exception, and they are the minimised
-     * values.
+     * its message and keeps them on the exception, so what is thrown is neither
+     * that exception nor chained to it, and holds no binding.
      *
      * @return void
      */
     public function testARefusedInsertHoldsNoSecret(): void
     {
+        self::throwOnAFailedWrite();
+
         $this->pointAtProbeTable();
 
         $this->beforeApplicationDestroyed(fn () => $this->removeProbeTable());
@@ -489,8 +516,10 @@ final class NoSecretAnywhereTest extends TestCase
             self::planted(self::KEY)->record();
         });
 
-        self::assertInstanceOf(QueryException::class, $thrown);
-        self::assertStringContainsString(Redactor::MARKER, json_encode($thrown->getBindings(), JSON_THROW_ON_ERROR));
+        self::assertInstanceOf(AuditWriteFailedException::class, $thrown);
+        self::assertSame(QueryException::class, $thrown->exceptionClass);
+        self::assertNull($thrown->getPrevious());
+        self::assertFalse(self::holdsText($thrown, Redactor::MARKER));
     }
 
     /**
@@ -1083,7 +1112,8 @@ final class NoSecretAnywhereTest extends TestCase
      * Run the capture with its reports recorded, pass what escaped it and what
      * it reported through the framework's own handler, as an application would,
      * so each is logged, then search the record, the thrown exception and its
-     * chain, the reports and the log.
+     * chain, the reports and the log, spill lines included, which alone are not
+     * logged reports.
      *
      * @param  \Closure(): void  $capture
      * @return ?\Throwable
@@ -1107,7 +1137,9 @@ final class NoSecretAnywhereTest extends TestCase
         }
 
         self::assertNotSame([], $reported, 'The capture must have failed.');
-        self::assertCount(count($reported), $this->logged, 'Each failure must have been logged.');
+        $lines = array_filter($this->logged, static fn (MessageLogged $line): bool => !str_starts_with($line->message, FailureSpill::MARKER));
+
+        self::assertCount(count($reported), $lines, 'Each failure must have been logged.');
         self::assertHoldsNoSecret($thrown, 'the thrown exception');
         self::assertHoldsNoSecret($handler->reports(), 'a report');
         self::assertHoldsNoSecret($this->logged, 'a log line');
@@ -1306,14 +1338,27 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
+     * Make a failed write throw, whatever its timing.
+     *
+     * @return void
+     */
+    private static function throwOnAFailedWrite(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+    }
+
+    /**
      * Bind a store that fails quoting the record it was given, as the
-     * database's own refusal of an insert quotes its bindings.
+     * database's own refusal of an insert quotes its bindings, and let its
+     * failure throw.
      *
      * @return void
      */
     private static function bindStoreQuotingTheRecord(): void
     {
-        app()->instance(AuditStore::class, new class implements AuditStore {
+        self::throwOnAFailedWrite();
+
+        app()->instance(AuditStore::class, new class implements DurableAuditStore {
             /**
              * Fail, quoting the record.
              *
@@ -1327,6 +1372,30 @@ final class NoSecretAnywhereTest extends TestCase
             {
                 throw new \RuntimeException(json_encode($record->toArray(), JSON_THROW_ON_ERROR));
             }
+
+            /**
+             * Say a return is durable, so a fail-closed record reaches the
+             * write.
+             *
+             * @return bool
+             */
+            #[\Override]
+            public function isDurable(): bool
+            {
+                return true;
+            }
+
+            /**
+             * Say the write joins no transaction.
+             *
+             * @param  string  $connection
+             * @return bool
+             */
+            #[\Override]
+            public function participatesIn(string $connection): bool
+            {
+                return false;
+            }
         });
     }
 
@@ -1338,7 +1407,7 @@ final class NoSecretAnywhereTest extends TestCase
      */
     private static function bindThrowingStore(): void
     {
-        app()->instance(AuditStore::class, new class implements AuditStore {
+        app()->instance(AuditStore::class, new class implements DurableAuditStore {
             /**
              * Fail.
              *
@@ -1351,6 +1420,30 @@ final class NoSecretAnywhereTest extends TestCase
             public function store(FinalisedRecord $record): void
             {
                 throw new \RuntimeException('The store is down.');
+            }
+
+            /**
+             * Say a return is durable, so a fail-closed record reaches the
+             * write.
+             *
+             * @return bool
+             */
+            #[\Override]
+            public function isDurable(): bool
+            {
+                return true;
+            }
+
+            /**
+             * Say the write joins no transaction.
+             *
+             * @param  string  $connection
+             * @return bool
+             */
+            #[\Override]
+            public function participatesIn(string $connection): bool
+            {
+                return false;
             }
         });
     }

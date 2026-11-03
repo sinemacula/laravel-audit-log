@@ -4,9 +4,10 @@
 
 This note records where and how entries are kept: the entries table and its columns, indexes and engine options, the
 connections the table lives on and is maintained through, the grants each needs, the read model that never writes, and
-how the database store inserts a finalised record, resolves a duplicate and leaves a host transaction usable. The table
-is evidence, so what each column holds, how a time or an id is written and what the store may do to a row are fixed
-here; a change to any of them changes what every stored row means.
+how the database store inserts a finalised record, resolves a duplicate and leaves a host transaction usable. It also
+records the two tables delivery works from, the outbox and the receipts, and the connection each is on. The table is
+evidence, so what each column holds, how a time or an id is written and what the store may do to a row are fixed here; a
+change to any of them changes what every stored row means.
 
 ## Invariants
 
@@ -38,9 +39,20 @@ here; a change to any of them changes what every stored row means.
   distinct. MySQL must be 8.4 or later and run in strict mode, so a value that does not fit is refused instead of cut.
   MariaDB is not supported, whether through its own driver or the `mysql` one. Column-level collation is never set,
   because PostgreSQL has no such collation.
-- The migration is published under `audit-log-migrations` and never loaded from the package; it runs on the storage
-  connection (`getConnection()` is `StorageConnection::name()`), and its collision guard refuses to create the table
-  over an existing one, naming `entries.table` as the setting that renames it.
+- `delivery.outbox.table` (`audit_log_outbox` by default) is on `delivery.outbox.connection`, which is the storage
+  connection unless it names another. It has `id`, the record's id as its primary key, `payload` (`longText`, the
+  encrypted envelope), `attempts`, `available_at`, `claimed_until`, `claimed_by` (the claim's token), `failed_at`,
+  `last_error_class` and `created_at`, with every time `dateTime(6)`. It is indexed for what a drain reads. The row
+  exists only until the record is delivered, and a failed row is kept. On the connection the application's transactions
+  run on, a row commits exactly when they do.
+- `delivery.deliveries_table` (`audit_log_deliveries` by default) is always on the storage connection, beside the
+  entries it describes. Its primary key is `entry_id` and `destination`, and it has `attempts`, `first_attempted_at`,
+  `delivered_at` and `last_error_class`. A receipt holds nothing of the record and is kept once its record is delivered.
+- Both tables follow the entries table where it applies: the table name's grammar, no foreign keys, and on MySQL
+  `utf8mb4_0900_bin` and `InnoDB`. Delivery is in `delivery.md`.
+- The migrations are published under `audit-log-migrations` and never loaded from the package. Each runs on its own
+  table's connection (the entries' `getConnection()` is `StorageConnection::name()`), and a collision guard refuses to
+  create a table over an existing one, naming the setting that renames it, such as `entries.table`.
 - `storage.connection` is the connection the table lives on (`null` or empty for the default);
   `storage.maintenance_connection` is the one pruning, holds and erasure will run through (`null` or empty for the
   storage connection). Both must reach the same physical database, the maintenance connection with credentials of its
@@ -48,7 +60,9 @@ here; a change to any of them changes what every stored row means.
 - Grants: the application's writer needs `SELECT` and `INSERT` on the entries table and nothing else, on every engine.
   The MySQL duplicate lookup inside a transaction is a shared locking read, which needs `SELECT` alone, never
   `FOR UPDATE`. The maintenance user has the privileges its operations need, and nothing runs DDL at runtime. Triggers
-  refusing `UPDATE` and `DELETE` are optional and documented with integrity.
+  refusing `UPDATE` and `DELETE` are optional and documented with integrity. In outbox mode the writer also needs
+  `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the outbox and `SELECT`, `INSERT` and `UPDATE` on the receipts; only the
+  entries table stays append-only.
 - The read model, `Models\AuditEntry`, takes its table and connection from the settings, has a string key, no
   timestamps and nothing mass assignable, and refuses every model write with `ImmutableEntryException`: `save()`,
   `saveQuietly()`, `update()`, `updateQuietly()`, `push()`, `touch()`, `delete()`, `deleteQuietly()`,
@@ -74,7 +88,8 @@ here; a change to any of them changes what every stored row means.
 - Publish the migrations with `vendor:publish --tag=audit-log-migrations`, set the storage settings, and run `migrate`;
   the table is created on the storage connection under `entries.table`.
 - `php artisan audit-log:check` confirms the settings, the connections, the engine, the table's columns, collation and
-  indexes, and the signing key, reading only and printing no secret.
+  indexes, and the signing key, reading only and printing no secret. In outbox mode it checks the outbox and the
+  receipts too, each on its own connection.
 - A record finalised once is stored with one insert, and inside a host transaction with one savepoint beside it; a
   duplicate costs one more read.
 - A dedicated storage connection, reaching the same database under a connection name of its own, keeps the audit
@@ -95,19 +110,26 @@ here; a change to any of them changes what every stored row means.
 
 ## Seams Left
 
-- `Contracts\AuditStore`, bound to `DatabaseAuditStore` by default, takes other stores.
+- `Contracts\AuditStore`, bound to `DatabaseAuditStore` by default, takes other stores; `delivery.md` has those that
+  ship.
+- Pruning the receipts, which are kept until then.
 - Pruning, holds and erasure on the maintenance connection.
 - Partitioning the entries table.
 
 ## Implementation Anchors
 
-- `database/migrations/2026_11_02_000000_create_audit_log_entries_table.php`.
+- `database/migrations/2026_11_02_000000_create_audit_log_entries_table.php`,
+  `database/migrations/2026_11_02_000100_create_audit_log_outbox_table.php`,
+  `database/migrations/2026_11_02_000200_create_audit_log_deliveries_table.php`.
+- `src/Database/DeliveryTables.php`: `outboxTable()`, `deliveriesTable()`; `src/Delivery/Outbox.php`,
+  `src/Delivery/Receipts.php`.
 - `src/Database/StorageConnection.php`: `name()`, `forMaintenance()`; `src/Database/EntrySettings.php`: `table()`;
   `src/Database/MigrationCollisionGuard.php`: `ensureNotExists()`.
 - `src/Stores/DatabaseAuditStore.php`: `store()`; `src/Stores/RowCodec.php`; `src/Support/StoredTime.php`.
 - `src/Models/AuditEntry.php`, `src/Casts/UtcInstant.php`.
-- `src/Console/SchemaChecks.php`, `src/Console/EngineChecks.php`.
-- `src/AuditLogServiceProvider.php`: `registerPublishing()`; `config/audit-log.php`: `storage`, `entries`.
+- `src/Console/SchemaChecks.php`, `src/Console/EngineChecks.php`, `src/Console/DeliveryChecks.php`,
+  `src/Console/TableShape.php`.
+- `src/AuditLogServiceProvider.php`: `registerPublishing()`; `config/audit-log.php`: `storage`, `entries`, `delivery`.
 
 ## Authoritative Tests
 
@@ -136,6 +158,20 @@ here; a change to any of them changes what every stored row means.
   `testStoringInsideATransactionAddsOnlyASavepoint`,
   `testEachRecordInsideOneTransactionHoldsASavepointUntilTheHostCommits`
 - `tests/Feature/Console/SchemaChecksTest.php` `testTheShippedMigrationHasNoProblems`
+- `tests/Integration/Migration/OutboxTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
+  `testTheIdIsThePrimaryKey`, `testThePayloadIsLongText`, `testStoresEveryTimeToTheMicrosecond`,
+  `testIndexesWhatTheDrainReads`, `testHasNoForeignKeys`, `testAnExistingTableStopsTheMigrationNamingTheSetting`
+- `tests/Integration/Migration/DeliveriesTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
+  `testTheKeyIsTheEntryAndTheDestination`, `testAnEntryHasOneReceiptPerDestination`, `testHasNoForeignKeys`,
+  `testAnExistingTableStopsTheMigrationNamingTheSetting`
+- `tests/Feature/Database/DeliveryTablesTest.php` `testTheTablesHaveTheirDefaults`,
+  `testTheOutboxConnectionDefaultsToTheStorageConnection`, `testANamedOutboxConnectionIsUsed`
+- `tests/Integration/Delivery/ReceiptsTest.php` `testTheReceiptsAreOnTheStorageConnectionWhenTheOutboxMoves`,
+  `testAReceiptHoldsNoPayload`
+- `tests/Integration/Delivery/OutboxTest.php` `testTheOutboxIsOnItsOwnConnectionWhenMoved`,
+  `testTheInsertReachesTheWriter`
+- `tests/Feature/Console/DeliveryChecksTest.php` `testTheOutboxTablesAreNotCheckedInSyncMode`,
+  `testAnOutboxOnItsOwnConnectionIsCheckedThere`
 - `tests/Feature/Console/EngineChecksTest.php` `testMariaDbThroughTheMySqlDriverIsRefusedThoughLaravelStripsItsVersion`,
   `testOnMySqlTheWriterIsCheckedNotTheReplica`
 
@@ -143,11 +179,12 @@ here; a change to any of them changes what every stored row means.
 
 Update this note when any of the following change:
 
-- a column, its type, its length or its nullability
+- a column, its type, its length or its nullability, in any of the three tables
+- the connection the outbox or the receipts are on
 - the precision of `occurred_at` or `recorded_at`
 - an index, its name or its columns
 - the table name's grammar or its length
 - the MySQL collation or engine, or a supported engine or version
-- the grants the store needs
+- the grants the store or the drain needs
 - how the store inserts, opens a savepoint or resolves a duplicate
 - a model write path, or one the query builder forwards

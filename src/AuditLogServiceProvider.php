@@ -8,6 +8,7 @@ use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Database\Events\TransactionCommitting;
 use Illuminate\Foundation\Http\Kernel;
 use Illuminate\Log\Context\Events\ContextDehydrating;
 use Illuminate\Queue\Events\JobExceptionOccurred;
@@ -17,11 +18,14 @@ use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
+use SineMacula\Laravel\AuditLog\Console\DrainCommand;
+use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Delivery\CommitQueue;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
@@ -32,6 +36,7 @@ use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
+use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 
@@ -41,8 +46,13 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
  * its catalogue and contributors, the scoped runtime state, the listeners that
  * track execution frames and carry context into jobs, the global middleware
  * that enters an HTTP frame, its publishing tags (the configuration and the
- * migrations, which it never loads itself) and the `audit-log:check` console
- * command. It adds no route.
+ * migrations, which it never loads itself) and the `audit-log:check`,
+ * `audit-log:drain` and `audit-log:replay` console commands. It adds no route
+ * and schedules nothing.
+ *
+ * Binding `AuditStore` is the only seam for where records go: there is no
+ * manager and no driver registry. The delivery classes are autowired for each
+ * capture, so none outlives a request.
  *
  * Registration of definitions and contributors is frozen once the application
  * has booted, so a long-lived worker registers once. Booting issues no query
@@ -62,6 +72,8 @@ final class AuditLogServiceProvider extends ServiceProvider
     /** @var list<string> File names of the shipped migrations, published under the `audit-log-migrations` tag. */
     private const array MIGRATIONS = [
         '2026_11_02_000000_create_audit_log_entries_table.php',
+        '2026_11_02_000100_create_audit_log_outbox_table.php',
+        '2026_11_02_000200_create_audit_log_deliveries_table.php',
     ];
 
     /**
@@ -95,6 +107,8 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->scopedIf(ExecutionFrames::class);
         $this->app->scopedIf(RequestIdentity::class);
         $this->app->scopedIf(ReportLatch::class);
+        $this->app->scopedIf(WriteGuard::class);
+        $this->app->scopedIf(CommitQueue::class);
     }
 
     /**
@@ -150,7 +164,7 @@ final class AuditLogServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->commands([CheckCommand::class]);
+        $this->commands([CheckCommand::class, DrainCommand::class, ReplayCommand::class]);
     }
 
     /**
@@ -171,6 +185,7 @@ final class AuditLogServiceProvider extends ServiceProvider
         Event::listen(CommandStarting::class, TrackCommandFrames::class);
         Event::listen(JobProcessing::class, TrackJobFrames::class);
         Event::listen(ContextDehydrating::class, CarryContextIntoJobs::class);
+        Event::listen(TransactionCommitting::class, [CommitQueue::class, 'probe']);
 
         $this->app->booted(static function (): void {
             Event::listen(CommandFinished::class, TrackCommandFrames::class);

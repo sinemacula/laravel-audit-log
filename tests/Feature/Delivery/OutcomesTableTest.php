@@ -1,0 +1,1598 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature\Delivery;
+
+use Carbon\CarbonImmutable;
+use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\Connection;
+use Illuminate\Database\DeadlockException;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Monolog\Handler\NullHandler;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Delivery\DrainResult;
+use SineMacula\Laravel\AuditLog\Delivery\FailureHandler;
+use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
+use SineMacula\Laravel\AuditLog\Delivery\OutboxWriter;
+use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
+use SineMacula\Laravel\AuditLog\Delivery\Replayer;
+use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
+use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
+use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
+use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
+use Tests\Concerns\CapturesLogLines;
+use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Concerns\InteractsWithOutbox;
+use Tests\Concerns\SeedsTheOutbox;
+use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Stores\CallbackStore;
+use Tests\Fixtures\Stores\PlainStore;
+use Tests\TestCase;
+
+/**
+ * Feature tests for the guarantee table of the outcomes note, one per row: each
+ * forces the row's failure through the public API and asserts its columns, by
+ * the rows it leaves, the spill lines, the reports, the events and what escaped
+ * to the caller. A last test holds the rows of the note to the tests here, each
+ * way, so neither can move without the other.
+ *
+ * A failed write is a real one on every engine, an insert into a table with a
+ * `NOT NULL` column the write never fills, and a failure fatal to a host is one
+ * Laravel recognises as such, raised as its statement would be. Nothing but the
+ * aborted PostgreSQL host depends on the engine.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+#[CoversClass(RecordDelivery::class)]
+#[CoversClass(OutboxWriter::class)]
+#[CoversClass(FailureHandler::class)]
+#[CoversClass(OutboxDrainer::class)]
+final class OutcomesTableTest extends TestCase
+{
+    use CapturesLogLines, InteractsWithAuditStore, InteractsWithOutbox, SeedsTheOutbox;
+
+    /** @var string The code every test records. */
+    private const string CODE = 'invoice.approved';
+
+    /** @var string The code a record made inside a store has. */
+    private const string INNER_CODE = 'invoice.voided';
+
+    /** @var string A second connection a host transacts on. */
+    private const string OTHER = 'audit_other';
+
+    /** @var string The spill channel, which writes nowhere; the lines are captured as they are logged. */
+    private const string SPILL_CHANNEL = 'audit-spill';
+
+    /** @var string The table holding the host's business data. */
+    private const string INVOICES = 'outcome_invoices';
+
+    /** @var string When each test starts. */
+    private const string NOW = '2026-11-01T12:00:00.000000Z';
+
+    /** @var string When a first retry falls due, by the default backoff. */
+    private const string RETRY_DUE = '2026-11-01T12:01:00.000000Z';
+
+    /** @var string An application key other than the one the tests start with. */
+    private const string OTHER_APP_KEY = 'base64:b3RoZXIgYXBwbGljYXRpb24ga2V5IGZvciB0ZXN0cyE=';
+
+    /** @var string A failure Laravel reads as a concurrency error. */
+    private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock';
+
+    /** @var string A failure Laravel reads as a lost connection. */
+    private const string LOST = 'SQLSTATE[HY000]: General error: 2006 MySQL server has gone away';
+
+    /** @var string A record with the default timing. */
+    private const string AFTER_COMMIT = 'after commit';
+
+    /** @var string A record asked to be written now. */
+    private const string IMMEDIATELY = 'immediately';
+
+    /** @var string A record asked to join the open transaction. */
+    private const string TRANSACTIONAL = 'transactional';
+
+    /** @var string A record asked to fail closed. */
+    private const string FAIL_CLOSED = 'fail closed';
+
+    /** @var string A record asked to fail closed, inside the open transaction. */
+    private const string FAIL_CLOSED_TRANSACTIONAL = 'fail closed transactional';
+
+    /** @var string The synchronous delivery mode. */
+    private const string SYNC = 'sync';
+
+    /** @var string The outbox delivery mode. */
+    private const string OUTBOX = 'outbox';
+
+    /** @var string The failure mode that lets the recording code go on. */
+    private const string REPORT = 'report';
+
+    /** @var string The failure mode that throws to the recording code. */
+    private const string THROW = 'throw';
+
+    /** @var string The note the table is in. */
+    private const string NOTE = __DIR__ . '/../../../docs/design/outcomes.md';
+
+    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter is asked to report. */
+    private RecordingExceptionHandler $reporter;
+
+    /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditWriteFailed> The failed writes said, in order. */
+    private array $failures = [];
+
+    /** @var int How many times a written record was said. */
+    private int $recorded = 0;
+
+    /** @var list<string> The spill files a test wrote, to remove. */
+    private array $files = [];
+
+    /**
+     * Bind the reporter, capture the spill lines, keep what is said, stop the
+     * clock and create the table holding the host's business data.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reporter = new RecordingExceptionHandler;
+
+        $this->app?->instance(ExceptionHandler::class, $this->reporter);
+
+        $this->captureLogLines();
+        $this->moveClockTo(self::NOW);
+
+        Event::listen(AuditWriteFailed::class, function (AuditWriteFailed $event): void {
+            $this->failures[] = $event;
+        });
+
+        Event::listen(AuditRecorded::class, function (): void {
+            $this->recorded++;
+        });
+
+        Schema::connection(self::CONNECTION)->create(self::INVOICES, static function (Blueprint $table): void {
+            $table->string('number', 16);
+        });
+    }
+
+    /**
+     * Roll back any transaction a test left open, drop what it added, remove
+     * its files and release the clock.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function tearDown(): void
+    {
+        foreach (DB::getConnections() as $connection) {
+            while ($connection->transactionLevel() > 0) {
+                $connection->rollBack();
+            }
+        }
+
+        $this->removeProbeTable();
+        $this->removeOutboxProbeTable();
+
+        Schema::connection(self::CONNECTION)->dropIfExists(self::INVOICES);
+
+        foreach ($this->files as $file) {
+            @unlink($file);
+        }
+
+        CarbonImmutable::setTestNow();
+
+        parent::tearDown();
+    }
+
+    /**
+     * `after-commit-sync-report`: dropped on the host's rollback and written at
+     * its commit, in memory until then; a failed write spills, reports and says
+     * it, and the commit stands.
+     *
+     * @return void
+     */
+    public function testRowAfterCommitSyncReport(): void
+    {
+        $this->assertWaitsForTheCommit($this->host(), entries: 1, outbox: 0, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        $this->host()->beginTransaction();
+        $this->businessChange();
+        $this->recordAs(self::AFTER_COMMIT);
+
+        $this->assertOutcome();
+
+        $this->host()->commit();
+
+        self::assertSame(1, $this->businessRows());
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+    }
+
+    /**
+     * `after-commit-sync-throw`: as the row above until the write fails, when
+     * it spills and says it, reports nothing and throws from the commit, whose
+     * work has already committed.
+     *
+     * @return void
+     */
+    public function testRowAfterCommitSyncThrow(): void
+    {
+        $this->failureMode(self::THROW);
+
+        $this->assertWaitsForTheCommit($this->host(), entries: 1, outbox: 0, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        $this->host()->beginTransaction();
+        $this->businessChange();
+        $this->recordAs(self::AFTER_COMMIT);
+
+        $this->assertOutcome();
+
+        self::assertSanitised($this->thrownBy(fn () => $this->host()->commit()));
+        self::assertSame(0, $this->host()->transactionLevel());
+        self::assertSame(1, $this->businessRows());
+        $this->assertOutcome(spills: 1, events: 1);
+    }
+
+    /**
+     * `after-commit-none-open`: with no transaction open the record is written
+     * now, or it is in the spill with a report and an event.
+     *
+     * @return void
+     */
+    public function testRowAfterCommitNoneOpen(): void
+    {
+        $record = $this->recordAs(self::AFTER_COMMIT);
+
+        self::assertSame($record->id, $this->storedRow($record->id)['id']);
+        $this->assertOutcome(entries: 1, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        $this->recordAs(self::AFTER_COMMIT);
+
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+    }
+
+    /**
+     * `after-commit-outbox-same`: the row is inserted now, inside the selected
+     * transaction, and goes with its rollback; a failed insert is reported and
+     * said at once, and its spill waits for the commit and goes with a
+     * rollback.
+     *
+     * @return void
+     */
+    public function testRowAfterCommitOutboxSame(): void
+    {
+        $this->outboxModeOn();
+
+        $this->assertJoinsTheHost(self::AFTER_COMMIT, entries: 0, outbox: 1, recorded: 0);
+
+        $this->startOver();
+        $this->pointOutboxAtProbeTable();
+
+        $this->host()->beginTransaction();
+        $this->businessChange();
+        $this->recordAs(self::AFTER_COMMIT);
+
+        $this->assertOutcome(reports: 1, events: 1);
+
+        $this->host()->commit();
+
+        self::assertSame(1, $this->businessRows());
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+
+        $this->startOver();
+
+        $this->host()->beginTransaction();
+        $this->recordAs(self::AFTER_COMMIT);
+        $this->host()->rollBack();
+
+        $this->assertOutcome(reports: 1, events: 1);
+    }
+
+    /**
+     * `after-commit-outbox-same-throw`: the row is written as in the row above;
+     * a failed insert is said and thrown now, reports nothing, and its spill
+     * waits for the commit and goes with a rollback.
+     *
+     * @return void
+     */
+    public function testRowAfterCommitOutboxSameThrow(): void
+    {
+        $this->outboxModeOn();
+        $this->failureMode(self::THROW);
+
+        $this->assertJoinsTheHost(self::AFTER_COMMIT, entries: 0, outbox: 1, recorded: 0);
+
+        $this->startOver();
+        $this->pointOutboxAtProbeTable();
+
+        $this->host()->beginTransaction();
+        $this->businessChange();
+
+        self::assertSanitised($this->thrownBy(fn () => $this->recordAs(self::AFTER_COMMIT)));
+        $this->assertOutcome(events: 1);
+
+        $this->host()->commit();
+
+        self::assertSame(1, $this->businessRows());
+        $this->assertOutcome(spills: 1, events: 1);
+
+        $this->startOver();
+
+        $this->host()->beginTransaction();
+
+        self::assertSanitised($this->thrownBy(fn () => $this->recordAs(self::AFTER_COMMIT)));
+
+        $this->host()->rollBack();
+
+        $this->assertOutcome(events: 1);
+    }
+
+    /**
+     * `after-commit-outbox-other`: with the selected transaction on another
+     * connection the row waits for that commit and is dropped by its rollback,
+     * in memory until then; a failed insert spills, reports and says it, and
+     * the commit stands.
+     *
+     * @return void
+     */
+    public function testRowAfterCommitOutboxOther(): void
+    {
+        $this->outboxModeOn();
+
+        $other = DB::connection(self::OTHER);
+
+        self::assertInstanceOf(Connection::class, $other);
+
+        $this->assertWaitsForTheCommit($other, entries: 0, outbox: 1, recorded: 0);
+
+        $this->startOver();
+        $this->pointOutboxAtProbeTable();
+
+        $other->beginTransaction();
+        $this->recordAs(self::AFTER_COMMIT);
+
+        $this->assertOutcome();
+
+        $other->commit();
+
+        self::assertSame(0, $other->transactionLevel());
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+    }
+
+    /**
+     * `immediately-sync-report`: stored now, and rolled back with the host on
+     * the shared connection; a failed write spills, reports and says it at
+     * once, and the host stays usable.
+     *
+     * @return void
+     */
+    public function testRowImmediatelySyncReport(): void
+    {
+        $this->assertWrittenNowAndRolledBack(self::IMMEDIATELY, entries: 1, outbox: 0, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        $this->host()->beginTransaction();
+        $this->businessChange();
+        $this->recordAs(self::IMMEDIATELY);
+
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+
+        $this->host()->commit();
+
+        self::assertSame(1, $this->businessRows());
+    }
+
+    /**
+     * `immediately-sync-throw`: a return means stored; a failed write spills,
+     * says it and throws at the call, reporting nothing, and the host stays
+     * usable.
+     *
+     * @return void
+     */
+    public function testRowImmediatelySyncThrow(): void
+    {
+        $this->failureMode(self::THROW);
+
+        $this->assertWrittenNowAndRolledBack(self::IMMEDIATELY, entries: 1, outbox: 0, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        $this->host()->beginTransaction();
+        $this->businessChange();
+
+        self::assertSanitised($this->thrownBy(fn () => $this->recordAs(self::IMMEDIATELY)));
+        $this->assertOutcome(spills: 1, events: 1);
+
+        $this->host()->commit();
+
+        self::assertSame(1, $this->businessRows());
+    }
+
+    /**
+     * `immediately-outbox`: a row now, rolled back with the host on the shared
+     * connection, and a failed insert spills, reports and says it at once.
+     *
+     * @return void
+     */
+    public function testRowImmediatelyOutbox(): void
+    {
+        $this->outboxModeOn();
+
+        $this->assertWrittenNowAndRolledBack(self::IMMEDIATELY, entries: 0, outbox: 1, recorded: 0);
+
+        $this->startOver();
+        $this->pointOutboxAtProbeTable();
+
+        $this->recordAs(self::IMMEDIATELY);
+
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+    }
+
+    /**
+     * Rows of `[failure mode]`: each way the failure mode can be set, for the
+     * rows that hold under either.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideFailureModes(): iterable
+    {
+        yield from [
+            'report' => [self::REPORT],
+            'throw'  => [self::THROW],
+        ];
+    }
+
+    /**
+     * `transactional-sync`: stored inside the transaction under either failure
+     * mode, and rolled back with it; a failed write says it, throws and leaves
+     * no spill, and left uncaught it rolls the business change back.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideFailureModes')]
+    public function testRowTransactionalSync(string $mode): void
+    {
+        $this->failureMode($mode);
+
+        $this->assertJoinsTheHost(self::TRANSACTIONAL, entries: 1, outbox: 0, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        $this->assertThrowsAndSpillsNothing(self::TRANSACTIONAL);
+    }
+
+    /**
+     * `transactional-outbox`: a row inside the transaction under either failure
+     * mode, and rolled back with it; a failed insert says it, throws and leaves
+     * no spill, and left uncaught it rolls the business change back.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideFailureModes')]
+    public function testRowTransactionalOutbox(string $mode): void
+    {
+        $this->outboxModeOn();
+        $this->failureMode($mode);
+
+        $this->assertJoinsTheHost(self::TRANSACTIONAL, entries: 0, outbox: 1, recorded: 0);
+
+        $this->startOver();
+        $this->pointOutboxAtProbeTable();
+
+        $this->assertThrowsAndSpillsNothing(self::TRANSACTIONAL);
+    }
+
+    /**
+     * `fail-closed-sync`: under either failure mode a return means stored, now,
+     * rolled back with the host on the shared connection; a failed write
+     * spills, says it and throws at the call, reporting nothing.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideFailureModes')]
+    public function testRowFailClosedSync(string $mode): void
+    {
+        $this->failureMode($mode);
+
+        $this->assertWrittenNowAndRolledBack(self::FAIL_CLOSED, entries: 1, outbox: 0, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        self::assertSanitised($this->thrownBy(fn () => $this->recordAs(self::FAIL_CLOSED)));
+        $this->assertOutcome(spills: 1, events: 1);
+    }
+
+    /**
+     * `fail-closed-outbox`: under either failure mode a return means a row,
+     * written now and rolled back with the host on the shared connection; a
+     * failed insert spills, says it and throws at the call, reporting nothing.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideFailureModes')]
+    public function testRowFailClosedOutbox(string $mode): void
+    {
+        $this->outboxModeOn();
+        $this->failureMode($mode);
+
+        $this->assertWrittenNowAndRolledBack(self::FAIL_CLOSED, entries: 0, outbox: 1, recorded: 0);
+
+        $this->startOver();
+        $this->pointOutboxAtProbeTable();
+
+        self::assertSanitised($this->thrownBy(fn () => $this->recordAs(self::FAIL_CLOSED)));
+        $this->assertOutcome(spills: 1, events: 1);
+    }
+
+    /**
+     * Rows of `[delivery mode, failure mode]`: every pairing.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideDeliveryAndFailureModes(): iterable
+    {
+        yield from [
+            'sync, report'   => [self::SYNC, self::REPORT],
+            'sync, throw'    => [self::SYNC, self::THROW],
+            'outbox, report' => [self::OUTBOX, self::REPORT],
+            'outbox, throw'  => [self::OUTBOX, self::THROW],
+        ];
+    }
+
+    /**
+     * `fail-closed-transactional`: it stays transactional in either delivery
+     * mode and under either failure mode, so a failed write says it, throws and
+     * leaves no spill, and failing closed brings no spill back.
+     *
+     * @param  string  $delivery
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideDeliveryAndFailureModes')]
+    public function testRowFailClosedTransactional(string $delivery, string $mode): void
+    {
+        $outbox = $delivery === self::OUTBOX;
+
+        if ($outbox) {
+            $this->outboxModeOn();
+        }
+
+        $this->failureMode($mode);
+
+        $this->assertJoinsTheHost(self::FAIL_CLOSED_TRANSACTIONAL, entries: $outbox ? 0 : 1, outbox: $outbox ? 1 : 0, recorded: $outbox ? 0 : 1);
+
+        $this->startOver();
+
+        $outbox ? $this->pointOutboxAtProbeTable() : $this->pointAtProbeTable();
+
+        $this->assertThrowsAndSpillsNothing(self::FAIL_CLOSED_TRANSACTIONAL);
+    }
+
+    /**
+     * Rows of `[how it is recorded, delivery mode, failure mode]`: each way a
+     * record is written while the host's transaction is open.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function provideWritesInsideAHost(): iterable
+    {
+        yield from [
+            'after commit, outbox, report'  => [self::AFTER_COMMIT, self::OUTBOX, self::REPORT],
+            'after commit, outbox, throw'   => [self::AFTER_COMMIT, self::OUTBOX, self::THROW],
+            'immediately, sync, report'     => [self::IMMEDIATELY, self::SYNC, self::REPORT],
+            'immediately, sync, throw'      => [self::IMMEDIATELY, self::SYNC, self::THROW],
+            'immediately, outbox, report'   => [self::IMMEDIATELY, self::OUTBOX, self::REPORT],
+            'transactional, sync, report'   => [self::TRANSACTIONAL, self::SYNC, self::REPORT],
+            'transactional, outbox, report' => [self::TRANSACTIONAL, self::OUTBOX, self::REPORT],
+            'fail closed, sync, report'     => [self::FAIL_CLOSED, self::SYNC, self::REPORT],
+            'fail closed, outbox, report'   => [self::FAIL_CLOSED, self::OUTBOX, self::REPORT],
+        ];
+    }
+
+    /**
+     * `host-deadlock`: a deadlock while the host's transaction is open is said
+     * but neither spilled nor reported, and escapes as a sanitised
+     * `DeadlockException` whatever the policy, on which the host's own
+     * transaction rolls back.
+     *
+     * @param  string  $how
+     * @param  string  $delivery
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideWritesInsideAHost')]
+    public function testRowHostDeadlock(string $how, string $delivery, string $mode): void
+    {
+        $thrown = $this->thrownByAFatalWrite($how, $delivery, $mode, self::DEADLOCK, '40001', 1213);
+
+        self::assertInstanceOf(DeadlockException::class, $thrown);
+        self::assertNull($thrown->getPrevious());
+        self::assertSame(0, $this->businessRows());
+        self::assertSame(0, $this->host()->transactionLevel());
+        $this->assertOutcome(events: 1);
+    }
+
+    /**
+     * `host-connection-lost`: a lost connection while the host's transaction is
+     * open is said but neither spilled nor reported, and escapes as the
+     * sanitised exception whatever the policy, on which the host's own
+     * transaction rolls back.
+     *
+     * @param  string  $how
+     * @param  string  $delivery
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideWritesInsideAHost')]
+    public function testRowHostConnectionLost(string $how, string $delivery, string $mode): void
+    {
+        $thrown = $this->thrownByAFatalWrite($how, $delivery, $mode, self::LOST, 'HY000', 2006);
+
+        self::assertSanitised($thrown);
+        self::assertSame(0, $this->businessRows());
+        self::assertSame(0, $this->host()->transactionLevel());
+        $this->assertOutcome(events: 1);
+    }
+
+    /**
+     * `aborted-postgres-host`: a host PostgreSQL has already aborted refuses
+     * the write without a fatal error, and the record is in the spill, with a
+     * report and an event, once the host has rolled back.
+     *
+     * @return void
+     */
+    public function testRowAbortedPostgresHost(): void
+    {
+        $host = $this->host();
+
+        if ($host->getDriverName() !== 'pgsql') {
+            self::markTestSkipped('Only PostgreSQL leaves a transaction aborted by a failed statement.');
+        }
+
+        $host->beginTransaction();
+
+        self::assertInstanceOf(QueryException::class, $this->thrownBy(static fn () => $host->statement('select * from audit_no_such_table')));
+
+        $record = $this->recordAs(self::IMMEDIATELY);
+
+        self::assertSame(self::CODE, $record->event);
+
+        $host->rollBack();
+
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+        self::assertSame('25P02', $this->firstReport()->sqlState);
+    }
+
+    /**
+     * `failed-finalise`: a key ring that cannot sign leaves nothing written, an
+     * unsigned spill, a report and an event, and a replay of that line skips it
+     * and adds nothing.
+     *
+     * @return void
+     */
+    public function testRowFailedFinalise(): void
+    {
+        $config = app(ConfigRepository::class);
+        $keys   = $config->get('audit-log.integrity.keys');
+
+        $config->set('audit-log.integrity.keys', 'not a map');
+
+        $this->forgetTheKeyRing();
+
+        $record = $this->recordAs(self::IMMEDIATELY);
+
+        self::assertSame(self::CODE, $record->event);
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+        self::assertSame('finalise', $this->firstReport()->operation);
+
+        $line = $this->spillLines()[0];
+
+        self::assertStringContainsString('"unsigned":true', $line);
+        self::assertStringNotContainsString('"hmac"', $line);
+
+        $config->set('audit-log.integrity.keys', $keys);
+
+        $this->forgetTheKeyRing();
+
+        $result = app(Replayer::class)->spill($this->spillFile($line), false);
+
+        self::assertSame(0, $result->replayed());
+        self::assertSame(['unsigned' => 1], $result->skipped());
+        self::assertSame(0, $this->entryCount());
+    }
+
+    /**
+     * Rows of `[how the inner record is made, delivery mode]`: each ordinary
+     * timing, inside a store run by each delivery mode.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideOrdinaryRecordsInsideAStore(): iterable
+    {
+        yield from [
+            'after commit, sync'   => [self::AFTER_COMMIT, self::SYNC],
+            'after commit, outbox' => [self::AFTER_COMMIT, self::OUTBOX],
+            'immediately, sync'    => [self::IMMEDIATELY, self::SYNC],
+            'immediately, outbox'  => [self::IMMEDIATELY, self::OUTBOX],
+        ];
+    }
+
+    /**
+     * `inside-a-store`: an ordinary record made inside a store comes back as
+     * captured, unwritten, however many are made, with one report of a
+     * `\LogicException`, and the write around it goes on.
+     *
+     * @param  string  $how
+     * @param  string  $delivery
+     * @return void
+     */
+    #[DataProvider('provideOrdinaryRecordsInsideAStore')]
+    public function testRowInsideAStore(string $how, string $delivery): void
+    {
+        $inner = [];
+
+        $this->bindStore(new CallbackStore(function () use (&$inner, $how): void {
+            $inner[] = $this->recordAs($how, self::INNER_CODE);
+            $inner[] = $this->recordAs($how, self::INNER_CODE);
+        }));
+
+        $this->recordThroughTheStore($delivery);
+
+        self::assertCount(2, $inner);
+        self::assertSame(self::INNER_CODE, $inner[0]->event);
+        self::assertSame(self::INNER_CODE, $inner[1]->event);
+        $this->assertOutcome(reports: 1, recorded: 1);
+
+        $report = $this->reporter->reports()[0];
+
+        self::assertSame(\LogicException::class, $report::class);
+        self::assertStringContainsString(self::INNER_CODE, $report->getMessage());
+    }
+
+    /**
+     * Rows of `[how the inner record is made, delivery mode, failure mode]`:
+     * each strict record, inside a store run by each delivery mode.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function provideStrictRecordsInsideAStore(): iterable
+    {
+        yield from [
+            'fail closed, sync, report'     => [self::FAIL_CLOSED, self::SYNC, self::REPORT],
+            'fail closed, sync, throw'      => [self::FAIL_CLOSED, self::SYNC, self::THROW],
+            'fail closed, outbox, report'   => [self::FAIL_CLOSED, self::OUTBOX, self::REPORT],
+            'transactional, sync, report'   => [self::TRANSACTIONAL, self::SYNC, self::REPORT],
+            'transactional, sync, throw'    => [self::TRANSACTIONAL, self::SYNC, self::THROW],
+            'transactional, outbox, report' => [self::TRANSACTIONAL, self::OUTBOX, self::REPORT],
+        ];
+    }
+
+    /**
+     * `inside-a-store-strict`: a strict record made inside a store does not
+     * return: it is refused with a `\LogicException`, and nothing is reported.
+     *
+     * @param  string  $how
+     * @param  string  $delivery
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideStrictRecordsInsideAStore')]
+    public function testRowInsideAStoreStrict(string $how, string $delivery, string $mode): void
+    {
+        $this->failureMode($mode);
+
+        $refused = null;
+
+        $this->bindStore(new CallbackStore(function () use (&$refused, $how): void {
+            $refused = $this->thrownBy(fn () => $this->recordAs($how, self::INNER_CODE));
+        }));
+
+        $this->recordThroughTheStore($delivery);
+
+        self::assertInstanceOf(\Throwable::class, $refused);
+        self::assertSame(\LogicException::class, $refused::class);
+        self::assertStringContainsString('its guarantee cannot be met', $refused->getMessage());
+        $this->assertOutcome(recorded: 1);
+    }
+
+    /**
+     * `drain-transient`: a failed attempt keeps its error class on the receipt
+     * and the row, which waits out its backoff, with nothing reported or said,
+     * and a later attempt writes the record.
+     *
+     * @return void
+     */
+    public function testRowDrainTransient(): void
+    {
+        $this->outboxModeOn();
+        $this->pointAtProbeTable();
+
+        $id = $this->recordAs(self::AFTER_COMMIT)->id;
+
+        self::assertSame(1, $this->drain()->retried());
+
+        $row     = $this->outboxRow($id);
+        $receipt = $this->receipt($id, 'store');
+
+        self::assertIsArray($row);
+        self::assertIsArray($receipt);
+        self::assertSame(QueryException::class, $row['last_error_class']);
+        self::assertSame(1, $row['attempts']);
+        self::assertSame(self::RETRY_DUE, $row['available_at']);
+        self::assertNull($row['failed_at']);
+        self::assertSame(QueryException::class, $receipt['last_error_class']);
+        self::assertNull($receipt['delivered_at']);
+        $this->assertOutcome(outbox: 1);
+
+        $this->removeProbeTable();
+
+        self::assertSame(0, $this->drain()->delivered());
+
+        $this->moveClockTo(self::RETRY_DUE);
+
+        self::assertSame(1, $this->drain()->delivered());
+        self::assertSame($id, $this->storedRow($id)['id']);
+        $this->assertOutcome(entries: 1, recorded: 1);
+    }
+
+    /**
+     * `drain-final`: a failed last attempt fails the row and keeps it, with a
+     * report and an event, and no later drain deletes it or tries it again.
+     *
+     * @return void
+     */
+    public function testRowDrainFinal(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.delivery.outbox.max_attempts', 1);
+
+        $this->outboxModeOn();
+        $this->pointAtProbeTable();
+
+        $id = $this->recordAs(self::AFTER_COMMIT)->id;
+
+        self::assertSame(1, $this->drain()->failed());
+
+        $row = $this->outboxRow($id);
+
+        self::assertIsArray($row);
+        self::assertSame(self::NOW, $row['failed_at']);
+        self::assertSame(QueryException::class, $row['last_error_class']);
+        self::assertSame($id, $this->firstReport()->recordId);
+        self::assertSame('drain', $this->firstReport()->operation);
+        self::assertSame($id, $this->failures[0]->id);
+        $this->assertOutcome(outbox: 1, reports: 1, events: 1);
+
+        $this->removeProbeTable();
+        $this->moveClockTo(self::RETRY_DUE);
+
+        self::assertSame(0, $this->drain()->delivered());
+        $this->assertOutcome(outbox: 1, reports: 1, events: 1);
+    }
+
+    /**
+     * `drain-undecryptable`: a row whose key is gone is failed and kept, as it
+     * was found, and reported by its id alone, since the code is in the payload
+     * it cannot read; no later drain deletes it.
+     *
+     * @return void
+     */
+    public function testRowDrainUndecryptable(): void
+    {
+        $this->outboxModeOn();
+
+        $id      = $this->recordAs(self::AFTER_COMMIT)->id;
+        $payload = $this->outboxRow($id)['payload'] ?? null;
+
+        app(ConfigRepository::class)->set(['app.key' => self::OTHER_APP_KEY, 'app.previous_keys' => []]);
+        app()->forgetInstance('encrypter');
+
+        self::assertSame(1, $this->drain()->failed());
+
+        $row = $this->outboxRow($id);
+
+        self::assertIsArray($row);
+        self::assertSame(self::NOW, $row['failed_at']);
+        self::assertSame('undecryptable', $row['last_error_class']);
+        self::assertSame($payload, $row['payload']);
+        self::assertSame($id, $this->firstReport()->recordId);
+        self::assertNull($this->firstReport()->eventCode);
+        $this->assertOutcome(outbox: 1, reports: 1);
+
+        $this->moveClockTo(self::RETRY_DUE);
+
+        self::assertSame(0, $this->drain()->delivered());
+        $this->assertOutcome(outbox: 1, reports: 1);
+    }
+
+    /**
+     * Every row of the note's guarantee table has its test here, and every row
+     * test here has its row, so a row added, renamed or dropped on either side
+     * fails.
+     *
+     * @return void
+     */
+    public function testEveryRowOfTheTableHasATest(): void
+    {
+        preg_match_all('/^\| `([a-z-]+)` +\|/m', self::guarantees(), $rows);
+
+        self::assertNotSame([], $rows[1]);
+
+        $expected = array_map(static fn (string $id): string => 'testRow' . Str::studly($id), $rows[1]);
+        $methods  = array_map(static fn (\ReflectionMethod $method): string => $method->getName(), (new \ReflectionClass(self::class))->getMethods());
+        $actual   = array_values(array_filter($methods, static fn (string $method): bool => str_starts_with($method, 'testRow')));
+
+        sort($expected);
+        sort($actual);
+
+        self::assertSame($expected, $actual);
+    }
+
+    /**
+     * The table has the columns each row asserts, in order, and every row fills
+     * each of them.
+     *
+     * @return void
+     */
+    public function testEveryRowOfTheTableHasEachColumn(): void
+    {
+        $columns = ['Row id', 'Timing', 'Mode', 'Policy', 'Written', 'On a failed write', 'On the host\'s rollback', '`record()` returning means'];
+        $lines   = array_values(array_filter(explode("\n", self::guarantees()), static fn (string $line): bool => str_starts_with($line, '|')));
+
+        self::assertSame($columns, self::cellsOf($lines[0]));
+
+        foreach (array_slice($lines, 2) as $line) {
+            $cells = self::cellsOf($line);
+
+            self::assertCount(count($columns), $cells, $line);
+            self::assertNotContains('', $cells, $line);
+        }
+    }
+
+    /**
+     * A deadlock at the commit of the host, with nothing left open, ended no
+     * transaction, so it is no host failure and follows the policy, and the
+     * commit stands.
+     *
+     * @return void
+     */
+    public function testADeadlockAtACommitWithNothingOpenFollowsThePolicy(): void
+    {
+        $this->breakWrites(self::DEADLOCK, '40001', 1213);
+
+        $this->host()->beginTransaction();
+        $this->businessChange();
+        $this->recordAs(self::AFTER_COMMIT);
+        $this->host()->commit();
+
+        self::assertSame(1, $this->businessRows());
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+    }
+
+    /**
+     * An after-commit write running at another connection's commit, while the
+     * host's transaction is still open on the storage connection, is inside
+     * that host, so a deadlock is the host's and escapes from that commit.
+     *
+     * @return void
+     */
+    public function testADeadlockAtAnotherCommitInsideAHostIsTheHosts(): void
+    {
+        $this->breakWrites(self::DEADLOCK, '40001', 1213);
+
+        $other = DB::connection(self::OTHER);
+
+        $this->host()->beginTransaction();
+        $other->beginTransaction();
+        $this->recordAs(self::AFTER_COMMIT);
+
+        self::assertInstanceOf(DeadlockException::class, $this->thrownBy(static fn () => $other->commit()));
+        $this->assertOutcome(events: 1);
+    }
+
+    /**
+     * Rows of `[whether the host commits, spill lines once it has ended]`: each
+     * way the host can end.
+     *
+     * @return iterable<string, array{0: bool, 1: int}>
+     */
+    public static function provideHostEndings(): iterable
+    {
+        yield from [
+            'it commits'    => [true, 1],
+            'it rolls back' => [false, 0],
+        ];
+    }
+
+    /**
+     * An after-commit record's spill waits for any transaction still open on
+     * the connection it was written to: reported and said at once, spilled with
+     * that transaction's commit and never after its rollback.
+     *
+     * @param  bool  $commits
+     * @param  int  $spills
+     * @return void
+     */
+    #[DataProvider('provideHostEndings')]
+    public function testAnAfterCommitSpillWaitsForATransactionStillOpenOnItsConnection(bool $commits, int $spills): void
+    {
+        $this->pointAtProbeTable();
+
+        $other = DB::connection(self::OTHER);
+
+        $this->host()->beginTransaction();
+        $other->beginTransaction();
+        $this->recordAs(self::AFTER_COMMIT);
+        $other->commit();
+
+        $this->assertOutcome(reports: 1, events: 1);
+
+        $commits ? $this->host()->commit() : $this->host()->rollBack();
+
+        $this->assertOutcome(spills: $spills, reports: 1, events: 1);
+    }
+
+    /**
+     * Rows of `[how it is recorded, what the failure mode is]`: each way a
+     * record's spill is written at once, inside a host.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideSpillsWrittenAtOnce(): iterable
+    {
+        yield from [
+            'immediately, report' => [self::IMMEDIATELY, self::REPORT],
+            'immediately, throw'  => [self::IMMEDIATELY, self::THROW],
+            'fail closed'         => [self::FAIL_CLOSED, self::REPORT],
+        ];
+    }
+
+    /**
+     * An immediate or fail-closed record's spill is written at once, so it
+     * outlives an enclosing rollback: the line is evidence of an attempt, not
+     * of a committed change.
+     *
+     * @param  string  $how
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideSpillsWrittenAtOnce')]
+    public function testASpillWrittenAtOnceOutlivesAnEnclosingRollback(string $how, string $mode): void
+    {
+        $this->failureMode($mode);
+        $this->pointAtProbeTable();
+
+        $this->host()->beginTransaction();
+
+        // The rule may throw it, and what stays behind is what this pins
+        rescue(fn (): AuditRecord => $this->recordAs($how), report: false);
+
+        self::assertCount(1, $this->spillLines());
+
+        $this->host()->rollBack();
+
+        self::assertCount(1, $this->spillLines());
+    }
+
+    /**
+     * A strict record left uncaught inside a store is a failure of the write
+     * around it, which then follows that write's own policy.
+     *
+     * @return void
+     */
+    public function testAStrictRecordLeftUncaughtInsideAStoreFailsTheOuterWrite(): void
+    {
+        $this->bindStore(new CallbackStore(function (): void {
+            $this->recordAs(self::FAIL_CLOSED, self::INNER_CODE);
+        }));
+
+        AuditLog::record(self::CODE);
+
+        $this->assertOutcome(spills: 1, reports: 1, events: 1);
+        self::assertSame(\LogicException::class, $this->firstReport()->exceptionClass);
+        self::assertSame(self::CODE, $this->firstReport()->eventCode);
+    }
+
+    /**
+     * A store that does not say it is durable refuses a fail-closed record in
+     * sync mode, and in outbox mode the row is the acknowledgement instead, so
+     * the same record is accepted.
+     *
+     * @return void
+     */
+    public function testTheOutboxAcknowledgesForAStoreThatIsNotDurable(): void
+    {
+        $this->bindStore(new PlainStore);
+
+        self::assertSame(\LogicException::class, $this->thrownBy(fn () => $this->recordAs(self::FAIL_CLOSED))::class);
+        $this->assertOutcome();
+
+        $this->outboxModeOn();
+
+        $this->recordAs(self::FAIL_CLOSED);
+
+        $this->assertOutcome(outbox: 1);
+    }
+
+    /**
+     * Spill to a channel that writes nowhere, and define a second connection
+     * for a host to transact on.
+     *
+     * @param  mixed  $app
+     * @return void
+     */
+    #[\Override]
+    protected function defineEnvironment(mixed $app): void
+    {
+        parent::defineEnvironment($app);
+
+        $config = app(ConfigRepository::class);
+
+        $config->set('logging.channels.' . self::SPILL_CHANNEL, ['driver' => 'monolog', 'handler' => NullHandler::class]);
+        $config->set('audit-log.failure.log_channel', self::SPILL_CHANNEL);
+        $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
+    }
+
+    /**
+     * Assert what the write has left so far: the rows in the entries table and
+     * the outbox, the spill lines, the reports, the failed writes said and the
+     * written records said.
+     *
+     * @param  int  $entries
+     * @param  int  $outbox
+     * @param  int  $spills
+     * @param  int  $reports
+     * @param  int  $events
+     * @param  int  $recorded
+     * @return void
+     */
+    private function assertOutcome(int $entries = 0, int $outbox = 0, int $spills = 0, int $reports = 0, int $events = 0, int $recorded = 0): void
+    {
+        self::assertSame(
+            ['entries' => $entries, 'outbox' => $outbox, 'spills' => $spills, 'reports' => $reports, 'events' => $events, 'recorded' => $recorded],
+            [
+                'entries'  => $this->entryCount(),
+                'outbox'   => $this->outboxCount(),
+                'spills'   => count($this->spillLines()),
+                'reports'  => count($this->reporter->reports()),
+                'events'   => count($this->failures),
+                'recorded' => $this->recorded,
+            ],
+        );
+    }
+
+    /**
+     * Assert an after-commit record waits in memory for the commit on the
+     * connection: dropped with nothing left by its rollback, and written with
+     * what is given once it commits.
+     *
+     * @param  \Illuminate\Database\Connection  $host
+     * @param  int  $entries
+     * @param  int  $outbox
+     * @param  int  $recorded
+     * @return void
+     */
+    private function assertWaitsForTheCommit(Connection $host, int $entries, int $outbox, int $recorded): void
+    {
+        $host->beginTransaction();
+
+        self::assertSame(self::CODE, $this->recordAs(self::AFTER_COMMIT)->event);
+        $this->assertOutcome();
+
+        $host->rollBack();
+
+        $this->assertOutcome();
+
+        $host->beginTransaction();
+        $this->recordAs(self::AFTER_COMMIT);
+
+        $this->assertOutcome();
+
+        $host->commit();
+
+        $this->assertOutcome(entries: $entries, outbox: $outbox, recorded: $recorded);
+    }
+
+    /**
+     * Assert the record is written before `record()` returns, whether or not a
+     * transaction is open, and goes with the host's rollback on the shared
+     * connection.
+     *
+     * @param  string  $how
+     * @param  int  $entries
+     * @param  int  $outbox
+     * @param  int  $recorded
+     * @return void
+     */
+    private function assertWrittenNowAndRolledBack(string $how, int $entries, int $outbox, int $recorded): void
+    {
+        $this->host()->beginTransaction();
+        $this->recordAs($how);
+
+        $this->assertOutcome(entries: $entries, outbox: $outbox, recorded: $recorded);
+
+        $this->host()->rollBack();
+
+        $this->assertOutcome(recorded: $recorded);
+
+        $this->startOver();
+
+        $this->recordAs($how);
+
+        $this->assertOutcome(entries: $entries, outbox: $outbox, recorded: $recorded);
+    }
+
+    /**
+     * Assert the record is written inside the host's transaction before
+     * `record()` returns, goes with its rollback and stays with its commit.
+     *
+     * @param  string  $how
+     * @param  int  $entries
+     * @param  int  $outbox
+     * @param  int  $recorded
+     * @return void
+     */
+    private function assertJoinsTheHost(string $how, int $entries, int $outbox, int $recorded): void
+    {
+        $this->host()->beginTransaction();
+        $this->recordAs($how);
+
+        $this->assertOutcome(entries: $entries, outbox: $outbox, recorded: $recorded);
+
+        $this->host()->rollBack();
+
+        $this->assertOutcome(recorded: $recorded);
+
+        $this->startOver();
+
+        $this->host()->beginTransaction();
+        $this->recordAs($how);
+        $this->host()->commit();
+
+        $this->assertOutcome(entries: $entries, outbox: $outbox, recorded: $recorded);
+    }
+
+    /**
+     * Assert a failed write inside the host's own `transaction()` is said and
+     * thrown sanitised, spills nothing, reports nothing, and that left uncaught
+     * it rolls the business change back.
+     *
+     * @param  string  $how
+     * @return void
+     */
+    private function assertThrowsAndSpillsNothing(string $how): void
+    {
+        $thrown = $this->thrownBy(fn () => $this->host()->transaction(function () use ($how): void {
+            $this->businessChange();
+            $this->recordAs($how);
+        }));
+
+        self::assertSanitised($thrown);
+        self::assertSame(0, $this->businessRows());
+        self::assertSame(0, $this->host()->transactionLevel());
+        $this->assertOutcome(events: 1);
+    }
+
+    /**
+     * Assert what escaped is the sanitised exception of a failed statement,
+     * with nothing behind it.
+     *
+     * @param  \Throwable  $thrown
+     * @return void
+     */
+    private static function assertSanitised(\Throwable $thrown): void
+    {
+        self::assertInstanceOf(AuditWriteFailedException::class, $thrown);
+        self::assertSame(QueryException::class, $thrown->exceptionClass);
+        self::assertNull($thrown->getPrevious());
+    }
+
+    /**
+     * What escapes the host's own `transaction()` around a business change and
+     * a record whose write raises the failure, under the delivery and failure
+     * modes.
+     *
+     * @param  string  $how
+     * @param  string  $delivery
+     * @param  string  $mode
+     * @param  string  $message
+     * @param  string  $state
+     * @param  int  $code
+     * @return \Throwable
+     */
+    private function thrownByAFatalWrite(string $how, string $delivery, string $mode, string $message, string $state, int $code): \Throwable
+    {
+        if ($delivery === self::OUTBOX) {
+            $this->outboxModeOn();
+        }
+
+        $this->failureMode($mode);
+        $this->breakWrites($message, $state, $code);
+
+        return $this->thrownBy(fn () => $this->host()->transaction(function () use ($how): void {
+            $this->businessChange();
+            $this->recordAs($how);
+        }));
+    }
+
+    /**
+     * What the work throws; it must throw.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \Closure(): mixed  $work
+     * @return \Throwable
+     */
+    private function thrownBy(\Closure $work): \Throwable
+    {
+        try {
+            $work();
+        } catch (\Throwable $thrown) {
+            return $thrown;
+        }
+
+        self::fail('Expected the work to throw.');
+    }
+
+    /**
+     * Record through the public API, as asked.
+     *
+     * @param  string  $how
+     * @param  string  $code
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     */
+    private function recordAs(string $how, string $code = self::CODE): AuditRecord
+    {
+        $pending = AuditLog::event($code);
+
+        return match ($how) {
+            self::IMMEDIATELY               => $pending->immediately()->record(),
+            self::TRANSACTIONAL             => $pending->transactional()->record(),
+            self::FAIL_CLOSED               => $pending->failClosed()->record(),
+            self::FAIL_CLOSED_TRANSACTIONAL => $pending->failClosed()->transactional()->record(),
+            default                         => $pending->record(),
+        };
+    }
+
+    /**
+     * Record so the bound store is called: at once in sync mode, and in outbox
+     * mode by a drain of the row the record leaves.
+     *
+     * @param  string  $delivery
+     * @return void
+     */
+    private function recordThroughTheStore(string $delivery): void
+    {
+        if ($delivery === self::SYNC) {
+
+            $this->recordAs(self::AFTER_COMMIT);
+
+            return;
+        }
+
+        $this->outboxModeOn();
+        $this->recordAs(self::AFTER_COMMIT);
+
+        self::assertSame(1, $this->drain()->delivered());
+    }
+
+    /**
+     * Make an insert into the entries table or the outbox throw a query failure
+     * with the SQLSTATE and driver code, as Laravel throws it, leaving every
+     * other statement alone.
+     *
+     * @param  string  $message
+     * @param  string  $state
+     * @param  int  $code
+     * @return void
+     */
+    private function breakWrites(string $message, string $state, int $code): void
+    {
+        $previous = new \PDOException($message);
+
+        $previous->errorInfo = [$state, $code, $message];
+
+        $failure = new QueryException(self::CONNECTION, 'insert into "audit_log_entries" ("id") values (?)', ['id'], $previous);
+        $tables  = [EntrySettings::table(), DeliveryTables::outboxTable()];
+
+        $this->host()->beforeExecuting(static function (string $query) use ($failure, $tables): void {
+            if (!str_starts_with($query, 'insert into') || !Str::contains($query, $tables)) {
+                return;
+            }
+
+            throw $failure;
+        });
+    }
+
+    /**
+     * Forget everything a part of a test has seen, so the next part asserts its
+     * own: the spill lines, the reports and the events.
+     *
+     * @return void
+     */
+    private function startOver(): void
+    {
+        $this->captureLogLines();
+
+        $this->reporter = new RecordingExceptionHandler;
+
+        $this->app?->instance(ExceptionHandler::class, $this->reporter);
+
+        $this->failures = [];
+        $this->recorded = 0;
+
+        $this->storageConnection()->table(EntrySettings::table())->delete();
+        $this->outboxConnection()->table(DeliveryTables::outboxTable())->delete();
+    }
+
+    /**
+     * The connection the host transacts on, which the storage and the outbox
+     * share unless a test says otherwise.
+     *
+     * @return \Illuminate\Database\Connection
+     */
+    private function host(): Connection
+    {
+        return DB::connection(self::CONNECTION);
+    }
+
+    /**
+     * Make the host's business change.
+     *
+     * @return void
+     */
+    private function businessChange(): void
+    {
+        $this->host()->table(self::INVOICES)->insert(['number' => 'INV-1']);
+    }
+
+    /**
+     * The number of business changes that have committed or are in the host's
+     * open transaction.
+     *
+     * @return int
+     */
+    private function businessRows(): int
+    {
+        return $this->host()->table(self::INVOICES)->count();
+    }
+
+    /**
+     * Set the failure mode.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    private function failureMode(string $mode): void
+    {
+        app(ConfigRepository::class)->set('audit-log.failure.mode', $mode);
+    }
+
+    /**
+     * Bind the store.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
+     * @return void
+     */
+    private function bindStore(AuditStore $store): void
+    {
+        app()->instance(AuditStore::class, $store);
+    }
+
+    /**
+     * Forget the key ring and what its settings read, so the next write reads
+     * them again.
+     *
+     * @return void
+     */
+    private function forgetTheKeyRing(): void
+    {
+        app()->forgetInstance(KeyRing::class);
+        app()->forgetInstance(IntegritySettings::class);
+    }
+
+    /**
+     * Drain every row that is due.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\DrainResult
+     */
+    private function drain(): DrainResult
+    {
+        return app(OutboxDrainer::class)->drain(100, false);
+    }
+
+    /**
+     * The first report, which must be the sanitised exception.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
+     */
+    private function firstReport(): AuditWriteFailedException
+    {
+        $report = $this->reporter->reports()[0] ?? null;
+
+        self::assertInstanceOf(AuditWriteFailedException::class, $report);
+
+        return $report;
+    }
+
+    /**
+     * A file holding the spill line, removed once the test is over.
+     *
+     * @param  string  $line
+     * @return string
+     */
+    private function spillFile(string $line): string
+    {
+        $path = tempnam(sys_get_temp_dir(), 'audit-outcomes');
+
+        self::assertIsString($path);
+
+        file_put_contents($path, $line . "\n");
+
+        $this->files[] = $path;
+
+        return $path;
+    }
+
+    /**
+     * The guarantee table's section of the note.
+     *
+     * @return string
+     */
+    private static function guarantees(): string
+    {
+        $note = file_get_contents(self::NOTE);
+
+        self::assertIsString($note);
+
+        $section = preg_replace('/\A.*?^## Guarantees$(.*?)^## .*\z/ms', '$1', $note);
+
+        self::assertIsString($section);
+        self::assertNotSame($note, $section, 'The note has no section of guarantees.');
+
+        return $section;
+    }
+
+    /**
+     * The trimmed cells of a table line.
+     *
+     * @param  string  $line
+     * @return list<string>
+     */
+    private static function cellsOf(string $line): array
+    {
+        return array_map(trim(...), explode('|', trim($line, "| \t")));
+    }
+}

@@ -15,13 +15,15 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
+use SineMacula\Laravel\AuditLog\Console\TableShape;
 use Tests\Fixtures\Database\EntriesTableShape;
 use Tests\TestCase;
 
 /**
- * Feature tests for the schema checks of `audit-log:check`: the table the
- * shipped migration creates has no problem, and each way a table can differ
- * from it, one at a time, is the one problem reported.
+ * Feature tests for the schema checks of `audit-log:check`: each table a
+ * shipped migration creates, the entries, the outbox and the deliveries, has no
+ * problem, and each way a table can differ from it, one at a time, is the one
+ * problem reported.
  *
  * Each test runs the shipped migration under a table name of its own, then
  * changes the table in one way; Laravel rebuilds the table on SQLite for a
@@ -34,6 +36,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(SchemaChecks::class)]
+#[CoversClass(TableShape::class)]
 final class SchemaChecksTest extends TestCase
 {
     use MockeryPHPUnitIntegration;
@@ -43,6 +46,18 @@ final class SchemaChecksTest extends TestCase
 
     /** @var string Absolute path to the shipped entries migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php';
+
+    /** @var string Absolute path to the shipped outbox migration file. */
+    private const string OUTBOX_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000100_create_audit_log_outbox_table.php';
+
+    /** @var string Absolute path to the shipped deliveries migration file. */
+    private const string DELIVERIES_MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000200_create_audit_log_deliveries_table.php';
+
+    /** @var string The outbox table a test migrates and checks. */
+    private const string OUTBOX = 'audit_check_outbox';
+
+    /** @var string The deliveries table a test migrates and checks. */
+    private const string DELIVERIES = 'audit_check_deliveries';
 
     /** @var string A table name that fits the setting but not beside the prefix. */
     private const string LONG_TABLE = 'audit_check_entries_under_a_long_table_name';
@@ -76,6 +91,32 @@ final class SchemaChecksTest extends TestCase
         ],
     ];
 
+    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The type name, full type and collation MySQL and PostgreSQL report for each outbox column, by name. */
+    private const array OUTBOX_REPORTED = [
+        'mysql' => [
+            'id'               => ['char', 'char(36)', 'utf8mb4_0900_bin'],
+            'payload'          => ['longtext', 'longtext', 'utf8mb4_0900_bin'],
+            'attempts'         => ['int', 'int', null],
+            'available_at'     => ['datetime', 'datetime(6)', null],
+            'claimed_until'    => ['datetime', 'datetime(6)', null],
+            'claimed_by'       => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
+            'failed_at'        => ['datetime', 'datetime(6)', null],
+            'last_error_class' => ['varchar', 'varchar(191)', 'utf8mb4_0900_bin'],
+            'created_at'       => ['datetime', 'datetime(6)', null],
+        ],
+        'pgsql' => [
+            'id'               => ['uuid', 'uuid', null],
+            'payload'          => ['text', 'text', null],
+            'attempts'         => ['int4', 'integer', null],
+            'available_at'     => ['timestamp', 'timestamp(6) without time zone', null],
+            'claimed_until'    => ['timestamp', 'timestamp(6) without time zone', null],
+            'claimed_by'       => ['varchar', 'character varying(64)', null],
+            'failed_at'        => ['timestamp', 'timestamp(6) without time zone', null],
+            'last_error_class' => ['varchar', 'character varying(191)', null],
+            'created_at'       => ['timestamp', 'timestamp(6) without time zone', null],
+        ],
+    ];
+
     /**
      * Run the shipped migration for `TABLE` on the test's connection.
      *
@@ -100,6 +141,8 @@ final class SchemaChecksTest extends TestCase
     protected function tearDown(): void
     {
         Schema::connection(self::CONNECTION)->dropIfExists(self::TABLE);
+        Schema::connection(self::CONNECTION)->dropIfExists(self::OUTBOX);
+        Schema::connection(self::CONNECTION)->dropIfExists(self::DELIVERIES);
 
         if (app(ConfigRepository::class)->has('database.connections.prefixed')) {
             Schema::connection('prefixed')->dropIfExists(self::LONG_TABLE);
@@ -519,10 +562,9 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of
-     * `[a driver, the column changed, its type name, its full type, its collation, the problem]`:
-     * what MySQL or PostgreSQL could report for a column the package writes,
-     * and how it is described.
+     * Rows of `[a driver, the column changed, its type name, its full type, its
+     * collation, the problem]`: what MySQL or PostgreSQL could report for a
+     * column the package writes, and how it is described.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string, 3: string, 4: ?string, 5: string}>
      */
@@ -569,19 +611,271 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The problems the checks find on the connection's table.
+     * The outbox table the shipped migration creates has no problem.
+     *
+     * @return void
+     */
+    public function testTheShippedOutboxMigrationHasNoProblems(): void
+    {
+        $this->migrateDeliveryTables();
+
+        self::assertSame([], $this->problems(self::OUTBOX, self::CONNECTION, TableShape::outbox()));
+    }
+
+    /**
+     * The deliveries table the shipped migration creates has no problem.
+     *
+     * @return void
+     */
+    public function testTheShippedDeliveriesMigrationHasNoProblems(): void
+    {
+        $this->migrateDeliveryTables();
+
+        self::assertSame([], $this->problems(self::DELIVERIES, self::CONNECTION, TableShape::deliveries()));
+    }
+
+    /**
+     * Rows of `[the table, its shape, how it is named]`: a delivery table that
+     * does not exist is named by its own label.
+     *
+     * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Console\TableShape, 2: string}>
+     */
+    public static function provideMissingDeliveryTables(): iterable
+    {
+        yield from [
+            'the outbox'     => ['audit_absent_outbox', TableShape::outbox(), 'outbox'],
+            'the deliveries' => ['audit_absent_deliveries', TableShape::deliveries(), 'deliveries'],
+        ];
+    }
+
+    /**
+     * A delivery table that does not exist is the one problem, naming the table
+     * by its label, the connection and how to create it.
+     *
+     * @param  string  $table
+     * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
+     * @param  string  $label
+     * @return void
+     */
+    #[DataProvider('provideMissingDeliveryTables')]
+    public function testAMissingDeliveryTableIsNamedByItsLabel(string $table, TableShape $shape, string $label): void
+    {
+        self::assertSame([
+            sprintf('The %s table `%s` does not exist on connection [testing]; publish and run the migrations', $label, $table)
+                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+        ], $this->problems($table, self::CONNECTION, $shape));
+    }
+
+    /**
+     * The index a drain claims outbox rows by is a problem when it is missing.
+     *
+     * @return void
+     */
+    public function testAMissingOutboxIndexIsAProblem(): void
+    {
+        $this->migrateDeliveryTables();
+
+        Schema::connection(self::CONNECTION)->table(self::OUTBOX, static function (Blueprint $table): void {
+            $table->dropIndex(self::OUTBOX . '_due_index');
+        });
+
+        self::assertSame(['Index `audit_check_outbox_due_index` is missing.'], $this->problems(self::OUTBOX, self::CONNECTION, TableShape::outbox()));
+    }
+
+    /**
+     * A deliveries table keyed by the entry alone is a problem, since it would
+     * keep one receipt for a record however many destinations it has.
+     *
+     * @return void
+     */
+    public function testAWrongDeliveriesKeyIsAProblem(): void
+    {
+        $this->migrateDeliveryTables();
+
+        Schema::connection(self::CONNECTION)->table(self::DELIVERIES, static function (Blueprint $table): void {
+            $table->dropPrimary(self::DELIVERIES . '_primary');
+        });
+
+        Schema::connection(self::CONNECTION)->table(self::DELIVERIES, static function (Blueprint $table): void {
+            $table->primary(['entry_id'], self::DELIVERIES . '_primary');
+        });
+
+        self::assertSame(['The primary key must be (`entry_id`, `destination`).'], $this->problems(self::DELIVERIES, self::CONNECTION, TableShape::deliveries()));
+    }
+
+    /**
+     * A deliveries table keyed by its columns in another order is a problem.
+     *
+     * @return void
+     */
+    public function testADeliveriesKeyOutOfOrderIsAProblem(): void
+    {
+        $this->migrateDeliveryTables();
+
+        Schema::connection(self::CONNECTION)->table(self::DELIVERIES, static function (Blueprint $table): void {
+            $table->dropPrimary(self::DELIVERIES . '_primary');
+        });
+
+        Schema::connection(self::CONNECTION)->table(self::DELIVERIES, static function (Blueprint $table): void {
+            $table->primary(['destination', 'entry_id'], self::DELIVERIES . '_primary');
+        });
+
+        self::assertSame(['The primary key must be (`entry_id`, `destination`).'], $this->problems(self::DELIVERIES, self::CONNECTION, TableShape::deliveries()));
+    }
+
+    /**
+     * A column of the outbox the package does not write is a problem, in the
+     * outbox's own words, which say nothing of an HMAC.
+     *
+     * @return void
+     */
+    public function testAnUnknownOutboxColumnIsAProblem(): void
+    {
+        $this->migrateDeliveryTables();
+
+        Schema::connection(self::CONNECTION)->table(self::OUTBOX, static function (Blueprint $table): void {
+            $table->string('notes')->nullable();
+        });
+
+        self::assertSame(['Column `notes` is not one the package writes.'], $this->problems(self::OUTBOX, self::CONNECTION, TableShape::outbox()));
+    }
+
+    /**
+     * A receipt column the deliveries table lacks, and one made nullable that
+     * must not be, are each a problem.
+     *
+     * @return void
+     */
+    public function testADeliveriesColumnMissingOrNullableIsAProblem(): void
+    {
+        $this->migrateDeliveryTables();
+
+        Schema::connection(self::CONNECTION)->table(self::DELIVERIES, static function (Blueprint $table): void {
+            $table->dropColumn('delivered_at');
+        });
+
+        Schema::connection(self::CONNECTION)->table(self::DELIVERIES, static function (Blueprint $table): void {
+            $table->integer('attempts')->nullable()->change();
+        });
+
+        self::assertSame(
+            ['Column `attempts` is nullable; it must not be.', 'Column `delivered_at` is missing.'],
+            $this->problems(self::DELIVERIES, self::CONNECTION, TableShape::deliveries()),
+        );
+    }
+
+    /**
+     * The entries shape is what the checks use when none is given, so the
+     * outbox table checked without one is a table of the wrong shape.
+     *
+     * @return void
+     */
+    public function testTheEntriesShapeIsTheDefault(): void
+    {
+        $this->migrateDeliveryTables();
+
+        self::assertSame($this->problems(self::OUTBOX, self::CONNECTION, TableShape::entries()), $this->problems(self::OUTBOX));
+        self::assertContains('Column `payload` is not one the package writes, so no entry\'s HMAC covers it.', $this->problems(self::OUTBOX));
+    }
+
+    /**
+     * The shipped outbox table as MySQL and PostgreSQL report it, its long text
+     * and integer columns included, has no problem; this runs on any engine the
+     * suite runs against.
+     *
+     * @param  string  $driver
+     * @return void
+     */
+    #[DataProvider('provideSizedDrivers')]
+    public function testTheShippedOutboxTableAsEachEngineReportsItHasNoProblems(string $driver): void
+    {
+        $this->migrateDeliveryTables();
+
+        $this->fake($driver, self::reportedOutbox($driver), self::OUTBOX);
+
+        self::assertSame([], $this->problems(self::OUTBOX, 'fake', TableShape::outbox()));
+    }
+
+    /**
+     * Rows of `[a driver, the column changed, its type name, its full type, the
+     * problem]`: what MySQL or PostgreSQL could report for an outbox column of
+     * the long text or integer families, and how it is described.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: string, 3: string, 4: string}>
+     */
+    public static function provideReportedOutboxTypes(): iterable
+    {
+        yield from [
+            'a payload of text on MySQL'            => ['mysql', 'payload', 'text', 'text', 'Column `payload` is text; expected longtext.'],
+            'a payload of json on PostgreSQL'       => ['pgsql', 'payload', 'json', 'json', 'Column `payload` is json; expected text.'],
+            'attempts as a small integer on MySQL'  => ['mysql', 'attempts', 'smallint', 'smallint', 'Column `attempts` is smallint; expected int.'],
+            'attempts as a big integer on Postgres' => ['pgsql', 'attempts', 'int8', 'bigint', 'Column `attempts` is int8; expected int4.'],
+        ];
+    }
+
+    /**
+     * Each outbox column of a new type family that MySQL or PostgreSQL could
+     * report otherwise is the one problem, in the engine's own terms.
+     *
+     * @param  string  $driver
+     * @param  string  $column
+     * @param  string  $typeName
+     * @param  string  $type
+     * @param  string  $problem
+     * @return void
+     */
+    #[DataProvider('provideReportedOutboxTypes')]
+    public function testEachEngineReportsAnOutboxColumnInItsOwnTerms(string $driver, string $column, string $typeName, string $type, string $problem): void
+    {
+        $this->migrateDeliveryTables();
+
+        $columns = array_map(static fn (array $reported): array => $reported['name'] === $column
+            ? [...$reported, 'type_name' => $typeName, 'type' => $type]
+            : $reported, self::reportedOutbox($driver));
+
+        $this->fake($driver, $columns, self::OUTBOX);
+
+        self::assertSame([$problem], $this->problems(self::OUTBOX, 'fake', TableShape::outbox()));
+    }
+
+    /**
+     * The problems the checks find on the connection's table, against the shape
+     * given or, when none is, the entries table's.
      *
      * @param  string  $table
      * @param  string  $connection
+     * @param  ?\SineMacula\Laravel\AuditLog\Console\TableShape  $shape
      * @return list<string>
      */
-    private function problems(string $table = self::TABLE, string $connection = self::CONNECTION): array
+    private function problems(string $table = self::TABLE, string $connection = self::CONNECTION, ?TableShape $shape = null): array
     {
         $database = $this->app?->make(DatabaseManager::class);
 
         assert($database instanceof DatabaseManager);
 
-        return (new SchemaChecks($database))->problems($connection, $table);
+        return (new SchemaChecks($database))->problems($connection, $table, $shape);
+    }
+
+    /**
+     * The shipped outbox table's columns as the driver reports them: their
+     * names and nullability as the test's engine created them, their types and
+     * MySQL's collation as the driver would report them.
+     *
+     * @param  string  $driver
+     * @return list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>
+     */
+    private static function reportedOutbox(string $driver): array
+    {
+        $columns = [];
+
+        foreach (Schema::connection(self::CONNECTION)->getColumns(self::OUTBOX) as $column) {
+
+            [$typeName, $type, $collation] = self::OUTBOX_REPORTED[$driver][$column['name']];
+
+            $columns[] = ['name' => $column['name'], 'type' => $type, 'type_name' => $typeName, 'collation' => $collation, 'nullable' => $column['nullable']];
+        }
+
+        return $columns;
     }
 
     /**
@@ -614,16 +908,17 @@ final class SchemaChecksTest extends TestCase
 
     /**
      * Register a connection named `fake` that reports the driver and, for any
-     * table, the columns given and the indexes of the table the test migrated,
-     * with no server behind it.
+     * table, the columns given and the indexes of the table the test migrated
+     * under the name given, with no server behind it.
      *
      * @param  string  $driver
      * @param  list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>  $columns
+     * @param  string  $table
      * @return void
      */
-    private function fake(string $driver, array $columns): void
+    private function fake(string $driver, array $columns, string $table = self::TABLE): void
     {
-        $indexes = Schema::connection(self::CONNECTION)->getIndexes(self::TABLE);
+        $indexes = Schema::connection(self::CONNECTION)->getIndexes($table);
 
         $schema = \Mockery::mock(SQLiteBuilder::class);
 
@@ -690,6 +985,34 @@ final class SchemaChecksTest extends TestCase
         }
 
         self::markTestSkipped($reason);
+    }
+
+    /**
+     * Run the shipped outbox and deliveries migrations under the tables' names
+     * of this test, on the test's connection.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateDeliveryTables(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.delivery.outbox.table'     => self::OUTBOX,
+            'audit-log.delivery.deliveries_table' => self::DELIVERIES,
+        ]);
+
+        foreach ([self::OUTBOX_MIGRATION_PATH, self::DELIVERIES_MIGRATION_PATH] as $path) {
+
+            $migration = include $path;
+
+            if (!$migration instanceof Migration) {
+                self::fail('A delivery migration file did not return a Migration instance.');
+            }
+
+            $migration->up(); // @phpstan-ignore method.notFound
+        }
     }
 
     /**

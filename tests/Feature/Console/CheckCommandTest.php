@@ -20,16 +20,18 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use Tests\Fixtures\Database\VersionReportingPdo;
+use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
  * Feature tests for `audit-log:check`: it reads the settings, the connections
- * and guards they name, the entries table and the integrity keys, lists every
- * problem it finds as `[<subject>] <message>` and every subject without one as
- * `[<subject>] OK`, exits `1` when there is a problem and `0` when there is
- * none, covers every leaf of the shipped configuration, lists `app.key` once
- * whichever settings read it, and prints no secret, setting's value, statement
- * or binding.
+ * and guards they name, the entries table, the integrity keys and the delivery,
+ * lists every problem it finds as `[<subject>] <message>` and every subject
+ * without one as `[<subject>] OK`, ends with a `[spill]` note that is never a
+ * problem, exits `1` when there is a problem and `0` when there is none, covers
+ * every leaf of the shipped configuration and of the failure and delivery
+ * settings, lists `app.key` once whichever settings read it, and prints no
+ * secret, setting's value, statement or binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,8 +43,12 @@ final class CheckCommandTest extends TestCase
 {
     use MockeryPHPUnitIntegration;
 
-    /** @var list<string> What a run prints when nothing has a problem. */
-    private const array EVERY_SUBJECT_OK = ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK'];
+    /** @var string The note on the default channel of a default install, which is not the documented spill channel. */
+    private const string SPILL_NOTE = '[spill] The channel [stack] is not the documented file format, so replaying what it holds is unverified,'
+        . ' and whole records in plaintext go to it and to everything it feeds.';
+
+    /** @var list<string> What a run prints when nothing has a problem, the note on the default channel last. */
+    private const array EVERY_SUBJECT_OK = ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE];
 
     /** @var string Absolute path to the shipped entries migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php';
@@ -58,24 +64,33 @@ final class CheckCommandTest extends TestCase
 
     /** @var array<string, int|string> A value the check refuses for each leaf of the package's configuration, by its path under `audit-log`. */
     private const array BAD_LEAVES = [
-        'storage.connection'             => 123,
-        'storage.maintenance_connection' => 123,
-        'entries.table'                  => 'audit-log',
-        'integrity.keys'                 => 'x',
-        'integrity.current'              => 'k1',
-        'actor.guards'                   => 'web',
-        'context.trust_request_id'       => 'yes',
-        'context.request_id_header'      => 'X Request',
-        'context.trust_traceparent'      => 'yes',
-        'definitions.require_registered' => '1',
-        'source.id'                      => 42,
-        'source.region'                  => 42,
-        'redaction.keys'                 => 'password',
-        'redaction.key'                  => 'short',
-        'redaction.identifiers'          => 'maybe',
-        'redaction.ip'                   => 'partial',
-        'redaction.max_bytes'            => 8191,
-        'redaction.max_context_bytes'    => 1023,
+        'storage.connection'              => 123,
+        'storage.maintenance_connection'  => 123,
+        'entries.table'                   => 'audit-log',
+        'integrity.keys'                  => 'x',
+        'integrity.current'               => 'k1',
+        'actor.guards'                    => 'web',
+        'context.trust_request_id'        => 'yes',
+        'context.request_id_header'       => 'X Request',
+        'context.trust_traceparent'       => 'yes',
+        'definitions.require_registered'  => '1',
+        'source.id'                       => 42,
+        'source.region'                   => 42,
+        'redaction.keys'                  => 'password',
+        'redaction.key'                   => 'short',
+        'redaction.identifiers'           => 'maybe',
+        'redaction.ip'                    => 'partial',
+        'redaction.max_bytes'             => 8191,
+        'redaction.max_context_bytes'     => 1023,
+        'failure.mode'                    => 'maybe',
+        'failure.log_channel'             => 42,
+        'delivery.mode'                   => 'queue',
+        'delivery.outbox.connection'      => 42,
+        'delivery.outbox.table'           => 'audit-outbox',
+        'delivery.outbox.lease_seconds'   => 29,
+        'delivery.outbox.max_attempts'    => 0,
+        'delivery.outbox.backoff_seconds' => 0,
+        'delivery.deliveries_table'       => 'audit-deliveries',
     ];
 
     /** @var array<string, array<string, string>|string> An explicit ring whose settings all pass, so none of them reads `app.key`. */
@@ -140,6 +155,23 @@ final class CheckCommandTest extends TestCase
     /** @var string The message of a malformed context budget. */
     private const string MALFORMED_MAX_CONTEXT_BYTES = '[config] `audit-log.redaction.max_context_bytes` must be an integer from 1024 to 16777216.';
 
+    /** @var string The message of a malformed failure mode. */
+    private const string MALFORMED_FAILURE_MODE = '[config] `audit-log.failure.mode` must be `report` or `throw`.';
+
+    /** @var string The message of a malformed spill channel. */
+    private const string MALFORMED_LOG_CHANNEL = '[config] `audit-log.failure.log_channel` must be a channel name of 1 to 64 characters, or null or empty for the default channel.';
+
+    /** @var string The message of a malformed delivery mode. */
+    private const string MALFORMED_DELIVERY_MODE = '[config] `audit-log.delivery.mode` must be `sync` or `outbox`.';
+
+    /** @var string The message of a malformed outbox table name. */
+    private const string MALFORMED_OUTBOX_TABLE = '[config] `audit-log.delivery.outbox.table` must be a table name of 1 to 47 lower-case letters, digits and underscores'
+        . ' that does not start with a digit.';
+
+    /** @var string The message of a malformed deliveries table name. */
+    private const string MALFORMED_DELIVERIES_TABLE = '[config] `audit-log.delivery.deliveries_table` must be a table name of 1 to 47 lower-case letters, digits and underscores'
+        . ' that does not start with a digit.';
+
     /** @var list<string> Files a test created, removed when it ends. */
     private array $files = [];
 
@@ -160,6 +192,10 @@ final class CheckCommandTest extends TestCase
         assert($kernel instanceof ConsoleKernel);
 
         $kernel->registerCommand(new CheckCommand);
+
+        // The default channel of a default install, whatever the environment
+        // says, so the note on it is the same in every run
+        app(ConfigRepository::class)->set('logging.default', 'stack');
     }
 
     /**
@@ -245,6 +281,10 @@ final class CheckCommandTest extends TestCase
             ],
             'a storage connection that is not a name beside a maintenance connection' => [
                 ['audit-log.storage.connection' => 123, 'audit-log.storage.maintenance_connection' => 'testing'],
+                '[config] `audit-log.storage.connection` must be a connection name, or null or empty for the default connection.',
+            ],
+            'a storage connection that is not a name, which no connection falls back to' => [
+                ['audit-log.storage.connection' => 123, 'audit-log.storage.maintenance_connection' => 'testing', 'audit-log.delivery.outbox.connection' => 'testing'],
                 '[config] `audit-log.storage.connection` must be a connection name, or null or empty for the default connection.',
             ],
             'a storage connection that is not configured' => [
@@ -356,6 +396,45 @@ final class CheckCommandTest extends TestCase
             'a context budget over its ceiling'        => [['audit-log.redaction.max_context_bytes' => 16777217], self::MALFORMED_MAX_CONTEXT_BYTES],
             'a context budget that is a word'          => [['audit-log.redaction.max_context_bytes' => 'many'], self::MALFORMED_MAX_CONTEXT_BYTES],
             'a context budget that is null'            => [['audit-log.redaction.max_context_bytes' => null], self::MALFORMED_MAX_CONTEXT_BYTES],
+            'a failure mode that is unknown'           => [['audit-log.failure.mode' => 'maybe'], self::MALFORMED_FAILURE_MODE],
+            'a failure mode in capitals'               => [['audit-log.failure.mode' => 'THROW'], self::MALFORMED_FAILURE_MODE],
+            'a failure mode that is null'              => [['audit-log.failure.mode' => null], self::MALFORMED_FAILURE_MODE],
+            'a spill channel that is a number'         => [['audit-log.failure.log_channel' => 42], self::MALFORMED_LOG_CHANNEL],
+            'a spill channel of 65 characters'         => [['audit-log.failure.log_channel' => str_repeat('c', 65)], self::MALFORMED_LOG_CHANNEL],
+            'a delivery mode that is unknown'          => [['audit-log.delivery.mode' => 'queue'], self::MALFORMED_DELIVERY_MODE],
+            'a delivery mode that is null'             => [['audit-log.delivery.mode' => null], self::MALFORMED_DELIVERY_MODE],
+            'an outbox connection that is a number'    => [
+                ['audit-log.delivery.outbox.connection' => 42],
+                '[config] `audit-log.delivery.outbox.connection` must be a connection name, or null or empty for the storage connection.',
+            ],
+            'an outbox table with a hyphen'     => [['audit-log.delivery.outbox.table' => 'audit-outbox'], self::MALFORMED_OUTBOX_TABLE],
+            'an outbox table of 48 characters'  => [['audit-log.delivery.outbox.table' => str_repeat('o', 48)], self::MALFORMED_OUTBOX_TABLE],
+            'a deliveries table with a hyphen'  => [['audit-log.delivery.deliveries_table' => 'audit-deliveries'], self::MALFORMED_DELIVERIES_TABLE],
+            'a deliveries table that is a list' => [['audit-log.delivery.deliveries_table' => ['audit']], self::MALFORMED_DELIVERIES_TABLE],
+            'a lease under its minimum'         => [
+                ['audit-log.delivery.outbox.lease_seconds' => 29],
+                '[config] `audit-log.delivery.outbox.lease_seconds` must be an integer from 30 to 86400.',
+            ],
+            'a lease over its ceiling' => [
+                ['audit-log.delivery.outbox.lease_seconds' => 86401],
+                '[config] `audit-log.delivery.outbox.lease_seconds` must be an integer from 30 to 86400.',
+            ],
+            'no attempts' => [
+                ['audit-log.delivery.outbox.max_attempts' => 0],
+                '[config] `audit-log.delivery.outbox.max_attempts` must be an integer from 1 to 1000.',
+            ],
+            'attempts over their ceiling' => [
+                ['audit-log.delivery.outbox.max_attempts' => 1001],
+                '[config] `audit-log.delivery.outbox.max_attempts` must be an integer from 1 to 1000.',
+            ],
+            'no backoff' => [
+                ['audit-log.delivery.outbox.backoff_seconds' => 0],
+                '[config] `audit-log.delivery.outbox.backoff_seconds` must be an integer from 1 to 3600.',
+            ],
+            'a backoff that is a word' => [
+                ['audit-log.delivery.outbox.backoff_seconds' => 'soon'],
+                '[config] `audit-log.delivery.outbox.backoff_seconds` must be an integer from 1 to 3600.',
+            ],
         ];
     }
 
@@ -394,7 +473,25 @@ final class CheckCommandTest extends TestCase
         self::assertSame([
             '[config] `audit-log.storage.connection` must be a connection name, or null or empty for the default connection.',
             '[integrity] OK',
+            self::SPILL_NOTE,
         ], $output);
+    }
+
+    /**
+     * A malformed storage connection is listed once, in its place among the
+     * settings, though the outbox connection, which falls back to it, reads it
+     * too.
+     *
+     * @return void
+     */
+    public function testAMalformedStorageConnectionIsListedOnceAndFirst(): void
+    {
+        app(ConfigRepository::class)->set(['audit-log.storage.connection' => 123, 'audit-log.redaction.ip' => 'partial']);
+
+        self::assertSame([
+            '[config] `audit-log.storage.connection` must be a connection name, or null or empty for the default connection.',
+            self::MALFORMED_IP,
+        ], self::problemsIn($this->check()[1]));
     }
 
     /**
@@ -413,6 +510,8 @@ final class CheckCommandTest extends TestCase
             '[config] `audit-log.storage.maintenance_connection` must be a connection name, or null or empty for the storage connection.',
             '[schema] OK',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -432,6 +531,8 @@ final class CheckCommandTest extends TestCase
             '[config] OK',
             '[connections] The connection [missing] that `audit-log.storage.connection` names is not configured in `database.connections`.',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -533,6 +634,8 @@ final class CheckCommandTest extends TestCase
             '[schema] The entries table `audit_absent_entries` does not exist on connection [testing]; publish and run the migrations'
                 . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -563,6 +666,8 @@ final class CheckCommandTest extends TestCase
             '[connections] The connection [missing] that `audit-log.storage.maintenance_connection` names is not configured in `database.connections`.',
             '[schema] Column `reason` is missing.',
             '[schema] Column `notes` is not one the package writes, so no entry\'s HMAC covers it.',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -594,6 +699,8 @@ final class CheckCommandTest extends TestCase
             '[config] `audit-log.integrity.keys.k1` must be a secret of at least 32 bytes, or `base64:` followed by the encoding of one.',
             '[connections] OK',
             '[schema] The storage connection [garbage] could not be read (Illuminate\Database\QueryException).',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
 
         foreach ([self::SHORT_SECRET, $secret, $config->string('app.key'), $path, 'select', 'sqlite_master', 'SQL'] as $hidden) {
@@ -624,6 +731,8 @@ final class CheckCommandTest extends TestCase
             '[connections] OK',
             '[schema] The storage connection [broken] could not be opened (' . SQLiteDatabaseDoesNotExistException::class . ').',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
         self::assertStringNotContainsString($path, implode("\n", $output));
     }
@@ -647,6 +756,8 @@ final class CheckCommandTest extends TestCase
             '[connections] OK',
             '[schema] OK',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -687,6 +798,8 @@ final class CheckCommandTest extends TestCase
             '[connections] OK',
             '[schema] OK',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -880,6 +993,8 @@ final class CheckCommandTest extends TestCase
             '[schema] The entries table `audit_absent_entries` does not exist on connection [testing]; publish and run the migrations'
                 . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -988,7 +1103,7 @@ final class CheckCommandTest extends TestCase
         [$code, $output] = $this->check();
 
         self::assertSame(1, $code);
-        self::assertSame([self::MISSING_APPLICATION_KEY, '[connections] OK', '[schema] OK', '[integrity] OK'], $output);
+        self::assertSame([self::MISSING_APPLICATION_KEY, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE], $output);
     }
 
     /**
@@ -1142,6 +1257,8 @@ final class CheckCommandTest extends TestCase
             '[connections] OK',
             '[schema] OK',
             '[integrity] OK',
+            '[delivery] OK',
+            self::SPILL_NOTE,
         ], $output);
     }
 
@@ -1305,6 +1422,197 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
+     * A delivery problem fails the run, listed under `delivery` after every
+     * other subject and before the note on the spill channel.
+     *
+     * @return void
+     */
+    public function testADeliveryProblemFailsTheRun(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.failure.log_channel', 'missing');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[config] OK',
+            '[connections] OK',
+            '[schema] OK',
+            '[integrity] OK',
+            '[delivery] The channel [missing] that `audit-log.failure.log_channel` names is not configured in `logging.channels`.',
+            '[spill] The channel [missing] is not the documented file format, so replaying what it holds is unverified,'
+                . ' and whole records in plaintext go to it and to everything it feeds.',
+        ], $output);
+    }
+
+    /**
+     * In outbox mode the outbox and deliveries tables are checked, so a missing
+     * outbox table is a delivery problem that fails the run.
+     *
+     * @return void
+     */
+    public function testAnOutboxModeRunChecksTheOutboxTables(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.delivery.mode'         => 'outbox',
+            'audit-log.delivery.outbox.table' => 'audit_absent_outbox',
+        ]);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[delivery] The outbox table `audit_absent_outbox` does not exist on connection [testing]; publish and run the migrations'
+                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+        ], self::problemsIn($output));
+    }
+
+    /**
+     * An install the shipped migrations created passes in outbox mode too.
+     *
+     * @return void
+     */
+    public function testAGoodInstallPassesInOutboxMode(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.delivery.mode', 'outbox');
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * The note on a spill channel that is not the documented one is printed
+     * after every subject and leaves a clean run passing.
+     *
+     * @return void
+     */
+    public function testASpillNoteDoesNotFailTheRun(): void
+    {
+        [$code, $output] = $this->check();
+
+        self::assertSame(0, $code);
+        self::assertSame(self::SPILL_NOTE, end($output));
+        self::assertSame([], self::problemsIn($output));
+    }
+
+    /**
+     * The documented spill channel is said to be so, by the last line.
+     *
+     * @return void
+     */
+    public function testTheDocumentedChannelIsSaidToBeOk(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('logging.channels.audit_spill', DocumentedSpillChannel::config(sys_get_temp_dir() . '/audit-log-spill-' . getmypid() . '.log'));
+        $config->set('audit-log.failure.log_channel', 'audit_spill');
+
+        self::assertSame([0, ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[spill] OK']], $this->check());
+    }
+
+    /**
+     * A malformed failure or delivery setting leaves the delivery subject out,
+     * since it reads them, and a malformed channel setting the note too, while
+     * the other subjects are still checked.
+     *
+     * @return void
+     */
+    public function testAMalformedDeliverySettingSkipsTheSubject(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.delivery.mode', 'queue');
+
+        self::assertSame([1, [self::MALFORMED_DELIVERY_MODE, '[connections] OK', '[schema] OK', '[integrity] OK', self::SPILL_NOTE]], $this->check());
+
+        $config->set('audit-log.delivery.mode', 'sync');
+        $config->set('audit-log.failure.log_channel', 42);
+
+        self::assertSame([1, [self::MALFORMED_LOG_CHANNEL, '[connections] OK', '[schema] OK', '[integrity] OK']], $this->check());
+    }
+
+    /**
+     * Every malformed failure and delivery setting is listed by the one run, by
+     * its full path and in the order the settings are read, after those already
+     * checked.
+     *
+     * @return void
+     */
+    public function testEveryMalformedDeliveryLeafIsReportedInOneRun(): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.delivery.deliveries_table'       => 'audit-deliveries',
+            'audit-log.delivery.outbox.connection'      => 42,
+            'audit-log.delivery.outbox.table'           => 'audit-outbox',
+            'audit-log.delivery.outbox.backoff_seconds' => 0,
+            'audit-log.delivery.outbox.max_attempts'    => 0,
+            'audit-log.delivery.outbox.lease_seconds'   => 29,
+            'audit-log.delivery.mode'                   => 'queue',
+            'audit-log.failure.log_channel'             => 42,
+            'audit-log.failure.mode'                    => 'maybe',
+            'audit-log.redaction.ip'                    => 'partial',
+        ]);
+
+        self::assertSame([
+            self::MALFORMED_IP,
+            self::MALFORMED_FAILURE_MODE,
+            self::MALFORMED_LOG_CHANNEL,
+            self::MALFORMED_DELIVERY_MODE,
+            '[config] `audit-log.delivery.outbox.lease_seconds` must be an integer from 30 to 86400.',
+            '[config] `audit-log.delivery.outbox.max_attempts` must be an integer from 1 to 1000.',
+            '[config] `audit-log.delivery.outbox.backoff_seconds` must be an integer from 1 to 3600.',
+            self::MALFORMED_OUTBOX_TABLE,
+            self::MALFORMED_DELIVERIES_TABLE,
+            '[config] `audit-log.delivery.outbox.connection` must be a connection name, or null or empty for the storage connection.',
+        ], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Rows of `[the setting, the bad value, the text in it]`: a failure or
+     * delivery setting in each shape it is refused in.
+     *
+     * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
+     */
+    public static function provideDeliveryValuesThatMustNotBePrinted(): iterable
+    {
+        $long = str_repeat(self::SENTINEL, 8);
+
+        yield from [
+            'a failure mode'                 => ['audit-log.failure.mode', self::SENTINEL, self::SENTINEL],
+            'a spill channel too long'       => ['audit-log.failure.log_channel', $long, self::SENTINEL],
+            'a spill channel that is a list' => ['audit-log.failure.log_channel', [self::SENTINEL], self::SENTINEL],
+            'a delivery mode'                => ['audit-log.delivery.mode', self::SENTINEL, self::SENTINEL],
+            'an outbox connection'           => ['audit-log.delivery.outbox.connection', [self::SENTINEL], self::SENTINEL],
+            'an outbox table'                => ['audit-log.delivery.outbox.table', self::SENTINEL, self::SENTINEL],
+            'a lease'                        => ['audit-log.delivery.outbox.lease_seconds', self::SENTINEL, self::SENTINEL],
+            'a number of attempts'           => ['audit-log.delivery.outbox.max_attempts', self::SENTINEL, self::SENTINEL],
+            'a backoff'                      => ['audit-log.delivery.outbox.backoff_seconds', self::SENTINEL, self::SENTINEL],
+            'a deliveries table'             => ['audit-log.delivery.deliveries_table', self::SENTINEL, self::SENTINEL],
+        ];
+    }
+
+    /**
+     * A bad failure or delivery setting fails the run and never appears in its
+     * output, which names the setting by its key.
+     *
+     * @param  string  $setting
+     * @param  array<array-key, string>|string  $value
+     * @param  string  $sentinel
+     * @return void
+     */
+    #[DataProvider('provideDeliveryValuesThatMustNotBePrinted')]
+    public function testThePrintedOutputHoldsNoValueOfADeliverySetting(string $setting, array|string $value, string $sentinel): void
+    {
+        app(ConfigRepository::class)->set($setting, $value);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertCount(1, self::problemsIn($output));
+        self::assertStringContainsString("`{$setting}`", implode("\n", $output));
+        self::assertStringNotContainsString($sentinel, implode("\n", $output));
+    }
+
+    /**
      * Run the command and return its exit code and its output lines.
      *
      * @return array{0: int, 1: list<string>}
@@ -1321,14 +1629,15 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The lines of the output that are not a subject's `OK`.
+     * The lines of the output that are not a subject's `OK` or the note on the
+     * spill channel, which is not a problem.
      *
      * @param  list<string>  $output
      * @return list<string>
      */
     private static function problemsIn(array $output): array
     {
-        return array_values(array_filter($output, static fn (string $line): bool => preg_match('/\A\[[a-z]+\] OK\z/', $line) !== 1));
+        return array_values(array_filter($output, static fn (string $line): bool => preg_match('/\A\[[a-z]+\] OK\z/', $line) !== 1 && !str_starts_with($line, '[spill] ')));
     }
 
     /**

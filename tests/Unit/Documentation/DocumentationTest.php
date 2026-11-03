@@ -11,34 +11,44 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
+use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
+use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
+use Tests\Fixtures\Stores\DocumentedSpillChannel;
 
 /**
  * A drift guard for the README, the guides in docs/guides and the design notes
  * in docs/design: every outcome, origin, provenance, field handling, key owner,
- * IP mode and identifier mode, every configuration key and every method of the
- * recorder is documented; every package event has a row in the events table;
- * every `AuditLog::` call shown exists or is planned; every design note, the
- * redaction note and the threat model among them, exists, has the standard
- * sections and is listed in the index, which ends with the standard sentence;
- * the notes state what they must, and the threat model opens with the limits of
- * key matching; the redaction note lists every entry of the matcher and every
- * IP mode, and never calls key matching fail-closed; every redaction setting's
- * environment variable is in the README; every test a note cites and every
- * file it anchors exists, and no document cites a file kept out of the
- * repository; the vocabulary reserves every prefix and every shipped code sits
- * under one; and every example is valid and neutral, naming no other package of
- * the suite.
+ * IP mode, identifier mode, failure mode, delivery mode, failed operation and
+ * envelope failure, every configuration key and every method of the recorder is
+ * documented; every package event has a row in the events table and in the
+ * events guide; every `AuditLog::` call shown exists or is planned; every
+ * design note, the redaction note, the threat model and the delivery note among
+ * them, exists, has the standard sections and is listed in the index, which
+ * ends with the standard sentence; the notes state what they must, and the
+ * threat model opens with the limits of key matching; the redaction note lists
+ * every entry of the matcher and every IP mode, and never calls key matching
+ * fail-closed; every redaction, failure and delivery setting's environment
+ * variable is in the README; the outcomes table has exactly its rows, and no
+ * document says a failed record is not true; the documented spill channel is
+ * the one the tests use, and the spill and the outbox are called personal data;
+ * every test a note cites and every file it anchors exists, and no document
+ * cites a file kept out of the repository, a milestone or another package of
+ * the suite, or describes a transition from a release that does not exist; the
+ * vocabulary reserves every prefix and every shipped code sits under one; and
+ * every example is valid and neutral, naming no other package of the suite.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -52,7 +62,19 @@ use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 final class DocumentationTest extends TestCase
 {
     /** @var list<class-string<\BackedEnum>> The public enums whose every value is documented. */
-    private const array ENUMS = [Outcome::class, Origin::class, Provenance::class, FieldHandling::class, KeyOwner::class, IpMode::class, IdentifierMode::class];
+    private const array ENUMS = [
+        Outcome::class,
+        Origin::class,
+        Provenance::class,
+        FieldHandling::class,
+        KeyOwner::class,
+        IpMode::class,
+        IdentifierMode::class,
+        FailureMode::class,
+        DeliveryMode::class,
+        FailedOperation::class,
+        EnvelopeFailure::class,
+    ];
 
     /** @var list<string> The sections of every design note, in order. */
     private const array SECTIONS = ['Purpose', 'Invariants', 'Success Path', 'Failure / Edge Cases', 'Implementation Anchors', 'Authoritative Tests', 'Change Triggers'];
@@ -65,6 +87,8 @@ final class DocumentationTest extends TestCase
         'storage.md',
         'integrity.md',
         'outcomes.md',
+        'delivery.md',
+        'event-model.md',
         'context-resolution.md',
         'redaction.md',
         'threat-model.md',
@@ -83,6 +107,48 @@ final class DocumentationTest extends TestCase
 
     /** @var string The threat model. */
     private const string THREAT_MODEL = '/docs/design/threat-model.md';
+
+    /** @var string The delivery note. */
+    private const string DELIVERY_NOTE = '/docs/design/delivery.md';
+
+    /** @var string The event model. */
+    private const string EVENT_MODEL = '/docs/design/event-model.md';
+
+    /** @var string The outcomes note. */
+    private const string OUTCOMES_NOTE = '/docs/design/outcomes.md';
+
+    /** @var string The events guide. */
+    private const string EVENTS_GUIDE = '/docs/guides/events.md';
+
+    /** @var string The sentence both the threat model and the delivery note state about the spill and the outbox. */
+    private const string PERSONAL_DATA = 'The spill and the outbox hold personal data';
+
+    /** @var list<string> The rows of the outcomes table, in order. */
+    private const array OUTCOME_ROWS = [
+        'after-commit-sync-report',
+        'after-commit-sync-throw',
+        'after-commit-none-open',
+        'after-commit-outbox-same',
+        'after-commit-outbox-same-throw',
+        'after-commit-outbox-other',
+        'immediately-sync-report',
+        'immediately-sync-throw',
+        'immediately-outbox',
+        'transactional-sync',
+        'transactional-outbox',
+        'fail-closed-sync',
+        'fail-closed-outbox',
+        'fail-closed-transactional',
+        'host-deadlock',
+        'host-connection-lost',
+        'aborted-postgres-host',
+        'failed-finalise',
+        'inside-a-store',
+        'inside-a-store-strict',
+        'drain-transient',
+        'drain-final',
+        'drain-undecryptable',
+    ];
 
     /** @var list<string> The facade calls the documentation may show before they ship; this list empties as each arrives. */
     private const array PLANNED_CALLS = ['bulk', 'capture', 'map'];
@@ -111,6 +177,18 @@ final class DocumentationTest extends TestCase
 
     /** @var string A citation of what is kept out of the repository: the requirements, the backlog or a build file. */
     private const string LOCAL_ONLY = '/FEATURES\.md|BACKLOG\.md|\bAUDIT-[A-Z]+\.\d|\bBL-\d|\.sinemacula\b|\bm\d+-design\b|§/';
+
+    /** @var string A way of saying a failed record is not true, which it can be even when the business change rolls back, however the words are wrapped. */
+    private const string NOT_TRUE = '/\b(?:the|a|its|that)\s+(?:failed\s+|spilled\s+)?record\s+(?:is|was)\s+(?:not|never)\s+true\b/i';
+
+    /** @var string A citation of how the work was divided, which means nothing to a reader of the repository. */
+    private const string MILESTONE = '/\bmilestones?\b|\bM[1-9]\b/';
+
+    /** @var string Words describing a transition from a release, and none exists. */
+    private const string TRANSITION = '/\bbreaking change|\bdeprecat|\bupgrade notes?\b|\bbackward[s]?[\s-]compat/i';
+
+    /** @var string The name of another package of the suite, in prose as much as in code. */
+    private const string SIBLING = '/\blaravel-(?:authentication|authorization|mfa|sso|iam)\b/i';
 
     /** @var ?string The README, the guides and the design notes, read once. */
     private static ?string $documentation = null;
@@ -682,6 +760,8 @@ final class DocumentationTest extends TestCase
         $testing     = '/docs/design/testing-helpers.md';
         $definitions = '/docs/design/event-definitions.md';
         $record      = '/docs/design/record-model.md';
+        $storage     = '/docs/design/storage.md';
+        $integrity   = '/docs/design/integrity.md';
 
         yield from [
             'the actor is never loaded'          => [$context, 'never through `user()`'],
@@ -751,6 +831,73 @@ final class DocumentationTest extends TestCase
             'a value hashes alike in any field'  => [self::THREAT_MODEL, 'the same value does give the same hash in any field of any code'],
             'a field needing no linkage'         => [self::THREAT_MODEL, 'a field needing no linkage should use `drop` or `encrypt`'],
             'a key change is visible'            => [self::THREAT_MODEL, 'A key change is visible through the fingerprint'],
+            'often shipped'                      => [self::THREAT_MODEL, 'often shipped off the server'],
+            'what the encryption protects'       => [self::THREAT_MODEL, 'protects a database copy and not a compromised application holding the key'],
+            'a spill is not encrypted'           => [self::THREAT_MODEL, 'A spill line is not encrypted'],
+            'what a log\'s readers see'          => [self::THREAT_MODEL, 'no `MessageLogged` listener sees a spill line'],
+            'other holders of a spill line'      => [self::THREAT_MODEL, 'a spill on the default channel can post a record to a chat room'],
+            'what signing establishes'           => [self::THREAT_MODEL, 'What signing establishes'],
+            'uncommitted is not evidence'        => [self::OUTCOMES_NOTE, 'A record for an uncommitted operation must not later become committed evidence.'],
+            'a bound spill waits'                => [self::OUTCOMES_NOTE, 'A bound spill waits in memory'],
+            'a spill waits for its connection'   => [self::OUTCOMES_NOTE, 'spill waits for any transaction still open on the connection it was written to'],
+            'a spill written at once'            => [self::OUTCOMES_NOTE, 'spill is written at once'],
+            'evidence of an attempt'             => [self::OUTCOMES_NOTE, 'evidence of an attempt, not of a committed change'],
+            'the remaining gap'                  => [self::OUTCOMES_NOTE, 'The gap stays for `after-commit-outbox-other`'],
+            'the sync gap'                       => [self::OUTCOMES_NOTE, 'a process that dies between a sync commit and its write loses it'],
+            'the one decoder'                    => [self::DELIVERY_NOTE, '`Records\EnvelopeCodec` is the one decoder'],
+            'failures move before the commit'    => [self::DELIVERY_NOTE, 'moves finalisation and insert failures before the commit'],
+            'the guaranteed format'              => [self::DELIVERY_NOTE, 'Replay is guaranteed only for that format'],
+            'at least once'                      => [self::DELIVERY_NOTE, 'at-least-once'],
+            'no order'                           => [self::DELIVERY_NOTE, 'Delivery order is not guaranteed'],
+            'calls within the lease'             => [self::DELIVERY_NOTE, 'a destination call must finish within `delivery.outbox.lease_seconds`'],
+            'clocks within the lease'            => [self::DELIVERY_NOTE, 'worker clocks must agree to well within the lease'],
+            'no drain inside a transaction'      => [self::DELIVERY_NOTE, 'the drain refuses to run inside a transaction'],
+            'a stack and its capabilities'       => [self::DELIVERY_NOTE, 'joins a transaction only when every destination does'],
+            'a host-fatal secondary failure'     => [self::DELIVERY_NOTE, 'a reporter or a listener on any connection with a transaction open propagates sanitised'],
+            'nothing is scheduled'               => [self::DELIVERY_NOTE, 'The package does not schedule it'],
+            'no job exists'                      => [self::DELIVERY_NOTE, 'because no job exists'],
+            'why no job exists'                  => [self::DELIVERY_NOTE, 'Laravel stores exception text in `failed_jobs` separately from the payload'],
+            'a call is no proof'                 => [self::DELIVERY_NOTE, 'a successful call to a remote destination is not proof that it ingested the record'],
+            'receipts stay'                      => [self::DELIVERY_NOTE, 'Receipts are kept'],
+            'old keys stay'                      => [self::DELIVERY_NOTE, 'Old keys must stay in `app.previous_keys`'],
+            'a decrypt failure'                  => [self::DELIVERY_NOTE, 'A decrypt failure means a removed key or corruption, and the row is kept'],
+            'never signed again'                 => [self::DELIVERY_NOTE, 'never re-signed'],
+            'a removed key'                      => [self::DELIVERY_NOTE, 'restore the key or leave the record quarantined'],
+            'where an unsigned record goes'      => [self::DELIVERY_NOTE, 'The importer, which has not shipped yet, is where an unsigned record goes, marked as asserted'],
+            'a repeated log line'                => [self::DELIVERY_NOTE, 'a replay can repeat a log destination\'s line'],
+            'a rewritten token'                  => [self::DELIVERY_NOTE, 'A `LineFormatter` substitutes `%context%`'],
+            'a commit that is really a rollback' => [self::OUTCOMES_NOTE, 'A commit that is really a rollback writes nothing.'],
+            'one record costs no other'          => [self::OUTCOMES_NOTE, 'One record\'s failure costs no other.'],
+            'what a callback can still cost'     => [self::OUTCOMES_NOTE, 'An application callback can still cost the audit log its records.'],
+            'what counts as fatal'               => [self::OUTCOMES_NOTE, 'What counts as fatal is read from the driver, not from the record.'],
+            'a line is a projection'             => [self::DELIVERY_NOTE, 'The log store\'s line is a projection, not the integrity artefact'],
+            'access to a spill file'             => [self::DELIVERY_NOTE, '**Access.**'],
+            'rotating a spill file'              => [self::DELIVERY_NOTE, '**Rotation.**'],
+            'keeping a spill file'               => [self::DELIVERY_NOTE, '**Retention.**'],
+            'a percent sign is escaped'          => [self::DELIVERY_NOTE, 'every `%` is written as `\u0025`'],
+            'the pinned OCSF version'            => [self::DELIVERY_NOTE, 'OCSF `1.9.0`'],
+            'a mapping and its version'          => [self::DELIVERY_NOTE, 'A mapping applies only to records of its definition\'s version'],
+            'the fallback'                       => [self::DELIVERY_NOTE, 'falls back to a Base Event'],
+            'no invented classification'         => [self::DELIVERY_NOTE, 'A classification is never invented'],
+            'the CEF header'                     => [self::DELIVERY_NOTE, 'CEF:0|Sine Macula|laravel-audit-log|<record_version>|<event>|<event>|<severity>|<extension>'],
+            'the CEF extension'                  => [self::DELIVERY_NOTE, '`externalId`'],
+            'a lost event'                       => [self::EVENT_MODEL, 'A crash between delete and dispatch loses an `AuditRecorded`'],
+            'the event holds no value'           => [self::EVENT_MODEL, 'Neither holds a value of the record'],
+            'the event contract'                 => [self::EVENT_MODEL, '`Contracts\AuditLogEvent`'],
+            'what the guard leaves out'          => [self::EVENT_MODEL, 'The guard does not cover a contributor or an `AuditRecorded` listener'],
+            'the failing fake by mode'           => [$testing, 'What the caller sees is the write path\'s, not the fake\'s'],
+            'the fake says it can'               => [$testing, 'The fake says it is durable and that it joins a transaction on any connection'],
+            'the fake in outbox mode'            => [$testing, 'In outbox mode a record reaches the fake when it is drained'],
+            'the two tables'                     => [$storage, '`delivery.deliveries_table` (`audit_log_deliveries` by default) is always on the storage connection'],
+            'the outbox\'s connection'           => [$storage, '`delivery.outbox.table` (`audit_log_outbox` by default) is on `delivery.outbox.connection`'],
+            'the writer\'s other grants'         => [$storage, 'In outbox mode the writer also needs'],
+            'a replay never signs'               => [$integrity, 'A replay verifies and never re-signs'],
+            'rebuilding a record'                => [$record, '`AuditRecord::fromEnvelope()`'],
+            'the codec in the record model'      => [$record, '`Records\EnvelopeCodec`, the one decoder'],
+            'a queued listener'                  => [self::EVENTS_GUIDE, 'Use a queued listener'],
+            'alerting on a failure'              => [self::EVENTS_GUIDE, 'Alert on a failed write'],
+            'alerting on a record'               => [self::EVENTS_GUIDE, 'Alert on a stored record'],
+            'what a listener may do'             => [self::EVENTS_GUIDE, 'What a listener may do'],
         ];
     }
 
@@ -777,13 +924,15 @@ final class DocumentationTest extends TestCase
     {
         yield from [
             'redaction'    => [self::REDACTION_NOTE, ['Key Matching', 'Field Rules', 'Budgets And Omission', 'IP Modes']],
-            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force']],
+            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox']],
+            'delivery'     => [self::DELIVERY_NOTE, ['Spill Channel', 'Claims And Receipts', 'Replay', 'Stores And Capabilities', 'Formatters']],
         ];
     }
 
     /**
-     * The redaction note and the threat model have their own sections, in
-     * order, between the failure and edge cases and the implementation anchors.
+     * The redaction note, the threat model and the delivery note have their own
+     * sections, in order, between the failure and edge cases and the
+     * implementation anchors.
      *
      * @param  string  $note
      * @param  list<string>  $extra
@@ -937,6 +1086,192 @@ final class DocumentationTest extends TestCase
 
         foreach ($variables[0] as $variable) {
             self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+        }
+    }
+
+    /**
+     * The failure and delivery settings read from the environment are named in
+     * the README, and there are as many as the settings that read one.
+     *
+     * @return void
+     */
+    public function testEveryDeliveryLeafNamesItsEnvVarInTheReadme(): void
+    {
+        preg_match_all('/\bAUDIT_LOG_(?:FAILURE|DELIVERY)_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
+
+        self::assertCount(9, $variables[0], 'The configuration does not read the failure and delivery environment variables it should.');
+
+        foreach ($variables[0] as $variable) {
+            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+        }
+    }
+
+    /**
+     * No document says a failed record is not true, because a failure or a
+     * denial can be true even when the business change rolls back.
+     *
+     * @return void
+     */
+    public function testNoNoteSaysAFailedRecordIsNotTrue(): void
+    {
+        self::assertSame(0, preg_match(self::NOT_TRUE, self::documentation()), 'A document says a failed record is not true.');
+    }
+
+    /**
+     * The phrase a failed record is never described with is found in each of
+     * its forms, across a wrapped line, and not in a phrase that merely
+     * resembles it.
+     *
+     * @return void
+     */
+    public function testTheNotTruePatternFindsEachForm(): void
+    {
+        foreach (['the record is not true', 'The record is not true', "the record\n  is not true", 'a failed record was never true', 'the spilled record is not true'] as $phrase) {
+            self::assertSame(1, preg_match(self::NOT_TRUE, $phrase), $phrase);
+        }
+
+        foreach (['the record is true', 'A failure or a denial can be true', 'a record is not trusted'] as $phrase) {
+            self::assertSame(0, preg_match(self::NOT_TRUE, $phrase), $phrase);
+        }
+    }
+
+    /**
+     * The guarantees of the outcomes note have exactly the rows they should, in
+     * order, so a row added, removed or renamed is seen here as well as by its
+     * test.
+     *
+     * @return void
+     */
+    public function testTheOutcomesTableHasEachRow(): void
+    {
+        preg_match_all('/^\| `([a-z-]+)` +\|/m', self::section(self::read(self::OUTCOMES_NOTE), 'Guarantees'), $rows);
+
+        self::assertSame(self::OUTCOME_ROWS, $rows[1]);
+    }
+
+    /**
+     * Each key of the channel the tests use, but its path, is in the delivery
+     * note's code block with the same value, and the block has no key the tests
+     * do not use, so the documented channel and the tested one cannot drift
+     * apart.
+     *
+     * @return void
+     */
+    public function testTheDocumentedChannelIsTheTestedOne(): void
+    {
+        $block  = self::documentedChannel(self::section(self::read(self::DELIVERY_NOTE), 'Spill Channel'));
+        $tested = DocumentedSpillChannel::config('');
+
+        preg_match_all('/^ +\'(\w+)\' +=>/m', $block, $keys);
+
+        self::assertSame(array_keys($tested), $keys[1], 'The documented channel does not have the keys of the tested one.');
+
+        unset($tested['path']);
+
+        foreach ($tested as $key => $value) {
+            self::assertStringContainsString(self::channelEntry($key, $value), self::collapsed($block));
+        }
+    }
+
+    /**
+     * An entry of the channel is written as it is in configuration: a string in
+     * quotes, a permission in octal, a class by its name, and a map with its
+     * values written the same way, with a line feed in double quotes.
+     *
+     * @return void
+     */
+    public function testAChannelEntryIsWrittenAsItIsInConfiguration(): void
+    {
+        self::assertSame('\'level\' => \'critical\'', self::channelEntry('level', 'critical'));
+        self::assertSame('\'permission\' => 0600', self::channelEntry('permission', 0600));
+        self::assertSame('\'formatter\' => Tests\Unit\Documentation\DocumentationTest::class', self::channelEntry('formatter', self::class));
+        self::assertSame('\'with\' => [\'format\' => "%message%\n", \'inline\' => false]', self::channelEntry('with', ['format' => "%message%\n", 'inline' => false]));
+    }
+
+    /**
+     * The block is found by the channel's name, among others in its section,
+     * and a section without it gives nothing.
+     *
+     * @return void
+     */
+    public function testTheChannelBlockIsFoundByItsName(): void
+    {
+        $section = "Text.\n\n```php\n\$other = 1;\n```\n\n```php\n'audit-spill' => [\n    'driver' => 'single',\n],\n```\n";
+
+        self::assertSame("'audit-spill' => [\n    'driver' => 'single',\n],\n", self::documentedChannel($section));
+        self::assertSame('', self::documentedChannel("```php\n\$other = 1;\n```\n"));
+    }
+
+    /**
+     * The spill and the outbox are called personal data by the threat model, in
+     * its own section, and by the delivery note, along with what the outbox's
+     * encryption does not protect and who else can read a line.
+     *
+     * @return void
+     */
+    public function testTheSpillAndOutboxArePersonalData(): void
+    {
+        $section = self::collapsed(self::section(self::read(self::THREAT_MODEL), 'Spill And Outbox'));
+
+        self::assertStringContainsString(self::PERSONAL_DATA, $section);
+        self::assertStringContainsString('often shipped off the server', $section);
+        self::assertStringContainsString('not a compromised application holding the key', $section);
+        self::assertStringContainsString('A spill line is not encrypted', $section);
+        self::assertStringContainsString('no `MessageLogged` listener', $section);
+
+        self::assertStringContainsString(self::PERSONAL_DATA, self::prose(self::DELIVERY_NOTE));
+    }
+
+    /**
+     * Every event the package dispatches has a row in the events guide itself,
+     * which is where a reader of the guide looks for it.
+     *
+     * @param  string  $class
+     * @return void
+     */
+    #[DataProvider('provideEvents')]
+    public function testEveryEventIsInTheEventsGuide(string $class): void
+    {
+        self::assertTrue(self::hasEventRow(self::read(self::EVENTS_GUIDE), $class), sprintf('The events guide has no row for %s.', $class));
+    }
+
+    /**
+     * No document cites a milestone, describes a transition from a release, or
+     * names another package of the suite, in prose as much as in code.
+     *
+     * @return void
+     */
+    public function testNoDocumentCitesAMilestoneATransitionOrASibling(): void
+    {
+        self::assertSame(0, preg_match(self::MILESTONE, self::documentation()), 'The documentation cites a milestone.');
+        self::assertSame(0, preg_match(self::TRANSITION, self::documentation()), 'The documentation describes a transition from a release.');
+        self::assertSame(0, preg_match(self::SIBLING, self::documentation()), 'The documentation names another package of the suite.');
+    }
+
+    /**
+     * Those patterns find each form, and neither the package's own name nor a
+     * word that merely resembles one.
+     *
+     * @return void
+     */
+    public function testTheMilestoneTransitionAndSiblingPatternsFindEachForm(): void
+    {
+        foreach (['the milestone', 'in M5', 'M1 to M4'] as $citation) {
+            self::assertSame(1, preg_match(self::MILESTONE, $citation), $citation);
+        }
+
+        foreach (['A breaking change', 'deprecated', 'Deprecation', 'upgrade notes', 'backward compatible', 'backwards-compatibility'] as $phrase) {
+            self::assertSame(1, preg_match(self::TRANSITION, $phrase), $phrase);
+        }
+
+        foreach (['sinemacula/laravel-mfa', 'laravel-authentication', 'LARAVEL-IAM'] as $name) {
+            self::assertSame(1, preg_match(self::SIBLING, $name), $name);
+        }
+
+        foreach (['M0', 'HMAC5', 'a line break', 'upgrade', 'sinemacula/laravel-audit-log'] as $text) {
+            self::assertSame(0, preg_match(self::MILESTONE, $text), $text);
+            self::assertSame(0, preg_match(self::TRANSITION, $text), $text);
+            self::assertSame(0, preg_match(self::SIBLING, $text), $text);
         }
     }
 
@@ -1323,6 +1658,65 @@ final class DocumentationTest extends TestCase
     private static function literal(array $match): string
     {
         return ($match[1] ?? '') !== '' ? $match[1] : ($match[2] ?? '');
+    }
+
+    /**
+     * The fenced code block of a section that holds the documented channel,
+     * found by its name, or nothing when none does.
+     *
+     * @param  string  $section
+     * @return string
+     */
+    private static function documentedChannel(string $section): string
+    {
+        preg_match_all('/^ *```[^\n]*\n(.*?)^ *```[ \t]*$/ms', $section, $blocks);
+
+        foreach ($blocks[1] as $block) {
+            if (str_contains($block, '\'audit-spill\'')) {
+                return $block;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * An entry of the channel, written as it is in configuration.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  string  $key
+     * @param  mixed  $value
+     * @return string
+     */
+    private static function channelEntry(string $key, mixed $value): string
+    {
+        return sprintf('\'%s\' => %s', $key, self::channelValue($value));
+    }
+
+    /**
+     * A value of the channel, written as it is in configuration.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $value
+     * @return string
+     */
+    private static function channelValue(mixed $value): string
+    {
+        if (is_array($value)) {
+            $entries = array_map(self::channelEntry(...), array_keys($value), array_values($value));
+
+            return '[' . implode(', ', $entries) . ']';
+        }
+
+        return match (true) {
+            is_bool($value)                                 => $value ? 'true' : 'false',
+            is_int($value)                                  => sprintf('0%o', $value),
+            is_string($value) && class_exists($value)       => $value . '::class',
+            is_string($value) && str_contains($value, "\n") => '"' . addcslashes($value, "\n") . '"',
+            default                                         => '\'' . (is_string($value) ? $value : get_debug_type($value)) . '\'',
+        };
     }
 
     /**

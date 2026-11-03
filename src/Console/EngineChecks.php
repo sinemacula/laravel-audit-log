@@ -46,13 +46,13 @@ final readonly class EngineChecks
     private const string ENGINE = 'InnoDB';
 
     /** @var string Why a connection that cannot be built or opened is a problem, named by the class of what was thrown. */
-    private const string UNOPENED = 'The storage connection [%s] could not be opened (%s).';
+    private const string UNOPENED = 'The %s connection [%s] could not be opened (%s).';
 
     /** @var string Why a driver the package does not support is a problem. */
-    private const string UNSUPPORTED_DRIVER = 'The storage connection uses the %s driver, which is not supported; use SQLite, MySQL 8.4 or later, or PostgreSQL.';
+    private const string UNSUPPORTED_DRIVER = 'The %s connection [%s] uses the %s driver, which is not supported; use SQLite, MySQL 8.4 or later, or PostgreSQL.';
 
     /** @var string Why a MySQL server older than 8.4, or MariaDB, is a problem. */
-    private const string UNSUPPORTED_MYSQL = 'MySQL %s is not supported; use MySQL 8.4 or later (MariaDB is not supported).';
+    private const string UNSUPPORTED_MYSQL = 'The %s connection [%s] runs MySQL %s, which is not supported; use MySQL 8.4 or later (MariaDB is not supported).';
 
     /**
      * Constructor.
@@ -107,12 +107,13 @@ final readonly class EngineChecks
      * The problem that stops anything else being checked on the connection: a
      * driver the package does not support, a connection that cannot be built or
      * opened, or a MySQL server older than 8.4 or MariaDB; `null` when there is
-     * none.
+     * none. The message names the connection by its role.
      *
      * @param  string  $connection
+     * @param  'outbox'|'storage'  $role
      * @return ?string
      */
-    public function blockingProblem(string $connection): ?string
+    public function blockingProblem(string $connection, string $role = 'storage'): ?string
     {
         // The framework declares nothing for building or opening a connection,
         // though both throw: for a driver it has no connection for, a missing
@@ -122,12 +123,12 @@ final readonly class EngineChecks
             $driver   = $database->getDriverName();
             $version  = in_array($driver, self::DRIVERS, true) ? self::serverVersion($database) : null;
         } catch (\Throwable $exception) { // @phpstan-ignore catch.neverThrown
-            return sprintf(self::UNOPENED, $connection, $exception::class);
+            return sprintf(self::UNOPENED, $role, $connection, get_debug_type($exception));
         }
 
         return match (true) {
-            $version === null                                             => sprintf(self::UNSUPPORTED_DRIVER, $driver),
-            $driver  === 'mysql' && !self::supportsMySqlVersion($version) => sprintf(self::UNSUPPORTED_MYSQL, $version),
+            $version === null                                             => sprintf(self::UNSUPPORTED_DRIVER, $role, $connection, $driver),
+            $driver  === 'mysql' && !self::supportsMySqlVersion($version) => sprintf(self::UNSUPPORTED_MYSQL, $role, $connection, $version),
             default                                                       => null,
         };
     }

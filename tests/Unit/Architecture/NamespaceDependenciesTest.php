@@ -58,10 +58,10 @@ final class NamespaceDependenciesTest extends TestCase
     /** @var array<string, array{from: non-empty-list<string>, except: list<string>, forbids: non-empty-list<string>, allows: list<string>}> The rules, by what each holds. */
     private const array RULES = [
         'the enums name nothing of the package but other enums' => [
-            'from'    => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums'],
+            'from'    => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums', 'Delivery\Enums', 'Stores\Enums'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums'],
+            'allows'  => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums', 'Delivery\Enums', 'Stores\Enums'],
         ],
         'the support helpers name nothing of the package but the support helpers, references and the clock contract' => [
             'from'    => ['Support'],
@@ -93,9 +93,9 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database', 'Delivery', 'Contributors', 'Runtime', 'Listeners', 'Testing', 'Facades', 'Recorder', 'Http'],
             'allows'  => [],
         ],
-        'the record values name nothing of the integrity layer but the finaliser' => [
+        'the record values name nothing of the integrity layer but the finaliser and the codec' => [
             'from'    => ['Records'],
-            'except'  => ['Records\RecordFinaliser'],
+            'except'  => ['Records\RecordFinaliser', 'Records\EnvelopeCodec'],
             'forbids' => ['Integrity'],
             'allows'  => [],
         ],
@@ -182,6 +182,18 @@ final class NamespaceDependenciesTest extends TestCase
             'except'  => [],
             'forbids' => ['Privacy'],
             'allows'  => ['Privacy\Minimised'],
+        ],
+        'the formatters name nothing of the stores, the read model, the console, the database helpers or the delivery' => [
+            'from'    => ['Export'],
+            'except'  => [],
+            'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database', 'Delivery', 'Runtime', 'Listeners', 'Testing', 'Facades', 'Recorder'],
+            'allows'  => [],
+        ],
+        'the delivery names nothing of the console or the read model' => [
+            'from'    => ['Delivery'],
+            'except'  => [],
+            'forbids' => ['Console', 'Models', 'Casts'],
+            'allows'  => [],
         ],
     ];
 

@@ -6,6 +6,7 @@ namespace Tests\Performance;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\Events\TransactionCommitted;
 use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -18,9 +19,11 @@ use Tests\TestCase;
  * can assert structural statement budgets without making flaky wall-clock
  * assertions: every statement the connection is asked to run, counted before it
  * runs, so one that fails counts too (the query log records only those that
- * succeed); every savepoint, a transaction begun inside another; and every
- * rollback, of a transaction or a savepoint. The clock is frozen at a time with
- * microseconds.
+ * succeed); every savepoint, a transaction begun inside another; every
+ * rollback, of a transaction or a savepoint; and every top-level transaction
+ * and commit, which run on PDO directly and which no statement count sees,
+ * though each is a round trip on MySQL and PostgreSQL. The clock is frozen at a
+ * time with microseconds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,6 +44,12 @@ abstract class PerformanceContractTestCase extends TestCase
     /** @var int The rollbacks counted since the last capture began. */
     private int $rollbacks = 0;
 
+    /** @var int The top-level transactions begun since the last capture began. */
+    private int $transactions = 0;
+
+    /** @var int The top-level commits made since the last capture began. */
+    private int $commits = 0;
+
     /**
      * Freeze the clock and count what the default connection is asked to do.
      *
@@ -59,6 +68,8 @@ abstract class PerformanceContractTestCase extends TestCase
 
         Event::listen(TransactionBeginning::class, function (TransactionBeginning $event): void {
             if ($event->connection->transactionLevel() <= 1) {
+                $this->transactions++;
+
                 return;
             }
 
@@ -67,6 +78,14 @@ abstract class PerformanceContractTestCase extends TestCase
 
         Event::listen(TransactionRolledBack::class, function (): void {
             $this->rollbacks++;
+        });
+
+        Event::listen(TransactionCommitted::class, function (TransactionCommitted $event): void {
+            if ($event->connection->transactionLevel() > 0) {
+                return;
+            }
+
+            $this->commits++;
         });
     }
 
@@ -113,6 +132,40 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
+     * The reads a commit costs with audit work waiting on it: one on
+     * PostgreSQL, which asks whether the transaction was already aborted,
+     * because a commit there reports a success even then, and none on any other
+     * engine.
+     *
+     * @return int
+     */
+    protected function commitQuestionReads(): int
+    {
+        return DB::connection()->getDriverName() === 'pgsql' ? 1 : 0;
+    }
+
+    /**
+     * Run a subject and assert how many top-level transactions it began and how
+     * many it committed, which no statement budget sees.
+     *
+     * @template TResult
+     *
+     * @param  int  $transactions
+     * @param  int  $commits
+     * @param  callable(): TResult  $callback
+     * @return TResult
+     */
+    protected function assertTransactionBudget(int $transactions, int $commits, callable $callback): mixed
+    {
+        $result = $this->capture($callback);
+
+        static::assertSame($transactions, $this->transactions, 'Unexpected top-level transaction budget.');
+        static::assertSame($commits, $this->commits, 'Unexpected top-level commit budget.');
+
+        return $result;
+    }
+
+    /**
      * Run a subject with the counts started afresh, so what is captured
      * afterwards is what it asked for alone.
      *
@@ -126,6 +179,9 @@ abstract class PerformanceContractTestCase extends TestCase
         $this->statements = [];
         $this->savepoints = 0;
         $this->rollbacks  = 0;
+
+        $this->transactions = 0;
+        $this->commits      = 0;
 
         return $callback();
     }

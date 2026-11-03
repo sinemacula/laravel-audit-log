@@ -18,6 +18,7 @@ use SineMacula\Laravel\AuditLog\Database\AfterCommit;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
@@ -27,8 +28,8 @@ use Tests\TestCase;
  * engine the suite runs against: a record is written when the transaction it
  * selected commits and dropped when that transaction rolls back, whichever
  * connection the transaction is on, a name pins that connection, and a write
- * that fails does so after the business data has committed, stopping the
- * callbacks behind it.
+ * that fails under the `throw` mode does so after the business data has
+ * committed, stopping the callbacks behind it.
  *
  * Storage is the default connection unless a test defines it as a connection of
  * its own. The second transacting connection needs no tables.
@@ -589,14 +590,17 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A failed write surfaces from the host's commit, after the business data
-     * has committed, and neither the data nor the connection is affected: the
-     * write sits outside the transaction it waited for.
+     * Under the `throw` mode a failed write surfaces from the host's commit,
+     * after the business data has committed, and neither the data nor the
+     * connection is affected: the write sits outside the transaction it waited
+     * for.
      *
      * @return void
      */
     public function testAFailedWriteSurfacesAfterTheBusinessDataHasCommitted(): void
     {
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+
         $this->createInvoices();
         $this->pointAtProbeTable();
 
@@ -616,14 +620,16 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A failed write stops the after-commit callbacks registered behind it and
-     * has no effect on those before it, since Laravel runs them in order and
-     * nothing catches the exception. The failure policy replaces this later.
+     * Under the `throw` mode a failed write stops the after-commit callbacks
+     * registered behind it and has no effect on those before it, since Laravel
+     * runs them in order and nothing catches the exception.
      *
      * @return void
      */
     public function testAFailedWriteStopsLaterAfterCommitCallbacks(): void
     {
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+
         $this->pointAtProbeTable();
 
         $this->host()->beginTransaction();
@@ -805,7 +811,8 @@ final class AfterCommitTimingTest extends TestCase
 
     /**
      * Commit the host's transaction, whose deferred insert into the probe table
-     * fails on its `NOT NULL` column with the engine's own `QueryException`.
+     * fails on its `NOT NULL` column with the engine's own `QueryException`,
+     * sanitised.
      *
      * @return void
      *
@@ -817,8 +824,9 @@ final class AfterCommitTimingTest extends TestCase
             $this->host()->commit();
 
             self::fail('Expected the deferred audit insert to fail.');
-        } catch (QueryException $exception) {
-            self::assertStringStartsWith('insert into', $exception->getSql());
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(QueryException::class, $exception->exceptionClass);
+            self::assertNotNull($exception->sqlState);
         }
     }
 }

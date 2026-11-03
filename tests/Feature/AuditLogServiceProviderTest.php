@@ -9,6 +9,7 @@ use Illuminate\Console\Application as ConsoleApplication;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Database\Events\TransactionCommitting;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Foundation\Application;
 use Illuminate\Log\Context\Events\ContextDehydrating;
@@ -27,11 +28,14 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
+use SineMacula\Laravel\AuditLog\Console\DrainCommand;
+use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Delivery\CommitQueue;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
@@ -43,6 +47,7 @@ use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
+use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
@@ -53,7 +58,7 @@ use Tests\TestCase;
 /**
  * Feature tests for the package AuditLogServiceProvider: the configuration it
  * merges, the defaults it binds, the files it publishes under each tag, the
- * migrations it never loads, the command it registers in the console only, the
+ * migrations it never loads, the commands it registers in the console only, the
  * listeners and middleware it adds, and that it freezes registration at boot.
  *
  * The class runs no migration of its own, so the migrator's paths are what the
@@ -74,6 +79,13 @@ final class AuditLogServiceProviderTest extends TestCase
 
     /** @var string The tag the migrations are published under. */
     private const string MIGRATIONS_TAG = 'audit-log-migrations';
+
+    /** @var list<string> File names of every shipped migration, in the order they run. */
+    private const array SHIPPED_MIGRATIONS = [
+        '2026_11_02_000000_create_audit_log_entries_table.php',
+        '2026_11_02_000100_create_audit_log_outbox_table.php',
+        '2026_11_02_000200_create_audit_log_deliveries_table.php',
+    ];
 
     /**
      * The shipped configuration is merged under the package's key.
@@ -155,10 +167,14 @@ final class AuditLogServiceProviderTest extends TestCase
 
         $shipped = array_map(static fn (string $file): string => basename($file), glob($source . '*.php') ?: []);
 
-        self::assertSame(['2026_11_02_000000_create_audit_log_entries_table.php'], $shipped);
-        self::assertSame([
-            (string) realpath($source . '2026_11_02_000000_create_audit_log_entries_table.php') => database_path('migrations/2026_11_02_000000_create_audit_log_entries_table.php'),
-        ], $paths);
+        $expected = [];
+
+        foreach (self::SHIPPED_MIGRATIONS as $file) {
+            $expected[(string) realpath($source . $file)] = database_path('migrations/' . $file);
+        }
+
+        self::assertSame(self::SHIPPED_MIGRATIONS, $shipped);
+        self::assertSame($expected, $paths);
         self::assertContains(self::MIGRATIONS_TAG, ServiceProvider::publishableGroups());
     }
 
@@ -188,6 +204,28 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         self::assertArrayHasKey('audit-log:check', Artisan::all());
         self::assertInstanceOf(CheckCommand::class, Artisan::all()['audit-log:check']);
+    }
+
+    /**
+     * Running in the console, as a test does, the drain command is there.
+     *
+     * @return void
+     */
+    public function testTheDrainCommandIsRegistered(): void
+    {
+        self::assertArrayHasKey('audit-log:drain', Artisan::all());
+        self::assertInstanceOf(DrainCommand::class, Artisan::all()['audit-log:drain']);
+    }
+
+    /**
+     * Running in the console, as a test does, the replay command is there.
+     *
+     * @return void
+     */
+    public function testTheReplayCommandIsRegistered(): void
+    {
+        self::assertArrayHasKey('audit-log:replay', Artisan::all());
+        self::assertInstanceOf(ReplayCommand::class, Artisan::all()['audit-log:replay']);
     }
 
     /**
@@ -229,6 +267,8 @@ final class AuditLogServiceProviderTest extends TestCase
             'the recorder'           => [Recorder::class, Recorder::class],
             'the frames'             => [ExecutionFrames::class, ExecutionFrames::class],
             'the request identity'   => [RequestIdentity::class, RequestIdentity::class],
+            'the write guard'        => [WriteGuard::class, WriteGuard::class],
+            'the commit queue'       => [CommitQueue::class, CommitQueue::class],
         ];
     }
 
@@ -269,6 +309,8 @@ final class AuditLogServiceProviderTest extends TestCase
         $frames   = app(ExecutionFrames::class);
         $identity = app(RequestIdentity::class);
         $latch    = app(ReportLatch::class);
+        $guard    = app(WriteGuard::class);
+        $queue    = app(CommitQueue::class);
 
         self::assertSame($latch, app(ReportLatch::class));
 
@@ -277,6 +319,8 @@ final class AuditLogServiceProviderTest extends TestCase
         self::assertNotSame($frames, app(ExecutionFrames::class));
         self::assertNotSame($identity, app(RequestIdentity::class));
         self::assertNotSame($latch, app(ReportLatch::class));
+        self::assertNotSame($guard, app(WriteGuard::class));
+        self::assertNotSame($queue, app(CommitQueue::class));
     }
 
     /**
@@ -329,6 +373,20 @@ final class AuditLogServiceProviderTest extends TestCase
         self::assertSame([$listener], array_values(array_filter(
             Event::getRawListeners()[$event] ?? [],
             static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
+        )));
+    }
+
+    /**
+     * The commit queue's probe hears each commit about to happen, once, so an
+     * aborted PostgreSQL transaction is caught before its callbacks run.
+     *
+     * @return void
+     */
+    public function testTheCommitProbeListensOnce(): void
+    {
+        self::assertSame([[CommitQueue::class, 'probe']], array_values(array_filter(
+            Event::getRawListeners()[TransactionCommitting::class] ?? [],
+            static fn (mixed $registered): bool => is_array($registered) && is_string($registered[0] ?? null) && str_starts_with($registered[0], 'SineMacula\\'),
         )));
     }
 

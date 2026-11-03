@@ -40,6 +40,11 @@ change to any of them is a new version, never an edit of the old one.
   not in the ring is an `Integrity\UnknownKeyException` naming the id; an unsupported `integrity_version`, a missing
   column, a malformed `hmac` or a value with no canonical form is an `\UnexpectedValueException`. Verification keeps the
   evidence as it is and never repairs it.
+- A record kept outside the entries table, in the outbox or a spill line, is verified on the way back in, by
+  `Records\EnvelopeCodec`. Only one that verifies reaches the store, and it arrives with its own `recorded_at`, key id
+  and HMAC. A replay verifies and never re-signs, because a new signature would vouch for bytes nobody can now check, so
+  a removed signing key means restoring the key or leaving the record quarantined. A line marked `unsigned` has no
+  signature to verify, and is counted and left.
 - Removing a key from the ring leaves its rows unverifiable. Verification keys are kept as long as the rows they
   signed, independently of when an encryption key is retired: moving `app.key` into `app.previous_keys` keeps the old
   derived key verifying, and dropping it from there does not. Choose the managed ring before going live, because rows
@@ -67,6 +72,9 @@ change to any of them is a new version, never an edit of the old one.
 - A tampered column, a nested property or a microsecond fails verification with `false`.
 - A row signed under a key the ring no longer holds raises `UnknownKeyException`; the store lets it propagate rather
   than call the row a conflict.
+- An envelope in the outbox or a spill line that fails is refused with a distinct `Records\Enums\EnvelopeFailure`:
+  `signature_mismatch`, `unknown_key`, `unsupported_version` or `malformed`. The outbox row is failed and kept, and the
+  spill line is counted and left in its file; `delivery.md` has every outcome.
 
 ## Seams Left
 
@@ -81,6 +89,7 @@ change to any of them is a new version, never an edit of the old one.
 - `src/Integrity/IntegrityKey.php`: `secret()`, `ID_PATTERN`, `MIN_SECRET_BYTES`;
   `src/Integrity/UnknownKeyException.php`: `forKey()`.
 - `src/Records/RecordFinaliser.php`: `finalise()`; `src/Records/FinalisedRecord.php`.
+- `src/Records/EnvelopeCodec.php`: `decode()`; `src/Delivery/Replayer.php`: `spill()`.
 - `config/audit-log.php`: `integrity`.
 
 ## Authoritative Tests
@@ -107,6 +116,14 @@ change to any of them is a new version, never an edit of the old one.
 - `tests/Integration/Stores/StoredEntryRoundTripTest.php` `testAStoredRecordVerifiesAfterTheRoundTrip`,
   `testNestedPropertiesTheEngineReordersStillVerify`, `testUnicodeAndHostileTextStillVerify`,
   `testAnEditedStoredRowFailsVerification`
+- `tests/Unit/Records/EnvelopeCodecTest.php` `testADecodedRecordVerifies`, `testATamperedValueIsASignatureMismatch`,
+  `testAnUnknownKeyIsDistinct`, `testAnUnsupportedIntegrityVersionIsDistinct`,
+  `testAnEnvelopeSignedWithARetiredKeyDecodes`
+- `tests/Feature/Delivery/ReplayerTest.php` `testNeverResigns`, `testNeverFinalisesAgain`,
+  `testAnUnknownKeyIsSkippedAndCounted`, `testAnUnsignedLineIsSkippedAndCounted`
+- `tests/Integration/Delivery/SpillReplayEnginesTest.php` `testAReplayedRowVerifies`,
+  `testALineUnderARemovedKeyReplaysOnceTheKeyIsBack`
+- `tests/Feature/Delivery/OutboxDrainerTest.php` `testAnEnvelopeUnderARemovedSigningKeyIsFailedAndNeverResigned`
 
 ## Change Triggers
 
@@ -118,3 +135,4 @@ Update this note when any of the following change:
 - the derivation, its info string or the derived key's id
 - the key id grammar or the shortest secret
 - what verification answers, or which exception it raises
+- what a replay verifies, or how a removed key is handled

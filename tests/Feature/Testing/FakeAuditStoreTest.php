@@ -8,7 +8,9 @@ use Illuminate\Container\Container;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
@@ -20,8 +22,8 @@ use Tests\Unit\Stubs\Enums\StubNumberedActivity;
 
 /**
  * Feature tests for the audit store tests bind in place of the database store:
- * how it is bound, what it holds and gives back, and that a failing one throws
- * and holds nothing.
+ * how it is bound, what it holds and gives back, that a failing one throws and
+ * holds nothing, and that it says it is durable and joins any transaction.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -281,6 +283,48 @@ final class FakeAuditStoreTest extends TestCase
         $this->expectExceptionObject($exception);
 
         $fake->store($this->finalised('invoice.approved'));
+    }
+
+    /**
+     * The fake says a return is durable, failing or not, so a fail-closed
+     * record can be tested against it.
+     *
+     * @return void
+     */
+    public function testIsDurable(): void
+    {
+        self::assertInstanceOf(DurableAuditStore::class, FakeAuditStore::fake());
+        self::assertTrue(FakeAuditStore::fake()->isDurable());
+        self::assertTrue(FakeAuditStore::failing(new \RuntimeException('The store is down.'))->isDurable());
+    }
+
+    /**
+     * Rows of `[connection]`: the storage connection, another and an empty
+     * name.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideConnections(): iterable
+    {
+        yield from [
+            'the storage connection' => [self::CONNECTION],
+            'another'                => ['audit'],
+            'an empty name'          => [''],
+        ];
+    }
+
+    /**
+     * The fake says it joins a transaction on any connection, so a
+     * transactional record can be tested against it whatever its connection.
+     *
+     * @param  string  $connection
+     * @return void
+     */
+    #[DataProvider('provideConnections')]
+    public function testParticipatesInAnyConnection(string $connection): void
+    {
+        self::assertTrue(FakeAuditStore::fake()->participatesIn($connection));
+        self::assertTrue(FakeAuditStore::failing(new \RuntimeException('The store is down.'))->participatesIn($connection));
     }
 
     /**
