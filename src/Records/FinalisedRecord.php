@@ -13,10 +13,17 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  *
  * Signing and storage read it, in the envelope of the entries table; it is
  * never rebuilt from a stored row, which is evidence to verify, not a record to
- * write again. It is never recorded before the activity occurred, and its id,
- * and its import batch id when it has one, are lower-case UUIDs, the one form
- * every engine stores and returns, so a record signed on one engine verifies on
- * every other.
+ * write again. A record kept in the outbox or a spill line is rebuilt only by
+ * the codec, after its signature verifies: it keeps the JSON columns as they
+ * were decoded, and returns them from `toArray()`, because an array cannot tell
+ * `{}` from `[]`, nor a map with sequential numeric keys from a list, and the
+ * captured record holds arrays. Those columns are copied whole on the way in
+ * and on the way out, because a decoded object is shared by reference, and a
+ * destination changing what it was handed must not change what was signed for
+ * the next destination. It is never recorded before the activity occurred, and
+ * its id, and its import batch id when it has one, are lower-case UUIDs, the
+ * one form every engine stores and returns, so a record signed on one engine
+ * verifies on every other.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,13 +47,24 @@ final readonly class FinalisedRecord
     /**
      * Constructor.
      *
+     * @formatter:off
+     *
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  string  $recordedAt
      * @param  int  $integrityVersion
      * @param  string  $keyId
      * @param  string  $hmac
+     * @param  ?array{context: array<array-key, mixed>|\stdClass|null, properties: array<array-key, mixed>|\stdClass|null}  $decodedColumns
      *
      * @throws \InvalidArgumentException
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
+     *
+     * @formatter:on
      */
     public function __construct(
 
@@ -64,6 +82,9 @@ final readonly class FinalisedRecord
 
         /** HMAC-SHA256, lower-case hex, over every other column. */
         public string $hmac,
+
+        /** The JSON columns as a verified envelope decoded them, or `null` for a record finalised here. */
+        private ?array $decodedColumns = null,
     ) {
         self::checkTime($record, $recordedAt);
         self::checkIntegrity($integrityVersion, $keyId, $hmac);
@@ -71,9 +92,46 @@ final readonly class FinalisedRecord
     }
 
     /**
+     * The finalised record a verified envelope holds: the record rebuilt from
+     * it, its finalisation as signed, and its JSON columns as they were
+     * decoded, which `toArray()` returns in place of the record's arrays. It is
+     * checked like any other.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @param  string  $recordedAt
+     * @param  int  $integrityVersion
+     * @param  string  $keyId
+     * @param  string  $hmac
+     * @param  array<array-key, mixed>|\stdClass|null  $context
+     * @param  array<array-key, mixed>|\stdClass|null  $properties
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     *
+     * @internal
+     */
+    public static function decoded(
+        #[\SensitiveParameter]
+        AuditRecord $record,
+        string $recordedAt,
+        int $integrityVersion,
+        string $keyId,
+        string $hmac,
+        #[\SensitiveParameter]
+        array|\stdClass|null $context,
+        #[\SensitiveParameter]
+        array|\stdClass|null $properties,
+    ): self {
+        return new self($record, $recordedAt, $integrityVersion, $keyId, $hmac, self::copyOf(['context' => $context, 'properties' => $properties]));
+    }
+
+    /**
      * The finalised record as its envelope: the captured record's fields, then
      * when it was recorded and its integrity fields, each under its stored key,
-     * in the order of the entries table.
+     * in the order of the entries table. A record rebuilt from an envelope
+     * gives a copy of its JSON columns as they were decoded, in their places.
      *
      * @formatter:off
      *
@@ -81,7 +139,7 @@ final readonly class FinalisedRecord
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @return array{id: string, record_version: int, event: string, event_version: int, category: string, outcome: string, reason: ?string, actor_type: ?string, actor_id: ?string, subject_type: ?string, subject_id: ?string, principal_type: ?string, principal_id: ?string, tenant_type: ?string, tenant_id: ?string, credential_id: ?string, guard: ?string, session_id: ?string, request_id: ?string, trace_id: ?string, correlation_id: ?string, origin: ?string, provenance: string, source_id: string, source_region: ?string, source_record_id: ?string, import_batch_id: ?string, ip: ?string, user_agent: ?string, context: ?array<array-key, mixed>, properties: ?array<array-key, mixed>, occurred_at: string, recorded_at: string, integrity_version: int, key_id: string, hmac: string}
+     * @return array{id: string, record_version: int, event: string, event_version: int, category: string, outcome: string, reason: ?string, actor_type: ?string, actor_id: ?string, subject_type: ?string, subject_id: ?string, principal_type: ?string, principal_id: ?string, tenant_type: ?string, tenant_id: ?string, credential_id: ?string, guard: ?string, session_id: ?string, request_id: ?string, trace_id: ?string, correlation_id: ?string, origin: ?string, provenance: string, source_id: string, source_region: ?string, source_record_id: ?string, import_batch_id: ?string, ip: ?string, user_agent: ?string, context: array<array-key, mixed>|\stdClass|null, properties: array<array-key, mixed>|\stdClass|null, occurred_at: string, recorded_at: string, integrity_version: int, key_id: string, hmac: string}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -91,11 +149,44 @@ final readonly class FinalisedRecord
     {
         return [
             ...$this->record->toArray(),
+            ...self::copyOf($this->decodedColumns ?? []),
             'recorded_at'       => $this->recordedAt,
             'integrity_version' => $this->integrityVersion,
             'key_id'            => $this->keyId,
             'hmac'              => $this->hmac,
         ];
+    }
+
+    /**
+     * A deep copy of a decoded JSON value, keeping every object an object and
+     * every array an array, so nothing of the copy is shared with the original.
+     *
+     * @template TValue
+     *
+     * @param  TValue  $value
+     * @return TValue
+     */
+    private static function copyOf(#[\SensitiveParameter] mixed $value): mixed
+    {
+        if (is_array($value)) {
+            // Each member is copied to its own type, so the array keeps its own
+            // @phpstan-ignore return.type
+            return array_map(self::copyOf(...), $value);
+        }
+
+        if (!$value instanceof \stdClass) {
+            return $value;
+        }
+
+        $copy = new \stdClass;
+
+        foreach (get_object_vars($value) as $key => $member) {
+            $copy->{$key} = self::copyOf($member);
+        }
+
+        // A copy of a plain object is a plain object
+        // @phpstan-ignore return.type
+        return $copy;
     }
 
     /**

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
+use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
@@ -17,9 +18,9 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
  *
  * Boots a minimal Testbench application with the package service provider
  * registered, the database `DB_CONNECTION` names (in-memory SQLite when unset),
- * and the shipped table created. Subclasses may override `defineEnvironment` to
- * add per-test config and `defineDatabaseMigrations` (or use `setUp`) to create
- * additional tables.
+ * and the shipped tables created. Subclasses may override `defineEnvironment`
+ * to add per-test config and `defineDatabaseMigrations` (or use `setUp`) to
+ * create additional tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,11 +38,14 @@ abstract class TestCase extends OrchestraTestCase
     /** @var string The package's shipped migrations. */
     private const string MIGRATIONS = __DIR__ . '/../database/migrations';
 
-    /** @var array<string, ?string> The settings that say where the shipped table is created, each with the value it has when it is not set. */
+    /** @var array<string, ?string> The settings that say where the shipped tables are created, each with the value it has when it is not set. */
     private const array STORAGE_SETTINGS = [
         'audit-log.storage.connection'             => null,
         'audit-log.storage.maintenance_connection' => null,
         'audit-log.entries.table'                  => EntrySettings::DEFAULT_TABLE,
+        'audit-log.delivery.outbox.connection'     => null,
+        'audit-log.delivery.outbox.table'          => DeliveryTables::DEFAULT_OUTBOX,
+        'audit-log.delivery.deliveries_table'      => DeliveryTables::DEFAULT_DELIVERIES,
     ];
 
     /** @var array<string, true> Worker databases this process has created. */
@@ -122,19 +126,19 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migration so the default `audit_log_entries`
-     * table exists for tests that use it, on the connection the storage
-     * settings name when it runs.
+     * Run the package's shipped migrations so the entries, outbox and
+     * deliveries tables exist for tests that use them, each on the connection
+     * its settings name when they run.
      *
-     * A test may point the storage settings elsewhere once the table exists;
-     * `tearDown()` puts them back before the migration is rolled back. On a
-     * persistent database (MySQL, PostgreSQL) creating and dropping the table
-     * costs more than most tests themselves, so a table on the worker's
-     * connection is kept from one test to the next. Each test starts by
-     * comparing its schema and migration records with what the migration left:
-     * when they match it deletes its rows, otherwise it migrates it afresh. A
-     * table on any other connection is migrated for the test and dropped when
-     * it ends.
+     * A test may point the storage settings elsewhere once the tables exist;
+     * `tearDown()` puts them back before the migrations are rolled back. On a
+     * persistent database (MySQL, PostgreSQL) creating and dropping the tables
+     * costs more than most tests themselves, so while all three are on the
+     * worker's connection they are kept from one test to the next. Each test
+     * starts by comparing their schema and migration records with what the
+     * migrations left: when they match it deletes their rows, otherwise it
+     * migrates them afresh. When any table is on another connection, all three
+     * are migrated for the test and dropped when it ends.
      *
      * @return void
      */
@@ -206,7 +210,8 @@ abstract class TestCase extends OrchestraTestCase
     /**
      * Return the storage settings as they are, a name or `null` each, and one
      * that is not set as the value it then has; a setting that is neither is
-     * left as the test sets it, since the shipped migration cannot run with it.
+     * left as the test sets it, since the shipped migrations cannot run with
+     * it.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return array<string, ?string>
@@ -236,8 +241,13 @@ abstract class TestCase extends OrchestraTestCase
      */
     private function packageTables(ConfigRepository $config): array
     {
+        $default = $config->string('database.default');
+        $storage = StorageConnection::name() ?? $default;
+
         return [
-            [StorageConnection::name() ?? $config->string('database.default'), EntrySettings::table()],
+            [$storage, EntrySettings::table()],
+            [DeliveryTables::outboxConnection() ?? $default, DeliveryTables::outboxTable()],
+            [$storage, DeliveryTables::deliveriesTable()],
         ];
     }
 

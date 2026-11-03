@@ -15,6 +15,7 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Tests\Concerns\InteractsWithAuditStore;
@@ -286,8 +287,8 @@ final class AccessRecordsTest extends TestCase
             AuditLog::accessed(self::CODE, subject: self::document(), purpose: self::PURPOSE, channel: self::CHANNEL)->failClosed()->record();
 
             self::fail('Expected the failed write to reach the caller at the call.');
-        } catch (\RuntimeException $exception) {
-            self::assertSame('The store is down.', $exception->getMessage());
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(\RuntimeException::class, $exception->exceptionClass);
         }
 
         self::assertSame(1, DB::connection(self::CONNECTION)->transactionLevel());

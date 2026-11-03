@@ -35,7 +35,7 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
  * configured source, and it is delivered, after commit unless the builder chose
  * otherwise. A refusal before the record is built, a minimiser's failure among
  * them, stores nothing and leaves the builder usable, and a failed write
- * propagates.
+ * follows the failure policy.
  *
  * A singleton that outlives requests under Octane, so it holds only frozen
  * registration data: contributors, runtime state, the clock, the store and the
@@ -218,8 +218,8 @@ final readonly class Recorder
      * @throws \JsonException
      * @throws \LogicException
      * @throws \UnexpectedValueException
-     * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
-     * @throws \SineMacula\Laravel\AuditLog\Stores\RecordConflictException
+     * @throws \Illuminate\Database\DeadlockException
+     * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
     private function write(#[\SensitiveParameter] PendingRecord $pending): AuditRecord
     {
@@ -232,7 +232,7 @@ final readonly class Recorder
         $delivery   = $container->make(RecordDelivery::class);
         $timing     = $snapshot->timing ?? Timing::AFTER_COMMIT;
 
-        $delivery->check($timing, $snapshot->connection);
+        $delivery->check($timing, $snapshot->connection, $snapshot->failClosed);
 
         $contribution = new Contribution($pending);
 
@@ -245,7 +245,7 @@ final readonly class Recorder
         $occurredAt = $container->make(Clock::class)->now();
         $record     = AuditRecord::fromPending($pending, $minimised, $definition->version, $definition->category, $occurredAt, $source->id(), $source->region());
 
-        $delivery->deliver($record, $timing, $snapshot->connection);
+        $delivery->deliver($record, $timing, $snapshot->connection, $snapshot->failClosed);
 
         return $record;
     }

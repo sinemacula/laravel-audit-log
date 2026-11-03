@@ -19,6 +19,11 @@
             <directory suffix="Test.php">./tests/Performance</directory>
         </testsuite>
     </testsuites>
+    <php>
+        <!-- Keep arguments in stack traces, as development does, so the tests that prove no payload reaches -->
+        <!-- a trace see every argument; with production's setting they would see none and prove nothing. -->
+        <ini name="zend.exception_ignore_args" value="0"/>
+    </php>
     <source>
         <include>
             <directory suffix=".php">./src</directory>

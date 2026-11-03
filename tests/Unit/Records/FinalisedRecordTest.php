@@ -16,7 +16,8 @@ use Tests\Fixtures\Records\RecordFactory;
  * Unit tests for the finalised record: the captured record and finalisation it
  * carries, its 36-column envelope in table order, and each value it refuses
  * because its column cannot hold it or an engine would store it differently, in
- * the order they are checked.
+ * the order they are checked; and a record rebuilt from an envelope, which
+ * returns its JSON columns as they were decoded and is checked like any other.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -132,6 +133,194 @@ final class FinalisedRecordTest extends TestCase
         self::assertSame('legacy-0042', $envelope['source_record_id']);
         self::assertSame('0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e', $envelope['import_batch_id']);
         self::assertSame('imported', $envelope['provenance']);
+    }
+
+    /**
+     * What a destination changes in the envelope it was handed, at the top or
+     * nested, stays out of the record the next destination is handed.
+     *
+     * @return void
+     */
+    public function testChangingAnEnvelopeLeavesTheRecordAsSigned(): void
+    {
+        $properties = (object) ['amount' => '1.00', 'lines' => [(object) ['sku' => 'a']], 'meta' => (object) ['tier' => 'gold']];
+        $context    = (object) ['route' => 'invoices'];
+        $finalised  = FinalisedRecord::decoded(RecordFactory::captured(), self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, $context, $properties);
+        $first      = $finalised->toArray();
+
+        self::assertInstanceOf(\stdClass::class, $first['properties']);
+        self::assertInstanceOf(\stdClass::class, $first['context']);
+
+        $first['properties']->amount        = '999.00';
+        $first['properties']->lines[0]->sku = 'z';
+        $first['properties']->meta->tier    = 'none';
+        $first['context']->route            = 'elsewhere';
+
+        $second = json_encode($finalised->toArray(), JSON_THROW_ON_ERROR);
+
+        self::assertStringContainsString('"amount":"1.00"', $second);
+        self::assertStringContainsString('"sku":"a"', $second);
+        self::assertStringContainsString('"tier":"gold"', $second);
+        self::assertStringContainsString('"route":"invoices"', $second);
+    }
+
+    /**
+     * What is changed in the columns given after decoding stays out of the
+     * record too, since the codec keeps no copy of its own.
+     *
+     * @return void
+     */
+    public function testChangingTheColumnsGivenLeavesTheRecordAsSigned(): void
+    {
+        $properties = (object) ['amount' => '1.00', 'meta' => (object) ['tier' => 'gold']];
+        $finalised  = FinalisedRecord::decoded(RecordFactory::captured(), self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, null, $properties);
+
+        $properties->amount     = '999.00';
+        $properties->meta->tier = 'none';
+
+        $envelope = json_encode($finalised->toArray(), JSON_THROW_ON_ERROR);
+
+        self::assertStringContainsString('"amount":"1.00"', $envelope);
+        self::assertStringContainsString('"tier":"gold"', $envelope);
+    }
+
+    /**
+     * The copy keeps every JSON type as it was: an empty object is no empty
+     * array, a list is no map, and a map with sequential numeric keys stays a
+     * map.
+     *
+     * @return void
+     */
+    public function testTheCopyKeepsEveryJsonType(): void
+    {
+        $properties = (object) [
+            'empty_map'  => new \stdClass,
+            'empty_list' => [],
+            'list'       => ['a', (object) ['b' => 1]],
+            'numeric'    => (object) ['0' => 'a', '1' => 'b'],
+            'nothing'    => null,
+            'flag'       => true,
+            'count'      => 1,
+        ];
+        $envelope = FinalisedRecord::decoded(RecordFactory::captured(), self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, null, $properties)->toArray();
+
+        self::assertSame(json_encode($properties, JSON_THROW_ON_ERROR), json_encode($envelope['properties'], JSON_THROW_ON_ERROR));
+        self::assertNull($envelope['context']);
+    }
+
+    /**
+     * A decoded record returns its JSON columns as they were decoded, objects
+     * as objects, in place of the record's array views, which cannot tell `{}`
+     * from `[]` nor a map with sequential numeric keys from a list; its record
+     * keeps those views for reading.
+     *
+     * @return void
+     */
+    public function testADecodedRecordReturnsItsColumnsAsDecoded(): void
+    {
+        $record     = RecordFactory::withFields(['context' => [], 'properties' => ['a', 'b']], RecordFactory::captured(id: self::ID));
+        $context    = new \stdClass;
+        $properties = (object) ['0' => 'a', '1' => 'b'];
+
+        $envelope = FinalisedRecord::decoded($record, self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, $context, $properties)->toArray();
+
+        self::assertEquals($context, $envelope['context']);
+        self::assertEquals($properties, $envelope['properties']);
+        self::assertInstanceOf(\stdClass::class, $envelope['context']);
+        self::assertInstanceOf(\stdClass::class, $envelope['properties']);
+        self::assertSame([], $record->context);
+        self::assertSame(['a', 'b'], $record->properties);
+    }
+
+    /**
+     * A decoded record's columns given as lists or `null` are returned as
+     * given, too, and every other column is the record's own.
+     *
+     * @return void
+     */
+    public function testADecodedRecordReturnsListsAndNullsAsGiven(): void
+    {
+        $record   = RecordFactory::captured(id: self::ID);
+        $envelope = FinalisedRecord::decoded($record, self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, null, [[], 'x'])->toArray();
+
+        self::assertNull($envelope['context']);
+        self::assertSame([[], 'x'], $envelope['properties']);
+        $others = array_fill_keys(['context', 'properties', 'recorded_at', 'integrity_version', 'key_id', 'hmac'], true);
+
+        self::assertSame(array_diff_key($record->toArray(), $others), array_diff_key($envelope, $others));
+    }
+
+    /**
+     * A decoded record's envelope keeps the 36 columns of the entries table in
+     * their order: the decoded columns replace the record's in place, before
+     * the finalisation's columns.
+     *
+     * @return void
+     */
+    public function testADecodedRecordKeepsTableOrder(): void
+    {
+        $decoded = FinalisedRecord::decoded(RecordFactory::captured(id: self::ID), self::RECORDED_AT, 3, self::KEY_ID, self::HMAC, new \stdClass, new \stdClass);
+
+        self::assertSame(self::COLUMNS, array_keys($decoded->toArray()));
+        self::assertSame([self::RECORDED_AT, 3, self::KEY_ID, self::HMAC], array_values(array_slice($decoded->toArray(), 32)));
+        self::assertSame([self::RECORDED_AT, 3, self::KEY_ID, self::HMAC], [$decoded->recordedAt, $decoded->integrityVersion, $decoded->keyId, $decoded->hmac]);
+    }
+
+    /**
+     * Rows of `[fields, recorded at, integrity version, key id, hmac, the
+     * message]`: one value of a decoded record that is refused, for each check.
+     *
+     * @return iterable<string, array{0: array<string, string>, 1: string, 2: int, 3: string, 4: string, 5: string}>
+     */
+    public static function provideRefusedDecodedRecords(): iterable
+    {
+        $upper = strtoupper(self::ID);
+
+        yield from [
+            'a time not in the form'     => [[], '2026-11-01 12:00:01', 1, self::KEY_ID, self::HMAC, self::TIME_MESSAGE],
+            'a time before the activity' => [[], '2026-11-01T11:00:00.000000Z', 1, self::KEY_ID, self::HMAC, self::BEFORE_MESSAGE],
+            'an integrity version of 0'  => [[], self::RECORDED_AT, 0, self::KEY_ID, self::HMAC, self::VERSION_MESSAGE],
+            'an empty key id'            => [[], self::RECORDED_AT, 1, '', self::HMAC, self::KEY_ID_MESSAGE],
+            'an upper-case HMAC'         => [[], self::RECORDED_AT, 1, self::KEY_ID, strtoupper(self::HMAC), self::HMAC_MESSAGE],
+            'an upper-case id'           => [['id' => $upper], self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, sprintf(self::UUID_MESSAGE, 'id')],
+            'an upper-case import batch' => [['import_batch_id' => $upper], self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, sprintf(self::UUID_MESSAGE, 'import_batch_id')],
+        ];
+    }
+
+    /**
+     * A decoded record is checked like any other: each value a finalised record
+     * refuses is refused, with the same message.
+     *
+     * @param  array<string, string>  $fields
+     * @param  string  $recordedAt
+     * @param  int  $integrityVersion
+     * @param  string  $keyId
+     * @param  string  $hmac
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideRefusedDecodedRecords')]
+    public function testADecodedRecordIsCheckedLikeAnyOther(array $fields, string $recordedAt, int $integrityVersion, string $keyId, string $hmac, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        FinalisedRecord::decoded(RecordFactory::withFields($fields), $recordedAt, $integrityVersion, $keyId, $hmac, new \stdClass, null);
+    }
+
+    /**
+     * The record and the decoded columns given to `decoded()` are marked
+     * sensitive: they hold the record's values.
+     *
+     * @return void
+     */
+    public function testTheDecodedPayloadIsMarkedSensitive(): void
+    {
+        $parameters = (new \ReflectionMethod(FinalisedRecord::class, 'decoded'))->getParameters();
+        $marked     = array_filter($parameters, static fn (\ReflectionParameter $parameter): bool => $parameter->getAttributes(\SensitiveParameter::class) !== []);
+        $sensitive  = array_map(static fn (\ReflectionParameter $parameter): string => $parameter->getName(), array_values($marked));
+
+        self::assertSame(['record', 'context', 'properties'], $sensitive);
     }
 
     /**

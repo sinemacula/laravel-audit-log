@@ -252,7 +252,9 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Inside a transaction a default record costs nothing until the commit,
-     * when it is one plain insert, outside the transaction, so no savepoint.
+     * when it is one plain insert, outside the transaction, so no savepoint. On
+     * PostgreSQL the commit also asks, once, whether the transaction was
+     * already aborted, because a commit there reports a success even then.
      *
      * @return void
      */
@@ -262,7 +264,35 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
 
         $this->assertStatementBudget(0, 0, 0, 0, static fn () => AuditLog::record(self::CODE));
 
-        $this->assertStatementBudget(0, 1, 0, 0, static fn () => DB::connection()->commit());
+        $this->assertStatementBudget($this->commitQuestionReads(), 1, 0, 0, static fn () => DB::connection()->commit());
+    }
+
+    /**
+     * However many records wait on one commit, it asks that question once.
+     *
+     * @return void
+     */
+    public function testRecordsWaitingOnACommitShareItsOneQuestion(): void
+    {
+        DB::connection()->beginTransaction();
+
+        AuditLog::record(self::CODE);
+        AuditLog::record(self::CODE);
+        AuditLog::record(self::CODE);
+
+        $this->assertStatementBudget($this->commitQuestionReads(), 3, 0, 0, static fn () => DB::connection()->commit());
+    }
+
+    /**
+     * A commit with nothing of the audit log waiting on it asks nothing.
+     *
+     * @return void
+     */
+    public function testACommitWithNoRecordWaitingAsksNothing(): void
+    {
+        DB::connection()->beginTransaction();
+
+        $this->assertStatementBudget(0, 0, 0, 0, static fn () => DB::connection()->commit());
     }
 
     /**
@@ -316,8 +346,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The fake runs the same pipeline and issues no statement, whether the
-     * record reaches it at once or on a commit.
+     * The fake runs the same pipeline and writes nothing, whether the record
+     * reaches it at once or on a commit, whose one question is all it adds.
      *
      * @return void
      */
@@ -325,7 +355,7 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     {
         $fake = AuditLog::fake();
 
-        $this->assertStatementBudget(0, 0, 0, 0, static function (): void {
+        $this->assertStatementBudget($this->commitQuestionReads(), 0, 0, 0, static function (): void {
             AuditLog::record(self::CODE);
 
             DB::connection()->beginTransaction();

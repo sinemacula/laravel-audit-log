@@ -4,9 +4,10 @@
 
 Key matching cannot find a secret in free text or under an innocuous key; event definitions, which allowlist fields, are
 the remedy. This note records the rest of what minimising does and does not promise: which leaks it closes, which it
-leaves open, and what falls once a key does. Whoever decides what an application records should read it first: a secret
-that reaches a row through one of these gaps stays there for as long as the row is kept. How each step works is in
-`redaction.md`.
+leaves open, what falls once a key does, and what the stores a failed or waiting record passes through can give away.
+Whoever decides what an application records should read it first: a secret that reaches a row through one of these gaps
+stays there for as long as the row is kept. How each step works is in `redaction.md`, and how a record travels is in
+`delivery.md`.
 
 ## Invariants
 
@@ -95,8 +96,41 @@ key stays secret.
   rewritten, so they no longer correlate with new ones, and the differing fingerprint says why. This includes a rotated
   `app.key` when no `redaction.key` is set, since `app.previous_keys` is not read.
 
+## Spill And Outbox
+
+The spill and the outbox hold personal data. Each holds a whole record as it was minimised, its references, its address
+and its properties included, so each is a personal data store of its own, with its own readers and its own retention,
+and neither is reached by anything that later prunes or erases a row. Log files and database backups are often shipped
+off the server, to a log aggregator, a backup provider or a support bundle, so the question is who can read those, and
+not only who can read this server.
+
+- A spill line is not encrypted. It is the record in canonical JSON, on purpose: it has to be readable when the store is
+  down and the key ring may be what failed. The documented channel is a dedicated file at `0600`, and any other channel
+  shares the line with whatever else it feeds.
+- What a log's readers can see goes past the file, through the channel's own handlers. A spill line is written past
+  Laravel's log wrapper, so no `MessageLogged` listener sees a spill line and no error tracker's breadcrumb or debug
+  recorder holds it beside the report that follows. A default channel's `stack` may still send `critical` lines to an
+  alerting tool, so a spill on the default channel can post a record to a chat room, and `audit-log:check` says so of
+  any channel but the documented one, and of a documented one whose file group or others can read.
+- The outbox's encryption protects a database copy and not a compromised application holding the key. A dump, a replica
+  or a backup of the row gives nothing without `app.key`, but anything that can run as the application can decrypt it,
+  and the row can be read for as long as an old key stays in `app.previous_keys`.
+- A receipt and an outbox row's own columns hold ids, times, destination ids and the class of a failure. They hold no
+  value of the record and no failure's message, so reading them says that a record exists and what became of it.
+- Failure paths hold less than the stores do. A report, an exception and `AuditWriteFailed` hold the record's id and
+  code and the classes involved, never a driver's message or a statement's bindings, so an error tracker holds a spill
+  line only if it is itself a handler of the spill channel, and not through the failure.
+- What signing establishes is narrow. A line that verifies was signed by a holder of the integrity key and has not
+  changed since, so editing a log cannot inject a record through a replay, and an unsigned line is never replayed. It
+  does not establish that the activity happened, only that the application said so, or that the transaction around it
+  committed: an immediate record's line can outlive an enclosing rollback, as evidence of an attempt. Nor does it show a
+  file is complete, since a line deleted from one leaves nothing to find. Replaying an old line adds nothing, but only
+  because the store already holds its id.
+
 ## Implementation Anchors
 
+- `src/Stores/FailureSpill.php`: `line()`; `src/Delivery/OutboxWriter.php`: `write()`; `src/Delivery/SpillReader.php`;
+  `src/Records/EnvelopeCodec.php`: `decode()`; `src/Stores/WriteDiagnostics.php`.
 - `src/Privacy/RecordMinimiser.php`: `minimise()`; `src/Recorder.php`: `record()`, `event()`.
 - `src/Privacy/KeyCeiling.php`: `MAX_BYTES`; `src/Privacy/KeyTokenizer.php`: `tokens()`; `src/Privacy/Redactor.php`:
   `SURVIVORS`, `EXEMPT_FINAL_TOKENS`, `SENSITIVE_UNITS`.
@@ -136,6 +170,12 @@ key stays secret.
   `testFailedSignInsCorrelateByIdentifierHash`, `testAPseudonymisedFieldDoesNotCorrelateWithAnIdentifierHash`
 - `tests/Integration/Privacy/IdentifierCorrelationTest.php` `testFiveFailuresThenALockoutShareOneHash`,
   `testAChangedKeyChangesTheFingerprint`
+- `tests/Unit/Documentation/DocumentationTest.php` `testTheSpillAndOutboxArePersonalData`
+- `tests/Feature/Delivery/NoPayloadInFailuresTest.php` `testTheSpillHoldsOnlyTheMinimisedValues`,
+  `testTheOutboxHoldsNoPlaintext`, `testAReceiptHoldsNoPayload`, `testAPlantedSecretIsInNoReport`,
+  `testAPlantedSecretIsInNoEvent`
+- `tests/Feature/Delivery/ReplayerTest.php` `testATamperedLineIsSkippedAndCounted`,
+  `testAnUnsignedLineIsSkippedAndCounted`
 
 ## Change Triggers
 
@@ -147,3 +187,5 @@ Update this note when any of the following change:
 - which key a hash derives from, or which domains exist
 - what a failed encrypter costs, or what is reported of it
 - what a diagnostic may hold
+- what the spill or the outbox holds, or how either is protected
+- what signing a line establishes

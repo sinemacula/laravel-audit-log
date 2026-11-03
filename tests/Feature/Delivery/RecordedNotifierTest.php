@@ -1,0 +1,527 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature\Delivery;
+
+use Illuminate\Container\Container;
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\DeadlockException;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Event;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
+use SineMacula\Laravel\AuditLog\Delivery\RecordedNotifier;
+use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
+use Tests\Concerns\SearchesForSecrets;
+use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\TestCase;
+
+/**
+ * Feature tests for the notifier that says a record was written: it dispatches
+ * `AuditRecorded`, contains a listener's failure and a broken reporter, reports
+ * through the latch so a reporter that records cannot loop, and throws a
+ * listener's deadlock or lost connection inside a host transaction, sanitised,
+ * instead of containing it.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+#[CoversClass(RecordedNotifier::class)]
+final class RecordedNotifierTest extends TestCase
+{
+    use SearchesForSecrets;
+
+    /** @var string The id the notifications name. */
+    private const string ID = '0195f4a2-7b1c-7000-8000-000000000001';
+
+    /** @var string The code the notifications name. */
+    private const string CODE = 'invoice.approved';
+
+    /** @var string The category the notifications name. */
+    private const string CATEGORY = 'finance';
+
+    /** @var string A driver's message of a deadlock. */
+    private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock';
+
+    /** @var string A driver's message of a lost connection. */
+    private const string LOST_CONNECTION = 'SQLSTATE[HY000]: General error: 2006 MySQL server has gone away';
+
+    /**
+     * The event is dispatched once, carrying the id, the code and the category.
+     *
+     * @return void
+     */
+    public function testDispatchesAuditRecorded(): void
+    {
+        Event::fake([AuditRecorded::class]);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        Event::assertDispatchedTimes(AuditRecorded::class, 1);
+        Event::assertDispatched(AuditRecorded::class, static fn (AuditRecorded $event): bool => $event->id === self::ID
+            && $event->code                                                                                === self::CODE
+            && $event->category                                                                            === self::CATEGORY);
+    }
+
+    /**
+     * A listener's exception is reported, the very exception, and goes no
+     * further.
+     *
+     * @return void
+     */
+    public function testAThrowingListenerIsReportedAndContained(): void
+    {
+        $handler   = $this->recordingHandler();
+        $exception = new \RuntimeException('The listener failed.');
+
+        $this->listenerThrows($exception);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        self::assertSame([$exception], $handler->reports());
+    }
+
+    /**
+     * A reporter that throws as well goes no further either.
+     *
+     * @return void
+     */
+    public function testAThrowingReporterIsContained(): void
+    {
+        $handler = $this->recordingHandler(throwsOnReport: true);
+
+        $this->listenerThrows(new \RuntimeException('The listener failed.'));
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        self::assertCount(1, $handler->reports());
+    }
+
+    /**
+     * A reporter that records an audit event whose listener fails again is
+     * reported to once: the report it would make of the second failure is
+     * dropped by the latch, rather than reporting, recording and failing in a
+     * loop until the stack runs out.
+     *
+     * @return void
+     */
+    public function testAReporterRecordingOnAListenerFailureDoesNotLoop(): void
+    {
+        $reports = 0;
+        $handler = \Mockery::mock(ExceptionHandler::class);
+
+        $handler->shouldReceive('report')->andReturnUsing(function () use (&$reports): void {
+            $reports++;
+
+            if ($reports > 5) {
+                self::fail('The reporter was called in a loop.');
+            }
+
+            $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+        });
+
+        app()->instance(ExceptionHandler::class, $handler);
+
+        $this->listenerThrows(new \RuntimeException('The listener failed.'));
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        self::assertSame(1, $reports);
+    }
+
+    /**
+     * The latch lets go once a report ends, so a later listener failure is
+     * reported too.
+     *
+     * @return void
+     */
+    public function testEachSeparateFailureIsReported(): void
+    {
+        $handler = $this->recordingHandler();
+
+        $this->listenerThrows(new \RuntimeException('The listener failed.'));
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        self::assertCount(2, $handler->reports());
+    }
+
+    /**
+     * A dispatcher that cannot even be resolved is contained like a listener
+     * that throws, because the record is already stored by then.
+     *
+     * @return void
+     */
+    public function testADispatcherThatCannotBeResolvedIsContained(): void
+    {
+        $handler   = new RecordingExceptionHandler;
+        $container = new Container;
+
+        $container->instance(ExceptionHandler::class, $handler);
+
+        (new RecordedNotifier($container))->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+        self::assertCount(1, $handler->reports());
+    }
+
+    /**
+     * Rows of `[driver's message, class thrown]`: a deadlock and a lost
+     * connection, each raised as a query exception holding the secret in its
+     * SQL and bindings.
+     *
+     * @return iterable<string, array{0: string, 1: class-string<\RuntimeException>}>
+     */
+    public static function provideHostFatalFailures(): iterable
+    {
+        yield from [
+            'a deadlock'        => [self::DEADLOCK, DeadlockException::class],
+            'a lost connection' => [self::LOST_CONNECTION, AuditWriteFailedException::class],
+        ];
+    }
+
+    /**
+     * With a host transaction open, a listener's deadlock or lost connection is
+     * not contained: it is thrown in its sanitised form, never the original,
+     * with no previous exception, and is not reported by the notifier, since
+     * whoever catches it reports it.
+     *
+     * @param  string  $message
+     * @param  class-string<\RuntimeException>  $thrown
+     * @return void
+     */
+    #[DataProvider('provideHostFatalFailures')]
+    public function testAHostFatalListenerFailureInsideAHostPropagatesSanitised(string $message, string $thrown): void
+    {
+        $handler = $this->recordingHandler();
+        $failure = self::queryFailure($message);
+
+        $this->listenerThrows($failure);
+
+        try {
+            $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+            self::fail('Expected the listener\'s failure to propagate.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame($thrown, $exception::class);
+            self::assertNotSame($failure, $exception);
+            self::assertNull($exception->getPrevious());
+        }
+
+        self::assertSame([], $handler->reports());
+    }
+
+    /**
+     * A listener's deadlock is thrown as the sanitised deadlock, which Laravel
+     * still recognises, so an outer `transaction()` retries it.
+     *
+     * @return void
+     */
+    public function testAListenersDeadlockIsTheSanitisedDeadlock(): void
+    {
+        $this->listenerThrows(self::queryFailure(self::DEADLOCK));
+
+        try {
+            $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+            self::fail('Expected the deadlock to propagate.');
+        } catch (DeadlockException $exception) {
+            self::assertSame(FailureClassifier::sanitisedDeadlock()->getMessage(), $exception->getMessage());
+            self::assertSame(40001, $exception->getCode());
+            self::assertTrue((new FailureClassifier)->isConcurrencyError($exception));
+        }
+    }
+
+    /**
+     * A listener's lost connection is thrown as a failed notification naming
+     * the record, its code and the operation, and the listener's class of
+     * failure, and nothing else.
+     *
+     * @return void
+     */
+    public function testAListenersLostConnectionNamesTheNotification(): void
+    {
+        $this->listenerThrows(self::queryFailure(self::LOST_CONNECTION));
+
+        try {
+            $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+            self::fail('Expected the lost connection to propagate.');
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(self::ID, $exception->recordId);
+            self::assertSame(self::CODE, $exception->eventCode);
+            self::assertSame('notify', $exception->operation);
+            self::assertSame(QueryException::class, $exception->exceptionClass);
+            self::assertSame('testing', $exception->connection);
+        }
+    }
+
+    /**
+     * Rows of `[driver's message]`: a deadlock and a lost connection.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideHostFatalMessages(): iterable
+    {
+        yield from [
+            'a deadlock'        => [self::DEADLOCK],
+            'a lost connection' => [self::LOST_CONNECTION],
+        ];
+    }
+
+    /**
+     * With no host transaction open, a listener's deadlock or lost connection
+     * ended nothing, so it is reported and contained like any other.
+     *
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideHostFatalMessages')]
+    public function testAHostFatalListenerFailureWithNoHostIsContained(string $message): void
+    {
+        $handler = $this->recordingHandler();
+        $failure = self::queryFailure($message);
+
+        $this->listenerThrows($failure);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        self::assertSame([$failure], $handler->reports());
+    }
+
+    /**
+     * With a host transaction open, a listener's ordinary failure ended nothing
+     * either, so it is reported and contained.
+     *
+     * @return void
+     */
+    public function testAnOrdinaryListenerFailureInsideAHostIsContained(): void
+    {
+        $handler   = $this->recordingHandler();
+        $exception = new \RuntimeException('The listener failed.');
+
+        $this->listenerThrows($exception);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+        self::assertSame([$exception], $handler->reports());
+    }
+
+    /**
+     * The sanitised failure holds nothing of the original: not its message, its
+     * SQL or its bindings, anywhere in what it carries or its trace.
+     *
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideHostFatalMessages')]
+    public function testTheSanitisedFailureHoldsNoSecret(string $message): void
+    {
+        $failure = self::queryFailure($message);
+
+        $this->recordingHandler();
+        $this->listenerThrows($failure);
+
+        try {
+            $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+            self::fail('Expected the listener\'s failure to propagate.');
+        } catch (\RuntimeException $exception) {
+            self::assertTrue(self::holdsText($failure, self::SECRET), 'The planted secret is not in the original failure.');
+            self::assertHoldsNoSecret($exception, 'the sanitised failure');
+        }
+    }
+
+    /**
+     * A listener's deadlock ends the transaction on the connection it happened
+     * on, whichever that is: a host's own, though the store writes elsewhere.
+     *
+     * @return void
+     */
+    public function testAListenerFailingOnAnOpenConnectionPropagates(): void
+    {
+        $this->listenerThrows(new QueryException('host', 'update hosts set x = 1', [], new \PDOException(self::DEADLOCK)));
+
+        $this->expectException(DeadlockException::class);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['host']);
+    }
+
+    /**
+     * A listener's deadlock on a connection with no transaction open ended
+     * nothing, whatever is open elsewhere, so it is contained.
+     *
+     * @return void
+     */
+    public function testAListenerFailingOnAnIdleConnectionIsContained(): void
+    {
+        $handler = $this->recordingHandler();
+        $failure = new QueryException('idle', 'update hosts set x = 1', [], new \PDOException(self::DEADLOCK));
+
+        $this->listenerThrows($failure);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['host']);
+
+        self::assertSame([$failure], $handler->reports());
+    }
+
+    /**
+     * A listener's deadlock that names no connection, as one from the driver
+     * itself, may have ended any transaction open, so with one open it
+     * propagates.
+     *
+     * @return void
+     */
+    public function testAListenersUnnamedDeadlockPropagatesWhileATransactionIsOpen(): void
+    {
+        $this->listenerThrows(new \PDOException(self::DEADLOCK));
+
+        $this->expectException(DeadlockException::class);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['host']);
+    }
+
+    /**
+     * The same deadlock with nothing open ended nothing, so it is contained.
+     *
+     * @return void
+     */
+    public function testAListenersUnnamedDeadlockWithNothingOpenIsContained(): void
+    {
+        $handler = $this->recordingHandler();
+        $failure = new \PDOException(self::DEADLOCK);
+
+        $this->listenerThrows($failure);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        self::assertSame([$failure], $handler->reports());
+    }
+
+    /**
+     * A phrase in a listener's failure that is no database failure, such as a
+     * cache server gone away, ended no transaction, so it is contained.
+     *
+     * @return void
+     */
+    public function testAPhraseOutsideTheDatabaseIsContained(): void
+    {
+        $handler = $this->recordingHandler();
+        $failure = new \RuntimeException('Redis server went away');
+
+        $this->listenerThrows($failure);
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+        self::assertSame([$failure], $handler->reports());
+    }
+
+    /**
+     * A reporter that deadlocks over a listener's ordinary failure while a host
+     * is open has ended that host, so the sanitised deadlock propagates rather
+     * than being swallowed as a broken reporter.
+     *
+     * @return void
+     */
+    public function testAReporterEndingAnOpenTransactionPropagates(): void
+    {
+        $this->reporterRaising(new QueryException('testing', 'insert into logs values (1)', [], new \PDOException(self::DEADLOCK)));
+
+        $this->listenerThrows(new \RuntimeException('The listener failed.'));
+
+        try {
+            $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY, ['testing']);
+
+            self::fail('Expected the reporter\'s deadlock to propagate.');
+        } catch (DeadlockException $thrown) {
+            self::assertNull($thrown->getPrevious());
+            self::assertSame(FailureClassifier::sanitisedDeadlock()->getMessage(), $thrown->getMessage());
+        }
+    }
+
+    /**
+     * The same reporter with nothing open ended nothing, so it stays ignored.
+     *
+     * @return void
+     */
+    public function testAReporterFailingWithNothingOpenIsIgnored(): void
+    {
+        $this->reporterRaising(new QueryException('testing', 'insert into logs values (1)', [], new \PDOException(self::DEADLOCK)));
+
+        $this->listenerThrows(new \RuntimeException('The listener failed.'));
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * A query exception holding the secret in its SQL and bindings, failing
+     * with the driver's message on the testing connection.
+     *
+     * @param  string  $message
+     * @return \Illuminate\Database\QueryException
+     */
+    private static function queryFailure(string $message): QueryException
+    {
+        return new QueryException('testing', 'update invoices set note = ? where note = \'' . self::SECRET . '\'', [self::SECRET], new \PDOException($message));
+    }
+
+    /**
+     * The notifier, as the container builds it.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\RecordedNotifier
+     */
+    private function notifier(): RecordedNotifier
+    {
+        return app(RecordedNotifier::class);
+    }
+
+    /**
+     * Bind a handler that keeps what it is asked to report and return it.
+     *
+     * @param  bool  $throwsOnReport
+     * @return \Tests\Fixtures\Privacy\RecordingExceptionHandler
+     */
+    private function recordingHandler(bool $throwsOnReport = false): RecordingExceptionHandler
+    {
+        $handler = new RecordingExceptionHandler($throwsOnReport);
+
+        app()->instance(ExceptionHandler::class, $handler);
+
+        return $handler;
+    }
+
+    /**
+     * Bind a handler whose `report()` throws the failure.
+     *
+     * @param  \Throwable  $failure
+     * @return void
+     */
+    private function reporterRaising(\Throwable $failure): void
+    {
+        $reporter = \Mockery::mock(ExceptionHandler::class);
+
+        $reporter->allows('report')->andThrow($failure);
+
+        app()->instance(ExceptionHandler::class, $reporter);
+    }
+
+    /**
+     * Register a listener of `AuditRecorded` that throws the failure.
+     *
+     * @param  \Throwable  $failure
+     * @return void
+     */
+    private function listenerThrows(\Throwable $failure): void
+    {
+        Event::listen(AuditRecorded::class, static function () use ($failure): never {
+            throw $failure;
+        });
+    }
+}

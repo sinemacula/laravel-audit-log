@@ -190,7 +190,7 @@ final class AuditRecordedDispatchTest extends TestCase
     }
 
     /**
-     * A failed write propagates and says nothing.
+     * A failed write says nothing of a written record.
      *
      * @return void
      */
@@ -200,13 +200,7 @@ final class AuditRecordedDispatchTest extends TestCase
 
         FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
-        try {
-            AuditLog::record(self::CODE);
-
-            self::fail('Expected the failed write to propagate.');
-        } catch (\RuntimeException $exception) {
-            self::assertSame('The store is down.', $exception->getMessage());
-        }
+        AuditLog::record(self::CODE);
 
         self::assertSame([], $this->events);
     }

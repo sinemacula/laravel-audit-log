@@ -16,6 +16,7 @@ use SineMacula\Laravel\AuditLog\Database\AfterCommit;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\TestCase;
 
@@ -297,13 +298,15 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * A failed write surfaces from the nested commit in a savepoint of the
-     * wrapper, which stays usable on every engine.
+     * Under the `throw` mode a failed write surfaces from the nested commit in
+     * a savepoint of the wrapper, which stays usable on every engine.
      *
      * @return void
      */
     public function testAFailedWriteSurfacesAtTheNestedCommitAndTheWrapperStaysUsable(): void
     {
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+
         $this->pointAtProbeTable();
 
         $this->insideTheTestingWrapper(function (Connection $connection): void {
@@ -315,8 +318,9 @@ final class TestingManagerTimingTest extends TestCase
                 $connection->commit();
 
                 self::fail('Expected the deferred audit insert to fail.');
-            } catch (QueryException $exception) {
-                self::assertStringStartsWith('insert into', $exception->getSql());
+            } catch (AuditWriteFailedException $exception) {
+                self::assertSame(QueryException::class, $exception->exceptionClass);
+                self::assertNotNull($exception->sqlState);
             }
 
             self::assertSame(1, $connection->transactionLevel());

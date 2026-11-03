@@ -7,20 +7,24 @@ namespace SineMacula\Laravel\AuditLog\Console;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Console\Command;
 use Illuminate\Database\DatabaseManager;
+use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
+use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 use SineMacula\Laravel\AuditLog\Runtime\ContextSettings;
+use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:check`: reads every setting the package stores entries and
- * captures records with, the connections and guards they name, the entries
- * table and the integrity keys, and exits non-zero on a problem, for deploy
- * pipelines and readiness probes.
+ * `audit-log:check`: reads every setting the package stores entries, captures
+ * records and delivers them with, the connections, guards and log channels they
+ * name, the entries table, the integrity keys and, in outbox mode, the outbox
+ * and deliveries tables, and exits non-zero on a problem, for deploy pipelines
+ * and readiness probes.
  *
  * Every check runs, so one run lists every problem, each as `[<subject>]
  * <message>`, and a subject without one as `[<subject>] OK`, in this order:
@@ -31,21 +35,29 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * default guard when no list is set, each configured in `auth.guards`, skipped
  * when the list is malformed; then the redaction settings, with `app.key` read
  * for them only beside an explicit ring and an empty `audit-log.redaction.key`,
- * since otherwise the integrity settings read it and it is listed once),
- * `[connections]` (the storage and maintenance connections are each configured
- * in `database.connections`, and use the same driver; skipped when a connection
- * setting is malformed), `[schema]` (the storage connection's engine and the
- * entries table's shape; see `EngineChecks` and `SchemaChecks`, skipped when
- * the storage connection or the table's name is malformed or the connection is
- * not configured) and `[integrity]` (a key signs; skipped when the integrity
- * settings are malformed). A malformed context, source, definition or redaction
- * setting skips nothing, since no later subject reads it. It does not warn
+ * since otherwise the integrity settings read it and it is listed once; then
+ * the failure and delivery settings, the delivery tables' names and the outbox
+ * connection), `[connections]` (the storage and maintenance connections are
+ * each configured in `database.connections`, and use the same driver; skipped
+ * when a connection setting is malformed), `[schema]` (the storage connection's
+ * engine and the entries table's shape; see `EngineChecks` and `SchemaChecks`,
+ * skipped when the storage connection or the table's name is malformed or the
+ * connection is not configured), `[integrity]` (a key signs; skipped when the
+ * integrity settings are malformed) and `[delivery]` (the spill channel, the
+ * store when a failure is thrown, and in outbox mode the outbox and deliveries
+ * tables; see `DeliveryChecks`, skipped when the storage connection or a
+ * failure or delivery setting is malformed). A malformed context, source,
+ * definition or redaction setting skips nothing, since no later subject reads
+ * it. After every subject, `[spill] OK` says the spill channel is the one the
+ * documentation gives, or a `[spill]` warning says replaying what it holds is
+ * unverified; that is a note, not a problem, and leaves the exit code as it is,
+ * and it is left out while the channel setting is malformed. It does not warn
  * about a storage connection shared with the application, which every default
  * install would trip. The command writes nothing and prints no secret,
  * statement or binding: a malformed setting is named by its key and never its
- * value, only the name of a connection or guard that is not configured is
- * printed, and a connection that cannot be opened or read is named with the
- * class of what was thrown, never its message.
+ * value, only the name of a connection, guard or log channel is printed, and a
+ * connection that cannot be opened or read, or a store that cannot be resolved,
+ * is named with the class of what was thrown, never its message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,20 +71,22 @@ final class CheckCommand extends Command
     protected $signature = 'audit-log:check';
 
     /** @var string The console command description. */
-    protected $description = 'Check the audit log settings, connections, schema and integrity keys';
+    protected $description = 'Check the audit log settings, connections, schema, integrity keys and delivery';
 
     /**
-     * Run every check, then report each problem, or that a subject has none.
+     * Run every check, then report each problem, or that a subject has none,
+     * and last the note on the spill channel.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @param  \Illuminate\Database\DatabaseManager  $database
+     * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @return int
      */
-    public function handle(ConfigRepository $config, DatabaseManager $database): int
+    public function handle(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery): int
     {
         $found = [];
 
-        foreach ($this->checks($config, $database) as $subject => $checks) {
+        foreach ($this->checks($config, $database, $delivery) as $subject => $checks) {
 
             $problems = [];
 
@@ -94,6 +108,8 @@ final class CheckCommand extends Command
             }
         }
 
+        $this->noteSpill($delivery);
+
         return array_merge(...array_values($found)) === [] ? self::SUCCESS : self::FAILURE;
     }
 
@@ -103,11 +119,12 @@ final class CheckCommand extends Command
      *
      * @param  \Illuminate\Config\Repository  $config
      * @param  \Illuminate\Database\DatabaseManager  $database
+     * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @return array<string, list<\Closure(): list<string>>>
      */
-    private function checks(ConfigRepository $config, DatabaseManager $database): array
+    private function checks(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery): array
     {
-        [$storageCheck, $maintenanceCheck, $tableCheck, $integrityCheck] = self::settingChecks($config);
+        [$storageCheck, $maintenanceCheck, $tableCheck, $integrityCheck, $deliveryCheck] = self::settingChecks($config);
 
         $checks  = ['config' => [$storageCheck, $maintenanceCheck, $tableCheck, ...self::integritySettingChecks($config), ...self::captureSettingChecks($config)]];
         $storage = !self::fails($storageCheck);
@@ -128,16 +145,20 @@ final class CheckCommand extends Command
             $checks['integrity'] = [];
         }
 
+        if ($storage && !self::fails($deliveryCheck)) {
+            $checks['delivery'] = [$delivery->problems(...)];
+        }
+
         return $checks;
     }
 
     /**
      * The checks of the settings themselves, in order: the storage connection,
-     * the maintenance connection, the entries table's name and the integrity
-     * settings.
+     * the maintenance connection, the entries table's name, the integrity
+     * settings, and the failure and delivery settings together.
      *
      * @param  \Illuminate\Config\Repository  $config
-     * @return array{0: \Closure(): list<string>, 1: \Closure(): list<string>, 2: \Closure(): list<string>, 3: \Closure(): list<string>}
+     * @return array{0: \Closure(): list<string>, 1: \Closure(): list<string>, 2: \Closure(): list<string>, 3: \Closure(): list<string>, 4: \Closure(): list<string>}
      */
     private static function settingChecks(ConfigRepository $config): array
     {
@@ -159,6 +180,12 @@ final class CheckCommand extends Command
             },
             static function () use ($config): array {
                 (new IntegritySettings($config))->validate();
+
+                return [];
+            },
+            static function () use ($config): array {
+                (new FailureSettings($config))->validate();
+                (new DeliverySettings($config))->validate();
 
                 return [];
             },
@@ -187,18 +214,22 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The checks of the settings records are captured with, one for each, so
-     * one run reports every malformed setting: the context settings, the source
-     * settings, the definition setting, the guards the actor is read from and
-     * the redaction settings. No other subject depends on them.
+     * The checks of the settings records are captured and delivered with, one
+     * for each, so one run reports every malformed setting: the context
+     * settings, the source settings, the definition setting, the guards the
+     * actor is read from, the redaction settings, then the failure and delivery
+     * settings, the delivery tables' names and the outbox connection. Only the
+     * delivery subject depends on the last of them.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
      */
     private static function captureSettingChecks(ConfigRepository $config): array
     {
-        $context = new ContextSettings($config);
-        $source  = new SourceSettings($config);
+        $context  = new ContextSettings($config);
+        $source   = new SourceSettings($config);
+        $failure  = new FailureSettings($config);
+        $delivery = new DeliverySettings($config);
 
         return [
             self::reading($context->guards(...)),
@@ -210,6 +241,15 @@ final class CheckCommand extends Command
             self::reading((new DefinitionSettings($config))->requiresRegistered(...)),
             static fn (): array => self::guardProblems($config),
             ...self::redactionSettingChecks($config),
+            self::reading($failure->mode(...)),
+            self::reading($failure->logChannel(...)),
+            self::reading($delivery->mode(...)),
+            self::reading($delivery->leaseSeconds(...)),
+            self::reading($delivery->maxAttempts(...)),
+            self::reading($delivery->backoffSeconds(...)),
+            self::reading(DeliveryTables::outboxTable(...)),
+            self::reading(DeliveryTables::deliveriesTable(...)),
+            self::reading(DeliveryTables::outboxConnection(...)),
         ];
     }
 
@@ -319,6 +359,33 @@ final class CheckCommand extends Command
                 return [sprintf('The storage connection [%s] could not be read (%s).', $connection, $exception::class)];
             }
         };
+    }
+
+    /**
+     * Say whether the spill channel is the one the documentation gives, by
+     * `info()`, or that replaying what it holds is unverified, by `warn()`; say
+     * nothing while the channel setting is malformed, which `config` reports.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
+     * @return void
+     */
+    private function noteSpill(DeliveryChecks $delivery): void
+    {
+        try {
+            $note = $delivery->spillNote();
+        } catch (\InvalidArgumentException) {
+            // The malformed setting is listed under `config`, and names no
+            // channel to describe
+            return;
+        }
+
+        if ($note === null) {
+            $this->info('[spill] OK');
+
+            return;
+        }
+
+        $this->warn("[spill] {$note}");
     }
 
     /**

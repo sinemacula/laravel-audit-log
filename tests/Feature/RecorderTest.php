@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Ramsey\Uuid\Uuid;
+use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\ContextContributor;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
@@ -32,6 +33,7 @@ use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Fixtures\Contributors\ActorFillingContributor;
 use Tests\Fixtures\Contributors\SecretFillingContributor;
@@ -42,6 +44,8 @@ use Tests\Fixtures\Definitions\Enums\UnretainedDisclosureActivity;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Privacy\ThrowingFieldEncrypter;
+use Tests\Fixtures\Stores\CallbackStore;
+use Tests\Fixtures\Stores\PlainStore;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 use Tests\Unit\Stubs\Enums\StubActivity;
@@ -690,23 +694,93 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A failed write reaches the caller.
+     * Under the `throw` mode a failed write reaches the caller, sanitised.
      *
      * @return void
      */
     public function testAFailedWritePropagates(): void
     {
-        $failure = new \RuntimeException('The store is down.');
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
 
-        FakeAuditStore::failing($failure);
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
         try {
             AuditLog::record(self::CODE);
 
             self::fail('Expected the failure to propagate.');
-        } catch (\RuntimeException $exception) {
-            self::assertSame($failure, $exception);
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(\RuntimeException::class, $exception->exceptionClass);
+            self::assertNull($exception->getPrevious());
         }
+    }
+
+    /**
+     * In the default mode a failed write does not reach the caller, and the
+     * captured record is still returned.
+     *
+     * @return void
+     */
+    public function testRecordReturnsTheCapturedRecordWhenTheWriteFails(): void
+    {
+        $fake = FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        app()->instance(ExceptionHandler::class, new RecordingExceptionHandler);
+
+        $record = AuditLog::record(self::CODE);
+
+        self::assertSame(self::CODE, $record->event);
+        self::assertSame(0, $fake->count());
+    }
+
+    /**
+     * A record made while another is being written is returned as captured, and
+     * stored nowhere.
+     *
+     * @return void
+     */
+    public function testRecordReturnsTheCapturedRecordWhenRefusedInsideAWrite(): void
+    {
+        $inner = null;
+        $calls = 0;
+
+        app()->instance(ExceptionHandler::class, new RecordingExceptionHandler);
+        app()->instance(AuditStore::class, new CallbackStore(static function () use (&$inner, &$calls): void {
+            $calls++;
+            $inner = AuditLog::record('invoice.refused');
+        }));
+
+        AuditLog::record(self::CODE);
+
+        self::assertSame(1, $calls);
+        self::assertInstanceOf(AuditRecord::class, $inner);
+        self::assertSame('invoice.refused', $inner->event);
+    }
+
+    /**
+     * The builder's fail-closed choice reaches the delivery: refused for a
+     * store that does not say it is durable, which an ordinary record is not.
+     *
+     * @return void
+     */
+    public function testAFailClosedBuilderIsPassedThrough(): void
+    {
+        $store = new PlainStore;
+
+        app()->instance(AuditStore::class, $store);
+
+        AuditLog::event(self::CODE)->immediately()->record();
+
+        self::assertSame(1, $store->calls());
+
+        try {
+            AuditLog::event(self::CODE)->failClosed()->record();
+
+            self::fail('Expected the fail-closed record to be refused.');
+        } catch (\LogicException $exception) {
+            self::assertStringContainsString('A fail-closed record needs a durable store', $exception->getMessage());
+        }
+
+        self::assertSame(1, $store->calls());
     }
 
     /**

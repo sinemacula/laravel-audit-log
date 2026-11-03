@@ -24,72 +24,41 @@ use SineMacula\Laravel\AuditLog\Database\AfterCommit;
 #[CoversClass(AfterCommit::class)]
 final class AfterCommitTest extends TestCase
 {
-    /** @var int How many times the callback has run. */
-    private int $runs = 0;
-
     /**
-     * With no manager, or with something that is not one, the callback runs at
-     * once.
+     * With no name the innermost pending transaction is selected, whichever
+     * connection it is on.
      *
      * @return void
      */
-    public function testRunsNowWithNoManager(): void
-    {
-        (new AfterCommit(static fn (): mixed => null))->run(null, $this->counted());
-
-        self::assertSame(1, $this->runs);
-
-        (new AfterCommit(static fn (): mixed => new \stdClass))->run('main', $this->counted());
-
-        self::assertSame(2, $this->runs);
-    }
-
-    /**
-     * With a manager and no pending transaction, the callback runs at once.
-     *
-     * @return void
-     */
-    public function testRunsNowWithNoPendingTransaction(): void
-    {
-        $this->adapter(new DatabaseTransactionsManager)->run(null, $this->counted());
-
-        self::assertSame(1, $this->runs);
-    }
-
-    /**
-     * With no name it attaches to the innermost transaction on any connection:
-     * the other connection's commit does not run it, and its own does.
-     *
-     * @return void
-     */
-    public function testAttachesToTheInnermostOnAnyConnection(): void
+    public function testSelectedIsTheInnermostOnAnyConnection(): void
     {
         $manager = new DatabaseTransactionsManager;
 
         $manager->begin('main', 1);
         $manager->begin('other', 1);
 
-        $this->adapter($manager)->run(null, $this->counted());
+        $selected = $this->adapter($manager)->selected(null);
 
-        self::assertSame(0, $this->runs);
+        self::assertNotNull($selected);
+        self::assertSame('other', $selected->connection);
+        self::assertSame(1, $selected->level);
 
-        $manager->commit('main', 1, 0);
+        $manager->begin('main', 2);
 
-        self::assertSame(0, $this->runs);
+        $selected = $this->adapter($manager)->selected(null);
 
-        $manager->commit('other', 1, 0);
-
-        self::assertSame(1, $this->runs);
+        self::assertNotNull($selected);
+        self::assertSame('main', $selected->connection);
+        self::assertSame(2, $selected->level);
     }
 
     /**
-     * With a name it attaches to that connection's innermost transaction, not
-     * to a later one elsewhere or the same connection's outer one, so a
-     * rollback of the inner transaction drops it.
+     * With a name the selection is that connection's innermost, though a later
+     * transaction is open elsewhere, and `null` on a connection with none.
      *
      * @return void
      */
-    public function testAPinnedNameSelectsItsOwnInnermost(): void
+    public function testSelectedPinsAConnection(): void
     {
         $manager = new DatabaseTransactionsManager;
 
@@ -97,172 +66,106 @@ final class AfterCommitTest extends TestCase
         $manager->begin('main', 2);
         $manager->begin('other', 1);
 
-        $this->adapter($manager)->run('main', $this->counted());
+        $selected = $this->adapter($manager)->selected('main');
 
-        $manager->commit('other', 1, 0);
-
-        self::assertSame(0, $this->runs);
-
-        $manager->rollback('main', 1);
-        $manager->commit('main', 1, 0);
-
-        self::assertSame(0, $this->runs);
+        self::assertNotNull($selected);
+        self::assertSame('main', $selected->connection);
+        self::assertSame(2, $selected->level);
+        self::assertNull($this->adapter($manager)->selected('third'));
     }
 
     /**
-     * A callback pinned to the inner transaction survives its inner commit and
-     * runs at the outer commit.
+     * With a manager and nothing pending there is nothing to select, by name or
+     * without one.
      *
      * @return void
      */
-    public function testAPinnedCallbackRunsAtTheOuterCommit(): void
+    public function testSelectedIsNullWithNoneOpen(): void
     {
         $manager = new DatabaseTransactionsManager;
+
+        self::assertNull($this->adapter($manager)->selected(null));
+        self::assertNull($this->adapter($manager)->selected('main'));
 
         $manager->begin('main', 1);
-        $manager->begin('main', 2);
-
-        $this->adapter($manager)->run('main', $this->counted());
-
-        $manager->commit('main', 2, 1);
-
-        self::assertSame(0, $this->runs);
-
         $manager->commit('main', 1, 0);
 
-        self::assertSame(1, $this->runs);
+        self::assertNull($this->adapter($manager)->selected(null));
+
+        $manager->begin('main', 1);
+        $manager->rollback('main', 0);
+
+        self::assertNull($this->adapter($manager)->selected('main'));
     }
 
     /**
-     * A transaction on another connection neither delays nor cancels work
-     * pinned to a connection with none.
+     * The testing manager's wrapper is never selected, though the connection is
+     * at level 1, and the transaction opened inside it is.
      *
      * @return void
      */
-    public function testAPinnedNameIgnoresOtherConnections(): void
+    public function testSelectedLeavesOutTheTestingWrapper(): void
     {
-        $manager = new DatabaseTransactionsManager;
+        $manager = new TestingTransactionsManager(['main']);
 
-        $manager->begin('other', 1);
+        $manager->begin('main', 1);
 
-        $this->adapter($manager)->run('main', $this->counted());
+        self::assertNull($this->adapter($manager)->selected(null));
+        self::assertNull($this->adapter($manager)->selected('main'));
 
-        self::assertSame(1, $this->runs);
+        $manager->begin('main', 2);
+
+        $selected = $this->adapter($manager)->selected('main');
+
+        self::assertNotNull($selected);
+        self::assertSame(2, $selected->level);
     }
 
     /**
-     * Every call resolves the manager afresh, so one swapped in after the
+     * With no manager, or with something that is not one, nothing is selected.
+     *
+     * @return void
+     */
+    public function testSelectedIsNullWithNoManager(): void
+    {
+        self::assertNull((new AfterCommit(static fn (): mixed => null))->selected(null));
+        self::assertNull((new AfterCommit(static fn (): mixed => new \stdClass))->selected('main'));
+    }
+
+    /**
+     * Selecting resolves the manager on every call, so one swapped in after the
      * adapter was made is the one consulted.
      *
      * @return void
      */
-    public function testResolvesTheManagerOnEveryCall(): void
+    public function testSelectedResolvesTheManagerOnEveryCall(): void
     {
         $first  = new DatabaseTransactionsManager;
         $second = new DatabaseTransactionsManager;
         $calls  = 0;
 
-        $first->begin('main', 1);
         $second->begin('main', 1);
 
         $adapter = new AfterCommit(static function () use (&$calls, $first, $second): DatabaseTransactionsManager {
             return ++$calls === 1 ? $first : $second;
         });
 
-        $adapter->run(null, $this->counted());
-        $adapter->run(null, $this->counted());
-
+        self::assertNull($adapter->selected(null));
+        self::assertNotNull($adapter->selected(null));
         self::assertSame(2, $calls);
-        self::assertSame(0, $this->runs);
-
-        $first->commit('main', 1, 0);
-
-        self::assertSame(1, $this->runs);
-
-        $second->commit('main', 1, 0);
-
-        self::assertSame(2, $this->runs);
     }
 
     /**
-     * The testing manager's wrapping transaction is never selected, with or
-     * without a name, so a test wrapped in a transaction sees the callback run
-     * at once, as an application with no transaction would.
+     * The closure the adapter takes is marked sensitive, so no frame shows what
+     * it holds.
      *
      * @return void
      */
-    public function testTheTestingManagersWrapperIsNotSelected(): void
+    public function testTheManagerResolverIsMarkedSensitive(): void
     {
-        $manager = new TestingTransactionsManager(['main']);
+        $transactions = new \ReflectionParameter([AfterCommit::class, '__construct'], 'transactions');
 
-        $manager->begin('main', 1);
-
-        $this->adapter($manager)->run(null, $this->counted());
-
-        self::assertSame(1, $this->runs);
-
-        $this->adapter($manager)->run('main', $this->counted());
-
-        self::assertSame(2, $this->runs);
-    }
-
-    /**
-     * A transaction opened inside the testing wrapper is selected, and its
-     * commit runs the callback though the wrapper stays open.
-     *
-     * @return void
-     */
-    public function testATransactionInsideTheTestingWrapperIsSelected(): void
-    {
-        $manager = new TestingTransactionsManager(['main']);
-
-        $manager->begin('main', 1);
-        $manager->begin('main', 2);
-
-        $this->adapter($manager)->run('main', $this->counted());
-
-        self::assertSame(0, $this->runs);
-
-        $manager->commit('main', 2, 1);
-
-        self::assertSame(1, $this->runs);
-    }
-
-    /**
-     * An exception from a callback run at once reaches the caller.
-     *
-     * @return void
-     */
-    public function testAnExceptionFromTheCallbackPropagates(): void
-    {
-        $exception = new \RuntimeException('The write failed.');
-
-        $this->expectExceptionObject($exception);
-
-        (new AfterCommit(static fn (): mixed => null))->run(null, static function () use ($exception): void {
-            throw $exception;
-        });
-    }
-
-    /**
-     * An exception from a deferred callback reaches the code that commits.
-     *
-     * @return void
-     */
-    public function testAnExceptionFromADeferredCallbackReachesTheCommit(): void
-    {
-        $manager   = new DatabaseTransactionsManager;
-        $exception = new \RuntimeException('The write failed.');
-
-        $manager->begin('main', 1);
-
-        $this->adapter($manager)->run(null, static function () use ($exception): void {
-            throw $exception;
-        });
-
-        $this->expectExceptionObject($exception);
-
-        $manager->commit('main', 1, 0);
+        self::assertNotSame([], $transactions->getAttributes(\SensitiveParameter::class));
     }
 
     /**
@@ -274,17 +177,5 @@ final class AfterCommitTest extends TestCase
     private function adapter(DatabaseTransactionsManager $manager): AfterCommit
     {
         return new AfterCommit(static fn (): DatabaseTransactionsManager => $manager);
-    }
-
-    /**
-     * A callback that counts its runs.
-     *
-     * @return \Closure(): void
-     */
-    private function counted(): \Closure
-    {
-        return function (): void {
-            $this->runs++;
-        };
     }
 }

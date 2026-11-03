@@ -23,6 +23,7 @@ use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
+use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 use Tests\Fixtures\Support\FrozenClock;
 
@@ -59,6 +60,7 @@ final class ProviderBindingOrderTest extends TestCase
             ExecutionFrames::class,
             RequestIdentity::class,
             ReportLatch::class,
+            WriteGuard::class,
         ];
 
         foreach ($abstracts as $abstract) {

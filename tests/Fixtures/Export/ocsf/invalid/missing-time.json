@@ -1,0 +1,29 @@
+{
+    "activity_id": 0,
+    "activity_name": "Unknown",
+    "category_name": "Uncategorized",
+    "category_uid": 0,
+    "class_name": "Base Event",
+    "class_uid": 0,
+    "message": "invoice.approved",
+    "metadata": {
+        "event_code": "invoice.approved",
+        "logged_time": 1793534401654,
+        "original_time": "2026-11-01T12:00:00.123456Z",
+        "product": {
+            "name": "laravel-audit-log",
+            "vendor_name": "Sine Macula"
+        },
+        "uid": "01932b4e-8a40-7000-8000-000000000001",
+        "version": "1.9.0"
+    },
+    "severity": "Informational",
+    "severity_id": 1,
+    "status": "Success",
+    "status_id": 1,
+    "type_name": "Base Event: Unknown",
+    "type_uid": 0,
+    "unmapped": {
+        "category": "finance"
+    }
+}

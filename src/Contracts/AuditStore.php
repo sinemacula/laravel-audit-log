@@ -12,11 +12,15 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * A store takes the finalised record, never a model, and keeps it as it is: the
  * record was finalised once, and a retry hands the store the same record again.
  * The package binds `Stores\DatabaseAuditStore`, which writes the entries
- * table; an application rebinds the contract to keep records elsewhere. An
- * implementation must keep no state between calls, must store a record at most
- * once (the same id with the same captured content is a success, and with
- * different content a `RecordConflictException`), and must let every other
- * failure propagate, since what a failure means is the caller's to decide.
+ * table; an application rebinds the contract to keep records elsewhere, and
+ * binds a `Stores\StackAuditStore` to reach several places with each record. A
+ * store says whether a return is durable, and whether it joins a transaction,
+ * by implementing `Contracts\DurableAuditStore`; one that does not counts as
+ * neither. An implementation must keep no state between calls, must store a
+ * record at most once (the same id with the same captured content is a success,
+ * and with different content a `RecordConflictException`), and must let every
+ * other failure propagate, since what a failure means is the caller's to
+ * decide.
  *
  * @api
  *

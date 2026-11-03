@@ -48,7 +48,7 @@ final class EngineChecksTest extends TestCase
         . ' so a value that does not fit fails instead of being cut.';
 
     /** @var string What a MySQL server too old to support, or MariaDB, is reported as, given its version. */
-    private const string UNSUPPORTED_MYSQL = 'MySQL %s is not supported; use MySQL 8.4 or later (MariaDB is not supported).';
+    private const string UNSUPPORTED_MYSQL = 'The storage connection [fake] runs MySQL %s, which is not supported; use MySQL 8.4 or later (MariaDB is not supported).';
 
     /** @var string What a table on MyISAM is reported as. */
     private const string NOT_INNODB = 'The entries table uses the MyISAM engine; it must use InnoDB.';
@@ -228,7 +228,7 @@ final class EngineChecksTest extends TestCase
         ]);
 
         self::assertSame(
-            [sprintf('The storage connection uses the %s driver, which is not supported; use SQLite, MySQL 8.4 or later, or PostgreSQL.', $driver)],
+            [sprintf('The storage connection [legacy] uses the %s driver, which is not supported; use SQLite, MySQL 8.4 or later, or PostgreSQL.', $driver)],
             $this->checks()->problems('legacy', self::TABLE),
         );
         self::assertInstanceOf(\Closure::class, DB::connection('legacy')->getRawPdo());

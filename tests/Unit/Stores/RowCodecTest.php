@@ -19,7 +19,8 @@ use Tests\Fixtures\Records\RecordFactory;
  * it encodes for an insert, with JSON in fixed flags and times in UTC to the
  * microsecond, and the envelope it decodes from a stored row, with integers
  * read from digit strings, JSON objects kept as objects, numbers never turned
- * into strings, and every missing or malformed column refused.
+ * into strings, and every missing or malformed column refused; and a record
+ * rebuilt from an envelope, whose objects are written as objects.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -557,6 +558,125 @@ final class RowCodecTest extends TestCase
         self::assertSame('2026-11-01 12:00:01.000001', $row['recorded_at']);
         self::assertSame(RecordFactory::OCCURRED_AT, $envelope['occurred_at']);
         self::assertSame(self::RECORDED_AT, $envelope['recorded_at']);
+    }
+
+    /**
+     * A record rebuilt from an envelope writes its JSON columns as it decoded
+     * them: an object as an object, nested objects included, where the record's
+     * array views would have written lists.
+     *
+     * @return void
+     */
+    public function testADecodedRecordEncodesItsObjectsAsObjects(): void
+    {
+        $context    = (object) ['route' => 'invoices.approve', 'ids' => (object) ['0' => 'a'], 'none' => new \stdClass, 'list' => [new \stdClass]];
+        $properties = (object) ['amount' => '1200.00', 'lines' => [(object) ['1' => 'x', '0' => 'y']]];
+
+        $row = (new RowCodec)->encode(self::decoded($context, $properties));
+
+        self::assertSame('{"route":"invoices.approve","ids":{"0":"a"},"none":{},"list":[{}]}', $row['context']);
+        self::assertSame('{"amount":"1200.00","lines":[{"1":"x","0":"y"}]}', $row['properties']);
+    }
+
+    /**
+     * An empty map stays an empty map, at the top and nested, and an empty list
+     * an empty list, through the row and back.
+     *
+     * @return void
+     */
+    public function testAnEmptyMapStaysAnEmptyMap(): void
+    {
+        $codec = new RowCodec;
+        $row   = $codec->encode(self::decoded(new \stdClass, (object) ['meta' => new \stdClass, 'lines' => []]));
+
+        self::assertSame('{}', $row['context']);
+        self::assertSame('{"meta":{},"lines":[]}', $row['properties']);
+
+        $envelope = $codec->decode($row);
+
+        self::assertEquals(new \stdClass, $envelope['context']);
+        self::assertSame('{"lines":[],"meta":{}}', CanonicalEncoder::encode($envelope['properties']));
+    }
+
+    /**
+     * A map with sequential numeric keys, which an array cannot tell from a
+     * list, stays a map, at the top and nested, through the row and back.
+     *
+     * @return void
+     */
+    public function testAMapWithSequentialNumericKeysStaysAMap(): void
+    {
+        $codec = new RowCodec;
+        $row   = $codec->encode(self::decoded((object) ['0' => 'a'], (object) ['0' => 'a', '1' => 'b', '2' => (object) ['0' => 'c']]));
+
+        self::assertSame('{"0":"a"}', $row['context']);
+        self::assertSame('{"0":"a","1":"b","2":{"0":"c"}}', $row['properties']);
+
+        $envelope = $codec->decode($row);
+
+        self::assertSame('{"0":"a"}', CanonicalEncoder::encode($envelope['context']));
+        self::assertSame('{"0":"a","1":"b","2":{"0":"c"}}', CanonicalEncoder::encode($envelope['properties']));
+    }
+
+    /**
+     * A record rebuilt from an envelope with lists or `null` in its JSON
+     * columns writes them as given.
+     *
+     * @return void
+     */
+    public function testADecodedRecordEncodesListsAndNullsAsGiven(): void
+    {
+        $row = (new RowCodec)->encode(self::decoded(null, [[], 'a']));
+
+        self::assertNull($row['context']);
+        self::assertSame('[[],"a"]', $row['properties']);
+    }
+
+    /**
+     * The record, the row and every value a helper takes are marked sensitive,
+     * and so is a previous exception, which can hold a value in its message: a
+     * frame of a trace never carries the record.
+     *
+     * @return void
+     */
+    public function testThePayloadIsMarkedSensitive(): void
+    {
+        $marked = [];
+
+        foreach ((new \ReflectionClass(RowCodec::class))->getMethods() as $method) {
+            foreach ($method->getParameters() as $parameter) {
+                if ($parameter->getAttributes(\SensitiveParameter::class) === []) {
+                    continue;
+                }
+
+                $marked[] = "{$method->getName()}(\${$parameter->getName()})";
+            }
+        }
+
+        self::assertSame([
+            'encode($record)',
+            'decode($row)',
+            'encodeJson($value)',
+            'decodeValue($value)',
+            'decodeJson($value)',
+            'decodeTime($value)',
+            'malformed($previous)',
+        ], $marked);
+    }
+
+    /**
+     * A record of the captured envelope rebuilt with the JSON columns given, as
+     * the codec rebuilds one.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>|\stdClass|null  $context
+     * @param  array<array-key, mixed>|\stdClass|null  $properties
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     */
+    private static function decoded(array|\stdClass|null $context, array|\stdClass|null $properties): FinalisedRecord
+    {
+        return FinalisedRecord::decoded(RecordFactory::captured(id: self::ID), self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, $context, $properties);
     }
 
     /**

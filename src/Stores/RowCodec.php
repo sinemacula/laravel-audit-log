@@ -19,9 +19,11 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * column required: an integer the engine returns as a digit string reads as the
  * integer, JSON decodes to `stdClass` objects so `{}` and numeric keys survive,
  * and a JSON number is never turned into a string, so a fraction or an integer
- * beyond PHP's range decodes as a float that verification refuses. Decoding
- * returns the envelope, never a record: a stored row is evidence. The codec
- * never trims, folds case or normalises a value.
+ * beyond PHP's range decodes as a float that verification refuses. A record
+ * rebuilt from an envelope gives its JSON columns as objects where they were
+ * objects, and they are written as objects. Decoding returns the envelope,
+ * never a record: a stored row is evidence. The codec never trims, folds case
+ * or normalises a value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,7 +86,7 @@ final readonly class RowCodec
      * @throws \JsonException
      * @throws \InvalidArgumentException
      */
-    public function encode(FinalisedRecord $record): array
+    public function encode(#[\SensitiveParameter] FinalisedRecord $record): array
     {
         $row = $record->toArray();
 
@@ -108,7 +110,7 @@ final readonly class RowCodec
      *
      * @throws \UnexpectedValueException
      */
-    public function decode(array $row): array
+    public function decode(#[\SensitiveParameter] array $row): array
     {
         $envelope = [];
 
@@ -125,16 +127,17 @@ final readonly class RowCodec
 
     /**
      * The JSON column's value as the insert writes it: `null` stays `null`, and
-     * an array is encoded with the fixed flags.
+     * an array or an object is encoded with the fixed flags, so a decoded
+     * record's `{}` and maps with sequential numeric keys stay objects.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @param  ?array<array-key, mixed>  $value
+     * @param  array<array-key, mixed>|\stdClass|null  $value
      * @return ?string
      *
      * @throws \JsonException
      */
-    private static function encodeJson(?array $value): ?string
+    private static function encodeJson(#[\SensitiveParameter] array|\stdClass|null $value): ?string
     {
         return $value === null ? null : json_encode($value, self::JSON_FLAGS);
     }
@@ -152,7 +155,7 @@ final readonly class RowCodec
      *
      * @throws \UnexpectedValueException
      */
-    private static function decodeValue(string $column, string $kind, mixed $value): mixed
+    private static function decodeValue(string $column, string $kind, #[\SensitiveParameter] mixed $value): mixed
     {
         return match ($kind) {
             'string'   => is_string($value) ? $value : throw self::malformed($column, 'a string'),
@@ -175,7 +178,7 @@ final readonly class RowCodec
      *
      * @throws \UnexpectedValueException
      */
-    private static function decodeJson(string $column, mixed $value): mixed
+    private static function decodeJson(string $column, #[\SensitiveParameter] mixed $value): mixed
     {
         if ($value === null) {
             return null;
@@ -203,7 +206,7 @@ final readonly class RowCodec
      *
      * @throws \UnexpectedValueException
      */
-    private static function decodeTime(string $column, mixed $value): string
+    private static function decodeTime(string $column, #[\SensitiveParameter] mixed $value): string
     {
         if (!is_string($value)) {
             throw self::malformed($column, 'a stored time');
@@ -224,7 +227,7 @@ final readonly class RowCodec
      * @param  ?\Throwable  $previous
      * @return \UnexpectedValueException
      */
-    private static function malformed(string $column, string $what, ?\Throwable $previous = null): \UnexpectedValueException
+    private static function malformed(string $column, string $what, #[\SensitiveParameter] ?\Throwable $previous = null): \UnexpectedValueException
     {
         return new \UnexpectedValueException(sprintf('A stored entry\'s `%s` is not %s.', $column, $what), 0, $previous);
     }

@@ -189,4 +189,71 @@ return [
         'max_context_bytes' => env('AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES', 4096),
     ],
 
+    /*
+    |---------------------------------------------------------------------------
+    | Failure
+    |---------------------------------------------------------------------------
+    |
+    | What a failed write does to the code that recorded it. `mode` is `report`
+    | by default, which spills the record, reports the failure, dispatches
+    | `AuditWriteFailed` and lets the code go on, or `throw`, which spills the
+    | record, dispatches the event and throws. A `failClosed()` record always
+    | throws, and a `transactional()` record always throws and is never spilled,
+    | whatever the mode. `log_channel` is the channel a spill line goes to, 1 to
+    | 64 characters, or `null` or empty for the default channel. A spill line
+    | holds the whole record, so this channel holds personal data: control who
+    | can read it and how long it is kept. A dedicated file channel using
+    | `LineFormatter` with `%message%\n` and no inline-break replacement is the
+    | only format `audit-log:replay` promises to read, and `audit-log:check`
+    | notes any other. A malformed value fails closed when it is read, and
+    | `audit-log:check` reports it, as it does a name `logging.channels` does
+    | not configure. Both may change on any deploy.
+    |
+    */
+
+    'failure' => [
+        'mode'        => env('AUDIT_LOG_FAILURE_MODE', 'report'),
+        'log_channel' => env('AUDIT_LOG_FAILURE_LOG_CHANNEL'),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Delivery
+    |---------------------------------------------------------------------------
+    |
+    | How a record reaches its store. `mode` is `sync` by default, which stores
+    | it as it is written, or `outbox`, which inserts it in the outbox table for
+    | `audit-log:drain`, scheduled by the application, to deliver.
+    | `outbox.connection` is the connection that table lives on, `null` or empty
+    | for the storage connection: on the connection the application's
+    | transactions run on, a row commits exactly when they do. `outbox.table`
+    | and `deliveries_table` name the tables, with the same grammar as the
+    | entries table, and the deliveries table is always on the storage
+    | connection. `outbox.lease_seconds` is how long a drain's claim lasts
+    | before another drain may take the row, from 30 to 86400 and 300 by
+    | default, and must outlast a destination's timeout. `outbox.max_attempts`
+    | is how many attempts a row gets before it is failed and kept for a replay,
+    | from 1 to 1000 and 10 by default. `outbox.backoff_seconds` is how long the
+    | first retry waits, doubling up to an hour, from 1 to 3600 and 60 by
+    | default. A row holds the record encrypted with `app.key`, so an old
+    | `app.key` must stay in `app.previous_keys` while the outbox needs it. A
+    | malformed value fails closed when it is read, and `audit-log:check`
+    | reports it. The mode and the numbers may change on any deploy; set the
+    | connection and the tables before migrating, since changing them later
+    | moves no table.
+    |
+    */
+
+    'delivery' => [
+        'mode'   => env('AUDIT_LOG_DELIVERY_MODE', 'sync'),
+        'outbox' => [
+            'connection'      => env('AUDIT_LOG_DELIVERY_OUTBOX_CONNECTION'),
+            'table'           => env('AUDIT_LOG_DELIVERY_OUTBOX_TABLE', 'audit_log_outbox'),
+            'lease_seconds'   => env('AUDIT_LOG_DELIVERY_OUTBOX_LEASE_SECONDS', 300),
+            'max_attempts'    => env('AUDIT_LOG_DELIVERY_OUTBOX_MAX_ATTEMPTS', 10),
+            'backoff_seconds' => env('AUDIT_LOG_DELIVERY_OUTBOX_BACKOFF_SECONDS', 60),
+        ],
+        'deliveries_table' => env('AUDIT_LOG_DELIVERY_DELIVERIES_TABLE', 'audit_log_deliveries'),
+    ],
+
 ];

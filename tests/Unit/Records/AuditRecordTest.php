@@ -25,11 +25,13 @@ use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for the captured record: its shape and its one named constructor,
+ * Unit tests for the captured record: its shape and its two named constructors,
  * the pinned envelope and the golden v1 record, the UUID version 7 id and its
  * order, the UTC instant, the versions, provenance and source it carries, the
  * reference pairs, that it stores only what minimising left, where a note is
- * stored and that an owned note never is, and the refusals of building one.
+ * stored and that an owned note never is, and the refusals of building one; and
+ * a record rebuilt from an envelope, every field kept as given, and the
+ * envelopes it refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -88,8 +90,9 @@ final class AuditRecordTest extends TestCase
 
     /**
      * The record is final and readonly, its constructor is private, and its
-     * only public methods are `fromPending()`, the one that returns a record,
-     * and `toArray()`.
+     * only public methods are `fromPending()`, the one named constructor that
+     * captures a record, `fromEnvelope()`, which only the codec calls to
+     * rebuild one, and `toArray()`.
      *
      * @return void
      */
@@ -106,10 +109,140 @@ final class AuditRecordTest extends TestCase
         $methods = array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $reflection->getMethods(\ReflectionMethod::IS_PUBLIC));
         $static  = array_filter($reflection->getMethods(\ReflectionMethod::IS_STATIC), static fn (\ReflectionMethod $method): bool => $method->isPublic());
 
-        self::assertSame(['fromPending', 'toArray'], $methods);
-        self::assertSame(['fromPending'], array_values(array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $static)));
+        self::assertSame(['fromEnvelope', 'fromPending', 'toArray'], $methods);
+        self::assertSame(['fromEnvelope', 'fromPending'], array_values(array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $static)));
         // PHP 8.5 reports a `self` return type by the class it names.
         self::assertContains((string) $reflection->getMethod('fromPending')->getReturnType(), ['self', AuditRecord::class]);
+        self::assertContains((string) $reflection->getMethod('fromEnvelope')->getReturnType(), ['self', AuditRecord::class]);
+    }
+
+    /**
+     * A record rebuilt from an envelope keeps every field as given, in the
+     * envelope's order, whatever capture would have made of it: an id that is
+     * not a version 7 UUID, upper-case and unclean text, a list as the
+     * properties, and a version the release does not read.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeKeepsEveryField(): void
+    {
+        $fields = array_replace(self::build(self::fullBuilder())->toArray(), [
+            'id'             => '6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b',
+            'record_version' => 9,
+            'event'          => 'Invoice.Approved',
+            'user_agent'     => "Agent\0\u{202E}",
+            'ip'             => '203.0.113.7',
+            'context'        => [],
+            'properties'     => ['password' => 'hunter2', 'lines' => ['b', 'a']],
+            'occurred_at'    => '2020-01-01T00:00:00.000001Z',
+        ]);
+
+        self::assertSame($fields, AuditRecord::fromEnvelope($fields)->toArray());
+        self::assertSame($fields, AuditRecord::fromEnvelope([...$fields, 'recorded_at' => '2026-11-01T12:00:00.000000Z', 'hmac' => 'ignored'])->toArray());
+    }
+
+    /**
+     * A record rebuilt from an envelope keeps its provenance and import fields
+     * as given: an imported record stays imported, with its source record and
+     * its batch.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeKeepsItsProvenance(): void
+    {
+        $fields = array_replace(self::build(self::minimalBuilder())->toArray(), [
+            'provenance'       => 'imported',
+            'source_id'        => 'legacy-app',
+            'source_region'    => null,
+            'source_record_id' => 'legacy-0042',
+            'import_batch_id'  => '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e',
+            'origin'           => null,
+        ]);
+
+        $record = AuditRecord::fromEnvelope($fields);
+
+        self::assertSame('imported', $record->provenance);
+        self::assertSame(['legacy-app', null, 'legacy-0042', '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e', null], [
+            $record->sourceId, $record->sourceRegion, $record->sourceRecordId, $record->importBatchId, $record->origin,
+        ]);
+    }
+
+    /**
+     * Rows of `[field, value, message]`: a field of another type for each kind
+     * of field, and a field missing.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @return iterable<string, array{0: string, 1: mixed, 2: string}>
+     */
+    public static function provideRefusedEnvelopes(): iterable
+    {
+        yield from [
+            'a string field holding null'       => ['event', null, 'An envelope\'s `event` must be a string.'],
+            'a string field holding an integer' => ['occurred_at', 1, 'An envelope\'s `occurred_at` must be a string.'],
+            'a nullable field holding an int'   => ['reason', 1, 'An envelope\'s `reason` must be a string or null.'],
+            'a nullable field holding a list'   => ['actor_id', ['42'], 'An envelope\'s `actor_id` must be a string or null.'],
+            'an integer field holding a string' => ['record_version', '1', 'An envelope\'s `record_version` must be an integer.'],
+            'an integer field holding null'     => ['event_version', null, 'An envelope\'s `event_version` must be an integer.'],
+            'an array field holding a string'   => ['context', '{}', 'An envelope\'s `context` must be an array or null.'],
+            'an array field holding an object'  => ['properties', new \stdClass, 'An envelope\'s `properties` must be an array or null.'],
+        ];
+    }
+
+    /**
+     * A field of another type is refused, naming the field and what it must be,
+     * never the value.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  string  $field
+     * @param  mixed  $value
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideRefusedEnvelopes')]
+    public function testAnEnvelopeOfAnotherTypeIsRefused(string $field, mixed $value, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        AuditRecord::fromEnvelope([$field => $value] + self::build(self::minimalBuilder())->toArray());
+    }
+
+    /**
+     * An envelope without a field is refused, naming the field, even one that
+     * may hold `null`: a missing field is never read as `null`.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeWithoutAFieldIsRefused(): void
+    {
+        foreach (self::KEYS as $key) {
+            $fields = self::build(self::minimalBuilder())->toArray();
+
+            unset($fields[$key]);
+
+            try {
+                AuditRecord::fromEnvelope($fields);
+                self::fail("Expected an envelope without `{$key}` to be refused.");
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame("An envelope has no `{$key}` field.", $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * The envelope's parameter is marked sensitive: it holds the record's
+     * values, and a refusal is thrown with it on the stack.
+     *
+     * @return void
+     */
+    public function testTheEnvelopeParameterIsSensitive(): void
+    {
+        $parameter = (new \ReflectionMethod(AuditRecord::class, 'fromEnvelope'))->getParameters()[0];
+
+        self::assertSame('fields', $parameter->getName());
+        self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class));
     }
 
     /**

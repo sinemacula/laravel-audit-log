@@ -36,11 +36,11 @@ final class EntrySettings
     /** @var string The table when none is configured. */
     public const string DEFAULT_TABLE = 'audit_log_entries';
 
+    /** @var string Lower-case letters, digits and underscores, with no leading digit, up to the longest table name. */
+    public const string TABLE_PATTERN = '/\A[a-z_][a-z0-9_]{0,46}\z/';
+
     /** @var string The setting's full key. */
     private const string KEY = 'audit-log.entries.table';
-
-    /** @var string Lower-case letters, digits and underscores, with no leading digit, up to the longest table name. */
-    private const string PATTERN = '/\A[a-z_][a-z0-9_]{0,46}\z/';
 
     /**
      * Disallow instantiation; utility container only.
@@ -59,7 +59,7 @@ final class EntrySettings
     {
         $table = Config::get(self::KEY, self::DEFAULT_TABLE);
 
-        if (!is_string($table) || preg_match(self::PATTERN, $table) !== 1) {
+        if (!is_string($table) || preg_match(self::TABLE_PATTERN, $table) !== 1) {
             $message = sprintf(
                 '`%s` must be a table name of 1 to %d lower-case letters, digits and underscores that does not start with a digit.',
                 self::KEY,

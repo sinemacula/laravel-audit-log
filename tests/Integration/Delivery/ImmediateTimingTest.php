@@ -18,6 +18,7 @@ use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\TestCase;
 
@@ -184,14 +185,16 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * A failed write propagates to the caller, and its savepoint leaves the
-     * host's transaction usable on every engine, PostgreSQL's aborted state
-     * included.
+     * Under the `throw` mode a failed write propagates to the caller, and its
+     * savepoint leaves the host's transaction usable on every engine,
+     * PostgreSQL's aborted state included.
      *
      * @return void
      */
     public function testAFailedWritePropagatesAndTheHostStaysUsable(): void
     {
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+
         $this->pointAtProbeTable();
 
         $this->host()->beginTransaction();
@@ -211,14 +214,17 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * On a dedicated connection a failed write propagates to the caller and the
-     * host's transaction, on a connection it never touched, carries on.
+     * On a dedicated connection, under the `throw` mode, a failed write
+     * propagates to the caller and the host's transaction, on a connection it
+     * never touched, carries on.
      *
      * @return void
      */
     #[DefineEnvironment('useDedicatedStorage')]
     public function testAFailedWriteOnADedicatedConnectionLeavesTheHostUntouched(): void
     {
+        app(ConfigRepository::class)->set('audit-log.failure.mode', 'throw');
+
         $this->pointAtProbeTable();
 
         $this->host()->beginTransaction();
@@ -408,8 +414,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * Run a capture that records into the probe table, which fails on its
-     * `NOT NULL` column with the engine's own `QueryException`.
+     * Run a capture that records into the probe table, which fails on its `NOT
+     * NULL` column with the engine's own `QueryException`, sanitised.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\AuditRecord  $capture
      * @return void
@@ -422,8 +428,9 @@ final class ImmediateTimingTest extends TestCase
             $capture();
 
             self::fail('Expected the audit insert to fail.');
-        } catch (QueryException $exception) {
-            self::assertStringStartsWith('insert into', $exception->getSql());
+        } catch (AuditWriteFailedException $exception) {
+            self::assertSame(QueryException::class, $exception->exceptionClass);
+            self::assertNotNull($exception->sqlState);
         }
     }
 }

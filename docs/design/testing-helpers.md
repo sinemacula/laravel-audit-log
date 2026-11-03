@@ -3,8 +3,9 @@
 ## Purpose
 
 This note records what the package gives an application's tests: the fake store, what it can be asked and the four
-assertions; which parts of the real pipeline run with the fake and what the fake does not model; and how Laravel's test
-helpers change what a record holds. It decides which test can use the fake and which belongs against a real database.
+assertions; which parts of the real pipeline run with the fake and what the fake does not model, a failing fake under
+each mode included; and how Laravel's test helpers change what a record holds. It decides which test can use the fake
+and which belongs against a real database.
 
 ## Invariants
 
@@ -12,8 +13,20 @@ helpers change what a record holds. It decides which test can use the fake and w
   It is a real static on the facade, not a `Recorder` method, so production code names nothing of the testing helpers.
   The store is resolved for each write, so the fake is used even when the recorder was resolved first.
   `FakeAuditStore::fake(?Container)` does the same on the container given.
-- `FakeAuditStore::failing(\Throwable)` binds a fake that throws the exception from every store call and holds nothing.
-  The failure propagates through the recorder, and `forget()` leaves it in force.
+- `FakeAuditStore::failing(\Throwable)` binds a fake that throws the exception from every store call and holds nothing,
+  and `forget()` leaves it in force. What the caller sees is the write path's, not the fake's:
+  - Under `failure.mode` set to `report` the record is spilled, the failure reported and `AuditWriteFailed` dispatched,
+    and `record()` returns as usual.
+  - Under `throw`, or for a `failClosed()` record, it is spilled and `AuditWriteFailed` dispatched, and the caller gets
+    a `Stores\AuditWriteFailedException` naming the class of the exception given, never the exception itself.
+  - A `transactional()` record does the same with no spill.
+  - Under `delivery.mode` set to `outbox`, `record()` writes a row and never reaches the fake. A drain that delivers the
+    row then fails: it retries, and at `delivery.outbox.max_attempts` the row is failed and kept.
+- The fake says it is durable and that it joins a transaction on any connection, so a `failClosed()` or
+  `transactional()` record is never refused for want of a store, whichever store production binds. A refusal of a store
+  that cannot honour one is tested with that store, not the fake.
+- In outbox mode a record reaches the fake when it is drained. Until a test runs `audit-log:drain` the fake holds
+  nothing, and `AuditRecorded` has not been dispatched.
 - The fake is read through `recorded(?Closure)`, the captured records, oldest first, or those the closure accepts;
   `finalised()`, what the store received, with the time each was recorded and its integrity fields; `hasRecorded()`,
   which reads a code as `event()` reads it, so a malformed one is refused; `count()`; and `forget()`. `recorded()` and
@@ -60,8 +73,9 @@ helpers change what a record holds. It decides which test can use the fake and w
 
 2. The record passes through the pipeline, and `RecordDelivery` finalises it and gives it to the fake instead of the
    database store.
-3. A test of a failure binds `FakeAuditStore::failing(new \RuntimeException('Storage is down.'))` and expects the
-   exception from the record.
+3. A test of a failure binds `FakeAuditStore::failing(new \RuntimeException('Storage is down.'))`, then asserts what its
+   policy promises: under `report`, that the code carries on and `AuditWriteFailed` was dispatched, and under `throw`,
+   that a `Stores\AuditWriteFailedException` reaches it.
 4. Between two phases of one test, `forget()` empties the fake.
 
 ## Failure / Edge Cases
@@ -82,8 +96,9 @@ helpers change what a record holds. It decides which test can use the fake and w
 - `transactional()` counts a `DatabaseTransactions` wrapper as an open transaction, because it asks the connection,
   whose level includes the wrapper. A record a production path would refuse with a `\LogicException` is therefore
   accepted inside the wrapper, so a test of that refusal runs without it.
-- The timing check runs with the fake bound and reads the storage connection, not the store, so `transactional()` still
-  needs a transaction open on that connection.
+- The timing check runs with the fake bound. The fake answers only whether it joins a transaction, and the check still
+  reads the connection, so `transactional()` still needs a transaction open on the storage connection, or on the outbox
+  connection in outbox mode.
 - After-commit deferral does not count the wrapper, which Laravel's testing transactions manager leaves out: a record
   inside only the wrapper is written at once, and one inside a transaction nested in it waits for that commit.
 - `AuditLog::define()` and `AuditLog::contribute()` are refused once the application has booted, as they are in
@@ -116,6 +131,7 @@ helpers change what a record holds. It decides which test can use the fake and w
 - `src/Testing/Concerns/InteractsWithAuditLog.php`: `assertAudited()`, `assertNotAudited()`, `assertNothingAudited()`,
   `assertAuditedTimes()`.
 - `src/Delivery/RecordDelivery.php`: `check()`, `deliver()`; `src/Database/AfterCommit.php`.
+- `src/Contracts/DurableAuditStore.php`: `isDurable()`, `participatesIn()`; `src/Delivery/OutboxDrainer.php`: `drain()`.
 
 ## Authoritative Tests
 
@@ -123,7 +139,14 @@ helpers change what a record holds. It decides which test can use the fake and w
   `testFakeBindsOnTheContainerGiven`, `testFailingBindsOnTheApplication`, `testRecordedListsOldestFirst`,
   `testRecordedFiltersWithTheClosure`, `testFinalisedGivesWhatTheStoreReceived`, `testHasRecordedTakesAStringOrAnEnum`,
   `testHasRecordedRefusesAnInvalidCode`, `testCountCounts`, `testForgetForgets`, `testFailingThrowsTheExceptionGiven`,
-  `testAFailingFakeHoldsNothing`, `testForgetLeavesAFailureInForce`, `testUsesNoPhpUnit`, `testMakesNoQuery`
+  `testAFailingFakeHoldsNothing`, `testForgetLeavesAFailureInForce`, `testIsDurable`, `testParticipatesInAnyConnection`,
+  `testUsesNoPhpUnit`, `testMakesNoQuery`
+- `tests/Feature/Delivery/StoreCapabilitiesTest.php` `testTheFakeIsDurableAndJoinsAnyTransaction`
+- `tests/Feature/Delivery/RecordDeliveryTest.php` `testAReportModeFailureReturnsAndNotifiesNothing`,
+  `testATransactionalRecordThrowsWhateverTheMode`, `testAFailClosedRecordThrowsWhateverTheMode`,
+  `testOutboxModeWritesNoEntryAndDispatchesNothing`
+- `tests/Feature/Delivery/OutboxDrainerTest.php` `testDrainingStoresTheRecordAndDeletesTheRow`,
+  `testTheFinalAttemptFailsTheRowAndKeepsIt`
 - `tests/Feature/Testing/Concerns/InteractsWithAuditLogTest.php` `testAssertAuditedPassesWhenTheCodeWasRecorded`,
   `testAssertAuditedFailsWhenItWasNot`, `testAssertAuditedHonoursTheClosure`, `testAssertNotAuditedFailsWhenItWas`,
   `testAssertNothingAuditedFailsWithARecord`, `testAssertAuditedTimesFails`, `testEveryAssertionReturnsTheTestCase`,
@@ -154,7 +177,8 @@ Update this note when any of the following change:
 - a method of the fake or its return type
 - an assertion, its arguments or what its failure prints
 - what runs with the fake bound, field rules included
-- what the fake models of a transaction
+- what the fake models of a transaction, or what it says of itself
+- what a failing fake does under a failure mode or a delivery mode
 - how a frame listener is registered, or a Laravel test helper that reaches it
 - how `transactional()` decides a transaction is open
 - when registration is frozen
