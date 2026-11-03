@@ -1,0 +1,75 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
+
+/**
+ * What verification established about a segment of the log, the entries one
+ * seal covers: every check passed, its entries were removed under a valid prune
+ * record, some are missing or still unsealed, a check could not be made, or the
+ * log was altered.
+ *
+ * The cases are in order of severity, and a segment reports the most severe
+ * status any of its checks found. Whether the segment is anchored is a separate
+ * answer, so a pruned segment can never hide an anchor that contradicts it.
+ *
+ * @api
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ */
+enum IntegrityStatus: string
+{
+    // Every check of the segment passed
+    case VALID = 'valid';
+
+    // Entries of the segment are missing, and a valid prune record for the
+    // exact seal accounts for them
+    case PRUNED = 'pruned';
+
+    // Entries are missing with no prune record, or entries older than the
+    // allowed age are still unsealed
+    case INCOMPLETE = 'incomplete';
+
+    // A check could not be made: a seal, a prune record or an entry is
+    // malformed, of an unknown version, or under a key the ring does not hold
+    case UNVERIFIABLE = 'unverifiable';
+
+    // The log was altered: a digest, a signature, the chain, the members or the
+    // anchor disagrees with what was sealed
+    case TAMPERED = 'tampered';
+
+    /**
+     * How severe the status is, from 0 for `valid` to 4 for `tampered`, so the
+     * most severe of several statuses is the one with the greatest severity.
+     *
+     * @return int
+     */
+    public function severity(): int
+    {
+        return match ($this) {
+            self::VALID        => 0,
+            self::PRUNED       => 1,
+            self::INCOMPLETE   => 2,
+            self::UNVERIFIABLE => 3,
+            self::TAMPERED     => 4,
+        };
+    }
+
+    /**
+     * Whether the status fails a verification: `incomplete`, `unverifiable` and
+     * `tampered` do; `valid` and `pruned` do not.
+     *
+     * @return bool
+     */
+    public function isFailure(): bool
+    {
+        return match ($this) {
+            self::INCOMPLETE,
+            self::UNVERIFIABLE,
+            self::TAMPERED => true,
+            default        => false,
+        };
+    }
+}

@@ -13,9 +13,10 @@ use Tests\Fixtures\Database\EntriesTableShape;
 /**
  * Unit tests for the shapes the schema checks compare the package's tables
  * against: the entries table's is what its migration gives, column by column
- * and index by index, the outbox's and the deliveries' are what theirs give,
- * and each names its table and describes a column the package does not write in
- * its own words.
+ * and index by index, the outbox's, the deliveries', the checkpoints', the
+ * checkpoint members' and the integrity state's are what theirs give, and each
+ * names its table and describes a column the package does not write in its own
+ * words.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,6 +64,7 @@ final class TableShapeTest extends TestCase
             '_category_index'  => [['category', 'occurred_at'], false],
             '_correlate_index' => [['correlation_id'], false],
             '_occurred_index'  => [['occurred_at'], false],
+            '_recorded_index'  => [['recorded_at', 'id'], false],
             '_source_unique'   => [['source_id', 'source_record_id'], true],
         ], $shape->indexes);
         self::assertSame(['id'], $shape->primary);
@@ -117,6 +119,85 @@ final class TableShapeTest extends TestCase
     }
 
     /**
+     * The checkpoints shape is what its migration gives: the seal's id as the
+     * key, its place in the chain, its members' digest, its times, its
+     * signature, the four anchor columns, one seal per sequence and the index
+     * the anchorer reads the seals not yet anchored by.
+     *
+     * @return void
+     */
+    public function testTheCheckpointsShapeIsWhatTheMigrationGives(): void
+    {
+        $shape = TableShape::checkpoints();
+
+        self::assertSame([
+            'id'                 => ['uuid', 36, false],
+            'sequence'           => ['bigint', null, false],
+            'log_id'             => ['string', 64, false],
+            'previous_id'        => ['uuid', 36, true],
+            'previous_digest'    => ['string', 64, true],
+            'member_count'       => ['integer', null, false],
+            'members_digest'     => ['string', 64, false],
+            'seal_digest'        => ['string', 64, false],
+            'first_recorded_at'  => ['datetime', 6, false],
+            'last_recorded_at'   => ['datetime', 6, false],
+            'sealed_at'          => ['datetime', 6, false],
+            'signer'             => ['string', 16, false],
+            'key_id'             => ['string', 32, false],
+            'algorithm_version'  => ['smallint', null, false],
+            'signature'          => ['string', 64, false],
+            'anchor'             => ['string', 64, true],
+            'anchor_receipt'     => ['json', null, true],
+            'anchored_at'        => ['datetime', 6, true],
+            'anchor_error_class' => ['string', 191, true],
+        ], $shape->columns);
+        self::assertSame([
+            '_sequence_unique' => [['sequence'], true],
+            '_anchored_index'  => [['anchored_at', 'sequence'], false],
+        ], $shape->indexes);
+        self::assertSame(['id'], $shape->primary);
+    }
+
+    /**
+     * The checkpoint members shape is what its migration gives: keyed by the
+     * seal and the entry, the entry's HMAC, and an entry held by at most one
+     * seal.
+     *
+     * @return void
+     */
+    public function testTheMembersShapeIsWhatTheMigrationGives(): void
+    {
+        $shape = TableShape::members();
+
+        self::assertSame([
+            'checkpoint_id' => ['uuid', 36, false],
+            'entry_id'      => ['uuid', 36, false],
+            'hmac'          => ['string', 64, false],
+        ], $shape->columns);
+        self::assertSame(['_entry_unique' => [['entry_id'], true]], $shape->indexes);
+        self::assertSame(['checkpoint_id', 'entry_id'], $shape->primary);
+    }
+
+    /**
+     * The integrity state shape is what its migration gives: one value for each
+     * name, which is its key, when it was written, and no other index.
+     *
+     * @return void
+     */
+    public function testTheStateShapeIsWhatTheMigrationGives(): void
+    {
+        $shape = TableShape::state();
+
+        self::assertSame([
+            'name'       => ['string', 64, false],
+            'value'      => ['text', null, false],
+            'updated_at' => ['datetime', 6, false],
+        ], $shape->columns);
+        self::assertSame([], $shape->indexes);
+        self::assertSame(['name'], $shape->primary);
+    }
+
+    /**
      * Rows of `[the shape, its label, how a column it does not hold is
      * described]`.
      *
@@ -125,15 +206,19 @@ final class TableShapeTest extends TestCase
     public static function provideShapes(): iterable
     {
         yield from [
-            'the entries'    => [TableShape::entries(), 'entries', 'Column `notes` is not one the package writes, so no entry\'s HMAC covers it.'],
-            'the outbox'     => [TableShape::outbox(), 'outbox', 'Column `notes` is not one the package writes.'],
-            'the deliveries' => [TableShape::deliveries(), 'deliveries', 'Column `notes` is not one the package writes.'],
+            'the entries'            => [TableShape::entries(), 'entries', 'Column `notes` is not one the package writes, so no entry\'s HMAC covers it.'],
+            'the outbox'             => [TableShape::outbox(), 'outbox', 'Column `notes` is not one the package writes.'],
+            'the deliveries'         => [TableShape::deliveries(), 'deliveries', 'Column `notes` is not one the package writes.'],
+            'the checkpoints'        => [TableShape::checkpoints(), 'checkpoints', 'Column `notes` is not one the package writes, so no seal covers it.'],
+            'the checkpoint members' => [TableShape::members(), 'checkpoint members', 'Column `notes` is not one the package writes, so no seal covers it.'],
+            'the integrity state'    => [TableShape::state(), 'integrity state', 'Column `notes` is not one the package writes.'],
         ];
     }
 
     /**
      * Each shape names its table, and describes a column the package does not
-     * write in its own words: only an entry is covered by an HMAC.
+     * write in its own words: an entry is covered by an HMAC, a seal and its
+     * members by the seal, and nothing else by either.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
      * @param  string  $label

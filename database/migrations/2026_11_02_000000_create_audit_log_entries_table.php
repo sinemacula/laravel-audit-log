@@ -144,8 +144,9 @@ return new class extends Migration {
 
     /**
      * Index each lookup the trail makes, by actor, subject, principal, tenant,
-     * event, category, correlation and time, and keep an imported record's
-     * source identity unique.
+     * event, category, correlation and time, index the order sealing pages the
+     * entries in, by the time each was recorded and then its id, and keep an
+     * imported record's source identity unique.
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
      * @param  string  $table
@@ -163,6 +164,10 @@ return new class extends Migration {
         $blueprint->index(['category', 'occurred_at'], $table . '_category_index');
         $blueprint->index(['correlation_id'], $table . '_correlate_index');
         $blueprint->index(['occurred_at'], $table . '_occurred_index');
+
+        // What sealing keyset-pages by: the time each entry was recorded, then
+        // its id, so entries recorded in the same microsecond keep an order.
+        $blueprint->index(['recorded_at', 'id'], $table . '_recorded_index');
         $blueprint->unique(['source_id', 'source_record_id'], $table . '_source_unique');
     }
 };

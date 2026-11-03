@@ -4,8 +4,12 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Config;
 
+use Illuminate\Config\Repository;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
+use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 
 /**
  * Unit tests for the shipped `config/audit-log.php`: the env vars it reads, the
@@ -34,6 +38,57 @@ final class ShippedConfigTest extends TestCase
 
     /** @var string Env var naming the current integrity key. */
     private const string CURRENT_ENV = 'AUDIT_LOG_INTEGRITY_CURRENT';
+
+    /** @var string Env var naming the log every seal names. */
+    private const string LOG_ID_ENV = 'AUDIT_LOG_INTEGRITY_LOG_ID';
+
+    /** @var string Env var naming the seals table. */
+    private const string CHECKPOINTS_TABLE_ENV = 'AUDIT_LOG_INTEGRITY_CHECKPOINTS_TABLE';
+
+    /** @var string Env var naming the checkpoint members table. */
+    private const string MEMBERS_TABLE_ENV = 'AUDIT_LOG_INTEGRITY_MEMBERS_TABLE';
+
+    /** @var string Env var naming the integrity state table. */
+    private const string STATE_TABLE_ENV = 'AUDIT_LOG_INTEGRITY_STATE_TABLE';
+
+    /** @var string Env var holding when sealing runs. */
+    private const string SEAL_SCHEDULE_ENV = 'AUDIT_LOG_INTEGRITY_SEAL_SCHEDULE';
+
+    /** @var string Env var holding when the sweep runs. */
+    private const string SWEEP_SCHEDULE_ENV = 'AUDIT_LOG_INTEGRITY_SEAL_SWEEP_SCHEDULE';
+
+    /** @var string Env var holding the most entries one seal holds. */
+    private const string SEAL_BATCH_ENV = 'AUDIT_LOG_INTEGRITY_SEAL_BATCH';
+
+    /** @var string Env var holding the most seals one run writes. */
+    private const string SEAL_MAX_BATCHES_ENV = 'AUDIT_LOG_INTEGRITY_SEAL_MAX_BATCHES';
+
+    /** @var string Env var holding how far back a recent pass starts. */
+    private const string SEAL_LOOKBACK_ENV = 'AUDIT_LOG_INTEGRITY_SEAL_LOOKBACK_SECONDS';
+
+    /** @var string Env var holding how long an entry waits before it is sealed. */
+    private const string SEAL_SETTLE_ENV = 'AUDIT_LOG_INTEGRITY_SEAL_SETTLE_SECONDS';
+
+    /** @var string Env var holding how many attempts a seal gets. */
+    private const string SEAL_ATTEMPTS_ENV = 'AUDIT_LOG_INTEGRITY_SEAL_MAX_ATTEMPTS';
+
+    /** @var string Env var holding when the strict verification runs. */
+    private const string VERIFY_SCHEDULE_ENV = 'AUDIT_LOG_INTEGRITY_VERIFY_SCHEDULE';
+
+    /** @var string Env var holding how old an unsealed entry may grow. */
+    private const string VERIFY_MAX_AGE_ENV = 'AUDIT_LOG_INTEGRITY_VERIFY_MAX_UNSEALED_AGE_SECONDS';
+
+    /** @var string Env var naming the anchor. */
+    private const string ANCHOR_DRIVER_ENV = 'AUDIT_LOG_INTEGRITY_ANCHOR_DRIVER';
+
+    /** @var string Env var naming the disk anchor's disk. */
+    private const string ANCHOR_DISK_ENV = 'AUDIT_LOG_INTEGRITY_ANCHOR_DISK';
+
+    /** @var string Env var naming the disk anchor's path. */
+    private const string ANCHOR_PATH_ENV = 'AUDIT_LOG_INTEGRITY_ANCHOR_PATH';
+
+    /** @var string Env var holding how many seals one run anchors. */
+    private const string ANCHOR_BATCH_ENV = 'AUDIT_LOG_INTEGRITY_ANCHOR_BATCH';
 
     /** @var string Env var turning on trust in an inbound request id. */
     private const string TRUST_REQUEST_ID_ENV = 'AUDIT_LOG_CONTEXT_TRUST_REQUEST_ID';
@@ -101,6 +156,23 @@ final class ShippedConfigTest extends TestCase
         self::MAINTENANCE_ENV,
         self::TABLE_ENV,
         self::CURRENT_ENV,
+        self::LOG_ID_ENV,
+        self::CHECKPOINTS_TABLE_ENV,
+        self::MEMBERS_TABLE_ENV,
+        self::STATE_TABLE_ENV,
+        self::SEAL_SCHEDULE_ENV,
+        self::SWEEP_SCHEDULE_ENV,
+        self::SEAL_BATCH_ENV,
+        self::SEAL_MAX_BATCHES_ENV,
+        self::SEAL_LOOKBACK_ENV,
+        self::SEAL_SETTLE_ENV,
+        self::SEAL_ATTEMPTS_ENV,
+        self::VERIFY_SCHEDULE_ENV,
+        self::VERIFY_MAX_AGE_ENV,
+        self::ANCHOR_DRIVER_ENV,
+        self::ANCHOR_DISK_ENV,
+        self::ANCHOR_PATH_ENV,
+        self::ANCHOR_BATCH_ENV,
         self::TRUST_REQUEST_ID_ENV,
         self::REQUEST_ID_HEADER_ENV,
         self::TRUST_TRACEPARENT_ENV,
@@ -236,6 +308,235 @@ final class ShippedConfigTest extends TestCase
         putenv(self::CURRENT_ENV . '=k2026');
 
         self::assertSame('k2026', $this->config()['integrity']['current']);
+    }
+
+    /**
+     * With nothing in the environment the integrity tables have their default
+     * names.
+     *
+     * @return void
+     */
+    public function testTheIntegrityTablesHaveTheirDefaults(): void
+    {
+        $integrity = $this->config()['integrity'];
+
+        self::assertSame('audit_log_checkpoints', $integrity['checkpoints_table']);
+        self::assertSame('audit_log_checkpoint_members', $integrity['members_table']);
+        self::assertSame('audit_log_integrity_state', $integrity['state_table']);
+    }
+
+    /**
+     * Each integrity table is read from its own env var.
+     *
+     * @return void
+     */
+    public function testTheIntegrityTablesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::CHECKPOINTS_TABLE_ENV . '=audit_seals');
+        putenv(self::MEMBERS_TABLE_ENV . '=audit_seal_members');
+        putenv(self::STATE_TABLE_ENV . '=audit_seal_state');
+
+        $integrity = $this->config()['integrity'];
+
+        self::assertSame('audit_seals', $integrity['checkpoints_table']);
+        self::assertSame('audit_seal_members', $integrity['members_table']);
+        self::assertSame('audit_seal_state', $integrity['state_table']);
+    }
+
+    /**
+     * With nothing in the environment no log id is set, so the source id is the
+     * log id.
+     *
+     * @return void
+     */
+    public function testTheLogIdDefaultsToNone(): void
+    {
+        putenv(self::LOG_ID_ENV);
+
+        self::assertNull($this->config()['integrity']['log_id']);
+    }
+
+    /**
+     * The log id is read from its env var.
+     *
+     * @return void
+     */
+    public function testTheLogIdIsReadFromTheEnvironment(): void
+    {
+        putenv(self::LOG_ID_ENV . '=app-eu-1');
+
+        self::assertSame('app-eu-1', $this->config()['integrity']['log_id']);
+    }
+
+    /**
+     * With nothing in the environment sealing runs every five minutes, the
+     * sweep daily, and the numbers have their defaults, as integers.
+     *
+     * @return void
+     */
+    public function testTheSealLeavesHaveTheirDefaults(): void
+    {
+        self::assertSame([
+            'schedule'         => '*/5 * * * *',
+            'sweep_schedule'   => '15 3 * * *',
+            'batch'            => 5000,
+            'max_batches'      => 100,
+            'lookback_seconds' => 3600,
+            'settle_seconds'   => 0,
+            'max_attempts'     => 5,
+        ], $this->config()['integrity']['seal']);
+    }
+
+    /**
+     * Each sealing setting is read from its own env var, raw, so a malformed
+     * number fails closed when it is read rather than casting to `0`.
+     *
+     * @return void
+     */
+    public function testTheSealLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::SEAL_SCHEDULE_ENV . '=*/10 * * * *');
+        putenv(self::SWEEP_SCHEDULE_ENV . '=0 4 * * *');
+        putenv(self::SEAL_BATCH_ENV . '=1000');
+        putenv(self::SEAL_MAX_BATCHES_ENV . '=20');
+        putenv(self::SEAL_LOOKBACK_ENV . '=7200');
+        putenv(self::SEAL_SETTLE_ENV . '=30');
+        putenv(self::SEAL_ATTEMPTS_ENV . '=3');
+
+        self::assertSame([
+            'schedule'         => '*/10 * * * *',
+            'sweep_schedule'   => '0 4 * * *',
+            'batch'            => '1000',
+            'max_batches'      => '20',
+            'lookback_seconds' => '7200',
+            'settle_seconds'   => '30',
+            'max_attempts'     => '3',
+        ], $this->config()['integrity']['seal']);
+    }
+
+    /**
+     * With nothing in the environment a strict verification runs daily, and an
+     * unsealed entry is overdue after 25 hours, longer than the day a late
+     * entry can wait for the sweep.
+     *
+     * @return void
+     */
+    public function testTheVerifyLeavesHaveTheirDefaults(): void
+    {
+        self::assertSame([
+            'schedule'                 => '45 3 * * *',
+            'max_unsealed_age_seconds' => 90000,
+        ], $this->config()['integrity']['verify']);
+    }
+
+    /**
+     * Each verification setting is read from its own env var, raw.
+     *
+     * @return void
+     */
+    public function testTheVerifyLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::VERIFY_SCHEDULE_ENV . '=30 2 * * 0');
+        putenv(self::VERIFY_MAX_AGE_ENV . '=172800');
+
+        self::assertSame([
+            'schedule'                 => '30 2 * * 0',
+            'max_unsealed_age_seconds' => '172800',
+        ], $this->config()['integrity']['verify']);
+    }
+
+    /**
+     * With nothing in the environment no anchor is configured, and a disk
+     * anchor would write under `audit-log-anchors` on the default disk.
+     *
+     * @return void
+     */
+    public function testTheAnchorLeavesHaveTheirDefaults(): void
+    {
+        self::assertSame([
+            'driver' => 'null',
+            'disk'   => null,
+            'path'   => 'audit-log-anchors',
+            'batch'  => 100,
+        ], $this->config()['integrity']['anchor']);
+    }
+
+    /**
+     * Each anchor setting is read from its own env var, raw.
+     *
+     * @return void
+     */
+    public function testTheAnchorLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::ANCHOR_DRIVER_ENV . '=disk');
+        putenv(self::ANCHOR_DISK_ENV . '=anchors');
+        putenv(self::ANCHOR_PATH_ENV . '=seals/eu');
+        putenv(self::ANCHOR_BATCH_ENV . '=500');
+
+        self::assertSame([
+            'driver' => 'disk',
+            'disk'   => 'anchors',
+            'path'   => 'seals/eu',
+            'batch'  => '500',
+        ], $this->config()['integrity']['anchor']);
+    }
+
+    /**
+     * The shipped default driver, and `null` in the environment, which `env()`
+     * reads as `null`, are each no anchor.
+     *
+     * @return void
+     */
+    public function testTheDefaultDriverAndANullEnvAreNoAnchor(): void
+    {
+        self::assertSame(AnchorDriver::NONE, $this->anchorSettings()->driver());
+
+        putenv(self::ANCHOR_DRIVER_ENV . '=null');
+
+        self::assertNull($this->config()['integrity']['anchor']['driver']);
+        self::assertSame(AnchorDriver::NONE, $this->anchorSettings()->driver());
+    }
+
+    /**
+     * An empty env line for a schedule turns its run off: the setting reads as
+     * no schedule, rather than as a malformed expression.
+     *
+     * @return void
+     */
+    public function testAnEmptyScheduleEnvDisablesTheRun(): void
+    {
+        putenv(self::SEAL_SCHEDULE_ENV . '=');
+        putenv(self::SWEEP_SCHEDULE_ENV . '=');
+        putenv(self::VERIFY_SCHEDULE_ENV . '=');
+
+        $seals = new SealSettings(new Repository(['audit-log' => $this->config()]));
+
+        self::assertSame('', $this->config()['integrity']['seal']['schedule']);
+        self::assertNull($seals->sealSchedule());
+        self::assertNull($seals->sweepSchedule());
+        self::assertNull($seals->verifySchedule());
+    }
+
+    /**
+     * The shipped defaults pass the sealing and anchor settings, so a fresh
+     * install schedules every run and needs no anchor.
+     *
+     * @return void
+     */
+    public function testTheShippedIntegrityDefaultsAreValid(): void
+    {
+        $config = new Repository(['audit-log' => $this->config(), 'filesystems' => ['default' => 'local']]);
+        $seals  = new SealSettings($config);
+
+        $config->set('audit-log.source.id', 'app-eu-1');
+
+        $seals->validate();
+        $this->anchorSettings()->validate();
+
+        self::assertSame('*/5 * * * *', $seals->sealSchedule());
+        self::assertSame('15 3 * * *', $seals->sweepSchedule());
+        self::assertSame('45 3 * * *', $seals->verifySchedule());
+        self::assertSame('app-eu-1', $seals->logId());
     }
 
     /**
@@ -413,6 +714,23 @@ final class ShippedConfigTest extends TestCase
             'entries.table',
             'integrity.keys',
             'integrity.current',
+            'integrity.log_id',
+            'integrity.checkpoints_table',
+            'integrity.members_table',
+            'integrity.state_table',
+            'integrity.seal.schedule',
+            'integrity.seal.sweep_schedule',
+            'integrity.seal.batch',
+            'integrity.seal.max_batches',
+            'integrity.seal.lookback_seconds',
+            'integrity.seal.settle_seconds',
+            'integrity.seal.max_attempts',
+            'integrity.verify.schedule',
+            'integrity.verify.max_unsealed_age_seconds',
+            'integrity.anchor.driver',
+            'integrity.anchor.disk',
+            'integrity.anchor.path',
+            'integrity.anchor.batch',
             'actor.guards',
             'context.trust_request_id',
             'context.request_id_header',
@@ -693,6 +1011,17 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * The anchor settings over the shipped configuration as the environment
+     * gives it now, with `local` as the default disk.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings
+     */
+    private function anchorSettings(): AnchorSettings
+    {
+        return new AnchorSettings(new Repository(['audit-log' => $this->config(), 'filesystems' => ['default' => 'local']]));
+    }
+
+    /**
      * The dotted leaves of a settings map, a list or an empty map being one
      * leaf.
      *
@@ -722,7 +1051,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -730,7 +1059,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
         $config = require self::CONFIG;
 
         return $config;

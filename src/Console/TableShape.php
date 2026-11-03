@@ -12,9 +12,9 @@ namespace SineMacula\Laravel\AuditLog\Console;
  * its name's suffix, the primary key's columns, and the sentence that describes
  * a column the package does not write.
  *
- * There is one shape for each table: the entries, the outbox and the
- * deliveries. Each is built by its named constructor, and none can be built
- * otherwise.
+ * There is one shape for each of six tables: the entries, the outbox, the
+ * deliveries, the checkpoints, the checkpoint members and the integrity state.
+ * Each is built by its named constructor, and none can be built otherwise.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,6 +73,7 @@ final readonly class TableShape
         '_category_index'  => [['category', 'occurred_at'], false],
         '_correlate_index' => [['correlation_id'], false],
         '_occurred_index'  => [['occurred_at'], false],
+        '_recorded_index'  => [['recorded_at', 'id'], false],
         '_source_unique'   => [['source_id', 'source_record_id'], true],
     ];
 
@@ -99,10 +100,56 @@ final readonly class TableShape
         'last_error_class'   => ['string', 191, true],
     ];
 
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each checkpoints column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array CHECKPOINTS_COLUMNS = [
+        'id'                 => ['uuid', 36, false],
+        'sequence'           => ['bigint', null, false],
+        'log_id'             => ['string', 64, false],
+        'previous_id'        => ['uuid', 36, true],
+        'previous_digest'    => ['string', 64, true],
+        'member_count'       => ['integer', null, false],
+        'members_digest'     => ['string', 64, false],
+        'seal_digest'        => ['string', 64, false],
+        'first_recorded_at'  => ['datetime', 6, false],
+        'last_recorded_at'   => ['datetime', 6, false],
+        'sealed_at'          => ['datetime', 6, false],
+        'signer'             => ['string', 16, false],
+        'key_id'             => ['string', 32, false],
+        'algorithm_version'  => ['smallint', null, false],
+        'signature'          => ['string', 64, false],
+        'anchor'             => ['string', 64, true],
+        'anchor_receipt'     => ['json', null, true],
+        'anchored_at'        => ['datetime', 6, true],
+        'anchor_error_class' => ['string', 191, true],
+    ];
+
+    /** @var array<string, array{0: non-empty-list<string>, 1: bool}> Each index the checkpoints migration creates, by its name's suffix, with its columns and uniqueness. */
+    private const array CHECKPOINTS_INDEXES = [
+        '_sequence_unique' => [['sequence'], true],
+        '_anchored_index'  => [['anchored_at', 'sequence'], false],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each checkpoint members column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array MEMBERS_COLUMNS = [
+        'checkpoint_id' => ['uuid', 36, false],
+        'entry_id'      => ['uuid', 36, false],
+        'hmac'          => ['string', 64, false],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each integrity state column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array STATE_COLUMNS = [
+        'name'       => ['string', 64, false],
+        'value'      => ['text', null, false],
+        'updated_at' => ['datetime', 6, false],
+    ];
+
     /** @var string How a column of an entries table the package does not write is described. */
     private const string UNKNOWN_ENTRIES_COLUMN = 'Column `%s` is not one the package writes, so no entry\'s HMAC covers it.';
 
-    /** @var string How a column of an outbox or deliveries table the package does not write is described. */
+    /** @var string How a column of a checkpoints or checkpoint members table the package does not write is described. */
+    private const string UNKNOWN_SEAL_COLUMN = 'Column `%s` is not one the package writes, so no seal covers it.';
+
+    /** @var string How a column of an outbox, deliveries or integrity state table the package does not write is described. */
     private const string UNKNOWN_DELIVERY_COLUMN = 'Column `%s` is not one the package writes.';
 
     /**
@@ -116,7 +163,7 @@ final readonly class TableShape
      */
     private function __construct(
 
-        /** What the table is called in a problem: `entries`, `outbox` or `deliveries`. */
+        /** What the table is called in a problem: `entries`, `outbox`, `deliveries`, `checkpoints`, `checkpoint members` or `integrity state`. */
         public string $label,
 
         /** Each column the package writes, in order, with its type family, its length or precision, and its nullability. */
@@ -162,5 +209,38 @@ final readonly class TableShape
     public static function deliveries(): self
     {
         return new self('deliveries', self::DELIVERIES_COLUMNS, [], ['entry_id', 'destination'], self::UNKNOWN_DELIVERY_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the checkpoints table: one seal per
+     * sequence, and the seals not yet anchored found in order.
+     *
+     * @return self
+     */
+    public static function checkpoints(): self
+    {
+        return new self('checkpoints', self::CHECKPOINTS_COLUMNS, self::CHECKPOINTS_INDEXES, ['id'], self::UNKNOWN_SEAL_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the checkpoint members table: keyed
+     * by the seal and the entry, and an entry held by at most one seal.
+     *
+     * @return self
+     */
+    public static function members(): self
+    {
+        return new self('checkpoint members', self::MEMBERS_COLUMNS, ['_entry_unique' => [['entry_id'], true]], ['checkpoint_id', 'entry_id'], self::UNKNOWN_SEAL_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the integrity state table: one
+     * value for each name, which is its key, and no other index.
+     *
+     * @return self
+     */
+    public static function state(): self
+    {
+        return new self('integrity state', self::STATE_COLUMNS, [], ['name'], self::UNKNOWN_DELIVERY_COLUMN);
     }
 }

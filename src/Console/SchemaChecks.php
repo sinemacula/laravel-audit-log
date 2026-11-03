@@ -10,20 +10,21 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 /**
  * The schema checks of `audit-log:check`: one of the package's tables exists on
  * its connection with the shape the shipped migration gives it (see
- * `TableShape`): the entries table unless another shape is given, or the outbox
- * or the deliveries table.
+ * `TableShape`): the entries table unless another shape is given, or the
+ * outbox, the deliveries, the checkpoints, the checkpoint members or the
+ * integrity state table.
  *
  * The table's prefixed name must fit every index name. Each column the package
  * writes must exist with its type family, its length or precision (which SQLite
  * does not record), and its nullability, and on MySQL with the binary, NO PAD
  * collation `utf8mb4_0900_bin`; a column the package does not write is reported
- * too, described as the shape describes it, because no entry's HMAC covers it
- * or nothing reads it. The primary key must be over the shape's columns, in
- * order, and each index the migration creates must exist under its name, over
- * its columns in order, unique or not as the migration made it; an index the
- * application added is its own. A missing table is one problem, naming the
- * table by its label, and nothing else is checked. The checks read the table's
- * existence, its columns and its indexes, whatever the table holds.
+ * too, described as the shape describes it, because no entry's HMAC or no seal
+ * covers it, or nothing reads it. The primary key must be over the shape's
+ * columns, in order, and each index the migration creates must exist under its
+ * name, over its columns in order, unique or not as the migration made it; an
+ * index the application added is its own. A missing table is one problem,
+ * naming the table by its label, and nothing else is checked. The checks read
+ * the table's existence, its columns and its indexes, whatever the table holds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,6 +42,8 @@ final readonly class SchemaChecks
         'datetime' => ['mysql' => 'datetime', 'pgsql' => 'timestamp', 'sqlite' => 'datetime'],
         'longtext' => ['mysql' => 'longtext', 'pgsql' => 'text', 'sqlite' => 'text'],
         'integer'  => ['mysql' => 'int', 'pgsql' => 'int4', 'sqlite' => 'integer'],
+        'bigint'   => ['mysql' => 'bigint', 'pgsql' => 'int8', 'sqlite' => 'integer'],
+        'text'     => ['mysql' => 'text', 'pgsql' => 'text', 'sqlite' => 'text'],
     ];
 
     /** @var string The collation every character column must use on MySQL: binary, and NO PAD. */
