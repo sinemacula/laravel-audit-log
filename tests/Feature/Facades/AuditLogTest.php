@@ -4,20 +4,23 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Facades;
 
+use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
  * Feature tests for the facade: it resolves the recorder, gives it typed, and
- * has a real static `fake()`, with which a record still runs the whole pipeline
- * up to the store.
+ * has a real static `fake()`, with which a record, a bulk record and its
+ * attachment included, still runs the whole pipeline up to the store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -201,5 +204,31 @@ final class AuditLogTest extends TestCase
         DB::connection(self::CONNECTION)->rollBack();
 
         self::assertSame(0, $fake->count());
+    }
+
+    /**
+     * A bulk record reaches the fake, which keeps attachments, with the sealed
+     * manifest of its subjects, bound by the descriptor the signed record
+     * holds.
+     *
+     * @return void
+     */
+    public function testABulkRecordReachesTheFakeWithItsAttachment(): void
+    {
+        $fake = AuditLog::fake();
+
+        $record = AuditLog::bulk('invoice.voided', [Reference::of('invoice', '2'), Reference::of('invoice', '1'), Reference::of('invoice', '2')])->record();
+
+        $stored     = $fake->recorded()[0] ?? null;
+        $attachment = $stored?->attachment;
+
+        self::assertSame($record, $stored);
+        self::assertNotNull($attachment);
+        self::assertSame(2, $attachment->memberCount);
+        self::assertSame(Manifest::KIND, $attachment->kind);
+        self::assertTrue($attachment->describes(['artifact_id' => $attachment->id, 'digest' => $attachment->digest, 'count' => 2]));
+        self::assertSame($record->properties['_audit']['manifest'] ?? null, ['artifact_id' => $attachment->id, 'digest' => $attachment->digest, 'count' => 2]);
+        self::assertSame(Manifest::encode([['invoice', '1'], ['invoice', '2']]), app(StringEncrypter::class)->decryptString($attachment->members));
+        self::assertSame($record, $fake->finalised()[0]->record);
     }
 }

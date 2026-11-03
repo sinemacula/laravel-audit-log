@@ -20,6 +20,11 @@ exported.
 - Any other prefix belongs to the application, such as `invoice.` or `user.`; its codes are its own to name and
   define.
 - Every code the package ships is under a reserved prefix and is named here when it ships.
+- The package defines its own codes while the application boots, before anything is recorded, so an application or an
+  integration that defines one of them differently is refused at boot. An integration records its own activity under
+  codes it defines, never under the package's.
+- A model's codes are under the segment it is watched as, which is never a reserved prefix's segment, so a model's
+  change never collides with a code the package or an integration records.
 - A record of access to sensitive data maps to `sensitive_read`, and other sensitive operations to `sensitive_create`,
   `sensitive_update` and `sensitive_delete`, whatever the application's code for them.
 
@@ -59,14 +64,60 @@ exported.
 | `sso.`            | sign-in through an external identity provider                             | `authn_login_success`, `authn_login_fail`, `authn_token_created`                                                                                                                                                                                                                                    |
 | `audit_log.`      | the package's own activity: pruning, sealing, reading, exporting, erasing | `sensitive_read`, `sensitive_delete`, `sys_monitor_disabled`, `sys_monitor_enabled`                                                                                                                                                                                                                 |
 
+## Package Codes
+
+The package records these codes when it captures Laravel's own authentication and authorisation events. Each is defined
+by `Capture\Enums\CapturedActivity`, version 1, in the `security` category, and drops every property it does not list.
+The actor and the subject are read from the event, never from the authenticated user: "none, explicitly" means no actor
+is recorded and no contributor fills one in.
+
+| Code                                      | Captured from                                                         | Outcome   | Actor                                 | Subject                        | Properties kept                          |
+|-------------------------------------------|-----------------------------------------------------------------------|-----------|---------------------------------------|--------------------------------|------------------------------------------|
+| `authentication.signed_in`                | `Login`                                                               | `success` | the user                              | the user                       | `remember`                               |
+| `authentication.session_restored`         | `Login`, when the named guard is a `SessionGuard` and `viaRemember()` | `success` | the user                              | the user                       | `remember`                               |
+| `authentication.sign_in_failed`           | `Failed`                                                              | `failure` | none, explicitly                      | the user when found, else none | none; the identifier is hashed           |
+| `authentication.signed_out`               | `Logout`, `CurrentDeviceLogout`                                       | `success` | the user, or none                     | the user, or none              | none                                     |
+| `authentication.signed_out_other_devices` | `OtherDeviceLogout`                                                   | `success` | the user, or none                     | the user, or none              | none                                     |
+| `authentication.locked_out`               | `Lockout`                                                             | `denied`  | none, explicitly                      | none                           | none; the IP, and the identifier hashed  |
+| `account.registered`                      | `Registered`                                                          | `success` | the user                              | the user                       | none                                     |
+| `account.email_verified`                  | `Verified`                                                            | `success` | the user                              | the user                       | none                                     |
+| `account.password_reset`                  | `PasswordReset`                                                       | `success` | the user                              | the user                       | none                                     |
+| `account.password_reset_requested`        | `PasswordResetLinkSent`                                               | `success` | none, explicitly                      | the user                       | none                                     |
+| `authorization.gate_denied`               | `GateEvaluated`, for a denial                                         | `denied`  | the event's user, or none, explicitly | none                           | `ability`, `arguments`, `argument_count` |
+
+`Attempting`, `Validated` and `Authenticated` are never captured.
+
+## Model Codes
+
+A model the application watches, through the boot-time watch registration, is recorded under its own segment, `as`,
+then the change. `as` is one code segment of at most 177 bytes, so the longest code still fits 191, and it may not be
+one of the reserved segments `authentication`, `session`, `account`, `authorization`, `mfa`, `sso` or `audit_log`. Each
+code is defined for the watch, version 1, in the `change` category.
+
+| Code                 | Recorded when                                                                 |
+|----------------------|-------------------------------------------------------------------------------|
+| `{as}.created`       | the model is inserted                                                         |
+| `{as}.updated`       | the model is saved with a change to a watched field                           |
+| `{as}.deleted`       | the model is deleted, or soft-deleted                                         |
+| `{as}.restored`      | a soft-deleted model is restored: an update that clears its deleted-at column |
+| `{as}.force_deleted` | the model is deleted for good, past its soft delete                           |
+
 ## Implementation Anchors
 
 - `src/Records/EventCode.php`: `of()`, `RESERVED_PREFIX`.
+- `src/Capture/Enums/CapturedActivity.php`: `definition()`.
+- `src/Capture/Enums/ModelEvent.php`: `codeFor()`, `eloquentEvent()`.
 
 ## Authoritative Tests
 
 - `tests/Unit/Records/EventCodeTest.php` `testRefusesTheReservedPrefix`,
   `testAcceptsCodesThatOnlyResembleTheReservedPrefix`, `testTheReservedPrefixIsCheckedAfterTheGrammar`
+- `tests/Unit/Capture/Enums/CapturedActivityTest.php` `testTheCodesAreTheVocabularys`, `testEveryCaseDefinesItsOwnCode`,
+  `testEveryDefinitionIsSecurityVersionOneAndDropsUnlisted`, `testTheSignInsRetainOnlyRemember`,
+  `testTheGateDenialRetainsTheAbilityAndItsArguments`, `testTheOtherCodesRetainNothing`,
+  `testTheCatalogueAcceptsTheEnum`, `testADifferentDefinitionOfAPackageCodeIsRefused`
+- `tests/Unit/Capture/Enums/ModelEventTest.php` `testTheValues`, `testCodeForPutsTheSuffixAfterThePrefix`,
+  `testTheLongestSegmentFitsTheCodeColumn`, `testEachEloquentEvent`
 - `tests/Unit/Documentation/DocumentationTest.php` `testEveryReservedPrefixIsInTheVocabulary`,
   `testThePackagePrefixIsTheOneEventCodesReserve`, `testEveryShippedCodeIsUnderAReservedPrefix`,
   `testEveryExampleCodeIsValidAndNeutral`
@@ -78,3 +129,5 @@ Update this note when any of the following change:
 - the code grammar or its length
 - a reserved prefix, or which prefixes are enforced in code
 - a code the package ships, or the OWASP names a prefix maps to
+- what a package code is captured from, its outcome, its actor or subject, or the properties it keeps
+- a model code's suffix, the grammar of the segment a model is watched as, or the segments it may not be

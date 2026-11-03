@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Stores;
 
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
@@ -14,14 +15,15 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * while its code goes on recording. It is never durable and joins no
  * transaction, so a fail-closed or a transactional record bound to it is
  * refused unless the outbox acknowledges for it, rather than being told it was
- * kept.
+ * kept. It accepts attachments, since it keeps nothing of any record, so
+ * nothing of a bulk record is lost more than of another.
  *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class NullAuditStore implements DurableAuditStore
+final readonly class NullAuditStore implements AcceptsAttachments, DurableAuditStore
 {
     /**
      * Succeed without writing the record anywhere.
@@ -58,5 +60,18 @@ final readonly class NullAuditStore implements DurableAuditStore
     public function participatesIn(string $connection): bool
     {
         return false;
+    }
+
+    /**
+     * Whether the store keeps a record's attachment with its entry: it accepts
+     * one, since it keeps nothing of any record, so nothing is selectively
+     * lost.
+     *
+     * @return bool
+     */
+    #[\Override]
+    public function acceptsAttachments(): bool
+    {
+        return true;
     }
 }

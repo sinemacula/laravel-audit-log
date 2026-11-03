@@ -18,6 +18,8 @@ use Illuminate\Support\Str;
 use Monolog\Handler\NullHandler;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
+use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
@@ -27,17 +29,23 @@ use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxWriter;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Delivery\Replayer;
+use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Listeners\RecordModelChange;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\CapturesLogLines;
+use Tests\Concerns\CreatesWatchedModels;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SeedsTheOutbox;
+use Tests\Fixtures\Capture\Events\PortalSignedIn;
+use Tests\Fixtures\Capture\Mappers\PortalMapper;
+use Tests\Fixtures\Capture\Models\WatchedInvoice;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Stores\CallbackStore;
 use Tests\Fixtures\Stores\PlainStore;
@@ -64,9 +72,10 @@ use Tests\TestCase;
 #[CoversClass(OutboxWriter::class)]
 #[CoversClass(FailureHandler::class)]
 #[CoversClass(OutboxDrainer::class)]
+#[CoversClass(CaptureCoordinator::class)]
 final class OutcomesTableTest extends TestCase
 {
-    use CapturesLogLines, InteractsWithAuditStore, InteractsWithOutbox, SeedsTheOutbox;
+    use CapturesLogLines, CreatesWatchedModels, InteractsWithAuditStore, InteractsWithOutbox, SeedsTheOutbox;
 
     /** @var string The code every test records. */
     private const string CODE = 'invoice.approved';
@@ -134,6 +143,9 @@ final class OutcomesTableTest extends TestCase
     /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditWriteFailed> The failed writes said, in order. */
     private array $failures = [];
 
+    /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed> The failed captures said, in order. */
+    private array $captures = [];
+
     /** @var int How many times a written record was said. */
     private int $recorded = 0;
 
@@ -164,6 +176,10 @@ final class OutcomesTableTest extends TestCase
 
         Event::listen(AuditRecorded::class, function (): void {
             $this->recorded++;
+        });
+
+        Event::listen(AuditCaptureFailed::class, function (AuditCaptureFailed $event): void {
+            $this->captures[] = $event;
         });
 
         Schema::connection(self::CONNECTION)->create(self::INVOICES, static function (Blueprint $table): void {
@@ -938,6 +954,133 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
+     * `captured-report`: a mapped event's record is written now, inside the
+     * host's transaction, and goes with its rollback on the shared connection;
+     * a failed write under the `throw` mode, which a capture never reads,
+     * spills, reports and says it, dispatches `AuditCaptureFailed` once, and
+     * nothing escapes: `capture()` returns `null`.
+     *
+     * @return void
+     */
+    public function testRowCapturedReport(): void
+    {
+        $this->failureMode(self::THROW);
+        $this->mapPortalSignIns();
+
+        $this->host()->beginTransaction();
+
+        self::assertSame(PortalMapper::CODE, $this->capture()?->event);
+        $this->assertOutcome(entries: 1, recorded: 1);
+
+        $this->host()->rollBack();
+
+        $this->assertOutcome(recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        self::assertNull($this->capture());
+        $this->assertOutcome(spills: 1, reports: 1, events: 1, captures: 1);
+        self::assertSame(PortalMapper::CODE, $this->firstReport()->eventCode);
+        self::assertSame([PortalSignedIn::class, PortalMapper::class, QueryException::class], self::namesOf($this->captures[0]));
+    }
+
+    /**
+     * Rows of `[failure message, SQLSTATE, driver code, what is thrown, failure
+     * mode]`: each failure fatal to a host, under each failure mode, which a
+     * capture never reads.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: int, 3: class-string<\Throwable>, 4: string}>
+     */
+    public static function provideCapturedHostFailures(): iterable
+    {
+        yield from [
+            'a deadlock, report'        => [self::DEADLOCK, '40001', 1213, DeadlockException::class, self::REPORT],
+            'a deadlock, throw'         => [self::DEADLOCK, '40001', 1213, DeadlockException::class, self::THROW],
+            'a lost connection, report' => [self::LOST, 'HY000', 2006, AuditWriteFailedException::class, self::REPORT],
+            'a lost connection, throw'  => [self::LOST, 'HY000', 2006, AuditWriteFailedException::class, self::THROW],
+        ];
+    }
+
+    /**
+     * `captured-host-fatal`: a deadlock or a lost connection of a capture
+     * written now inside the host's transaction is the one failure a capture
+     * lets out: said, as `AuditWriteFailed` and `AuditCaptureFailed`, neither
+     * spilled nor reported, and the sanitised exception reaches the caller, on
+     * which the host's own transaction rolls back.
+     *
+     * @param  string  $message
+     * @param  string  $state
+     * @param  int  $code
+     * @param  class-string<\Throwable>  $thrownClass
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideCapturedHostFailures')]
+    public function testRowCapturedHostFatal(string $message, string $state, int $code, string $thrownClass, string $mode): void
+    {
+        $this->failureMode($mode);
+        $this->mapPortalSignIns();
+        $this->breakWrites($message, $state, $code);
+
+        $thrown = $this->thrownBy(fn () => $this->host()->transaction(function (): void {
+            $this->businessChange();
+            $this->capture();
+        }));
+
+        self::assertSame($thrownClass, $thrown::class);
+        self::assertNull($thrown->getPrevious());
+        self::assertSame(0, $this->businessRows());
+        self::assertSame(0, $this->host()->transactionLevel());
+        $this->assertOutcome(events: 1, captures: 1);
+    }
+
+    /**
+     * `captured-model-after-commit`: a watched model's change is written at the
+     * commit of its connection's transaction, never before it and never after
+     * its rollback; a failed write at the commit, under the `throw` mode too,
+     * is spilled, reported and said, and never thrown: the commit stands.
+     *
+     * @return void
+     */
+    public function testRowCapturedModelAfterCommit(): void
+    {
+        $this->failureMode(self::THROW);
+
+        $host = $this->host();
+
+        $host->beginTransaction();
+        self::watchedInvoice();
+
+        $this->assertOutcome();
+
+        $host->rollBack();
+
+        $this->assertOutcome();
+
+        $host->beginTransaction();
+        self::watchedInvoice();
+
+        $this->assertOutcome();
+
+        $host->commit();
+
+        $this->assertOutcome(entries: 1, recorded: 1);
+
+        $this->startOver();
+        $this->pointAtProbeTable();
+
+        $host->beginTransaction();
+        self::watchedInvoice();
+        $host->commit();
+
+        self::assertSame(0, $host->transactionLevel());
+        self::assertSame(2, $host->table(WatchedInvoice::TABLE)->count());
+        $this->assertOutcome(spills: 1, reports: 1, events: 1, captures: 1);
+        self::assertSame([WatchedInvoice::class, RecordModelChange::class, QueryException::class], self::namesOf($this->captures[0]));
+    }
+
+    /**
      * Every row of the note's guarantee table has its test here, and every row
      * test here has its row, so a row added, renamed or dropped on either side
      * fails.
@@ -1147,8 +1290,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * Spill to a channel that writes nowhere, and define a second connection
-     * for a host to transact on.
+     * Spill to a channel that writes nowhere, define a second connection for a
+     * host to transact on, and watch the invoices while the application boots.
      *
      * @param  mixed  $app
      * @return void
@@ -1163,12 +1306,16 @@ final class OutcomesTableTest extends TestCase
         $config->set('logging.channels.' . self::SPILL_CHANNEL, ['driver' => 'monolog', 'handler' => NullHandler::class]);
         $config->set('audit-log.failure.log_channel', self::SPILL_CHANNEL);
         $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
+
+        app()->booting(static function (): void {
+            AuditLog::watch(WatchedInvoice::class, as: 'invoice', fields: ['number', 'amount']);
+        });
     }
 
     /**
      * Assert what the write has left so far: the rows in the entries table and
-     * the outbox, the spill lines, the reports, the failed writes said and the
-     * written records said.
+     * the outbox, the spill lines, the reports, the failed writes said, the
+     * written records said and the failed captures said.
      *
      * @param  int  $entries
      * @param  int  $outbox
@@ -1176,12 +1323,13 @@ final class OutcomesTableTest extends TestCase
      * @param  int  $reports
      * @param  int  $events
      * @param  int  $recorded
+     * @param  int  $captures
      * @return void
      */
-    private function assertOutcome(int $entries = 0, int $outbox = 0, int $spills = 0, int $reports = 0, int $events = 0, int $recorded = 0): void
+    private function assertOutcome(int $entries = 0, int $outbox = 0, int $spills = 0, int $reports = 0, int $events = 0, int $recorded = 0, int $captures = 0): void
     {
         self::assertSame(
-            ['entries' => $entries, 'outbox' => $outbox, 'spills' => $spills, 'reports' => $reports, 'events' => $events, 'recorded' => $recorded],
+            ['entries' => $entries, 'outbox' => $outbox, 'spills' => $spills, 'reports' => $reports, 'events' => $events, 'recorded' => $recorded, 'captures' => $captures],
             [
                 'entries'  => $this->entryCount(),
                 'outbox'   => $this->outboxCount(),
@@ -1189,6 +1337,7 @@ final class OutcomesTableTest extends TestCase
                 'reports'  => count($this->reporter->reports()),
                 'events'   => count($this->failures),
                 'recorded' => $this->recorded,
+                'captures' => count($this->captures),
             ],
         );
     }
@@ -1387,6 +1536,53 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
+     * Map the portal's sign-ins, on a registry of the test's own, since the
+     * application's is frozen once it has booted.
+     *
+     * @return void
+     */
+    private function mapPortalSignIns(): void
+    {
+        $registry = new MapperRegistry;
+
+        $registry->map(PortalSignedIn::class, PortalMapper::class);
+
+        app()->instance(MapperRegistry::class, $registry);
+    }
+
+    /**
+     * Capture a portal sign-in through the public API.
+     *
+     * @return ?\SineMacula\Laravel\AuditLog\Records\AuditRecord
+     */
+    private function capture(): ?AuditRecord
+    {
+        return AuditLog::capture(new PortalSignedIn);
+    }
+
+    /**
+     * The class names a failed capture carries: the event's, the mapper's and
+     * the exception's.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed  $failure
+     * @return array{0: string, 1: ?string, 2: string}
+     */
+    private static function namesOf(AuditCaptureFailed $failure): array
+    {
+        return [$failure->eventClass, $failure->mapperClass, $failure->exceptionClass];
+    }
+
+    /**
+     * Save a watched invoice, whose creation is captured.
+     *
+     * @return void
+     */
+    private static function watchedInvoice(): void
+    {
+        WatchedInvoice::query()->create(['number' => 'INV-1', 'amount' => 1250]);
+    }
+
+    /**
      * Record so the bound store is called: at once in sync mode, and in outbox
      * mode by a drain of the row the record leaves.
      *
@@ -1438,7 +1634,7 @@ final class OutcomesTableTest extends TestCase
 
     /**
      * Forget everything a part of a test has seen, so the next part asserts its
-     * own: the spill lines, the reports and the events.
+     * own: the spill lines, the reports, the events and the rows written.
      *
      * @return void
      */
@@ -1452,6 +1648,7 @@ final class OutcomesTableTest extends TestCase
 
         $this->failures = [];
         $this->recorded = 0;
+        $this->captures = [];
 
         $this->storageConnection()->table(EntrySettings::table())->delete();
         $this->outboxConnection()->table(DeliveryTables::outboxTable())->delete();

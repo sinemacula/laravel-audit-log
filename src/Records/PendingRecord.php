@@ -32,6 +32,10 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  * A builder is used once: after its record is built, every further call is a
  * `\LogicException`.
  *
+ * A bulk builder carries its manifest, what the operation affected, which its
+ * record seals as an attachment and describes in `properties._audit.manifest`.
+ * Only `AuditLog::bulk()` gives a builder one.
+ *
  * The recorder is the seam `record()` hands the builder to, and it returns the
  * captured record; the package's recorder passes its own write method. A
  * builder made without one can be described and inspected but not recorded.
@@ -54,6 +58,9 @@ final class PendingRecord
 
     /** @var bool Whether the builder has been used up by building its record. */
     private bool $consumed = false;
+
+    /** @var ?\SineMacula\Laravel\AuditLog\Records\Manifest What a bulk operation affected; `null` for any other record. */
+    private ?Manifest $manifest = null;
 
     /**
      * Constructor.
@@ -86,6 +93,30 @@ final class PendingRecord
         }
 
         return ($this->recorder)($this);
+    }
+
+    /**
+     * Carry the bulk operation's manifest. A builder has one manifest, given
+     * before its record is built.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
+     * @return self
+     *
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function withManifest(#[\SensitiveParameter] Manifest $manifest): self
+    {
+        $this->assertUsable();
+
+        if ($this->manifest !== null) {
+            throw new \LogicException('A bulk operation has one manifest.');
+        }
+
+        $this->manifest = $manifest;
+
+        return $this;
     }
 
     /**
@@ -132,6 +163,7 @@ final class PendingRecord
             identifier: $this->identifier,
             contextCollisions: $this->contextCollisions,
             contextCollisionCount: $this->contextCollisionCount,
+            manifest: $this->manifest,
         );
     }
 

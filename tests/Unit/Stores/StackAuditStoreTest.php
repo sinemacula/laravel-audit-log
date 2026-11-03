@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Facade;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Export\NdjsonFormatter;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
@@ -37,8 +38,9 @@ use Tests\Fixtures\Stores\PlainStore;
  * Unit tests for the store that delivers each record to several destinations:
  * the order and the bytes each receives, that a failing destination neither
  * stops nor undoes the others, the one exception naming each failure and what
- * it holds, the destinations it refuses, and what it says of durability and
- * transactions.
+ * it holds, the destinations it refuses, and what it says of durability,
+ * transactions and attachments, which it keeps only when every destination
+ * does.
  *
  * The storage connection the database store compares against is read through
  * the configuration facade, so each test gives the facade a bare application
@@ -615,6 +617,75 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
+     * Rows of `[destinations, accepts]`: a stack keeps attachments exactly when
+     * every destination implements the contract and says it does.
+     *
+     * @return iterable<string, array{0: array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>, 1: bool}>
+     */
+    public static function provideAttachmentCapabilities(): iterable
+    {
+        yield from [
+            'database alone'               => [['database' => self::database()], true],
+            'null alone'                   => [['null' => new NullAuditStore], true],
+            'log alone'                    => [['log' => self::log()], false],
+            'plain alone'                  => [['plain' => new PlainStore], false],
+            'database then null'           => [['database' => self::database(), 'null' => new NullAuditStore], true],
+            'database then log'            => [['database' => self::database(), 'log' => self::log()], false],
+            'log then database'            => [['log' => self::log(), 'database' => self::database()], false],
+            'database then plain'          => [['database' => self::database(), 'plain' => new PlainStore], false],
+            'a durable store without it'   => [['database' => self::database(), 'remote' => CallbackStore::saying(true, ['testing'])], false],
+            'two saying so'                => [['first' => self::attachmentStore(true), 'second' => self::attachmentStore(true)], true],
+            'the second saying not'        => [['first' => self::attachmentStore(true), 'second' => self::attachmentStore(false)], false],
+            'the first saying not'         => [['first' => self::attachmentStore(false), 'second' => self::attachmentStore(true)], false],
+            'the last of three saying not' => [['first' => self::database(), 'second' => new NullAuditStore, 'third' => self::attachmentStore(false)], false],
+        ];
+    }
+
+    /**
+     * The stack asks every destination whether it keeps attachments, and keeps
+     * them only when all of them do, so a bulk record is never handed to a
+     * stack one destination of which would lose its manifest; one without the
+     * contract keeps none.
+     *
+     * @param  array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>  $destinations
+     * @param  bool  $accepts
+     * @return void
+     */
+    #[DataProvider('provideAttachmentCapabilities')]
+    public function testAStackAcceptsAttachmentsOnlyWhenEveryDestinationDoes(array $destinations, bool $accepts): void
+    {
+        $stack = new StackAuditStore($destinations);
+
+        self::assertInstanceOf(AcceptsAttachments::class, $stack);
+        self::assertSame($accepts, $stack->acceptsAttachments());
+    }
+
+    /**
+     * Every destination is handed the very bundle the stack was given, its
+     * attachment included, so a database destination keeps the bundle.
+     *
+     * @return void
+     */
+    public function testEveryDestinationIsHandedTheBundle(): void
+    {
+        $bundle   = RecordFactory::finalisedBundle();
+        $first    = new PlainStore;
+        $second   = new PlainStore;
+        $received = [];
+
+        $third = new CallbackStore(static function (FinalisedRecord $record) use (&$received): void {
+            $received[] = $record->record->attachment;
+        });
+
+        (new StackAuditStore(['database' => $first, 'mirror' => $second, 'archive' => $third]))->store($bundle);
+
+        self::assertNotNull($bundle->record->attachment);
+        self::assertSame([$bundle], $first->received());
+        self::assertSame([$bundle], $second->received());
+        self::assertSame([$bundle->record->attachment], $received);
+    }
+
+    /**
      * The destinations come back under their ids, as the very stores given, in
      * the order given.
      *
@@ -692,5 +763,50 @@ final class StackAuditStoreTest extends TestCase
     private static function log(): AuditStore
     {
         return new LogAuditStore(new LogManager(new Container), new NdjsonFormatter);
+    }
+
+    /**
+     * A store that keeps nothing and says whether it keeps attachments.
+     *
+     * @param  bool  $accepts
+     * @return \SineMacula\Laravel\AuditLog\Contracts\AuditStore
+     */
+    private static function attachmentStore(bool $accepts): AuditStore
+    {
+        return new readonly class ($accepts) implements AcceptsAttachments {
+            /**
+             * Constructor.
+             *
+             * @param  bool  $accepts
+             */
+            public function __construct(
+
+                /** Whether the store says it keeps attachments. */
+                private bool $accepts,
+            ) {}
+
+            /**
+             * Keep nothing.
+             *
+             * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+             * @return void
+             */
+            #[\Override]
+            public function store(#[\SensitiveParameter] FinalisedRecord $record): void
+            {
+                // A store for what it says of itself alone keeps nothing
+            }
+
+            /**
+             * Whether the store says it keeps attachments.
+             *
+             * @return bool
+             */
+            #[\Override]
+            public function acceptsAttachments(): bool
+            {
+                return $this->accepts;
+            }
+        };
     }
 }

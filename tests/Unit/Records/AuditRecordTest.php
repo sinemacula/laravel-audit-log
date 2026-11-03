@@ -15,8 +15,10 @@ use Ramsey\Uuid\Uuid;
 use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Privacy\Minimised;
+use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\RecordVersion;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -41,6 +43,12 @@ use Tests\Unit\Stubs\StubUser;
 #[CoversClass(AuditRecord::class)]
 final class AuditRecordTest extends TestCase
 {
+    /** @var string The refusal of a record built with an attachment that is not its manifest's. */
+    private const string UNBOUND = 'A bulk record is built with the attachment of its own manifest, and any other record with none.';
+
+    /** @var string The refusal of an envelope and an attachment that do not describe one artifact. */
+    private const string MISMATCHED = 'A record\'s manifest and its attachment must describe the same artifact.';
+
     /** @var string The id the golden record is built with. */
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
 
@@ -807,6 +815,273 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
+     * A bulk builder's record carries the attachment of its manifest, and its
+     * properties sign the descriptor that names it, after the caller's keys.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testARecordWithAManifestCarriesItsAttachment(): void
+    {
+        $manifest   = self::manifest();
+        $attachment = Attachment::sealed($manifest, RecordFactory::encrypter());
+        $pending    = self::minimalBuilder()->withProperties(['batch' => 'march'])->withManifest($manifest);
+
+        $record = self::build($pending, attachment: $attachment);
+
+        self::assertSame($attachment, $record->attachment);
+        self::assertSame(['batch' => 'march', '_audit' => ['manifest' => $manifest->descriptor()]], $record->properties);
+        self::assertTrue($pending->isConsumed());
+    }
+
+    /**
+     * A record without a manifest carries no attachment.
+     *
+     * @return void
+     */
+    public function testARecordWithoutAManifestCarriesNoAttachment(): void
+    {
+        self::assertNull(self::build(self::fullBuilder())->attachment);
+        self::assertNull(self::build(self::minimalBuilder())->attachment);
+    }
+
+    /**
+     * A bulk builder's record is refused without the attachment of its
+     * manifest.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAManifestWithoutAnAttachmentIsRefused(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(self::UNBOUND);
+
+        self::build(self::minimalBuilder()->withManifest(self::manifest()));
+    }
+
+    /**
+     * A bulk builder's record is refused with the attachment of another
+     * manifest, even one of the same members, whose id is another.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAnAttachmentOfAnotherArtifactIsRefused(): void
+    {
+        $other = Attachment::sealed(self::manifest(), RecordFactory::encrypter());
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(self::UNBOUND);
+
+        self::build(self::minimalBuilder()->withManifest(self::manifest()), attachment: $other);
+    }
+
+    /**
+     * A record without a manifest is refused an attachment.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAnAttachmentWithoutAManifestIsRefused(): void
+    {
+        $attachment = Attachment::sealed(self::manifest(), RecordFactory::encrypter());
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(self::UNBOUND);
+
+        self::build(self::minimalBuilder(), attachment: $attachment);
+    }
+
+    /**
+     * The attachment must be the one the minimised properties describe: a
+     * minimisation that lost the descriptor, or that describes another
+     * manifest, is refused even with the builder's own attachment.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheMinimisedDescriptorMustDescribeTheAttachment(): void
+    {
+        $manifest   = self::manifest();
+        $attachment = Attachment::sealed($manifest, RecordFactory::encrypter());
+
+        $minimisations = [
+            'no descriptor'      => RecordFactory::minimisedOf(self::minimalBuilder()),
+            'another descriptor' => RecordFactory::minimisedOf(self::minimalBuilder()->withManifest(self::manifest())),
+        ];
+
+        foreach ($minimisations as $label => $minimised) {
+            try {
+                AuditRecord::fromPending(self::minimalBuilder()->withManifest($manifest), $minimised, 1, 'finance', self::instant(), 'app-eu-1', null, $attachment);
+                self::fail("Expected a record with {$label} to be refused.");
+            } catch (\LogicException $exception) {
+                self::assertSame(self::UNBOUND, $exception->getMessage(), $label);
+            }
+        }
+    }
+
+    /**
+     * The attachment is never in the envelope: the record's 32 keys stay
+     * exactly what is signed, and the members appear nowhere in it.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheAttachmentIsNeverInTheEnvelope(): void
+    {
+        $record   = RecordFactory::bundled();
+        $envelope = $record->toArray();
+
+        self::assertNotNull($record->attachment);
+        self::assertSame(self::KEYS, array_keys($envelope));
+        self::assertStringNotContainsString($record->attachment->members, json_encode($envelope, JSON_THROW_ON_ERROR));
+        self::assertSame($record->attachment->id, $envelope['properties']['_audit']['manifest']['artifact_id'] ?? null);
+    }
+
+    /**
+     * A bundle's record rebuilt from its envelope with its attachment keeps
+     * both, whatever order the descriptor's keys were decoded in.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testFromEnvelopeKeepsTheAttachmentItsDescriptorNames(): void
+    {
+        $record = RecordFactory::bundled();
+        $fields = $record->toArray();
+
+        self::assertNotNull($record->attachment);
+
+        $rebuilt = AuditRecord::fromEnvelope($fields, $record->attachment);
+
+        self::assertSame($fields, $rebuilt->toArray());
+        self::assertSame($record->attachment, $rebuilt->attachment);
+
+        $properties = $fields['properties'] ?? [];
+
+        self::assertIsArray($properties['_audit'] ?? null);
+        self::assertIsArray($properties['_audit']['manifest'] ?? null);
+
+        $properties['_audit']['manifest'] = array_reverse($properties['_audit']['manifest'], true);
+
+        self::assertSame($record->attachment, AuditRecord::fromEnvelope(['properties' => $properties] + $fields, $record->attachment)->attachment);
+    }
+
+    /**
+     * An envelope whose properties sign a descriptor is refused without an
+     * attachment, so a record never silently loses its members.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testFromEnvelopeRefusesADescriptorWithoutAnAttachment(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(self::MISMATCHED);
+
+        AuditRecord::fromEnvelope(RecordFactory::bundled()->toArray());
+    }
+
+    /**
+     * An envelope whose properties sign no descriptor is refused an attachment,
+     * whether its properties hold metadata or are `null`.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testFromEnvelopeRefusesAnAttachmentWithoutADescriptor(): void
+    {
+        $attachment = RecordFactory::bundled()->attachment;
+        $fields     = self::build(self::minimalBuilder()->withNote('Checked'))->toArray();
+
+        self::assertNotNull($attachment);
+
+        foreach ([$fields, ['properties' => null] + $fields, ['properties' => ['_audit' => 'manifest']] + $fields] as $envelope) {
+            try {
+                AuditRecord::fromEnvelope($envelope, $attachment);
+                self::fail('Expected an attachment without a descriptor to be refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame(self::MISMATCHED, $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Rows of `[what replaces the signed descriptor]`: a descriptor of another
+     * artifact, a changed count, a malformed descriptor and one key missing.
+     *
+     * @return iterable<string, array{0: array<string, int|string|null>|string|null}>
+     */
+    public static function provideOtherDescriptors(): iterable
+    {
+        yield from [
+            'another artifact' => [['artifact_id' => '01932b4e-8a40-7000-8000-00000000000f']],
+            'a changed count'  => [['count' => 4]],
+            'a changed digest' => [['digest' => str_repeat('a', 64)]],
+            'a string'         => ['01932b4e-8a40-7000-8000-00000000000f'],
+            'null'             => [null],
+            'no digest'        => [['digest' => null]],
+        ];
+    }
+
+    /**
+     * An attachment the signed descriptor does not describe is refused.
+     *
+     * @param  array<string, int|string|null>|string|null  $replacement
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    #[DataProvider('provideOtherDescriptors')]
+    public function testFromEnvelopeRefusesAnAttachmentTheDescriptorDoesNotDescribe(array|string|null $replacement): void
+    {
+        $record     = RecordFactory::bundled();
+        $fields     = $record->toArray();
+        $properties = $fields['properties'] ?? [];
+
+        self::assertIsArray($properties['_audit'] ?? null);
+        self::assertIsArray($properties['_audit']['manifest'] ?? null);
+
+        $properties['_audit']['manifest'] = is_array($replacement)
+            ? array_filter($replacement + $properties['_audit']['manifest'], static fn (mixed $value): bool => $value !== null)
+            : $replacement;
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(self::MISMATCHED);
+
+        AuditRecord::fromEnvelope(['properties' => $properties] + $fields, $record->attachment);
+    }
+
+    /**
+     * The attachment is marked sensitive on the way in and where the record
+     * holds it.
+     *
+     * @return void
+     */
+    public function testTheAttachmentIsMarkedSensitive(): void
+    {
+        $parameters = [
+            new \ReflectionParameter([AuditRecord::class, '__construct'], 'attachment'),
+            new \ReflectionParameter([AuditRecord::class, 'fromPending'], 'attachment'),
+            new \ReflectionParameter([AuditRecord::class, 'fromEnvelope'], 'attachment'),
+        ];
+
+        foreach ($parameters as $parameter) {
+            self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class), $parameter->getDeclaringFunction()->getName());
+        }
+    }
+
+    /**
      * The full builder's calls, by name, each on its own; its note has no
      * owner, so the envelope keeps it.
      *
@@ -922,15 +1197,29 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The captured record of the builder, as the golden record is built.
+     * The captured record of the builder, as the golden record is built, with
+     * the attachment given.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\DateTimeInterface  $occurredAt
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Attachment  $attachment
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      */
-    private static function build(PendingRecord $pending, ?\DateTimeInterface $occurredAt = null): AuditRecord
+    private static function build(PendingRecord $pending, ?\DateTimeInterface $occurredAt = null, ?Attachment $attachment = null): AuditRecord
     {
-        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 2, 'finance', $occurredAt ?? self::instant(), 'app-eu-1', 'eu-west-2');
+        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 2, 'finance', $occurredAt ?? self::instant(), 'app-eu-1', 'eu-west-2', $attachment);
+    }
+
+    /**
+     * A manifest of three invoices, made anew, so each has its own id.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\Manifest
+     *
+     * @throws \JsonException
+     */
+    private static function manifest(): Manifest
+    {
+        return Manifest::of(RecordFactory::members(3), 3, 65536);
     }
 
     /**

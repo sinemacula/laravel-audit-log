@@ -23,7 +23,10 @@ use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Contributors\OriginContributor;
 use SineMacula\Laravel\AuditLog\Contributors\RequestContributor;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
+use SineMacula\Laravel\AuditLog\Definitions\FieldRule;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
@@ -697,7 +700,9 @@ final class RecorderRequestsTest extends TestCase
     /**
      * Walking everything the recorder holds finds its registration data and
      * nothing else, during a request that ran a command and a job and after the
-     * worker is done with it: no request, no container, no guard, no frames.
+     * worker is done with it: its registries and the frozen definitions the
+     * package registers at boot, but no request, no container, no guard and no
+     * frames.
      *
      * @SuppressWarnings("php:S3011")
      *
@@ -707,7 +712,7 @@ final class RecorderRequestsTest extends TestCase
     {
         $recorder = $this->bootWorkerWithTheRecorderResolved();
 
-        $registrationData = [ContributorRegistry::class, EventCatalogue::class, Recorder::class];
+        $registrationData = [ContributorRegistry::class, FieldHandling::class, EventCatalogue::class, EventDefinition::class, FieldRule::class, Recorder::class];
 
         $this->serve(self::octaneRequest('GET', '/held', ['user' => '7']))->assertOk();
         $this->serve(self::octaneRequest('GET', '/held'))->assertOk();

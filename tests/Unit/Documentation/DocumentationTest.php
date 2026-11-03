@@ -7,6 +7,9 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
+use SineMacula\Laravel\AuditLog\Capture\Enums\ModelEvent;
+use SineMacula\Laravel\AuditLog\Capture\ModelWatch;
 use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
@@ -30,6 +33,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
@@ -60,7 +64,11 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
  * milestone or another package of the suite, or describes a transition from a
  * release that does not exist; the vocabulary reserves every prefix and every
  * shipped code sits under one; and every example is valid and neutral, naming
- * no other package of the suite.
+ * no other package of the suite. The automatic-capture guide has its sections,
+ * names every package code and states every gap in capture, the extending guide
+ * has its sections and documents the correlation id format, which the builder
+ * holds to, every capture setting's environment variable is in the README, and
+ * the segments a watched model may not use are the vocabulary's prefixes.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -167,6 +175,54 @@ final class DocumentationTest extends TestCase
         'Installing the package is not compliance',
     ];
 
+    /** @var string The automatic-capture guide. */
+    private const string CAPTURE_GUIDE = '/docs/guides/automatic-capture.md';
+
+    /** @var string The extending guide. */
+    private const string EXTENDING_GUIDE = '/docs/guides/extending.md';
+
+    /** @var list<string> The sections of the automatic-capture guide, in order. */
+    private const array CAPTURE_SECTIONS = [
+        'Laravel\'s authentication events',
+        'Excluding guards',
+        'Remember-me restores',
+        'Gaps in core capture',
+        'Gate denials',
+        'Model changes',
+        'Gaps in model capture',
+        'Bulk operations',
+        'When capture fails',
+    ];
+
+    /** @var list<string> The sections of the extending guide, in order. */
+    private const array EXTENDING_SECTIONS = ['Extensibility', 'Mapping another package\'s events', 'Recording one row per sign-in', 'Correlation ids', 'Contributors'];
+
+    /** @var array<string, array{0: string, 1: string}> Each gap in capture, by what it is, as the section of the automatic-capture guide that states it and what it says. */
+    private const array CAPTURE_GAPS = [
+        'once'                         => ['Gaps in core capture', '`Auth::once()` and `Auth::onceUsingId()` authenticate for one request and fire no `Login`'],
+        'token guards'                 => ['Gaps in core capture', 'Token guards that fire neither `Login` nor `Failed`'],
+        'token issuance'               => ['Gaps in core capture', 'Record token issuance explicitly'],
+        'events never recorded'        => ['Gaps in core capture', '`Attempting`, `Validated` and `Authenticated` are never recorded'],
+        'a restore misclassified'      => ['Remember-me restores', 'an explicit `login()` on the same guard after a restore can be recorded as a restore'],
+        'an ambiguous flow'            => ['Remember-me restores', 'A custom flow that is ambiguous in that way needs a mapper of its own'],
+        'eventless gate checks'        => ['Gate denials', '`Gate::allowIf()`, `Gate::denyIf()` and callbacks that throw fire no `GateEvaluated`, so they record nothing'],
+        'gate checks recorded by hand' => ['Gate denials', 'Record these explicitly'],
+        'a subclass'                   => ['Model changes', 'a subclass is not watched through its parent'],
+        'the query builder'            => ['Gaps in model capture', 'query-builder `update`, `delete`, `insert`, `upsert` and `increment`'],
+        'a quiet save'                 => ['Gaps in model capture', '`saveQuietly`'],
+        'no events'                    => ['Gaps in model capture', '`withoutEvents`'],
+        'raw statements'               => ['Gaps in model capture', 'raw `DB::` statements'],
+        'pivots'                       => ['Gaps in model capture', 'pivots without a `using()` model'],
+        'custom model events'          => ['Gaps in model capture', 'custom `$dispatchesEvents` listeners that stop the fallback'],
+        'the answer'                   => ['Gaps in model capture', '`bulk()` is the answer'],
+        'never truncated'              => ['Bulk operations', 'A larger one is refused, never truncated'],
+        'an unsealed manifest'         => ['Bulk operations', 'until an entry is sealed, its artifact is checked by nothing'],
+        'the host-fatal exception'     => ['When capture fails', 'The host-fatal exception'],
+    ];
+
+    /** @var string How the extending guide writes a correlation id. */
+    private const string CORRELATION_FORMAT = '`<namespace>:<value>`';
+
     /** @var string The sentence the operations guide limits its measurements with. */
     private const string ONE_MACHINE = 'These measurements show one machine and claim nothing beyond it.';
 
@@ -209,10 +265,13 @@ final class DocumentationTest extends TestCase
         'drain-transient',
         'drain-final',
         'drain-undecryptable',
+        'captured-report',
+        'captured-host-fatal',
+        'captured-model-after-commit',
     ];
 
-    /** @var list<string> The facade calls the documentation may show before they ship; this list empties as each arrives. */
-    private const array PLANNED_CALLS = ['bulk', 'capture', 'map'];
+    /** @var list<string> The facade calls the documentation may show before they ship; empty once every planned call shipped. */
+    private const array PLANNED_CALLS = [];
 
     /** @var string The sentence the design index ends with. */
     private const string CLOSING = 'These documents are secondary to the code and tests, not a replacement for them. '
@@ -760,7 +819,7 @@ final class DocumentationTest extends TestCase
     {
         $known = self::knownAuditLogCalls();
 
-        foreach (['record', 'event', 'accessed', 'define', 'contribute', 'fake', 'recorder', 'bulk', 'capture', 'map'] as $call) {
+        foreach (['record', 'event', 'accessed', 'define', 'contribute', 'fake', 'recorder', 'bulk', 'capture', 'map', 'watch'] as $call) {
             self::assertContains($call, $known);
         }
 
@@ -825,140 +884,161 @@ final class DocumentationTest extends TestCase
         $integrity   = '/docs/design/integrity.md';
 
         yield from [
-            'the actor is never loaded'          => [$context, 'never through `user()`'],
-            'guards with the trait only'         => [$context, '`GuardHelpers` trait'],
-            'a foreign guard is asked one thing' => [$context, '`hasUser()` and nothing else'],
-            'the guard goes with the actor'      => [$context, 'The guard goes with the ambient actor only'],
-            'a record before the middleware'     => [$context, 'before the `auth` middleware'],
-            'outside any frame'                  => [$context, 'Outside any frame the origin is `console`'],
-            'a nested call without events'       => [$context, '`$this->call()` inside a command emits no command event'],
-            'no claimed id'                      => [$context, 'No claimed id is kept'],
-            'the snapshot is not authentication' => [$context, 'who started the work, not current authentication'],
-            'only the package is reset'          => [$context, 'Only the package\'s own state is ever reset'],
-            'a guard a job leaves signed in'     => [$context, 'still holding the identical object counts as holding nobody'],
-            'a listener on the end of a job'     => [$context, 'still inside the frame'],
-            'a record before trusting a proxy'   => [$context, 'in global middleware ahead of `TrustProxies`'],
-            'the recorder is stateless'          => [$context, 'The recorder is stateless'],
-            'registration at boot'               => [$context, 'not from a `booted()` callback'],
-            'the fake is no engine'              => [$testing, 'no transaction engine'],
-            'field rules apply at capture'       => [$testing, 'Field rules apply at capture'],
-            'the failing fake'                   => [$testing, '`FakeAuditStore::failing(\Throwable)`'],
-            'the first assertion'                => [$testing, '`assertAudited($code, ?Closure)`'],
-            'the second assertion'               => [$testing, '`assertNotAudited($code, ?Closure)`'],
-            'the third assertion'                => [$testing, '`assertNothingAudited()`'],
-            'the fourth assertion'               => [$testing, '`assertAuditedTimes($code, $times)`'],
-            'what the store received'            => [$testing, '`finalised()`, what the store received'],
-            'faking every event'                 => [$testing, '`Event::fake([AuditRecorded::class])`'],
-            'skipping the middleware'            => [$testing, '`withoutMiddleware()` means no HTTP frame'],
-            'console events in a test'           => [$testing, '`WithConsoleEvents` is needed for command frames'],
-            'a record after a request'           => [$testing, 'A record made after `$this->get()`'],
-            'the test wrapper'                   => [$testing, '`transactional()` counts a `DatabaseTransactions` wrapper'],
-            'registering in a test'              => [$testing, '`$app->booting()`'],
-            'minimising in the pipeline'         => [$context, '`Privacy\RecordMinimiser` minimises it'],
-            'a filled value is minimised'        => [$context, 'A filled value is minimised too'],
-            'the walker reaches a nested rule'   => [$definitions, 'keeps `customer.email` and drops the rest of `customer`'],
-            'the rules apply at capture'         => [$definitions, 'the rules apply at capture'],
-            'what the metadata holds'            => [$record, 'it holds `note`, `identifier_hash` and `omitted`'],
-            'an owned note is sealed'            => [$record, 'it is sealed through `Contracts\FieldEncrypter`'],
-            'the record takes the minimised'     => [$record, '`AuditRecord::fromPending()` takes the minimised value'],
-            'an exemption is an assumption'      => [self::REDACTION_NOTE, 'An exemption assumes non-secret metadata'],
-            'an exempt container is kept'        => [self::REDACTION_NOTE, 'an exempt container\'s scalar values are kept'],
-            'the remedy is a field rule'         => [self::REDACTION_NOTE, 'the remedy is an explicit field rule'],
-            'policy before transform'            => [self::REDACTION_NOTE, 'selects the policy first and transforms the value after it'],
-            'a long container is dropped'        => [self::REDACTION_NOTE, 'A container whose canonical JSON is longer than 1024 bytes is dropped and diagnosed'],
-            'a 6to4 address keeps its /24'       => [self::REDACTION_NOTE, 'A `2002::/16` address truncates to its /40'],
-            'an invalid address is no refusal'   => [self::REDACTION_NOTE, 'An invalid address is `null` in every mode and adds `$ip`'],
-            'the minimum of the properties'      => [self::REDACTION_NOTE, 'at least 8192'],
-            'the minimum of the context'         => [self::REDACTION_NOTE, 'at least 1024'],
-            'what the count counts'              => [self::REDACTION_NOTE, '`count` counts removed branches'],
-            'the note is not protected'          => [self::REDACTION_NOTE, 'A note is not protected'],
-            'a mapped address is its IPv4'       => [self::REDACTION_NOTE, 'an IPv4-mapped address is its IPv4 address'],
-            'the encrypter\'s failure is named'  => [self::REDACTION_NOTE, '`Privacy\FieldEncryptionFailedException`'],
-            'no previous exception'              => [self::REDACTION_NOTE, 'has no previous exception'],
-            'one report per capture'             => [self::REDACTION_NOTE, 'one report per capture'],
-            'any other failure fails the write'  => [self::REDACTION_NOTE, 'Any other failure while minimising fails the write'],
-            'words joined with no boundary'      => [self::THREAT_MODEL, '`mypassword`'],
-            'only joined words are missed'       => [self::THREAT_MODEL, 'Only words joined with no boundary and not listed'],
-            'the facade\'s frame'                => [self::THREAT_MODEL, 'which no attribute can mark'],
-            'the setting that keeps arguments'   => [self::THREAT_MODEL, '`zend.exception_ignore_args`'],
-            'minimising at capture'              => [self::THREAT_MODEL, 'nothing raw rests in a deferred callback, event or row'],
-            'a secret is never un-redacted'      => [self::THREAT_MODEL, 'A built-in secret is never un-redacted'],
-            'no key means no field'              => [self::THREAT_MODEL, 'An `ENCRYPT` field with no key is dropped'],
-            'what a diagnostic never holds'      => [self::THREAT_MODEL, 'Diagnostics never hold a value or a dynamic key'],
-            'the key falls with the application' => [self::THREAT_MODEL, 'A key from `app.key` falls with it'],
-            'a dedicated key'                    => [self::THREAT_MODEL, 'A dedicated `redaction.key` allows independent operation'],
-            'failed sign-ins correlate'          => [self::THREAT_MODEL, 'Failed sign-ins correlate with each other'],
-            'a pseudonym is never another hash'  => [self::THREAT_MODEL, 'A pseudonym never equals an identifier hash or an IP hash'],
-            'a value hashes alike in any field'  => [self::THREAT_MODEL, 'the same value does give the same hash in any field of any code'],
-            'a field needing no linkage'         => [self::THREAT_MODEL, 'a field needing no linkage should use `drop` or `encrypt`'],
-            'a key change is visible'            => [self::THREAT_MODEL, 'A key change is visible through the fingerprint'],
-            'often shipped'                      => [self::THREAT_MODEL, 'often shipped off the server'],
-            'what the encryption protects'       => [self::THREAT_MODEL, 'protects a database copy and not a compromised application holding the key'],
-            'a spill is not encrypted'           => [self::THREAT_MODEL, 'A spill line is not encrypted'],
-            'what a log\'s readers see'          => [self::THREAT_MODEL, 'no `MessageLogged` listener sees a spill line'],
-            'other holders of a spill line'      => [self::THREAT_MODEL, 'a spill on the default channel can post a record to a chat room'],
-            'what signing establishes'           => [self::THREAT_MODEL, 'What signing establishes'],
-            'uncommitted is not evidence'        => [self::OUTCOMES_NOTE, 'A record for an uncommitted operation must not later become committed evidence.'],
-            'a bound spill waits'                => [self::OUTCOMES_NOTE, 'A bound spill waits in memory'],
-            'a spill waits for its connection'   => [self::OUTCOMES_NOTE, 'spill waits for any transaction still open on the connection it was written to'],
-            'a spill written at once'            => [self::OUTCOMES_NOTE, 'spill is written at once'],
-            'evidence of an attempt'             => [self::OUTCOMES_NOTE, 'evidence of an attempt, not of a committed change'],
-            'the remaining gap'                  => [self::OUTCOMES_NOTE, 'The gap stays for `after-commit-outbox-other`'],
-            'the sync gap'                       => [self::OUTCOMES_NOTE, 'a process that dies between a sync commit and its write loses it'],
-            'the one decoder'                    => [self::DELIVERY_NOTE, '`Records\EnvelopeCodec` is the one decoder'],
-            'failures move before the commit'    => [self::DELIVERY_NOTE, 'moves finalisation and insert failures before the commit'],
-            'the guaranteed format'              => [self::DELIVERY_NOTE, 'Replay is guaranteed only for that format'],
-            'at least once'                      => [self::DELIVERY_NOTE, 'at-least-once'],
-            'no order'                           => [self::DELIVERY_NOTE, 'Delivery order is not guaranteed'],
-            'calls within the lease'             => [self::DELIVERY_NOTE, 'a destination call must finish within `delivery.outbox.lease_seconds`'],
-            'clocks within the lease'            => [self::DELIVERY_NOTE, 'worker clocks must agree to well within the lease'],
-            'no drain inside a transaction'      => [self::DELIVERY_NOTE, 'the drain refuses to run inside a transaction'],
-            'a stack and its capabilities'       => [self::DELIVERY_NOTE, 'joins a transaction only when every destination does'],
-            'a host-fatal secondary failure'     => [self::DELIVERY_NOTE, 'a reporter or a listener on any connection with a transaction open propagates sanitised'],
-            'nothing is scheduled'               => [self::DELIVERY_NOTE, 'The package does not schedule it'],
-            'no job exists'                      => [self::DELIVERY_NOTE, 'because no job exists'],
-            'why no job exists'                  => [self::DELIVERY_NOTE, 'Laravel stores exception text in `failed_jobs` separately from the payload'],
-            'a call is no proof'                 => [self::DELIVERY_NOTE, 'a successful call to a remote destination is not proof that it ingested the record'],
-            'receipts stay'                      => [self::DELIVERY_NOTE, 'Receipts are kept'],
-            'old keys stay'                      => [self::DELIVERY_NOTE, 'Old keys must stay in `app.previous_keys`'],
-            'a decrypt failure'                  => [self::DELIVERY_NOTE, 'A decrypt failure means a removed key or corruption, and the row is kept'],
-            'never signed again'                 => [self::DELIVERY_NOTE, 'never re-signed'],
-            'a removed key'                      => [self::DELIVERY_NOTE, 'restore the key or leave the record quarantined'],
-            'where an unsigned record goes'      => [self::DELIVERY_NOTE, 'The importer, which has not shipped yet, is where an unsigned record goes, marked as asserted'],
-            'a repeated log line'                => [self::DELIVERY_NOTE, 'a replay can repeat a log destination\'s line'],
-            'a rewritten token'                  => [self::DELIVERY_NOTE, 'A `LineFormatter` substitutes `%context%`'],
-            'a commit that is really a rollback' => [self::OUTCOMES_NOTE, 'A commit that is really a rollback writes nothing.'],
-            'one record costs no other'          => [self::OUTCOMES_NOTE, 'One record\'s failure costs no other.'],
-            'what a callback can still cost'     => [self::OUTCOMES_NOTE, 'An application callback can still cost the audit log its records.'],
-            'what counts as fatal'               => [self::OUTCOMES_NOTE, 'What counts as fatal is read from the driver, not from the record.'],
-            'a line is a projection'             => [self::DELIVERY_NOTE, 'The log store\'s line is a projection, not the integrity artefact'],
-            'access to a spill file'             => [self::DELIVERY_NOTE, '**Access.**'],
-            'rotating a spill file'              => [self::DELIVERY_NOTE, '**Rotation.**'],
-            'keeping a spill file'               => [self::DELIVERY_NOTE, '**Retention.**'],
-            'a percent sign is escaped'          => [self::DELIVERY_NOTE, 'every `%` is written as `\u0025`'],
-            'the pinned OCSF version'            => [self::DELIVERY_NOTE, 'OCSF `1.9.0`'],
-            'a mapping and its version'          => [self::DELIVERY_NOTE, 'A mapping applies only to records of its definition\'s version'],
-            'the fallback'                       => [self::DELIVERY_NOTE, 'falls back to a Base Event'],
-            'no invented classification'         => [self::DELIVERY_NOTE, 'A classification is never invented'],
-            'the CEF header'                     => [self::DELIVERY_NOTE, 'CEF:0|Sine Macula|laravel-audit-log|<record_version>|<event>|<event>|<severity>|<extension>'],
-            'the CEF extension'                  => [self::DELIVERY_NOTE, '`externalId`'],
-            'a lost event'                       => [self::EVENT_MODEL, 'A crash between delete and dispatch loses an `AuditRecorded`'],
-            'the event holds no value'           => [self::EVENT_MODEL, 'Neither holds a value of the record'],
-            'the event contract'                 => [self::EVENT_MODEL, '`Contracts\AuditLogEvent`'],
-            'what the guard leaves out'          => [self::EVENT_MODEL, 'The guard does not cover a contributor or an `AuditRecorded` listener'],
-            'the failing fake by mode'           => [$testing, 'What the caller sees is the write path\'s, not the fake\'s'],
-            'the fake says it can'               => [$testing, 'The fake says it is durable and that it joins a transaction on any connection'],
-            'the fake in outbox mode'            => [$testing, 'In outbox mode a record reaches the fake when it is drained'],
-            'the two tables'                     => [$storage, '`delivery.deliveries_table` (`audit_log_deliveries` by default) is always on the storage connection'],
-            'the outbox\'s connection'           => [$storage, '`delivery.outbox.table` (`audit_log_outbox` by default) is on `delivery.outbox.connection`'],
-            'the writer\'s other grants'         => [$storage, 'In outbox mode the writer also needs'],
-            'a replay never signs'               => [$integrity, 'A replay verifies and never re-signs'],
-            'rebuilding a record'                => [$record, '`AuditRecord::fromEnvelope()`'],
-            'the codec in the record model'      => [$record, '`Records\EnvelopeCodec`, the one decoder'],
-            'a queued listener'                  => [self::EVENTS_GUIDE, 'Use a queued listener'],
-            'alerting on a failure'              => [self::EVENTS_GUIDE, 'Alert on a failed write'],
-            'alerting on a record'               => [self::EVENTS_GUIDE, 'Alert on a stored record'],
-            'what a listener may do'             => [self::EVENTS_GUIDE, 'What a listener may do'],
+            'the actor is never loaded'           => [$context, 'never through `user()`'],
+            'guards with the trait only'          => [$context, '`GuardHelpers` trait'],
+            'a foreign guard is asked one thing'  => [$context, '`hasUser()` and nothing else'],
+            'the guard goes with the actor'       => [$context, 'The guard goes with the ambient actor only'],
+            'a record before the middleware'      => [$context, 'before the `auth` middleware'],
+            'outside any frame'                   => [$context, 'Outside any frame the origin is `console`'],
+            'a nested call without events'        => [$context, '`$this->call()` inside a command emits no command event'],
+            'no claimed id'                       => [$context, 'No claimed id is kept'],
+            'the snapshot is not authentication'  => [$context, 'who started the work, not current authentication'],
+            'only the package is reset'           => [$context, 'Only the package\'s own state is ever reset'],
+            'a guard a job leaves signed in'      => [$context, 'still holding the identical object counts as holding nobody'],
+            'a listener on the end of a job'      => [$context, 'still inside the frame'],
+            'a record before trusting a proxy'    => [$context, 'in global middleware ahead of `TrustProxies`'],
+            'the recorder is stateless'           => [$context, 'The recorder is stateless'],
+            'registration at boot'                => [$context, 'not from a `booted()` callback'],
+            'the fake is no engine'               => [$testing, 'no transaction engine'],
+            'field rules apply at capture'        => [$testing, 'Field rules apply at capture'],
+            'the failing fake'                    => [$testing, '`FakeAuditStore::failing(\Throwable)`'],
+            'the first assertion'                 => [$testing, '`assertAudited($code, ?Closure)`'],
+            'the second assertion'                => [$testing, '`assertNotAudited($code, ?Closure)`'],
+            'the third assertion'                 => [$testing, '`assertNothingAudited()`'],
+            'the fourth assertion'                => [$testing, '`assertAuditedTimes($code, $times)`'],
+            'what the store received'             => [$testing, '`finalised()`, what the store received'],
+            'faking every event'                  => [$testing, '`Event::fake([AuditRecorded::class])`'],
+            'skipping the middleware'             => [$testing, '`withoutMiddleware()` means no HTTP frame'],
+            'console events in a test'            => [$testing, '`WithConsoleEvents` is needed for command frames'],
+            'a record after a request'            => [$testing, 'A record made after `$this->get()`'],
+            'the test wrapper'                    => [$testing, '`transactional()` counts a `DatabaseTransactions` wrapper'],
+            'registering in a test'               => [$testing, '`$app->booting()`'],
+            'minimising in the pipeline'          => [$context, '`Privacy\RecordMinimiser` minimises it'],
+            'a filled value is minimised'         => [$context, 'A filled value is minimised too'],
+            'the walker reaches a nested rule'    => [$definitions, 'keeps `customer.email` and drops the rest of `customer`'],
+            'the rules apply at capture'          => [$definitions, 'the rules apply at capture'],
+            'what the metadata holds'             => [$record, 'it holds `note`, `identifier_hash` and `omitted`'],
+            'an owned note is sealed'             => [$record, 'it is sealed through `Contracts\FieldEncrypter`'],
+            'the record takes the minimised'      => [$record, '`AuditRecord::fromPending()` takes the minimised value'],
+            'an exemption is an assumption'       => [self::REDACTION_NOTE, 'An exemption assumes non-secret metadata'],
+            'an exempt container is kept'         => [self::REDACTION_NOTE, 'an exempt container\'s scalar values are kept'],
+            'the remedy is a field rule'          => [self::REDACTION_NOTE, 'the remedy is an explicit field rule'],
+            'policy before transform'             => [self::REDACTION_NOTE, 'selects the policy first and transforms the value after it'],
+            'a long container is dropped'         => [self::REDACTION_NOTE, 'A container whose canonical JSON is longer than 1024 bytes is dropped and diagnosed'],
+            'a 6to4 address keeps its /24'        => [self::REDACTION_NOTE, 'A `2002::/16` address truncates to its /40'],
+            'an invalid address is no refusal'    => [self::REDACTION_NOTE, 'An invalid address is `null` in every mode and adds `$ip`'],
+            'the minimum of the properties'       => [self::REDACTION_NOTE, 'at least 8192'],
+            'the minimum of the context'          => [self::REDACTION_NOTE, 'at least 1024'],
+            'what the count counts'               => [self::REDACTION_NOTE, '`count` counts removed branches'],
+            'the note is not protected'           => [self::REDACTION_NOTE, 'A note is not protected'],
+            'a mapped address is its IPv4'        => [self::REDACTION_NOTE, 'an IPv4-mapped address is its IPv4 address'],
+            'the encrypter\'s failure is named'   => [self::REDACTION_NOTE, '`Privacy\FieldEncryptionFailedException`'],
+            'no previous exception'               => [self::REDACTION_NOTE, 'has no previous exception'],
+            'one report per capture'              => [self::REDACTION_NOTE, 'one report per capture'],
+            'any other failure fails the write'   => [self::REDACTION_NOTE, 'Any other failure while minimising fails the write'],
+            'words joined with no boundary'       => [self::THREAT_MODEL, '`mypassword`'],
+            'only joined words are missed'        => [self::THREAT_MODEL, 'Only words joined with no boundary and not listed'],
+            'the facade\'s frame'                 => [self::THREAT_MODEL, 'which no attribute can mark'],
+            'the setting that keeps arguments'    => [self::THREAT_MODEL, '`zend.exception_ignore_args`'],
+            'minimising at capture'               => [self::THREAT_MODEL, 'nothing raw rests in a deferred callback, event or row'],
+            'a secret is never un-redacted'       => [self::THREAT_MODEL, 'A built-in secret is never un-redacted'],
+            'no key means no field'               => [self::THREAT_MODEL, 'An `ENCRYPT` field with no key is dropped'],
+            'what a diagnostic never holds'       => [self::THREAT_MODEL, 'Diagnostics never hold a value or a dynamic key'],
+            'the key falls with the application'  => [self::THREAT_MODEL, 'A key from `app.key` falls with it'],
+            'a dedicated key'                     => [self::THREAT_MODEL, 'A dedicated `redaction.key` allows independent operation'],
+            'failed sign-ins correlate'           => [self::THREAT_MODEL, 'Failed sign-ins correlate with each other'],
+            'a pseudonym is never another hash'   => [self::THREAT_MODEL, 'A pseudonym never equals an identifier hash or an IP hash'],
+            'a value hashes alike in any field'   => [self::THREAT_MODEL, 'the same value does give the same hash in any field of any code'],
+            'a field needing no linkage'          => [self::THREAT_MODEL, 'a field needing no linkage should use `drop` or `encrypt`'],
+            'a key change is visible'             => [self::THREAT_MODEL, 'A key change is visible through the fingerprint'],
+            'often shipped'                       => [self::THREAT_MODEL, 'often shipped off the server'],
+            'what the encryption protects'        => [self::THREAT_MODEL, 'protects a database copy and not a compromised application holding the key'],
+            'a spill is not encrypted'            => [self::THREAT_MODEL, 'A spill line is not encrypted'],
+            'what a log\'s readers see'           => [self::THREAT_MODEL, 'no `MessageLogged` listener sees a spill line'],
+            'other holders of a spill line'       => [self::THREAT_MODEL, 'a spill on the default channel can post a record to a chat room'],
+            'what signing establishes'            => [self::THREAT_MODEL, 'What signing establishes'],
+            'uncommitted is not evidence'         => [self::OUTCOMES_NOTE, 'A record for an uncommitted operation must not later become committed evidence.'],
+            'a bound spill waits'                 => [self::OUTCOMES_NOTE, 'A bound spill waits in memory'],
+            'a spill waits for its connection'    => [self::OUTCOMES_NOTE, 'spill waits for any transaction still open on the connection it was written to'],
+            'a spill written at once'             => [self::OUTCOMES_NOTE, 'spill is written at once'],
+            'evidence of an attempt'              => [self::OUTCOMES_NOTE, 'evidence of an attempt, not of a committed change'],
+            'the remaining gap'                   => [self::OUTCOMES_NOTE, 'The gap stays for `after-commit-outbox-other`'],
+            'the sync gap'                        => [self::OUTCOMES_NOTE, 'a process that dies between a sync commit and its write loses it'],
+            'the one decoder'                     => [self::DELIVERY_NOTE, '`Records\EnvelopeCodec` is the one decoder'],
+            'failures move before the commit'     => [self::DELIVERY_NOTE, 'moves finalisation and insert failures before the commit'],
+            'the guaranteed format'               => [self::DELIVERY_NOTE, 'Replay is guaranteed only for that format'],
+            'at least once'                       => [self::DELIVERY_NOTE, 'at-least-once'],
+            'no order'                            => [self::DELIVERY_NOTE, 'Delivery order is not guaranteed'],
+            'calls within the lease'              => [self::DELIVERY_NOTE, 'a destination call must finish within `delivery.outbox.lease_seconds`'],
+            'clocks within the lease'             => [self::DELIVERY_NOTE, 'worker clocks must agree to well within the lease'],
+            'no drain inside a transaction'       => [self::DELIVERY_NOTE, 'the drain refuses to run inside a transaction'],
+            'a stack and its capabilities'        => [self::DELIVERY_NOTE, 'joins a transaction only when every destination does'],
+            'a host-fatal secondary failure'      => [self::DELIVERY_NOTE, 'a reporter or a listener on any connection with a transaction open propagates sanitised'],
+            'nothing is scheduled'                => [self::DELIVERY_NOTE, 'The package does not schedule it'],
+            'no job exists'                       => [self::DELIVERY_NOTE, 'because no job exists'],
+            'why no job exists'                   => [self::DELIVERY_NOTE, 'Laravel stores exception text in `failed_jobs` separately from the payload'],
+            'a call is no proof'                  => [self::DELIVERY_NOTE, 'a successful call to a remote destination is not proof that it ingested the record'],
+            'receipts stay'                       => [self::DELIVERY_NOTE, 'Receipts are kept'],
+            'old keys stay'                       => [self::DELIVERY_NOTE, 'Old keys must stay in `app.previous_keys`'],
+            'a decrypt failure'                   => [self::DELIVERY_NOTE, 'A decrypt failure means a removed key or corruption, and the row is kept'],
+            'never signed again'                  => [self::DELIVERY_NOTE, 'never re-signed'],
+            'a removed key'                       => [self::DELIVERY_NOTE, 'restore the key or leave the record quarantined'],
+            'where an unsigned record goes'       => [self::DELIVERY_NOTE, 'The importer, which has not shipped yet, is where an unsigned record goes, marked as asserted'],
+            'a repeated log line'                 => [self::DELIVERY_NOTE, 'a replay can repeat a log destination\'s line'],
+            'a rewritten token'                   => [self::DELIVERY_NOTE, 'A `LineFormatter` substitutes `%context%`'],
+            'a commit that is really a rollback'  => [self::OUTCOMES_NOTE, 'A commit that is really a rollback writes nothing.'],
+            'one record costs no other'           => [self::OUTCOMES_NOTE, 'One record\'s failure costs no other.'],
+            'what a callback can still cost'      => [self::OUTCOMES_NOTE, 'An application callback can still cost the audit log its records.'],
+            'what counts as fatal'                => [self::OUTCOMES_NOTE, 'What counts as fatal is read from the driver, not from the record.'],
+            'a line is a projection'              => [self::DELIVERY_NOTE, 'The log store\'s line is a projection, not the integrity artefact'],
+            'access to a spill file'              => [self::DELIVERY_NOTE, '**Access.**'],
+            'rotating a spill file'               => [self::DELIVERY_NOTE, '**Rotation.**'],
+            'keeping a spill file'                => [self::DELIVERY_NOTE, '**Retention.**'],
+            'a percent sign is escaped'           => [self::DELIVERY_NOTE, 'every `%` is written as `\u0025`'],
+            'the pinned OCSF version'             => [self::DELIVERY_NOTE, 'OCSF `1.9.0`'],
+            'a mapping and its version'           => [self::DELIVERY_NOTE, 'A mapping applies only to records of its definition\'s version'],
+            'the fallback'                        => [self::DELIVERY_NOTE, 'falls back to a Base Event'],
+            'no invented classification'          => [self::DELIVERY_NOTE, 'A classification is never invented'],
+            'the CEF header'                      => [self::DELIVERY_NOTE, 'CEF:0|Sine Macula|laravel-audit-log|<record_version>|<event>|<event>|<severity>|<extension>'],
+            'the CEF extension'                   => [self::DELIVERY_NOTE, '`externalId`'],
+            'a lost event'                        => [self::EVENT_MODEL, 'A crash between delete and dispatch loses an `AuditRecorded`'],
+            'the event holds no value'            => [self::EVENT_MODEL, 'Neither holds a value of the record'],
+            'the event contract'                  => [self::EVENT_MODEL, '`Contracts\AuditLogEvent`'],
+            'what the guard leaves out'           => [self::EVENT_MODEL, 'The guard does not cover a contributor or an `AuditRecorded` listener'],
+            'the failing fake by mode'            => [$testing, 'What the caller sees is the write path\'s, not the fake\'s'],
+            'the fake says it can'                => [$testing, 'The fake says it is durable and that it joins a transaction on any connection'],
+            'the fake in outbox mode'             => [$testing, 'In outbox mode a record reaches the fake when it is drained'],
+            'the two tables'                      => [$storage, '`delivery.deliveries_table` (`audit_log_deliveries` by default) is always on the storage connection'],
+            'the outbox\'s connection'            => [$storage, '`delivery.outbox.table` (`audit_log_outbox` by default) is on `delivery.outbox.connection`'],
+            'the writer\'s other grants'          => [$storage, 'In outbox mode the writer also needs'],
+            'a replay never signs'                => [$integrity, 'A replay verifies and never re-signs'],
+            'rebuilding a record'                 => [$record, '`AuditRecord::fromEnvelope()`'],
+            'the codec in the record model'       => [$record, '`Records\EnvelopeCodec`, the one decoder'],
+            'a queued listener'                   => [self::EVENTS_GUIDE, 'Use a queued listener'],
+            'alerting on a failure'               => [self::EVENTS_GUIDE, 'Alert on a failed write'],
+            'alerting on a record'                => [self::EVENTS_GUIDE, 'Alert on a stored record'],
+            'what a listener may do'              => [self::EVENTS_GUIDE, 'What a listener may do'],
+            'the one capture that waits'          => [self::OUTCOMES_NOTE, 'the one captured source that waits for commit'],
+            'a capture\'s rule'                   => [self::OUTCOMES_NOTE, 'A capture follows the `report` rule and never reads `failure.mode`'],
+            'a capture\'s one escape'             => [self::OUTCOMES_NOTE, '`captured-host-fatal` is the one failure a capture lets out'],
+            'a capture never reads the mode'      => [self::DELIVERY_NOTE, 'A capture never reads `failure.mode`'],
+            'nothing leaves a deferred capture'   => [self::DELIVERY_NOTE, 'nothing leaves its commit callback'],
+            'the bound covers the bundle'         => [self::DELIVERY_NOTE, '`EnvelopeCodec::MAX_BYTES` applies to the whole bundle'],
+            'a destination keeping none'          => [self::DELIVERY_NOTE, 'the row is retried, then failed and kept, never deleted'],
+            'guards excluded by configuration'    => [self::CAPTURE_GUIDE, 'by configuration and never by detection'],
+            'every gate evaluation'               => [self::CAPTURE_GUIDE, 'Every evaluation is recorded'],
+            'reason codes are the application\'s' => [self::CAPTURE_GUIDE, 'Treat that list as application-controlled data'],
+            'the gate names no guard'             => [self::CAPTURE_GUIDE, 'The Gate names no guard, so the record has none'],
+            'raw values'                          => [self::CAPTURE_GUIDE, 'Values are read raw'],
+            'two saves'                           => [self::CAPTURE_GUIDE, 'Two saves before a commit give two rows'],
+            'one row per restore'                 => [self::CAPTURE_GUIDE, 'A restore and a force delete are one row each'],
+            'the members\' key'                   => [self::CAPTURE_GUIDE, 'A rotated key must stay in `app.previous_keys`'],
+            'the artifact\'s retention'           => [self::CAPTURE_GUIDE, 'An artifact follows its entry\'s retention'],
+            'a mapper writes nothing'             => [self::EXTENDING_GUIDE, 'Its builder has no recorder, and nothing it records is written'],
+            'what a mapper sets off'              => [self::EXTENDING_GUIDE, 'What the mapper\'s own work sets off is captured as it would be anywhere else'],
+            'a mapper never recurses'             => [self::EXTENDING_GUIDE, 'so a mapper never runs inside itself'],
+            'an attachment kept atomically'       => [self::EXTENDING_GUIDE, 'only when it keeps the attachment and its entry atomically'],
+            'no detection'                        => [self::EXTENDING_GUIDE, 'The package never looks for another package'],
         ];
 
         yield from self::integrityStatements();
@@ -994,7 +1074,7 @@ final class DocumentationTest extends TestCase
         yield from [
             'redaction'    => [self::REDACTION_NOTE, ['Key Matching', 'Field Rules', 'Budgets And Omission', 'IP Modes']],
             'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox', 'Limits Of Integrity']],
-            'delivery'     => [self::DELIVERY_NOTE, ['Spill Channel', 'Claims And Receipts', 'Replay', 'Stores And Capabilities', 'Formatters']],
+            'delivery'     => [self::DELIVERY_NOTE, ['Spill Channel', 'Claims And Receipts', 'Replay', 'Stores And Capabilities', 'Captures And Bundles', 'Formatters']],
             'integrity'    => [self::INTEGRITY_NOTE, ['Seals', 'Anchors', 'Verification', 'Pruning And Erasure', 'Alerting And Progress', 'Seams Left']],
         ];
     }
@@ -1394,6 +1474,182 @@ final class DocumentationTest extends TestCase
         preg_match_all('/^\| `([a-z-]+)` +\|/m', self::section(self::read(self::OUTCOMES_NOTE), 'Guarantees'), $rows);
 
         self::assertSame(self::OUTCOME_ROWS, $rows[1]);
+    }
+
+    /**
+     * The automatic-capture guide opens with its title and has its sections, in
+     * order.
+     *
+     * @return void
+     */
+    public function testTheCaptureGuideHasItsSections(): void
+    {
+        $guide = self::withoutCodeBlocks(self::read(self::CAPTURE_GUIDE));
+
+        preg_match_all('/^## (.+)$/m', $guide, $sections);
+
+        self::assertStringStartsWith("# Automatic capture\n", $guide);
+        self::assertSame(self::CAPTURE_SECTIONS, $sections[1]);
+    }
+
+    /**
+     * The extending guide opens with its title and has its sections, in order.
+     *
+     * @return void
+     */
+    public function testTheExtendingGuideHasItsSections(): void
+    {
+        $guide = self::withoutCodeBlocks(self::read(self::EXTENDING_GUIDE));
+
+        preg_match_all('/^## (.+)$/m', $guide, $sections);
+
+        self::assertStringStartsWith("# Extending\n", $guide);
+        self::assertSame(self::EXTENDING_SECTIONS, $sections[1]);
+    }
+
+    /**
+     * Every public contract an application or an integration implements has a
+     * row of the extending guide's extensibility table, so a new seam cannot go
+     * unlisted; the marker of the package's own events is not one.
+     *
+     * @return void
+     */
+    public function testEveryPublicContractIsAnExtensionPoint(): void
+    {
+        $guide   = self::read(self::EXTENDING_GUIDE);
+        $start   = (int) strpos($guide, '## Extensibility');
+        $section = substr($guide, $start, (int) strpos($guide, '## Mapping another package\'s events') - $start);
+        $missing = [];
+
+        foreach (glob(dirname(__DIR__, 3) . '/src/Contracts/*.php') ?: [] as $file) {
+            $name = basename($file, '.php');
+
+            if ($name === 'AuditLogEvent' || !str_contains((string) file_get_contents($file), "\n * @api\n")) {
+                continue;
+            }
+
+            if (preg_match('/^\| [^|]+\| [^\n]*`Contracts\\\\' . $name . '`/m', $section)) {
+                continue;
+            }
+
+            $missing[] = $name;
+        }
+
+        self::assertSame([], $missing, 'Every public contract has a row of the extensibility table.');
+    }
+
+    /**
+     * Rows of `[section, statement]`: each gap in capture, where nothing is
+     * recorded or a value is read for less than a reader would assume.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideCaptureGaps(): iterable
+    {
+        yield from self::CAPTURE_GAPS;
+    }
+
+    /**
+     * Each gap in capture is stated in its section of the automatic-capture
+     * guide, however the lines are wrapped.
+     *
+     * @param  string  $section
+     * @param  string  $statement
+     * @return void
+     */
+    #[DataProvider('provideCaptureGaps')]
+    public function testEveryCaptureGapIsDocumented(string $section, string $statement): void
+    {
+        $text = self::collapsed(self::section(self::read(self::CAPTURE_GUIDE), $section));
+
+        self::assertNotSame('', $text, sprintf('The automatic-capture guide has no section %s.', $section));
+        self::assertStringContainsString($statement, $text, sprintf('The automatic-capture guide\'s section %s does not say: %s.', $section, $statement));
+    }
+
+    /**
+     * The capture settings read from the environment are named in the README
+     * and in the automatic-capture guide, and there are as many as the settings
+     * that read one.
+     *
+     * @return void
+     */
+    public function testEveryCaptureLeafNamesItsEnvVarInTheReadme(): void
+    {
+        preg_match_all('/\bAUDIT_LOG_CAPTURE_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
+
+        self::assertCount(4, $variables[0], 'The configuration does not read the capture environment variables it should.');
+
+        foreach ($variables[0] as $variable) {
+            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+            self::assertStringContainsString('`' . $variable . '`', self::read(self::CAPTURE_GUIDE));
+        }
+    }
+
+    /**
+     * The extending guide's section on correlation ids documents the format,
+     * the namespace's length and the neutral example, and the builder holds a
+     * correlation id to exactly that: the example and a namespace of 32
+     * characters are accepted, and a namespace of 33, an upper-case one and an
+     * id with no namespace are refused.
+     *
+     * @return void
+     */
+    public function testTheExtendingGuideDocumentsTheCorrelationFormat(): void
+    {
+        $section = self::collapsed(self::section(self::read(self::EXTENDING_GUIDE), 'Correlation ids'));
+
+        self::assertStringContainsString(self::CORRELATION_FORMAT, $section);
+        self::assertStringContainsString('`app:ticket-123`', $section);
+        self::assertStringContainsString('a lower-case namespace of up to 32 characters', $section);
+
+        foreach (['app:ticket-123', str_repeat('a', 32) . ':1'] as $accepted) {
+            $pending = new PendingRecord;
+
+            self::assertSame($pending, $pending->correlatedWith($accepted), $accepted);
+        }
+
+        foreach ([str_repeat('a', 33) . ':1', 'App:ticket-123', 'ticket-123'] as $refused) {
+            try {
+                (new PendingRecord)->correlatedWith($refused);
+
+                self::fail(sprintf('Expected `%s` to be refused.', $refused));
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('`<namespace>:<value>`', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * The segments a watched model's changes may not be stored under are the
+     * prefixes the vocabulary reserves, each without its dot, in the same
+     * order.
+     *
+     * @return void
+     */
+    public function testTheReservedSegmentsAreTheVocabularysPrefixes(): void
+    {
+        self::assertSame(self::RESERVED_PREFIXES, array_map(static fn (string $segment): string => $segment . '.', ModelWatch::RESERVED_SEGMENTS));
+    }
+
+    /**
+     * The automatic-capture guide names every code the package captures, and
+     * every code of a watched model's changes, in code type.
+     *
+     * @return void
+     */
+    public function testTheCaptureGuideNamesEveryPackageCode(): void
+    {
+        $guide = self::read(self::CAPTURE_GUIDE);
+        $codes = [
+            ...array_map(static fn (CapturedActivity $activity): string => $activity->value, CapturedActivity::cases()),
+            ...array_map(static fn (ModelEvent $change): string => $change->codeFor('{as}'), ModelEvent::cases()),
+        ];
+
+        self::assertCount(16, $codes);
+
+        foreach ($codes as $code) {
+            self::assertStringContainsString('`' . $code . '`', $guide, sprintf('The automatic-capture guide does not name `%s`.', $code));
+        }
     }
 
     /**

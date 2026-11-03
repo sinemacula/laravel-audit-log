@@ -13,23 +13,29 @@ use Ramsey\Uuid\Uuid;
 use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
+use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Fixtures\Contributors\TenantContributor;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
  * End-to-end tests for what the fake does and does not model: it holds exactly
- * what the real store would have been given, after the same contributors and
- * the same deferral, and it is no transaction engine, so what a rollback undoes
- * in a database stays held in it.
+ * what the real store would have been given, a bulk record's attachment
+ * included, after the same contributors and the same deferral, and it is no
+ * transaction engine, so what a rollback undoes in a database stays held in it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -94,6 +100,44 @@ final class FakeParityTest extends TestCase
             CanonicalEncoder::encode($fake->finalised()[0]->toArray()),
             CanonicalEncoder::encode($this->storedRow(self::ID)),
         );
+    }
+
+    /**
+     * With the clock pinned, the bundle the fake was given and the bundle the
+     * database store kept in a second delivery of the same bulk record are the
+     * same: the entry's envelope, signature included, and the artifact, its
+     * sealed members included, which open to the canonical form its digest
+     * names.
+     *
+     * @return void
+     */
+    public function testABundleReachesTheFakeAsTheDatabaseKeepsIt(): void
+    {
+        $this->app?->instance(Clock::class, FrozenClock::at('2026-11-01T12:00:00.223456Z'));
+
+        $record = RecordFactory::bundled();
+        $fake   = AuditLog::fake();
+
+        app(RecordDelivery::class)->deliver($record, Timing::IMMEDIATE, null);
+
+        $this->app?->instance(AuditStore::class, app(DatabaseAuditStore::class));
+
+        app(RecordDelivery::class)->deliver($record, Timing::IMMEDIATE, null);
+
+        $held       = $fake->finalised()[0];
+        $attachment = $fake->recorded()[0]->attachment;
+        $artifact   = (new RowCodec)->encodeAttachment($held);
+        $stored     = (array) $this->storageConnection()->table(EntrySettings::artifactsTable())->sole();
+
+        self::assertCount(1, $fake->finalised());
+        self::assertNotNull($attachment);
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(CanonicalEncoder::encode($held->toArray()), CanonicalEncoder::encode($this->storedRow($record->id)));
+        self::assertSame(
+            [...$artifact, 'member_count' => (string) $artifact['member_count'], 'created_at' => $held->recordedAt],
+            [...array_map(strval(...), $stored), 'created_at' => StoredTime::fromStorage((string) $stored['created_at'])],
+        );
+        self::assertSame($attachment->digest, hash('sha256', app('encrypter')->decryptString((string) $stored['members'])));
     }
 
     /**

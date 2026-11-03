@@ -6,11 +6,15 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Events\Dispatcher as EventDispatcher;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Ramsey\Uuid\Uuid;
+use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
+use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\ContextContributor;
@@ -24,6 +28,7 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
@@ -31,10 +36,18 @@ use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
+use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
+use Tests\Fixtures\Capture\Events\AccountEvent;
+use Tests\Fixtures\Capture\Events\PortalSignedIn;
+use Tests\Fixtures\Capture\Events\RenewedPortalSession;
+use Tests\Fixtures\Capture\Mappers\NotAMapper;
+use Tests\Fixtures\Capture\Mappers\PortalMapper;
+use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Contributors\ActorFillingContributor;
 use Tests\Fixtures\Contributors\SecretFillingContributor;
 use Tests\Fixtures\Contributors\TenantContributor;
@@ -50,6 +63,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 use Tests\Unit\Stubs\Enums\StubActivity;
 use Tests\Unit\Stubs\StubAuthUser;
+use Tests\Unit\Stubs\StubDocument;
 
 /**
  * Feature tests for the recorder: what each of its calls does, and the capture
@@ -71,6 +85,9 @@ final class RecorderTest extends TestCase
 {
     /** @var string The code most tests record. */
     private const string CODE = 'invoice.approved';
+
+    /** @var string The digest of the golden subjects' manifest. */
+    private const string GOLDEN_DIGEST = '0bee9fea9443d63a556a7fe8d19b18920d8aac7c234e48afc739a4df9380ed4d';
 
     /** @var string The message a code with a reason and a success is refused with. */
     private const string REASON_WITH_SUCCESS = 'A reason goes with a failure or a denial, not a success.';
@@ -1085,7 +1102,9 @@ final class RecorderTest extends TestCase
 
     /**
      * Two properties, of these types and no other, so a worker can retain
-     * nothing of a request through the recorder.
+     * nothing of a request through the recorder: the event mappers and the
+     * model watcher, which holds the dispatcher, are resolved for each
+     * registration, never held.
      *
      * @return void
      */
@@ -1341,18 +1360,408 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The properties and the builder hold the raw payload, so both are marked
-     * sensitive where the recorder takes them.
+     * `map()` registers the mapper with the event mappers the container binds,
+     * which every capture reads.
+     *
+     * @return void
+     */
+    public function testMapRegistersTheMapping(): void
+    {
+        $mappers = $this->bindFreshMappers();
+
+        self::recorder()->map(PortalSignedIn::class, PortalMapper::class, [RenewedPortalSession::class]);
+
+        self::assertTrue($mappers->hasMappings());
+        self::assertSame(PortalMapper::class, $mappers->mapperFor(PortalSignedIn::class));
+        self::assertNull($mappers->mapperFor(RenewedPortalSession::class));
+    }
+
+    /**
+     * The first mapping adds the one listener that routes every event to its
+     * mapping, and no later one adds another, an identical mapping included.
+     *
+     * @return void
+     */
+    public function testTheFirstMapRegistersTheBridgeOnce(): void
+    {
+        $this->bindFreshMappers();
+
+        $recorder = self::recorder();
+
+        self::assertSame(0, self::bridges(), 'Before any mapping.');
+
+        $recorder->map(PortalSignedIn::class, PortalMapper::class);
+
+        self::assertSame(1, self::bridges(), 'After the first mapping.');
+
+        $recorder->map(PortalSignedIn::class, PortalMapper::class);
+        $recorder->map(AccountEvent::class, PortalMapper::class);
+
+        self::assertSame(1, self::bridges(), 'After later mappings.');
+    }
+
+    /**
+     * A first mapping that is refused maps nothing, so it adds no listener, and
+     * the next one that is accepted adds it.
+     *
+     * @return void
+     */
+    public function testARefusedFirstMapRegistersNoBridge(): void
+    {
+        $this->bindFreshMappers();
+
+        $recorder = self::recorder();
+
+        try {
+            $recorder->map(PortalSignedIn::class, NotAMapper::class);
+
+            self::fail('Expected the mapper to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame(sprintf('`%s` is not a class implementing `EventMapper`.', NotAMapper::class), $exception->getMessage());
+        }
+
+        self::assertSame(0, self::bridges());
+
+        $recorder->map(PortalSignedIn::class, PortalMapper::class);
+
+        self::assertSame(1, self::bridges());
+    }
+
+    /**
+     * The application has booted by the time a test runs, so `map()` is
+     * refused, and nothing starts listening.
+     *
+     * @return void
+     */
+    public function testMapAfterBootIsRefused(): void
+    {
+        try {
+            AuditLog::recorder()->map(PortalSignedIn::class, PortalMapper::class);
+
+            self::fail('Expected the mapping to be refused.');
+        } catch (\LogicException $exception) {
+            self::assertSame('Event mappers are registered while the application boots, and it has already booted.', $exception->getMessage());
+        }
+
+        self::assertFalse(app(MapperRegistry::class)->hasMappings());
+        self::assertSame(0, self::bridges());
+    }
+
+    /**
+     * `capture()` writes the event through its mapper and returns the record
+     * the store holds.
+     *
+     * @return void
+     */
+    public function testCaptureReturnsTheRecord(): void
+    {
+        $this->bindFreshMappers();
+
+        $recorder = self::recorder();
+
+        $recorder->map(PortalSignedIn::class, PortalMapper::class);
+
+        $record = $recorder->capture(new PortalSignedIn('7'));
+
+        self::assertInstanceOf(AuditRecord::class, $record);
+        self::assertSame(PortalMapper::CODE, $record->event);
+        self::assertSame(PortalMapper::SUBJECT_TYPE, $record->subjectType);
+        self::assertSame('7', $record->subjectId);
+        self::assertSame([$record], $this->fake->recorded());
+    }
+
+    /**
+     * A captured record does not wait for an open transaction: it is written at
+     * once, unlike an explicit record.
+     *
+     * @return void
+     */
+    public function testACapturedRecordIsWrittenAtOnce(): void
+    {
+        $this->bindFreshMappers();
+
+        $recorder = self::recorder();
+
+        $recorder->map(PortalSignedIn::class, PortalMapper::class);
+
+        DB::connection(self::CONNECTION)->transaction(function () use ($recorder): void {
+            $recorder->capture(new PortalSignedIn);
+
+            self::assertSame(1, $this->fake->count());
+        });
+
+        self::assertSame(1, $this->fake->count());
+    }
+
+    /**
+     * The same event object is captured once, however often it is offered.
+     *
+     * @return void
+     */
+    public function testCaptureWritesAnEventObjectOnce(): void
+    {
+        $this->bindFreshMappers();
+
+        $recorder = self::recorder();
+        $event    = new PortalSignedIn;
+
+        $recorder->map(PortalSignedIn::class, PortalMapper::class);
+
+        self::assertInstanceOf(AuditRecord::class, $recorder->capture($event));
+        self::assertNull($recorder->capture($event));
+        self::assertSame(1, $this->fake->count());
+    }
+
+    /**
+     * An event no mapping applies to is not captured, and nothing is written.
+     *
+     * @return void
+     */
+    public function testCaptureOfAnUnmappedEventIsNull(): void
+    {
+        self::assertNull(AuditLog::capture(new PortalSignedIn));
+        self::assertNull(AuditLog::capture(new \stdClass));
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * `watch()` watches the model with the watcher the container binds, whose
+     * definitions go into its catalogue and whose listeners go on the
+     * dispatcher.
+     *
+     * @return void
+     */
+    public function testWatchRegistersTheModel(): void
+    {
+        $catalogue = new EventCatalogue;
+        $watcher   = new ModelWatcher($catalogue, app(Dispatcher::class));
+
+        $this->app?->instance(ModelWatcher::class, $watcher);
+
+        self::recorder()->watch(PlainLine::class, as: 'line', fields: ['description', 'quantity' => FieldHandling::REDACT]);
+
+        $watch = $watcher->watchFor(PlainLine::class);
+
+        self::assertNotNull($watch);
+        self::assertSame('line', $watch->as);
+        self::assertSame(['description' => FieldHandling::RETAIN, 'quantity' => FieldHandling::REDACT], $watch->fields);
+        self::assertTrue($catalogue->isRegistered(EventCode::of('line.created')));
+        self::assertTrue(app(Dispatcher::class)->hasListeners('eloquent.created: ' . PlainLine::class));
+    }
+
+    /**
+     * The application has booted by the time a test runs, so `watch()` is
+     * refused, and the model is not watched.
+     *
+     * @return void
+     */
+    public function testWatchAfterBootIsRefused(): void
+    {
+        try {
+            AuditLog::recorder()->watch(PlainLine::class, as: 'line', fields: ['description']);
+
+            self::fail('Expected the watch to be refused.');
+        } catch (\LogicException $exception) {
+            self::assertSame('Models are watched while the application boots, and it has already booted.', $exception->getMessage());
+        }
+
+        self::assertNull(app(ModelWatcher::class)->watchFor(PlainLine::class));
+        self::assertFalse(app(Dispatcher::class)->hasListeners('eloquent.created: ' . PlainLine::class));
+    }
+
+    /**
+     * `bulk()` gives a builder of the code, still to be recorded, carrying the
+     * manifest of its subjects, each once in canonical order; recording it
+     * seals the manifest as the record's attachment.
+     *
+     * @return void
+     */
+    public function testBulkGivesABuilderCarryingTheManifest(): void
+    {
+        $pending = AuditLog::bulk('invoice.voided', self::goldenSubjects());
+
+        $manifest = $pending->snapshot()->manifest;
+
+        self::assertFalse($pending->isConsumed());
+        self::assertNotNull($manifest);
+        self::assertSame(3, $manifest->count);
+        self::assertSame(self::GOLDEN_DIGEST, $manifest->digest);
+        self::assertSame(0, $this->fake->count());
+
+        $record = $pending->record();
+
+        self::assertSame('invoice.voided', $record->event);
+        self::assertNotNull($record->attachment);
+        self::assertSame($manifest->id, $record->attachment->id);
+        self::assertSame(['artifact_id' => $manifest->id, 'digest' => self::GOLDEN_DIGEST, 'count' => 3], $record->properties['_audit']['manifest'] ?? null);
+        self::assertSame([$record], $this->fake->recorded());
+    }
+
+    /**
+     * A model given as a subject is the reference it is stored as.
+     *
+     * @return void
+     */
+    public function testBulkTakesModels(): void
+    {
+        $document = (new StubDocument)->forceFill(['id' => 'document-1']);
+
+        $manifest = AuditLog::bulk('document.archived', [$document, Reference::to($document)])->snapshot()->manifest;
+
+        self::assertNotNull($manifest);
+        self::assertSame(1, $manifest->count);
+        self::assertSame(Manifest::encode([[Reference::to($document)->type, 'document-1']]), $manifest->canonical);
+    }
+
+    /**
+     * A bound store that keeps no attachment refuses a bulk operation up front,
+     * naming the store, before a single subject is read.
+     *
+     * @return void
+     */
+    public function testBulkIsRefusedByAStoreKeepingNoAttachments(): void
+    {
+        $reads    = new \ArrayObject;
+        $subjects = (static function () use ($reads): \Generator {
+            $reads->append(true);
+
+            yield Reference::of('invoice', '1');
+        })();
+
+        app()->instance(AuditStore::class, new PlainStore);
+
+        try {
+            AuditLog::recorder()->bulk('invoice.voided', $subjects);
+
+            self::fail('Expected the bulk operation to be refused.');
+        } catch (\LogicException $exception) {
+            $message = 'The store %s does not keep attachments, so a bulk operation cannot be stored there. Bind one that does, such as the database store.';
+
+            self::assertSame(sprintf($message, PlainStore::class), $exception->getMessage());
+        }
+
+        self::assertCount(0, $reads);
+    }
+
+    /**
+     * The bounds are read from the configuration on every call, so a changed
+     * setting applies to the next one, and a malformed one is refused by its
+     * key.
+     *
+     * @return void
+     */
+    public function testBulkReadsItsLimitsOnEachCall(): void
+    {
+        $subjects = [Reference::of('invoice', '1'), Reference::of('invoice', '2')];
+
+        self::config()->set('audit-log.capture.bulk.max_members', 1);
+
+        try {
+            AuditLog::recorder()->bulk('invoice.voided', $subjects);
+
+            self::fail('Expected the bulk operation to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('A bulk operation names at most 1 subjects, the `audit-log.capture.bulk.max_members` setting.', $exception->getMessage());
+        }
+
+        self::config()->set('audit-log.capture.bulk.max_members', 2);
+
+        self::assertSame(2, AuditLog::bulk('invoice.voided', $subjects)->snapshot()->manifest?->count);
+
+        self::config()->set('audit-log.capture.bulk.max_bytes', 'many');
+
+        try {
+            AuditLog::recorder()->bulk('invoice.voided', $subjects);
+
+            self::fail('Expected the malformed setting to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('`audit-log.capture.bulk.max_bytes` must be an integer from 65536 to 8388608.', $exception->getMessage());
+        }
+    }
+
+    /**
+     * A bulk operation with no subject is refused, never recorded empty.
+     *
+     * @return void
+     */
+    public function testBulkRefusesNoSubjects(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A bulk operation names at least one subject.');
+
+        AuditLog::bulk('invoice.voided', []);
+    }
+
+    /**
+     * A bulk operation's code is held to the rules of every code.
+     *
+     * @return void
+     */
+    public function testBulkRefusesAnInvalidCode(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        AuditLog::bulk('Invoice Voided', [Reference::of('invoice', '1')]);
+    }
+
+    /**
+     * A bulk record with no timing waits for the transaction to commit, as any
+     * explicit record does.
+     *
+     * @return void
+     */
+    public function testBulkIsWrittenAfterCommitByDefault(): void
+    {
+        DB::connection(self::CONNECTION)->transaction(function (): void {
+            AuditLog::bulk('invoice.voided', self::goldenSubjects())->record();
+
+            self::assertSame(0, $this->fake->count());
+        });
+
+        self::assertSame(1, $this->fake->count());
+        self::assertNotNull($this->fake->recorded()[0]->attachment);
+    }
+
+    /**
+     * An explicit record runs the pipeline of the recorder that built it: the
+     * definitions and the contributors of a recorder of a test's own apply to
+     * its records, and not to the application recorder's.
+     *
+     * @return void
+     */
+    public function testTheExplicitPipelineIsUnchanged(): void
+    {
+        $catalogue = new EventCatalogue;
+        $recorder  = self::recorder($catalogue);
+
+        $recorder->define(EventDefinition::for(self::CODE)->category('finance')->version(7));
+        $recorder->contribute(TenantContributor::class);
+
+        $own         = $recorder->event(self::CODE)->record();
+        $application = AuditLog::event(self::CODE)->record();
+
+        self::assertSame([7, 'finance', TenantContributor::ID], [$own->eventVersion, $own->category, $own->tenantId]);
+        self::assertSame([1, 'general', null], [$application->eventVersion, $application->category, $application->tenantId]);
+    }
+
+    /**
+     * The properties, a captured event and a bulk operation's subjects hold the
+     * raw payload, so each is marked sensitive where the recorder takes it.
      *
      * @return void
      */
     public function testTheRecorderPropertiesParameterIsSensitive(): void
     {
-        $properties = new \ReflectionParameter([Recorder::class, 'record'], 'properties');
-        $pending    = new \ReflectionParameter([Recorder::class, 'write'], 'pending');
+        $parameters = [
+            new \ReflectionParameter([Recorder::class, 'record'], 'properties'),
+            new \ReflectionParameter([Recorder::class, 'write'], 'pending'),
+            new \ReflectionParameter([Recorder::class, 'capture'], 'event'),
+            new \ReflectionParameter([Recorder::class, 'bulk'], 'subjects'),
+        ];
 
-        self::assertCount(1, $properties->getAttributes(\SensitiveParameter::class));
-        self::assertCount(1, $pending->getAttributes(\SensitiveParameter::class));
+        foreach ($parameters as $parameter) {
+            self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class), sprintf('`$%s` is not marked sensitive.', $parameter->getName()));
+        }
     }
 
     /**
@@ -1381,13 +1790,65 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A recorder of a test's own, whose registration is not frozen.
+     * A recorder of a test's own, whose registration is not frozen, with the
+     * catalogue given or a fresh one.
      *
+     * @param  ?\SineMacula\Laravel\AuditLog\Definitions\EventCatalogue  $catalogue
      * @return \SineMacula\Laravel\AuditLog\Recorder
      */
-    private static function recorder(): Recorder
+    private static function recorder(?EventCatalogue $catalogue = null): Recorder
     {
-        return new Recorder(new EventCatalogue, new ContributorRegistry);
+        return new Recorder($catalogue ?? new EventCatalogue, new ContributorRegistry);
+    }
+
+    /**
+     * The golden subjects: three invoices, one of them twice, out of order.
+     *
+     * @return list<\SineMacula\Laravel\AuditLog\Records\Reference>
+     */
+    private static function goldenSubjects(): array
+    {
+        return array_map(static fn (string $id): Reference => Reference::of('App\Models\Invoice', $id), ['2', '1', '10', '1']);
+    }
+
+    /**
+     * How many times the listener that routes mapped events is on the
+     * application's dispatcher for every event.
+     *
+     * @SuppressWarnings("php:S3011")
+     *
+     * @return int
+     */
+    private static function bridges(): int
+    {
+        $dispatcher = app(Dispatcher::class);
+
+        self::assertInstanceOf(EventDispatcher::class, $dispatcher);
+
+        $wildcards = (new \ReflectionProperty(EventDispatcher::class, 'wildcards'))->getValue($dispatcher);
+
+        self::assertIsArray($wildcards);
+
+        $listeners = $wildcards['*'] ?? [];
+
+        self::assertIsArray($listeners);
+
+        return count(array_keys($listeners, CaptureMappedEvent::class, true));
+    }
+
+    /**
+     * Bind event mappers that are not frozen, as the application's are while it
+     * boots, and return them.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Capture\MapperRegistry
+     */
+    private function bindFreshMappers(): MapperRegistry
+    {
+        $mappers = new MapperRegistry;
+
+        $this->app?->instance(MapperRegistry::class, $mappers);
+
+        return $mappers;
     }
 
     /**

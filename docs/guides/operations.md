@@ -177,15 +177,18 @@ AUDIT_LOG_INTEGRITY_ANCHOR_PATH=audit-log-anchors
 The integrity key ring signs every entry, and each seal is signed under a key derived from the ring key it names, so the
 ring decides for how long the log can be verified.
 
-| Key                    | Protects                                              | Keep it                                              |
-|------------------------|-------------------------------------------------------|------------------------------------------------------|
-| Encryption keys        | The outbox (`app.key`) and encrypted fields (owners') | Until no row needs decrypting; destroying one erases |
-| Row-HMAC keys          | Each entry's `hmac`, under its `key_id`               | As long as the entries they signed                   |
-| Seal-verification keys | Each seal's `signature`, under its `key_id`           | As long as the seals, which pruning keeps            |
+| Key                    | Protects                                                                 | Keep it                                              |
+|------------------------|--------------------------------------------------------------------------|------------------------------------------------------|
+| Encryption keys        | The outbox and bulk manifests (`app.key`) and encrypted fields (owners') | Until no row needs decrypting; destroying one erases |
+| Row-HMAC keys          | Each entry's `hmac`, under its `key_id`                                  | As long as the entries they signed                   |
+| Seal-verification keys | Each seal's `signature`, under its `key_id`                              | As long as the seals, which pruning keeps            |
 
 - These are separate lifetimes, though one ring key may serve as both a row-HMAC and a seal-verification key: an
   encryption key may be retired or destroyed on its own schedule, while a ring key is kept for as long as a seal names
   it, which is as long as the log is kept.
+- A retired `app.key` must stay in `app.previous_keys` for as long as the artifacts sealed under it are kept, or their
+  manifests can no longer be read and `audit-log:verify` reports them `manifest_unreadable`, though their entries still
+  verify.
 - Use a managed ring (`integrity.keys` and `integrity.current`) before going live. A key derived from `app.key` ties the
   log to it: after a rotation the old key has to stay in `app.previous_keys` for as long as the log, and dropping it
   leaves every row and seal it signed unverifiable.
@@ -200,10 +203,11 @@ ring decides for how long the log can be verified.
 The Grants And Triggers section of [the storage note](../design/storage.md) has the grants and the optional append-only
 triggers for each engine, as SQL that its tests run as written.
 
-- The application's user inserts and selects entries, seals and members, may update only a seal's four anchor columns,
-  and needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the integrity state table; it is granted no DDL.
-- The maintenance user is the only one that may delete an entry, and only an entry, since pruning keeps every seal and
-  member.
+- The application's user inserts and selects entries, artifacts, seals and members, may update only a seal's four
+  anchor columns, and needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the integrity state table; it is granted no
+  DDL.
+- The maintenance user is the only one that may delete an entry or its artifact, and nothing else, since pruning
+  deletes an entry's artifact with it and keeps every seal and member.
 - Run `audit-log:verify` as a user that can read the tables and write the integrity state table.
 - The triggers guard against the application's users. The tables' owner can drop them, so keep the owner's credentials
   out of the application.

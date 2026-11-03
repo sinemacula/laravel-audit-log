@@ -8,9 +8,10 @@ verifying a stored row answers; then how entries are sealed into a signed chain 
 is anchored outside the application's writable trust boundary, how pruning keeps the log verifiable, and what
 `audit-log:verify` establishes and reports. A row's signature shows that the row is as it was written; a seal shows
 which rows it holds and that none of them has since changed or gone; an anchor shows that the seals themselves were not
-rewritten or cut short. The encodings, the columns and fields they cover and the keys that verify them are fixed here
-and versioned, by `integrity_version` for a row and by `v` and `algorithm_version` for a seal; a change to any of them
-is a new version, never an edit of the old one. What none of this promises is in `threat-model.md`.
+rewritten or cut short; and a bulk entry's signed manifest shows that its artifact lists what the operation affected.
+The encodings, the columns and fields they cover and the keys that verify them are fixed here and versioned, by
+`integrity_version` for a row and by `v` and `algorithm_version` for a seal; a change to any of them is a new version,
+never an edit of the old one. What none of this promises is in `threat-model.md`.
 
 ## Invariants
 
@@ -55,6 +56,18 @@ is a new version, never an edit of the old one. What none of this promises is in
   signed under a derived key cannot yet be carried into it.
 - A row's signature proves that row alone: it shows neither that every entry is present nor that none was deleted. That
   is what a seal adds, for the rows it holds.
+- A bulk entry signs `properties._audit.manifest`, its artifact's `artifact_id`, `digest` and `count`, and its artifact
+  is a row of `entries.artifacts_table` that no signature of its own covers: the signed descriptor binds it. Verification
+  checks that the artifact is stored under the signed id, names the entry, is of kind `bulk`, stores the signed count and
+  digest, and that its members decrypt to exactly a canonical form, each member once and in canonical order, as many as
+  the signed count, whose SHA-256 is the signed digest. A signed descriptor cannot be malformed without the key, so one
+  that is not exactly those three fields is a mismatch.
+- Only an entry that verifies is trusted for its descriptor, so a sealed entry's manifest is checked with its seal and an
+  unsealed one once it is sealed, as its entry's own signature is: until then a bundle's artifact is checked by nothing.
+  An entry that fails its own check, or is missing, has no descriptor to check.
+- An artifact's members are encrypted under `app.key` once, when the bulk operation is recorded, and never sealed again.
+  A rotated key must stay in `app.previous_keys` for as long as artifacts sealed under it are kept, or they are
+  `unverifiable`, though their entries still verify.
 - A seal is an explicit membership manifest: one row of `integrity.checkpoints_table` and one row of
   `integrity.members_table` per entry it holds, each entry in at most one seal. An entry is unsealed exactly when no
   member row names it. Entries are read in `(recorded_at, id)` order, on the entries table's `<table>_recorded_index`,
@@ -161,6 +174,12 @@ is a new version, never an edit of the old one. What none of this promises is in
   and succeeds, and a later run tries again. Only a strict verification fails on it.
 - A crash at any point of sealing leaves either the whole seal or nothing; one between an anchor's remote write and the
   local receipt is recovered by the next run, which receives the same receipt.
+- An artifact missing with its entry, both deleted by a prune that committed after the segment's members were read, is no
+  finding: the run reports the segment as it read it, and the next run reads it pruned. An artifact missing beside its
+  entry, or deleted between the read of its columns and of its members, is `manifest_missing`; only a missing artifact
+  costs the read of the entries that tells the two apart.
+- An artifact whose members do not decrypt under `app.key` or `app.previous_keys` is `unverifiable`, never `tampered`,
+  since nothing can be said of what they hold; its entry and its seal still verify.
 
 ## Seals
 
@@ -289,6 +308,14 @@ writes each line as one JSON object, the summary last. Nothing is accumulated, s
   the rows must be as many as `member_count`, and their ids and HMACs, sorted bytewise in PHP and never trusted to the
   database's order, must give `members_digest`. So members swapped between seals, an extra member and a removed one each
   fail.
+- The manifests of a segment's verified entries are then checked together by `Integrity\ManifestVerifier`, never one
+  statement per entry: the artifacts of 100 entries at a time (`ManifestVerifier::ENTRY_BATCH`) are read in one
+  statement of their columns and their members' stored length, found by their entry or by the signed artifact id, so an
+  artifact moved to another entry is a mismatch rather than missing, and the members of those that match are read in
+  sub-batches of at most 64 MiB of stored bytes (`ManifestVerifier::MEMBERS_BATCH_BYTES`), an artifact larger than that
+  alone. A segment with no bundle costs no statement more. A missing artifact is `manifest_missing`, any other
+  difference `manifest_mismatch`, and members that do not decrypt `manifest_unreadable`; each is reported at the
+  earliest entry, bytewise.
 - Anchoring comes from the anchor, never from the receipt. When discovery gave the anchor's head, the walk reaches it
   and the local seal there has the head's digest, the head settles every seal's anchoring with no further call: a seal
   up to the head is `anchored`, since the head's digest commits to the chain the walk checks link by link, and one after
@@ -358,9 +385,12 @@ writes each line as one JSON object, the summary last. Nothing is accumulated, s
 | `prune_record`         | `tampered`     | A prune record is forged, or does not bind the seal it names                      |
 | `member_hmac`          | `tampered`     | An entry's stored HMAC is not the one its seal recorded                           |
 | `entry_hmac`           | `tampered`     | An entry's HMAC does not match its content                                        |
+| `manifest_missing`     | `tampered`     | A verified entry's manifest names an artifact that is not stored                  |
+| `manifest_mismatch`    | `tampered`     | An artifact is not the one its manifest signed, or its members are not that list  |
 | `prune_key`            | `unverifiable` | A prune record is signed under a key the ring does not hold                       |
 | `entry_malformed`      | `unverifiable` | An entry is not a well-formed record, so it cannot be verified or sealed          |
 | `entry_key`            | `unverifiable` | An entry is signed under a key the ring does not hold                             |
+| `manifest_unreadable`  | `unverifiable` | An artifact's members cannot be decrypted with `app.key` or `app.previous_keys`   |
 | `missing_entry`        | `incomplete`   | A sealed entry is missing, with no prune record to account for it                 |
 | `overdue_unsealed`     | `incomplete`   | Entries older than `integrity.verify.max_unsealed_age_seconds` are still unsealed |
 | `future_unsealed`      | `incomplete`   | Unsealed entries are recorded further ahead of the clock than the lookback        |
@@ -444,7 +474,8 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `src/Integrity/Anchors/AnchorFactory.php`, `src/Integrity/Anchors/AnchorSettings.php`,
   `src/Integrity/Anchors/AnchorConflictException.php`.
 - `src/Integrity/Verifier.php`: `verify()`, `SEAL_PAGE`, `ANCHOR_GRACE_SECONDS`; `src/Integrity/SegmentVerifier.php`:
-  `verify()`, `boundary()`; `src/Integrity/SegmentReport.php`, `src/Integrity/RunFinding.php`,
+  `verify()`, `boundary()`; `src/Integrity/ManifestVerifier.php`: `descriptorOf()`, `findings()`, `ENTRY_BATCH`,
+  `MEMBERS_BATCH_BYTES`; `src/Integrity/SegmentReport.php`, `src/Integrity/RunFinding.php`,
   `src/Integrity/VerificationRange.php`, `src/Integrity/VerificationContext.php`, `src/Integrity/VerificationTally.php`,
   `src/Integrity/VerificationSummary.php`.
 - `src/Integrity/Enums/IntegrityStatus.php`, `src/Integrity/Enums/AnchorStatus.php`, `src/Integrity/Enums/Finding.php`,
@@ -552,7 +583,20 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testMembersSwappedBetweenSealsAreTampered`, `testAValidPruneRecordIsPruned`, `testAForgedPruneRecordIsTampered`,
   `testPruningNeverExcusesABadSignature`, `testPruningNeverExcusesABrokenChain`,
   `testPruningNeverExcusesAnAnchorContradiction`, `testAReplayedReceiptIsUnanchored`,
-  `testOneStatementReadsTheMembersAndTheirEntries`, `testTheMemberOrderIsSortedNotTrusted`
+  `testOneStatementReadsTheMembersAndTheirEntries`, `testTheMemberOrderIsSortedNotTrusted`,
+  `testASegmentWithAValidBundleIsValid`, `testATamperedArtifactMakesTheSegmentTampered`,
+  `testAnUnreadableArtifactMakesTheSegmentUnverifiable`, `testAMemberThatFailsItsHmacIsNotTrustedForItsDescriptor`,
+  `testAPrunedBundleEntryNeedsNoArtifact`
+- `tests/Feature/Integrity/ManifestVerifierTest.php` `testAMissingArtifactIsManifestMissing`,
+  `testAnArtifactOfAnotherEntryIsManifestMismatch`, `testArtifactsSwappedBetweenEntriesAreManifestMismatch`,
+  `testMembersOutOfOrderAreManifestMismatch`, `testADuplicateMemberIsManifestMismatch`,
+  `testFewerMembersThanSignedAreManifestMismatch`, `testUndecryptableMembersAreManifestUnreadable`,
+  `testAPreviousApplicationKeyStillOpensTheMembers`, `testAMalformedDescriptorIsManifestMismatch`,
+  `testAnArtifactGoneWithItsEntryIsNoFinding`, `testManifestsAreReadInBatches`, `testMembersAreFetchedWithinTheByteBatch`
+- `tests/Integration/Integrity/ManifestVerificationEnginesTest.php` `testAnUnsealedBundleIsNotYetChecked`,
+  `testTheMaximumManifestVerifies`
+- `tests/Performance/VerifyQueryBudgetTest.php` `testManifestChecksAddTwoQueriesPerBatch`,
+  `testASegmentWithoutBundlesAddsNoQuery`
 - `tests/Feature/Integrity/VerifierTest.php` `testADeletedGenesisSealIsTampered`, `testAMissingBoundarySealIsAGap`,
   `testAFailingAnchorIsAskedOnce`, `testAnEmptyRemoteWithALocalLogIsUnanchored`, `testAnEmptyRemoteAndAnEmptyLogAgree`,
   `testARemoteHeadBeyondTheTailIsTampered`, `testTailTruncationIsFoundWithLocalReceiptsCleared`,
@@ -613,6 +657,7 @@ Update this note when any of the following change:
 - how the recent pass or the sweep selects entries, or what a seal attempt retries
 - the anchor contract, the disk anchor's paths, marker or receipt, or what its guarantees rest on
 - an integrity or anchoring status, a finding, or the status a finding gives
+- what the manifest check binds, its batches, or the key an artifact's members are encrypted under
 - what a strict run fails on, or the anchoring grace
 - the prune record's fields or what a prune keeps
 - the schedule, the cache lock, the event or the progress names

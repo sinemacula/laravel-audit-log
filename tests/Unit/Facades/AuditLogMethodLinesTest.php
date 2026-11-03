@@ -205,8 +205,8 @@ final class AuditLogMethodLinesTest extends TestCase
 
     /**
      * A type with no leading backslashes or contents of an array, `?T` written
-     * as `T|null`, and its parts in order, so two spellings of one type compare
-     * equal.
+     * as `T|null`, a list written as the array it is, and its parts in order,
+     * so two spellings of one type compare equal.
      *
      * @param  string  $type
      * @return string
@@ -214,7 +214,7 @@ final class AuditLogMethodLinesTest extends TestCase
     private static function normalised(string $type): string
     {
         $bare  = (string) preg_replace('/<.*>/', '', str_starts_with($type, '?') ? substr($type, 1) . '|null' : $type);
-        $parts = array_map(static fn (string $part): string => ltrim($part, '\\'), explode('|', $bare));
+        $parts = array_map(static fn (string $part): string => in_array($part, ['list', 'non-empty-list'], true) ? 'array' : ltrim($part, '\\'), explode('|', $bare));
 
         sort($parts);
 

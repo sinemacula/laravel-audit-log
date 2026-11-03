@@ -11,9 +11,10 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use Tests\TestCase;
 
 /**
- * Feature tests for the entries table's name: the default, the names it accepts
- * up to the longest one every index name fits, and the message any other value
- * fails with.
+ * Feature tests for the names of the entries table and of the artifacts table
+ * beside it: the defaults, the names each accepts up to the longest one every
+ * index name fits, and the message naming its own key any other value fails
+ * with.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,6 +29,13 @@ final class EntrySettingsTest extends TestCase
 
     /** @var string The message every refused table name fails with. */
     private const string MESSAGE = '`audit-log.entries.table` must be a table name of 1 to 47 lower-case letters, digits and underscores that does not start with a digit.';
+
+    /** @var string The artifacts table's setting. */
+    private const string ARTIFACTS_KEY = 'audit-log.entries.artifacts_table';
+
+    /** @var string The message every refused artifacts table name fails with. */
+    private const string ARTIFACTS_MESSAGE = '`audit-log.entries.artifacts_table` must be a table name of 1 to 47 lower-case letters, digits and underscores'
+        . ' that does not start with a digit.';
 
     /**
      * With no table configured, the entries live in `audit_log_entries`.
@@ -167,6 +175,71 @@ final class EntrySettingsTest extends TestCase
         $this->expectExceptionMessage(self::MESSAGE);
 
         EntrySettings::table();
+    }
+
+    /**
+     * With no artifacts table configured, each bulk operation's manifest lives
+     * in `audit_log_artifacts`, whatever the entries table is called.
+     *
+     * @return void
+     */
+    public function testTheArtifactsTableDefaults(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log', array_diff_key($config->array('audit-log'), ['entries' => true]));
+
+        self::assertFalse($config->has(self::ARTIFACTS_KEY));
+        self::assertSame('audit_log_artifacts', EntrySettings::DEFAULT_ARTIFACTS_TABLE);
+        self::assertSame('audit_log_artifacts', EntrySettings::artifactsTable());
+
+        $config->set(self::KEY, 'reporting_entries');
+
+        self::assertSame('audit_log_artifacts', EntrySettings::artifactsTable());
+    }
+
+    /**
+     * The artifacts table takes every name the entries table takes, up to 47
+     * characters, and is read on every call from its own key, never from the
+     * entries table's.
+     *
+     * @return void
+     */
+    public function testTheArtifactsTableHasTheEntriesGrammar(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        foreach ([...array_column([...self::provideAcceptedTables()], 0), str_repeat('a', 47)] as $table) {
+            $config->set(self::ARTIFACTS_KEY, $table);
+
+            self::assertSame($table, EntrySettings::artifactsTable());
+        }
+
+        $config->set(self::KEY, 'audit-log');
+        $config->set(self::ARTIFACTS_KEY, 'reporting_artifacts');
+
+        self::assertSame('reporting_artifacts', EntrySettings::artifactsTable());
+    }
+
+    /**
+     * Each value the entries table refuses is refused for the artifacts table
+     * too, with a message naming the artifacts table's key, while the entries
+     * table, configured well, is unaffected.
+     *
+     * @param  int|list<string>|string|null  $table
+     * @return void
+     */
+    #[DataProvider('provideRefusedTables')]
+    public function testAMalformedArtifactsTableIsRefusedNamingItsKey(array|int|string|null $table): void
+    {
+        app(ConfigRepository::class)->set(self::ARTIFACTS_KEY, $table);
+
+        self::assertSame('audit_log_entries', EntrySettings::table());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(self::ARTIFACTS_MESSAGE);
+
+        EntrySettings::artifactsTable();
     }
 
     /**

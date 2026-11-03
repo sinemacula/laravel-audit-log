@@ -4,6 +4,20 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Auth\Access\Events\GateEvaluated;
+use Illuminate\Auth\Events\Attempting;
+use Illuminate\Auth\Events\Authenticated;
+use Illuminate\Auth\Events\CurrentDeviceLogout;
+use Illuminate\Auth\Events\Failed;
+use Illuminate\Auth\Events\Lockout;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
+use Illuminate\Auth\Events\OtherDeviceLogout;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Auth\Events\PasswordResetLinkSent;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Auth\Events\Validated;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Console\Application as ConsoleApplication;
 use Illuminate\Console\Events\CommandFinished;
@@ -15,6 +29,7 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Events\TransactionCommitting;
 use Illuminate\Database\Migrations\Migrator;
+use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
 use Illuminate\Log\Context\Events\ContextDehydrating;
 use Illuminate\Queue\Events\JobExceptionOccurred;
@@ -31,6 +46,11 @@ use Orchestra\Testbench\Attributes\DefineEnvironment;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
+use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
+use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
+use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
+use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
+use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
@@ -43,17 +63,25 @@ use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Delivery\CommitQueue;
+use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
+use SineMacula\Laravel\AuditLog\Listeners\RecordGateDenial;
+use SineMacula\Laravel\AuditLog\Listeners\RecordLaravelAuthEvent;
+use SineMacula\Laravel\AuditLog\Listeners\RecordModelChange;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
@@ -61,6 +89,9 @@ use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
+use Tests\Fixtures\Capture\Events\PortalSignedIn;
+use Tests\Fixtures\Capture\Mappers\PortalMapper;
+use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\TestCase;
@@ -69,8 +100,8 @@ use Tests\TestCase;
  * Feature tests for the package AuditLogServiceProvider: the configuration it
  * merges, the defaults it binds, the files it publishes under each tag, the
  * migrations it never loads, the commands it registers and the runs it
- * schedules in the console only, the listeners and middleware it adds, and that
- * it freezes registration at boot.
+ * schedules in the console only, the listeners and middleware it adds, the
+ * package's codes it defines, and that it freezes registration at boot.
  *
  * The class runs no migration of its own, so the migrator's paths are what the
  * provider leaves there.
@@ -99,6 +130,7 @@ final class AuditLogServiceProviderTest extends TestCase
         '2026_11_02_000300_create_audit_log_checkpoints_table.php',
         '2026_11_02_000400_create_audit_log_checkpoint_members_table.php',
         '2026_11_02_000500_create_audit_log_integrity_state_table.php',
+        '2026_11_02_000600_create_audit_log_artifacts_table.php',
     ];
 
     /**
@@ -301,6 +333,8 @@ final class AuditLogServiceProviderTest extends TestCase
             'the prune ledger'       => [PruneLedger::class, NullPruneLedger::class],
             'the catalogue'          => [EventCatalogue::class, EventCatalogue::class],
             'the contributors'       => [ContributorRegistry::class, ContributorRegistry::class],
+            'the event mappers'      => [MapperRegistry::class, MapperRegistry::class],
+            'the model watcher'      => [ModelWatcher::class, ModelWatcher::class],
             'the recorder'           => [Recorder::class, Recorder::class],
             'the frames'             => [ExecutionFrames::class, ExecutionFrames::class],
             'the request identity'   => [RequestIdentity::class, RequestIdentity::class],
@@ -496,12 +530,37 @@ final class AuditLogServiceProviderTest extends TestCase
         $recorder     = app(Recorder::class);
         $catalogue    = app(EventCatalogue::class);
         $contributors = app(ContributorRegistry::class);
+        $mappers      = app(MapperRegistry::class);
+        $watcher      = app(ModelWatcher::class);
 
         $this->app?->forgetScopedInstances();
 
         self::assertSame($recorder, app(Recorder::class));
         self::assertSame($catalogue, app(EventCatalogue::class));
         self::assertSame($contributors, app(ContributorRegistry::class));
+        self::assertSame($mappers, app(MapperRegistry::class));
+        self::assertSame($watcher, app(ModelWatcher::class));
+    }
+
+    /**
+     * The events captured so far die with their scope, as Octane and a queue
+     * worker forget it, so an event object claimed in one request is free in
+     * the next.
+     *
+     * @return void
+     */
+    public function testTheCaptureStateIsScoped(): void
+    {
+        $captured = app(CapturedEvents::class);
+        $event    = new \stdClass;
+
+        self::assertSame($captured, app(CapturedEvents::class));
+        self::assertTrue($captured->claims($event));
+
+        $this->app?->forgetScopedInstances();
+
+        self::assertNotSame($captured, app(CapturedEvents::class));
+        self::assertFalse(app(CapturedEvents::class)->isClaimed($event));
     }
 
     /**
@@ -519,6 +578,17 @@ final class AuditLogServiceProviderTest extends TestCase
             'a job failed'       => [JobFailed::class, TrackJobFrames::class],
             'a job exception'    => [JobExceptionOccurred::class, TrackJobFrames::class],
             'context dehydrated' => [ContextDehydrating::class, CarryContextIntoJobs::class],
+            'a sign-in'          => [Login::class, RecordLaravelAuthEvent::class],
+            'a failed sign-in'   => [Failed::class, RecordLaravelAuthEvent::class],
+            'a lockout'          => [Lockout::class, RecordLaravelAuthEvent::class],
+            'a sign-out'         => [Logout::class, RecordLaravelAuthEvent::class],
+            'a device sign-out'  => [CurrentDeviceLogout::class, RecordLaravelAuthEvent::class],
+            'other devices out'  => [OtherDeviceLogout::class, RecordLaravelAuthEvent::class],
+            'a registration'     => [Registered::class, RecordLaravelAuthEvent::class],
+            'a verification'     => [Verified::class, RecordLaravelAuthEvent::class],
+            'a password reset'   => [PasswordReset::class, RecordLaravelAuthEvent::class],
+            'a reset link sent'  => [PasswordResetLinkSent::class, RecordLaravelAuthEvent::class],
+            'a Gate evaluation'  => [GateEvaluated::class, RecordGateDenial::class],
         ];
     }
 
@@ -537,6 +607,101 @@ final class AuditLogServiceProviderTest extends TestCase
             Event::getRawListeners()[$event] ?? [],
             static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
         )));
+    }
+
+    /**
+     * Rows of `[listener]`: every listener that captures events.
+     *
+     * @return iterable<string, array{0: class-string}>
+     */
+    public static function provideCaptureListeners(): iterable
+    {
+        yield from [
+            'the mapped events'   => [CaptureMappedEvent::class],
+            'the auth events'     => [RecordLaravelAuthEvent::class],
+            'the Gate denials'    => [RecordGateDenial::class],
+            'the watched changes' => [RecordModelChange::class],
+        ];
+    }
+
+    /**
+     * A capture listener holds nothing and has no binding of the provider's: it
+     * takes nothing when it is built, so the container that builds it, which
+     * under Octane is the worker's, leaves nothing in it.
+     *
+     * @param  class-string  $listener
+     * @return void
+     */
+    #[DataProvider('provideCaptureListeners')]
+    public function testACaptureListenerHoldsNothing(string $listener): void
+    {
+        $class = new \ReflectionClass($listener);
+
+        self::assertNull($class->getConstructor());
+        self::assertSame([], $class->getProperties());
+        self::assertFalse($this->app?->bound($listener));
+    }
+
+    /**
+     * A capture listener made by the root container captures with the current
+     * container, as Octane's request sandbox is: the event is claimed in the
+     * sandbox's capture state, never the root's.
+     *
+     * @return void
+     */
+    public function testACaptureListenerCapturesWithTheCurrentContainer(): void
+    {
+        $root = $this->app;
+
+        assert($root instanceof Application);
+
+        AuditLog::fake();
+
+        $listener = $root->make(RecordLaravelAuthEvent::class);
+        $sandbox  = clone $root;
+        $captured = new CapturedEvents;
+        $event    = new Registered(new \stdClass);
+
+        $sandbox->instance(CaptureCoordinator::class, new CaptureCoordinator($sandbox));
+        $sandbox->instance(CapturedEvents::class, $captured);
+
+        Container::setInstance($sandbox);
+
+        try {
+            $listener->handle($event);
+        } finally {
+            Container::setInstance($root);
+        }
+
+        self::assertTrue($captured->isClaimed($event));
+        self::assertFalse($root->make(CapturedEvents::class)->isClaimed($event));
+    }
+
+    /**
+     * The events the package never records are never listened to, and nothing
+     * routes mapped events until something is mapped.
+     *
+     * @SuppressWarnings("php:S3011")
+     *
+     * @return void
+     */
+    public function testNoOtherCaptureListenerIsRegistered(): void
+    {
+        foreach ([Attempting::class, Validated::class, Authenticated::class] as $event) {
+            self::assertSame([], array_values(array_filter(
+                Event::getRawListeners()[$event] ?? [],
+                static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
+            )), "{$event} has a listener of the package's.");
+        }
+
+        $dispatcher = app('events');
+
+        self::assertInstanceOf(Dispatcher::class, $dispatcher);
+
+        $wildcards = (new \ReflectionProperty(Dispatcher::class, 'wildcards'))->getValue($dispatcher);
+
+        self::assertIsArray($wildcards);
+        self::assertNotContains(CaptureMappedEvent::class, $wildcards['*'] ?? []);
     }
 
     /**
@@ -615,6 +780,114 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * Once the application has booted, the event mappers and the model watcher
+     * refuse more too.
+     *
+     * @return void
+     */
+    public function testMappingAndWatchingAreFrozenOnceBooted(): void
+    {
+        self::assertTrue(app(MapperRegistry::class)->isFrozen());
+        self::assertTrue(app(ModelWatcher::class)->isFrozen());
+    }
+
+    /**
+     * Every one of the package's codes is defined while it boots, as its
+     * definition says, so an application's definition of one that differs is
+     * refused at boot.
+     *
+     * @return void
+     */
+    public function testThePackageCodesAreDefinedAtBoot(): void
+    {
+        $catalogue = app(EventCatalogue::class);
+
+        foreach (CapturedActivity::cases() as $activity) {
+            $code = EventCode::of($activity);
+
+            self::assertTrue($catalogue->isRegistered($code), "{$activity->value} is not defined.");
+            self::assertTrue($catalogue->definitionFor($code)->equals($activity->definition()), "{$activity->value} is defined differently.");
+        }
+    }
+
+    /**
+     * A catalogue that already holds a package code defined differently makes
+     * the provider's boot fail, naming the code.
+     *
+     * @return void
+     */
+    public function testADifferentDefinitionOfAPackageCodeIsRefusedAtBoot(): void
+    {
+        $catalogue = new EventCatalogue;
+
+        $catalogue->define(EventDefinition::for(CapturedActivity::SIGNED_IN->value)->category('accounts'));
+
+        $this->app?->instance(EventCatalogue::class, $catalogue);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('The event code `authentication.signed_in` is already defined differently; a code has one definition.');
+
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke(new AuditLogServiceProvider($this->app));
+    }
+
+    /**
+     * A provider booted again once the application has booted defines nothing
+     * more and is not refused, since its codes were defined on the first boot
+     * and the catalogue is frozen.
+     *
+     * @return void
+     */
+    public function testBootingAgainAfterBootDefinesNothingMore(): void
+    {
+        $catalogue = app(EventCatalogue::class);
+
+        self::assertTrue($catalogue->isFrozen());
+
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke(new AuditLogServiceProvider($this->app));
+
+        self::assertSame($catalogue, app(EventCatalogue::class));
+        self::assertTrue($catalogue->isRegistered(EventCode::of(CapturedActivity::SIGNED_IN)));
+    }
+
+    /**
+     * An event mapper and a watched model registered from a provider's `boot()`
+     * are accepted and kept, and a mapped event dispatched afterwards is
+     * captured through the listener the mapping added.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('mapAndWatchInAProvidersBoot')]
+    public function testMappingAndWatchingInAProvidersBootAreAccepted(): void
+    {
+        $fake = FakeAuditStore::fake();
+
+        self::assertTrue(app(MapperRegistry::class)->isFrozen());
+        self::assertSame(PortalMapper::class, app(MapperRegistry::class)->mapperFor(PortalSignedIn::class));
+        self::assertSame('line', app(ModelWatcher::class)->watchFor(PlainLine::class)?->as);
+        self::assertTrue(Event::hasListeners('eloquent.created: ' . PlainLine::class));
+
+        Event::dispatch(new PortalSignedIn('7'));
+
+        self::assertSame([PortalMapper::CODE], array_map(static fn (AuditRecord $record): string => $record->event, $fake->recorded()));
+    }
+
+    /**
+     * Booting reads no capture setting: an application with every capture
+     * setting malformed boots, its registration is frozen with the package's
+     * codes defined, and `audit-log:check` can report the settings.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('malformEveryCaptureSetting')]
+    public function testNoCaptureListenerReadsASettingAtBoot(): void
+    {
+        self::assertTrue($this->app?->isBooted());
+        self::assertTrue(app(MapperRegistry::class)->isFrozen());
+        self::assertTrue(app(EventCatalogue::class)->isRegistered(EventCode::of(CapturedActivity::GATE_DENIED)));
+        self::assertSame(1, Artisan::call('audit-log:check'));
+    }
+
+    /**
      * Definitions and contributors registered from a provider's `boot()` are
      * accepted and kept.
      *
@@ -668,6 +941,51 @@ final class AuditLogServiceProviderTest extends TestCase
                 $recorder->contribute(TenantContributor::class);
             }
         });
+    }
+
+    /**
+     * Map an event and watch a model from another provider's `boot()`, which
+     * runs before the application has finished booting.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function mapAndWatchInAProvidersBoot(Application $app): void
+    {
+        $app->register(new class ($app) extends ServiceProvider {
+            /**
+             * Register with the recorder.
+             *
+             * @return void
+             */
+            public function boot(): void
+            {
+                $recorder = $this->app->make(Recorder::class);
+
+                $recorder->map(PortalSignedIn::class, PortalMapper::class);
+                $recorder->watch(PlainLine::class, as: 'line', fields: ['description']);
+            }
+        });
+    }
+
+    /**
+     * Give every capture setting a malformed value.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function malformEveryCaptureSetting(Application $app): void
+    {
+        $app->make(ConfigRepository::class)->set([
+            'audit-log.capture.laravel.except_guards'  => 'web',
+            'audit-log.capture.laravel.identifier_key' => 'e mail',
+            'audit-log.capture.gate.enabled'           => 'yes',
+            'audit-log.capture.gate.only_abilities'    => [],
+            'audit-log.capture.gate.except_abilities'  => 'update',
+            'audit-log.capture.gate.reason_codes'      => ['Not A Code'],
+            'audit-log.capture.bulk.max_members'       => 0,
+            'audit-log.capture.bulk.max_bytes'         => 'many',
+        ]);
     }
 
     /**

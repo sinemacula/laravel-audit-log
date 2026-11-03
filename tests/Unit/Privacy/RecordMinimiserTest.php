@@ -24,12 +24,14 @@ use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Privacy\ThrowingFieldEncrypter;
+use Tests\Fixtures\Records\RecordFactory;
 
 /**
  * Unit tests for the record minimiser: the order of its steps, what each does
@@ -615,6 +617,89 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
+     * A bulk record's manifest descriptor is added at capture, in the reserved
+     * area after the note and the identifier hash, and holds the artifact's id,
+     * the digest and the count.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheManifestDescriptorIsAddedAtCapture(): void
+    {
+        $manifest = self::manifest();
+        $pending  = self::pending()->withProperties(['batch' => 'march'])->withNote(self::NOTE)->withIdentifier('alice@example.com')->withManifest($manifest);
+
+        self::assertSame(['batch' => 'march', '_audit' => [
+            'note'            => self::NOTE,
+            'identifier_hash' => self::ALICE_HASH,
+            'manifest'        => ['artifact_id' => $manifest->id, 'digest' => $manifest->digest, 'count' => 3],
+        ]], $this->minimise($pending)->properties);
+    }
+
+    /**
+     * A record with nothing but a manifest stores only its descriptor, and a
+     * record without one stores no descriptor.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testOnlyABulkRecordHasADescriptor(): void
+    {
+        $manifest = self::manifest();
+
+        self::assertSame(['_audit' => ['manifest' => $manifest->descriptor()]], $this->minimise(self::pending()->withManifest($manifest))->properties);
+        self::assertSame(['batch' => 'march'], $this->minimise(self::pending()->withProperties(['batch' => 'march']))->properties);
+    }
+
+    /**
+     * A definition that drops every unlisted property never drops the
+     * descriptor, which is the package's own and outside every field rule.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testADropUnlistedDefinitionKeepsTheManifest(): void
+    {
+        $manifest = self::manifest();
+        $pending  = self::pending()->withProperties(['batch' => 'march'])->withManifest($manifest);
+
+        $properties = $this->minimise($pending, EventDefinition::for(self::CODE))->properties;
+
+        self::assertSame(['_audit' => ['manifest' => $manifest->descriptor(), 'omitted' => ['count' => 1, 'paths' => ['*']]]], $properties);
+    }
+
+    /**
+     * A record over its budget loses properties, never the descriptor, and its
+     * final encoding still fits.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheManifestSurvivesAnOverBudgetRecord(): void
+    {
+        $manifest = self::manifest();
+        $values   = [];
+
+        foreach (range(1, 10) as $number) {
+            $values['field_' . $number] = str_repeat('a', 1000);
+        }
+
+        $pending    = self::pending()->withProperties($values)->withIdentifier('alice@example.com')->withManifest($manifest);
+        $properties = $this->minimise($pending, redaction: ['max_bytes' => 8192])->properties;
+
+        self::assertIsArray($properties);
+        self::assertIsArray($properties['_audit'] ?? null);
+        self::assertSame($manifest->descriptor(), $properties['_audit']['manifest'] ?? null);
+        self::assertSame(self::ALICE_HASH, $properties['_audit']['identifier_hash'] ?? null);
+        self::assertSame(['count' => 7, 'paths' => ['*']], self::omitted($properties));
+        self::assertLessThanOrEqual(8192, strlen(json_encode($properties, CanonicalEncoder::JSON_FLAGS)));
+    }
+
+    /**
      * An address that is not valid is stored in no mode, and is diagnosed.
      *
      * @return void
@@ -893,6 +978,18 @@ final class RecordMinimiserTest extends TestCase
         $minimiser = new RecordMinimiser($settings, new Redactor($settings), new IpMinimiser($settings, $hasher), $hasher, $sealer);
 
         return $minimiser->minimise($pending->snapshot(), $definition ?? EventDefinition::permissive(EventCode::of(self::CODE)));
+    }
+
+    /**
+     * A manifest of three invoices, as a bulk operation gives a builder.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\Manifest
+     *
+     * @throws \JsonException
+     */
+    private static function manifest(): Manifest
+    {
+        return Manifest::of(RecordFactory::members(3), 3, 65536);
     }
 
     /**

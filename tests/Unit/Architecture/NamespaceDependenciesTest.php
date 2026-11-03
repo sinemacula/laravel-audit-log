@@ -16,16 +16,20 @@ use PHPUnit\Framework\TestCase;
  * there. A rule applies to the classes in its `from` namespaces or classes (`*`
  * for every class of the package) except those in `except`, and forbids them to
  * name anything in its `forbids` namespaces or classes except what `allows`
- * lists; every name is relative to the package.
+ * lists; every name is relative to the package. The capture layer names neither
+ * the stores nor the read model, and only its coordinator and the recorder
+ * reach the record pipeline, so nothing a mapper or a listener runs can write a
+ * record of its own.
  *
  * The same scanner holds the package to the framework: `FRAMEWORK_RULES` are
  * read the same way, with `forbids` and `allows` relative to the framework, so
  * nothing ships a route or a view, nothing reads authentication state, and the
- * domain reaches for no facade or container. Only the contributors and the
- * cached user read authentication state, as the one namespace and the one class
- * that touch `Auth` and the guards. And no class names another package of the
- * suite: anything under the suite's namespace but outside this package's is
- * refused.
+ * domain reaches for no facade or container. Only the contributors, the cached
+ * user, the core capture listeners, the user reference and the service provider
+ * read authentication state, as the classes that touch `Auth` and the guards,
+ * name its events or read the user an event carries. And no class names another
+ * package of the suite: anything under the suite's namespace but outside this
+ * package's is refused.
  *
  * A class names another through an import (`use`, grouped or aliased), a
  * qualified or fully qualified name in its code, or a fully qualified type in a
@@ -81,7 +85,8 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Records'],
             'allows'  => ['Records\EventCode'],
         ],
-        'contracts name nothing of the package but contracts, the definitions they return, the records, references and seal values they take and the conflict they raise' => [
+        'contracts name nothing of the package but contracts, the definitions they return, the records, references, pending records '
+        . 'and seal values they take and the conflict they raise' => [
             'from'    => ['Contracts'],
             'except'  => [],
             'forbids' => ['*'],
@@ -91,6 +96,7 @@ final class NamespaceDependenciesTest extends TestCase
                 'Records\FinalisedRecord',
                 'Records\Contribution',
                 'Records\Reference',
+                'Records\PendingRecord',
                 'Stores\RecordConflictException',
                 'Integrity\SealSummary',
                 'Integrity\AnchoredHead',
@@ -226,6 +232,40 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Console', 'Models', 'Casts'],
             'allows'  => [],
         ],
+        'the capture layer names nothing of the stores, the read model, the console or the testing helpers' => [
+            'from'    => ['Capture'],
+            'except'  => [],
+            'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Testing', 'Facades'],
+            'allows'  => [],
+        ],
+        'the capture enums name nothing of the package but other enums, the definitions and the defining contract' => [
+            'from'    => ['Capture\Enums'],
+            'except'  => [],
+            'forbids' => ['*'],
+            'allows'  => [
+                'Capture\Enums',
+                'Records\Enums',
+                'Runtime\Enums',
+                'Privacy\Enums',
+                'Delivery\Enums',
+                'Stores\Enums',
+                'Integrity\Enums',
+                'Definitions',
+                'Contracts\DefinesAuditEvents',
+            ],
+        ],
+        'the listeners name nothing of the stores, the console or the delivery' => [
+            'from'    => ['Listeners'],
+            'except'  => [],
+            'forbids' => ['Stores', 'Console', 'Delivery'],
+            'allows'  => [],
+        ],
+        'only the capture coordinator writes captured records' => [
+            'from'    => ['*'],
+            'except'  => ['Capture\CaptureCoordinator', 'Recorder', 'RecordPipeline'],
+            'forbids' => ['RecordPipeline'],
+            'allows'  => [],
+        ],
     ];
 
     /** @var array<string, array{from: non-empty-list<string>, except: list<string>, forbids: non-empty-list<string>, allows: list<string>}> The framework rules, by what each holds. */
@@ -236,9 +276,16 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Routing', 'Support\Facades\Route', 'View', 'Contracts\View', 'Support\Facades\View', 'Support\Facades\Blade'],
             'allows'  => ['Routing\Route'],
         ],
-        'only the contributors and the cached user read authentication state' => [
-            'from'    => ['*'],
-            'except'  => ['Contributors', 'Runtime\CachedUser'],
+        'only the contributors, the cached user, the core capture listeners, the user reference and the service provider read authentication state' => [
+            'from'   => ['*'],
+            'except' => [
+                'Contributors',
+                'Runtime\CachedUser',
+                'Listeners\RecordLaravelAuthEvent',
+                'Listeners\RecordGateDenial',
+                'Capture\UserReference',
+                'AuditLogServiceProvider',
+            ],
             'forbids' => ['Auth', 'Contracts\Auth', 'Support\Facades\Auth'],
             'allows'  => [],
         ],
@@ -624,6 +671,62 @@ final class NamespaceDependenciesTest extends TestCase
         self::assertSame(['AuditLog\Support\TextSanitizer', 'Other\Thing'], $vendor);
         self::assertSame(['Routing\Router', 'Support\Facades\Auth'], $framework);
         self::assertSame(['Support\TextSanitizer'], self::namesIn($source));
+    }
+
+    /**
+     * Rows of `[rule, class, name, whether the rule refuses it]`: what each
+     * capture rule refuses, and what it leaves to the classes it allows.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: string, 3: bool}>
+     */
+    public static function provideCaptureNames(): iterable
+    {
+        $capture   = 'the capture layer names nothing of the stores, the read model, the console or the testing helpers';
+        $enums     = 'the capture enums name nothing of the package but other enums, the definitions and the defining contract';
+        $listeners = 'the listeners name nothing of the stores, the console or the delivery';
+        $pipeline  = 'only the capture coordinator writes captured records';
+
+        yield from [
+            'a watch naming the read model'           => [$capture, 'Capture\ModelWatch', 'Models\AuditEntry', true],
+            'a watch naming a cast of the read model' => [$capture, 'Capture\ModelWatch', 'Casts\UtcInstant', true],
+            'the coordinator naming a store'          => [$capture, 'Capture\CaptureCoordinator', 'Stores\DatabaseAuditStore', true],
+            'the coordinator naming the fake'         => [$capture, 'Capture\CaptureCoordinator', 'Testing\FakeAuditStore', true],
+            'the coordinator naming the facade'       => [$capture, 'Capture\CaptureCoordinator', 'Facades\AuditLog', true],
+            'the coordinator naming its signal'       => [$capture, 'Capture\CaptureCoordinator', 'Delivery\CaptureSignal', false],
+            'a capture enum naming a definition'      => [$enums, 'Capture\Enums\CapturedActivity', 'Definitions\EventDefinition', false],
+            'a capture enum naming the contract'      => [$enums, 'Capture\Enums\CapturedActivity', 'Contracts\DefinesAuditEvents', false],
+            'a capture enum naming a record enum'     => [$enums, 'Capture\Enums\ModelEvent', 'Records\Enums\Outcome', false],
+            'a capture enum naming another contract'  => [$enums, 'Capture\Enums\CapturedActivity', 'Contracts\EventMapper', true],
+            'a capture enum naming the coordinator'   => [$enums, 'Capture\Enums\ModelEvent', 'Capture\CaptureCoordinator', true],
+            'a listener naming the delivery'          => [$listeners, 'Listeners\RecordGateDenial', 'Delivery\RecordDelivery', true],
+            'a listener naming a store'               => [$listeners, 'Listeners\RecordModelChange', 'Stores\NullAuditStore', true],
+            'a listener naming the coordinator'       => [$listeners, 'Listeners\RecordGateDenial', 'Capture\CaptureCoordinator', false],
+            'a listener naming the pipeline'          => [$pipeline, 'Listeners\RecordModelChange', 'RecordPipeline', true],
+            'the facade naming the pipeline'          => [$pipeline, 'Facades\AuditLog', 'RecordPipeline', true],
+            'the capture settings naming it'          => [$pipeline, 'Capture\CaptureSettings', 'RecordPipeline', true],
+            'the coordinator naming the pipeline'     => [$pipeline, 'Capture\CaptureCoordinator', 'RecordPipeline', false],
+            'the recorder naming the pipeline'        => [$pipeline, 'Recorder', 'RecordPipeline', false],
+        ];
+    }
+
+    /**
+     * Each capture rule refuses what it forbids and leaves what it allows, or
+     * what a class it excepts names, so a rule that held over nothing, or one
+     * widened to let a listener or a mapper reach the record pipeline, fails.
+     *
+     * @param  string  $rule
+     * @param  string  $class
+     * @param  string  $name
+     * @param  bool  $refused
+     * @return void
+     */
+    #[DataProvider('provideCaptureNames')]
+    public function testEachCaptureRuleRefusesWhatItForbids(string $rule, string $class, string $name, bool $refused): void
+    {
+        $scope      = self::RULES[$rule];
+        $violations = self::violations([$class => [$name]], $scope['from'], $scope['except'], $scope['forbids'], $scope['allows']);
+
+        self::assertSame($refused ? ["{$class} names {$name}"] : [], $violations);
     }
 
     /**

@@ -21,7 +21,8 @@ The current note set is:
   comes back from its envelope.
 - `event-definitions.md`: a code's version, category and field rules, the path grammar and precedence, encryption
   owners, the permissive default and the registration rules.
-- `vocabulary.md`: the reserved code prefixes and how they map to the OWASP Logging Vocabulary.
+- `vocabulary.md`: the reserved code prefixes and how they map to the OWASP Logging Vocabulary, the codes the package
+  captures from Laravel's authentication events and Gate denials, and the codes of a watched model's changes.
 - `storage.md`: the entries table, its columns, indexes and engine options, the outbox and receipt tables and their
   connections, the checkpoints, members and integrity state tables, the storage and maintenance connections, the
   read-only model, how the store inserts in a savepoint and resolves a duplicate, and the grants and append-only
@@ -31,11 +32,12 @@ The current note set is:
   their chain, the recent pass and the sweep, the anchors and their conditions, what verification checks and reports in
   each status and finding, pruning, the schedule, the alert and the progress, and the lifetimes of the keys.
 - `outcomes.md`: what storing a record returns or raises for each way a write can end, what the host transaction is left
-  as, and what each timing, delivery mode and failure guarantees.
+  as, and what each timing, delivery mode and failure guarantees, captured records and model changes included.
 - `delivery.md`: the pipeline, the outbox and its drain, claims and receipts, the spill channel and replay, the stores
-  and what each can promise, and the formatters.
-- `event-model.md`: what `AuditRecorded`, `AuditWriteFailed` and `IntegrityCheckFailed` carry and when, by mode and by
-  command, what a listener's failure does, and what the recursion guard refuses.
+  and what each can promise, how a captured record reports its failure, the bundle a bulk operation travels as, and the
+  formatters.
+- `event-model.md`: what `AuditRecorded`, `AuditWriteFailed`, `AuditCaptureFailed` and `IntegrityCheckFailed` carry
+  and when, by mode and by command, what a listener's failure does, and what the recursion guard refuses.
 - `context-resolution.md`: the capture pipeline, what contributors may fill, how the actor is read without loading a
   user, the execution frames, when an inbound request id or trace id is believed, and what travels into a queued job.
 - `redaction.md`: what a record keeps of what it is given: key matching, the field rules at capture, the hash domains,

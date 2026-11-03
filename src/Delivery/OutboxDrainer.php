@@ -32,6 +32,12 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
  * drain took over while this one worked it is stale: this drain changes nothing
  * of it further. A row is never re-signed or finalised again.
  *
+ * A row holding a bundle, a record with its attachment, is delivered whole:
+ * each destination that keeps attachments stores the entry and its artifact
+ * together, and its receipt follows them. A destination that keeps none is
+ * refused before it is called, as that destination's failure, so the row is
+ * retried, then failed and kept for a replay, never deleted.
+ *
  * A row whose destination failed is retried after a wait that doubles with each
  * attempt, from `delivery.outbox.backoff_seconds` up to an hour, without a
  * report: the class of the failure is kept on the row and the receipt. At

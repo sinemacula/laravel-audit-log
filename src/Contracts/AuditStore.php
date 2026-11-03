@@ -22,6 +22,13 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * other failure propagate, since what a failure means is the caller's to
  * decide.
  *
+ * A bulk record carries an attachment, the sealed manifest of the subjects the
+ * operation touched. A store is handed one only when it implements
+ * `Contracts\AcceptsAttachments` and says it keeps attachments, and it must
+ * then keep the attachment and the entry atomically, both or neither. The same
+ * id with the same artifact is a success, and an entry stored with another
+ * artifact, or without its own, a `RecordConflictException`.
+ *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

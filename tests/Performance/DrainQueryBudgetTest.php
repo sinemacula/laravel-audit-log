@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Delivery\DeliveryCoordinator;
 use SineMacula\Laravel\AuditLog\Delivery\DrainResult;
 use SineMacula\Laravel\AuditLog\Delivery\Outbox;
@@ -25,6 +26,7 @@ use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Stores\CallbackStore;
 
 /**
@@ -33,8 +35,10 @@ use Tests\Fixtures\Stores\CallbackStore;
  * renewal before and after the store, its attempt, its insert in a savepoint of
  * the transaction it shares with its receipt, and its delete; each further row
  * costs the same again; a duplicate adds one read and the savepoint's rollback;
- * a further destination adds its renewals and its receipt; a failure and a lost
- * claim are pinned as well, and no run reads a payload before its claim.
+ * a further destination adds its renewals and its receipt; a bundle adds its
+ * artifact's insert to the same savepoint, and one refused costs a failure; a
+ * failure and a lost claim are pinned as well, and no run reads a payload
+ * before its claim.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -143,6 +147,51 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
 
         self::assertSame(10, $result->delivered());
         self::assertSame(10, $this->entryCount());
+    }
+
+    /**
+     * A bundle to the database costs what one row costs and one more insert,
+     * its artifact's, which precedes its entry's inside the same savepoint of
+     * the one top-level transaction it shares with its receipt.
+     *
+     * @return void
+     */
+    public function testDrainingABundleIsTwoInsertsInOneTransaction(): void
+    {
+        $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled()));
+
+        $result = $this->assertTransactionBudget(1, 1, fn (): DrainResult => $this->assertStatementBudget(3, 8, 1, 0, fn (): DrainResult => $this->drain()));
+
+        $deliveries = DeliveryTables::deliveriesTable();
+        $isRowWrite = static fn (string $write): bool => str_starts_with($write, 'insert into ') && !str_contains($write, $deliveries);
+        $inserts    = array_values(array_filter($this->capturedWrites(), $isRowWrite));
+
+        self::assertSame(1, $result->delivered());
+        self::assertCount(2, $inserts);
+        self::assertStringContainsString(EntrySettings::artifactsTable(), $inserts[0]);
+        self::assertStringContainsString(EntrySettings::table(), $inserts[1]);
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame(1, DB::connection()->table(EntrySettings::artifactsTable())->where('entry_id', $id)->count());
+    }
+
+    /**
+     * A bundle refused by a store that keeps no attachments costs what any
+     * failure costs, and no insert of the entry or the artifact.
+     *
+     * @return void
+     */
+    public function testARefusedBundleCostsWhatAFailureCosts(): void
+    {
+        app()->instance(AuditStore::class, CallbackStore::saying(true));
+
+        $this->enqueue($this->finalisedRecord(RecordFactory::bundled()));
+
+        $result = $this->assertStatementBudget(3, 6, 0, 0, fn (): DrainResult => $this->drain());
+
+        self::assertSame(1, $result->retried());
+        self::assertSame(0, $this->entryCount());
+        self::assertSame(1, $this->outboxCount());
     }
 
     /**

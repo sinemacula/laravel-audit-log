@@ -17,13 +17,13 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
  * the key, so the result depends on neither the order of the input nor anything
  * outside it. In the properties, keys no rule governs go first, then keys a
  * rule governs, itself or beneath it, and the note last of all. The identifier
- * hash and the list of what was omitted are never omitted, because both are
- * bounded: `METADATA_RESERVE_BYTES` holds a hash and 32 paths of 128 bytes
- * under the largest count, so omitting until the rest fits beside that reserve
- * brings the final encoding within the budget, whatever the omissions
- * themselves add. In the context, which has no metadata and no reserve,
- * application keys go before the fixed names the package fills, and `_audit` is
- * an ordinary key.
+ * hash, a bulk operation's manifest descriptor and the list of what was omitted
+ * are never omitted, because all three are bounded: `METADATA_RESERVE_BYTES`
+ * holds a hash, the largest descriptor and 32 paths of 128 bytes under the
+ * largest count, so omitting until the rest fits beside that reserve brings the
+ * final encoding within the budget, whatever the omissions themselves add. In
+ * the context, which has no metadata and no reserve, application keys go before
+ * the fixed names the package fills, and `_audit` is an ordinary key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +32,8 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
  */
 final class ByteBudget
 {
-    /** @var int Bytes kept for the identifier hash and the omitted list at their largest, with their braces and a comma: 4357 measured, rounded up. */
-    public const int METADATA_RESERVE_BYTES = 4400;
+    /** @var int Bytes kept for the identifier hash, the manifest descriptor and the omitted list at their largest, with their braces and a comma: 4515 measured, rounded up. */
+    public const int METADATA_RESERVE_BYTES = 4600;
 
     /** @var int How far the context's costs must stay under its budget: its two braces, less the last key's comma. */
     private const int CONTEXT_OVERHEAD_BYTES = 1;
@@ -43,6 +43,9 @@ final class ByteBudget
 
     /** @var string The key the note sits under in the metadata. */
     private const string NOTE_KEY = 'note';
+
+    /** @var string The key the manifest descriptor sits under in the metadata. */
+    private const string MANIFEST_KEY = 'manifest';
 
     /** @var string The path an omitted note is reported under. */
     private const string NOTE_PATH = '_audit.note';
@@ -63,9 +66,10 @@ final class ByteBudget
 
     /**
      * The properties as they are stored, with `_audit` last, holding the note,
-     * the identifier hash and what was omitted, as present, with top-level keys
-     * and then the note omitted until the final encoding fits; `null` when
-     * nothing is left.
+     * the identifier hash, the manifest descriptor and what was omitted, as
+     * present, with top-level keys and then the note omitted until the final
+     * encoding fits; `null` when nothing is left. The descriptor is the
+     * package's own and is never omitted.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -75,6 +79,7 @@ final class ByteBudget
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
      * @param  int  $maxBytes
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
+     * @param  ?array{artifact_id: string, digest: string, count: int}  $manifest
      * @return ?array<array-key, mixed>
      *
      * @throws \JsonException
@@ -89,8 +94,9 @@ final class ByteBudget
         EventDefinition $definition,
         int $maxBytes,
         OmissionLog $omissions,
+        ?array $manifest = null,
     ): ?array {
-        $composed = self::compose($values, $note, $identifierHash, $omissions);
+        $composed = self::compose($values, $note, $identifierHash, $omissions, $manifest);
 
         if (self::encodedLength($composed) <= $maxBytes) {
             return self::nullWhenEmpty($composed);
@@ -116,7 +122,7 @@ final class ByteBudget
             $omissions->add(self::NOTE_PATH);
         }
 
-        return self::nullWhenEmpty(self::compose($values, $note, $identifierHash, $omissions));
+        return self::nullWhenEmpty(self::compose($values, $note, $identifierHash, $omissions, $manifest));
     }
 
     /**
@@ -152,8 +158,9 @@ final class ByteBudget
 
     /**
      * The values with the metadata after them, under `_audit`, in its fixed
-     * order and with only the parts present; the values alone when none is. An
-     * integer key keeps its value: this assigns rather than merges.
+     * order (the note, the identifier hash, the manifest descriptor, what was
+     * omitted) and with only the parts present; the values alone when none is.
+     * An integer key keeps its value: this assigns rather than merges.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -161,10 +168,18 @@ final class ByteBudget
      * @param  array<array-key, mixed>|string|null  $note
      * @param  ?string  $identifierHash
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
+     * @param  ?array{artifact_id: string, digest: string, count: int}  $manifest
      * @return array<array-key, mixed>
      */
-    private static function compose(#[\SensitiveParameter] array $values, #[\SensitiveParameter] array|string|null $note, ?string $identifierHash, OmissionLog $omissions): array
-    {
+    private static function compose(
+        #[\SensitiveParameter]
+        array $values,
+        #[\SensitiveParameter]
+        array|string|null $note,
+        ?string $identifierHash,
+        OmissionLog $omissions,
+        ?array $manifest,
+    ): array {
         $metadata = [];
 
         if ($note !== null) {
@@ -173,6 +188,10 @@ final class ByteBudget
 
         if ($identifierHash !== null) {
             $metadata['identifier_hash'] = $identifierHash;
+        }
+
+        if ($manifest !== null) {
+            $metadata[self::MANIFEST_KEY] = $manifest;
         }
 
         $omitted = $omissions->toArray();

@@ -13,8 +13,16 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 /**
  * The one conversion between a finalised record and the envelope it is kept in
  * outside the entries table, in the outbox or a spill line: the canonical
- * encoding of its 36 columns, and the finalised record a verified envelope
- * holds, rebuilt without loss.
+ * encoding of its 36 columns, or of the bundle a record with an attachment is
+ * kept as, and the finalised record a verified envelope holds, rebuilt without
+ * loss.
+ *
+ * An envelope takes one of two shapes. A record without an attachment is its
+ * columns. A record with one is a bundle of three keys: `bundle_version`, the
+ * bundle schema's version; `record`, its columns; and `attachment`, its id,
+ * entry id, kind, member count, digest and sealed members. A record that was
+ * never finalised is kept in either shape with `unsigned` set beside it. The
+ * envelope's bound applies to the whole of it, the attachment included.
  *
  * Decoding reads the envelope's record version and holds it to that version's
  * schema, exactly its columns, each of its kind, before it verifies the
@@ -26,11 +34,22 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * signature that does not match or a value with no canonical form, an id other
  * than the one expected, and a record its constructor refuses.
  *
+ * A bundle is read the same way, after its own checks: exactly its three keys,
+ * then a bundle version this release reads. Its record is verified as any
+ * other, then its attachment is held to its schema and must name that record as
+ * its entry. The attachment is not signed: it is bound by the descriptor the
+ * record signs at `properties._audit.manifest`, so a bundle whose attachment
+ * the descriptor does not describe is malformed, and so is a plain envelope
+ * whose properties hold a descriptor, which never becomes a record that lost
+ * its members. Every refusal of a bundle names the id of its record.
+ *
  * A rebuilt record keeps its id, its times, its provenance and its JSON columns
  * as they were decoded, objects as objects, so it encodes to the same bytes and
  * carries the same signature. The codec never minimises, sanitises or finalises
  * a record again: the envelope is evidence of a record already captured and
- * signed.
+ * signed. A bundle's record nests one level deeper than a plain envelope's
+ * columns and is decoded to the same depth, which captured values, bounded far
+ * shallower, never approach.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +64,23 @@ final readonly class EnvelopeCodec
     /** @var int Largest input decoded, in bytes: six times the envelope's bound, because a spill line writes a `%` as six bytes. */
     public const int MAX_ENCODED_BYTES = 201719808;
 
+    /** @var int The version of the bundle schema a record with an attachment is encoded in. */
+    public const int BUNDLE_VERSION = 1;
+
+    /** @var list<int> The bundle schema versions this release decodes. */
+    public const array SUPPORTED_BUNDLE_VERSIONS = [1];
+
     /** @var int The depth an envelope is decoded to: one more than the row codec reads a JSON column with, for the envelope's own object. */
     private const int DEPTH = 513;
+
+    /** @var list<string> A bundle's keys, exactly, sorted as the canonical encoding writes them. */
+    private const array BUNDLE_KEYS = ['attachment', 'bundle_version', 'record'];
+
+    /** @var array<'integer'|'string', non-empty-list<string>> A bundle's attachment's fields, by what each holds. */
+    private const array ATTACHMENT_SCHEMA = [
+        'string'  => ['id', 'entry_id', 'kind', 'digest', 'members'],
+        'integer' => ['member_count'],
+    ];
 
     /** @var array<int, array<'instant'|'integer'|'json'|'nullable'|'string', non-empty-list<string>>> Each record version's columns, every signed one and `hmac`, by what each holds. */
     private const array SCHEMAS = [
@@ -75,8 +109,39 @@ final readonly class EnvelopeCodec
     ) {}
 
     /**
+     * The finalised record's envelope, before it is encoded: its columns, or,
+     * for a record with an attachment, the bundle of its columns and its
+     * attachment.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @return array<string, mixed>
+     */
+    public static function envelopeOf(#[\SensitiveParameter] FinalisedRecord $record): array
+    {
+        return self::shapeOf($record->record, $record->toArray());
+    }
+
+    /**
+     * The envelope of a record that was never finalised, before it is encoded:
+     * either shape, its columns or its bundle, with `unsigned` set beside it
+     * and no integrity field.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @return array<string, mixed>
+     */
+    public static function unsignedEnvelopeOf(#[\SensitiveParameter] AuditRecord $record): array
+    {
+        return ['unsigned' => true, ...self::shapeOf($record, $record->toArray())];
+    }
+
+    /**
      * The finalised record's envelope: the canonical encoding of its columns,
-     * refused as oversize beyond the bound.
+     * or of its bundle, refused as oversize beyond the bound, which applies to
+     * the whole bundle.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return string
@@ -85,7 +150,7 @@ final readonly class EnvelopeCodec
      */
     public function encode(#[\SensitiveParameter] FinalisedRecord $record): string
     {
-        $envelope = CanonicalEncoder::encode($record->toArray());
+        $envelope = CanonicalEncoder::encode(self::envelopeOf($record));
 
         if (strlen($envelope) > self::MAX_BYTES) {
             throw new EnvelopeRejectedException(EnvelopeFailure::OVERSIZE, $record->record->id);
@@ -96,8 +161,9 @@ final readonly class EnvelopeCodec
 
     /**
      * The finalised record the envelope holds, once it is held to its version's
-     * schema and its signature verifies, and, when an id is expected, once its
-     * id is that id; otherwise the refusal naming the first failure.
+     * schema and its signature verifies, a bundle's attachment once it is held
+     * to its own and names the record, and, when an id is expected, once its id
+     * is that id; otherwise the refusal naming the first failure.
      *
      * @param  string  $json
      * @param  ?string  $expectedId
@@ -112,21 +178,48 @@ final readonly class EnvelopeCodec
         }
 
         $fields = self::fieldsOf($json);
-        $id     = self::idOf($fields);
+        $bundle = self::isBundle($fields);
+        $id     = self::idOf($fields, $bundle);
 
         if (($fields['unsigned'] ?? null) === true) {
             throw new EnvelopeRejectedException(EnvelopeFailure::UNSIGNED, $id);
         }
 
-        self::checkSchema($fields, self::schemaOf($fields, $id), $id);
+        $columns = $bundle ? self::recordOf($fields, $id) : $fields;
 
-        $this->verify($fields, $id);
+        self::checkSchema($columns, self::schemaOf($columns, $id), $id);
+
+        $this->verify($columns, $id);
+
+        if ($bundle) {
+            self::checkAttachment($fields['attachment'], $id);
+        }
 
         if ($expectedId !== null && $expectedId !== $id) {
             throw new EnvelopeRejectedException(EnvelopeFailure::ID_MISMATCH, $id);
         }
 
-        return self::rebuild($json, $fields, $id);
+        return $bundle ? self::rebuildBundle($json, $columns, $id) : self::rebuildRecord($json, $columns, $id);
+    }
+
+    /**
+     * The record's envelope of the columns given: those columns, or, when the
+     * record carries an attachment, the bundle of them and the attachment,
+     * which names the record as its entry.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @param  array<string, mixed>  $columns
+     * @return array<string, mixed>
+     */
+    private static function shapeOf(#[\SensitiveParameter] AuditRecord $record, #[\SensitiveParameter] array $columns): array
+    {
+        if ($record->attachment === null) {
+            return $columns;
+        }
+
+        return ['attachment' => $record->attachment->envelopeFor($record->id), 'bundle_version' => self::BUNDLE_VERSION, 'record' => $columns];
     }
 
     /**
@@ -154,19 +247,75 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The envelope's id as it was read, or `null` when it has none or it is not
-     * a string.
+     * Whether the envelope is a bundle: one that names a bundle version at its
+     * top, whatever else it holds.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<array-key, mixed>  $fields
+     * @return bool
+     */
+    private static function isBundle(#[\SensitiveParameter] array $fields): bool
+    {
+        return array_key_exists('bundle_version', $fields);
+    }
+
+    /**
+     * The envelope's id as it was read, a bundle's from its record, or `null`
+     * when it has none or it is not a string.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  bool  $bundle
      * @return ?string
      */
-    private static function idOf(#[\SensitiveParameter] array $fields): ?string
+    private static function idOf(#[\SensitiveParameter] array $fields, bool $bundle): ?string
     {
-        $id = $fields['id'] ?? null;
+        $record = $fields['record'] ?? null;
+
+        $id = match (true) {
+            !$bundle                     => $fields['id'] ?? null,
+            $record instanceof \stdClass => $record->id   ?? null,
+            default                      => null,
+        };
 
         return is_string($id) ? $id : null;
+    }
+
+    /**
+     * The bundle's record columns, once the bundle has exactly its three keys
+     * and a version this release reads: refused as malformed for another key or
+     * a missing one, a version that is not an integer or a record that is not
+     * an object, and as unsupported for a version it does not read.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  ?string  $id
+     * @return array<array-key, mixed>
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException
+     */
+    private static function recordOf(#[\SensitiveParameter] array $fields, ?string $id): array
+    {
+        $keys = array_keys($fields);
+
+        sort($keys, SORT_STRING);
+
+        if ($keys !== self::BUNDLE_KEYS || !is_int($fields['bundle_version'])) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
+
+        if (!in_array($fields['bundle_version'], self::SUPPORTED_BUNDLE_VERSIONS, true)) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::UNSUPPORTED_VERSION, $id);
+        }
+
+        if (!$fields['record'] instanceof \stdClass) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
+
+        return get_object_vars($fields['record']);
     }
 
     /**
@@ -199,8 +348,9 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * Refuse as malformed an envelope that has a column the schema does not
-     * name, lacks one it names, or holds a value of another kind.
+     * Refuse as malformed an envelope's record, or a bundle's attachment, that
+     * has a field the schema does not name, lacks one it names, or holds a
+     * value of another kind.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -276,9 +426,37 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The finalised record of the verified envelope: the record rebuilt from
-     * its array view, its finalisation as signed, and its JSON columns as
-     * decoded; refused as malformed when a constructor refuses a value.
+     * Refuse as malformed a bundle's attachment that is not an object, has a
+     * field its schema does not name, lacks one it names, holds a value of
+     * another kind, or names an entry other than the bundle's record.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $attachment
+     * @param  ?string  $id
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException
+     */
+    private static function checkAttachment(#[\SensitiveParameter] mixed $attachment, ?string $id): void
+    {
+        if (!$attachment instanceof \stdClass) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
+
+        $fields = get_object_vars($attachment);
+
+        self::checkSchema($fields, self::ATTACHMENT_SCHEMA, $id);
+
+        if ($fields['entry_id'] !== $id) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
+    }
+
+    /**
+     * The finalised record of the verified plain envelope, which takes no
+     * attachment, so one whose properties hold a manifest descriptor is refused
+     * as malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -289,16 +467,57 @@ final readonly class EnvelopeCodec
      *
      * @throws \SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException
      */
-    private static function rebuild(#[\SensitiveParameter] string $json, #[\SensitiveParameter] array $fields, ?string $id): FinalisedRecord
+    private static function rebuildRecord(#[\SensitiveParameter] string $json, #[\SensitiveParameter] array $fields, ?string $id): FinalisedRecord
     {
         $assoc = json_decode($json, true, self::DEPTH);
 
+        return self::finalised(static fn (): AuditRecord => AuditRecord::fromEnvelope($assoc), $fields, $id);
+    }
+
+    /**
+     * The finalised record of the verified bundle, rebuilt with its attachment,
+     * which must be the one its signed descriptor describes.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  string  $json
+     * @param  array<array-key, mixed>  $fields
+     * @param  ?string  $id
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException
+     */
+    private static function rebuildBundle(#[\SensitiveParameter] string $json, #[\SensitiveParameter] array $fields, ?string $id): FinalisedRecord
+    {
+        $bundle = json_decode($json, true, self::DEPTH);
+
+        assert(is_array($bundle) && is_array($bundle['record']) && is_array($bundle['attachment']));
+
+        return self::finalised(static fn (): AuditRecord => AuditRecord::fromEnvelope($bundle['record'], Attachment::fromEnvelope($bundle['attachment'])), $fields, $id);
+    }
+
+    /**
+     * The finalised record of the record the closure rebuilds: its finalisation
+     * as signed, and its JSON columns as decoded; refused as malformed when a
+     * constructor refuses a value.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @param  array<array-key, mixed>  $fields
+     * @param  ?string  $id
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException
+     */
+    private static function finalised(#[\SensitiveParameter] \Closure $record, #[\SensitiveParameter] array $fields, ?string $id): FinalisedRecord
+    {
         ['recorded_at' => $recordedAt, 'integrity_version' => $integrityVersion, 'key_id' => $keyId, 'hmac' => $hmac, 'context' => $context, 'properties' => $properties] = $fields;
 
         try {
-            return FinalisedRecord::decoded(AuditRecord::fromEnvelope($assoc), $recordedAt, $integrityVersion, $keyId, $hmac, $context, $properties);
+            return FinalisedRecord::decoded($record(), $recordedAt, $integrityVersion, $keyId, $hmac, $context, $properties);
         } catch (\InvalidArgumentException) {
-            // Its message names only the column; the refusal says no more
+            // Its message names only the field; the refusal says no more
             throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
         }
     }

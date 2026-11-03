@@ -203,10 +203,11 @@ where it came from, so each value's source, and what it does not claim, is fixed
 
 ## Package Events
 
-| Event                                                 | Dispatched when                 | Carries                                                                        |
-|-------------------------------------------------------|---------------------------------|--------------------------------------------------------------------------------|
-| `SineMacula\Laravel\AuditLog\Events\AuditRecorded`    | The store has accepted a record | The record's id, code and category, no more                                    |
-| `SineMacula\Laravel\AuditLog\Events\AuditWriteFailed` | A write failed                  | The record's id and code, the store's class and the exception's class, no more |
+| Event                                                   | Dispatched when                 | Carries                                                                        |
+|---------------------------------------------------------|---------------------------------|--------------------------------------------------------------------------------|
+| `SineMacula\Laravel\AuditLog\Events\AuditRecorded`      | The store has accepted a record | The record's id, code and category, no more                                    |
+| `SineMacula\Laravel\AuditLog\Events\AuditWriteFailed`   | A write failed                  | The record's id and code, the store's class and the exception's class, no more |
+| `SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed` | An event could not be captured  | The classes of the event, of what translated it and of the exception, no more  |
 
 Accepted is not always durable, and `outcomes.md` says when it is. Every package event implements
 `Contracts\AuditLogEvent`.
@@ -228,7 +229,8 @@ Accepted is not always durable, and `outcomes.md` says when it is. Every package
   `src/Runtime/ContextSettings.php`; `config/audit-log.php`: `actor`, `context`, `source`.
 - `src/Listeners/CarryContextIntoJobs.php`, `src/Runtime/CarriedContext.php`, `src/Runtime/ActorSnapshot.php`,
   `src/Runtime/ReportLatch.php`.
-- `src/Events/AuditRecorded.php`, `src/Events/AuditWriteFailed.php`, `src/Contracts/AuditLogEvent.php`.
+- `src/Events/AuditRecorded.php`, `src/Events/AuditWriteFailed.php`, `src/Events/AuditCaptureFailed.php`,
+  `src/Contracts/AuditLogEvent.php`.
 - `src/Runtime/WriteGuard.php`: `during()`, `isActive()`, `isFirstRefusal()`.
 
 ## Authoritative Tests
@@ -355,6 +357,7 @@ Accepted is not always durable, and `outcomes.md` says when it is. Every package
 - `tests/Unit/Runtime/WriteGuardTest.php` `testNestedWorkKeepsItActiveUntilTheOutermostEnds`,
   `testReleasesWhenTheWorkThrows`, `testTheFirstRefusalIsTheOnlyFirst`, `testNestedEndsDoNotClearTheRefusal`
 - `tests/Unit/Events/AuditWriteFailedTest.php` `testCarriesTheFourFieldsAndNothingElse`, `testIsAPackageEvent`
+- `tests/Unit/Events/AuditCaptureFailedTest.php` `testItCarriesOnlyClassNames`, `testItIsAPackageEvent`
 - `tests/Feature/Listeners/TrackCommandFramesTest.php` `testCommandStartingEntersAFrameWithItsName`,
   `testCommandFinishedLeavesIt`
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheContextNoteStatesTheProxyPrerequisite`,

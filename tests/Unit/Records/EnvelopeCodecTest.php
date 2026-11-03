@@ -9,14 +9,18 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Ramsey\Uuid\Uuid;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Records\Attachment;
+use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Records\RecordFactory;
 
@@ -69,6 +73,15 @@ final class EnvelopeCodecTest extends TestCase
 
     /** @var string The import batch an imported record came in. */
     private const string IMPORT_BATCH_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
+
+    /** @var string The id of the bulk record's artifact. */
+    private const string ARTIFACT_ID = '01932b4e-8a40-7000-8000-0000000000b1';
+
+    /** @var string The settled digest of the golden members. */
+    private const string GOLDEN_DIGEST = '0bee9fea9443d63a556a7fe8d19b18920d8aac7c234e48afc739a4df9380ed4d';
+
+    /** @var string The golden bundle: the key it is signed under, its members' canonical form and digest, and its envelope. */
+    private const string GOLDEN_BUNDLE = __DIR__ . '/../../Fixtures/Records/bundle-v1.json';
 
     /** @var string A string the tests replace with raw JSON that no PHP value encodes canonically. */
     private const string MARKER = '__raw__';
@@ -902,6 +915,636 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
+     * The bundle schema is version 1, the one version this release reads.
+     *
+     * @return void
+     */
+    public function testTheBundleVersionsArePinned(): void
+    {
+        self::assertSame(1, EnvelopeCodec::BUNDLE_VERSION);
+        self::assertSame([1], EnvelopeCodec::SUPPORTED_BUNDLE_VERSIONS);
+    }
+
+    /**
+     * A record without an attachment has its columns as its envelope, and,
+     * never finalised, its columns with `unsigned` set beside them.
+     *
+     * @return void
+     */
+    public function testARecordWithoutAnAttachmentIsItsColumns(): void
+    {
+        $record    = RecordFactory::captured(id: self::ID);
+        $finalised = self::signer()->sign($record, self::RECORDED_AT);
+
+        self::assertSame($finalised->toArray(), EnvelopeCodec::envelopeOf($finalised));
+        self::assertSame(['unsigned' => true, ...$record->toArray()], EnvelopeCodec::unsignedEnvelopeOf($record));
+    }
+
+    /**
+     * A record with an attachment is a bundle of three keys: its attachment,
+     * naming the record as its entry, the bundle version, and its columns;
+     * never finalised, the same bundle with `unsigned` set beside it and no
+     * integrity field in its record.
+     *
+     * @return void
+     */
+    public function testARecordWithAnAttachmentIsABundle(): void
+    {
+        $record    = self::bundledRecord();
+        $finalised = self::signer()->sign($record, self::RECORDED_AT);
+
+        self::assertNotNull($record->attachment);
+
+        $attachment = $record->attachment->envelopeFor(self::ID);
+
+        self::assertSame(['attachment' => $attachment, 'bundle_version' => 1, 'record' => $finalised->toArray()], EnvelopeCodec::envelopeOf($finalised));
+        self::assertSame(['unsigned' => true, 'attachment' => $attachment, 'bundle_version' => 1, 'record' => $record->toArray()], EnvelopeCodec::unsignedEnvelopeOf($record));
+        self::assertSame(self::ID, $attachment['entry_id']);
+        self::assertSame(self::ARTIFACT_ID, $attachment['id']);
+    }
+
+    /**
+     * A bundle encodes to the canonical encoding of its three keys and decodes
+     * to a record that encodes to exactly the same bytes, with its signature
+     * and every field of its attachment, the sealed members as they were.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testABundleRoundTripsByteForByte(): void
+    {
+        $codec     = self::codec();
+        $finalised = self::signer()->sign(self::bundledRecord(), self::RECORDED_AT);
+        $envelope  = $codec->encode($finalised);
+        $decoded   = $codec->decode($envelope);
+
+        self::assertSame(CanonicalEncoder::encode(EnvelopeCodec::envelopeOf($finalised)), $envelope);
+        self::assertSame(['attachment', 'bundle_version', 'record'], array_keys(self::assoc($envelope)));
+        self::assertSame($envelope, $codec->encode($decoded));
+        self::assertSame($finalised->hmac, $decoded->hmac);
+        self::assertTrue(self::signer()->verifies($decoded->toArray()));
+        self::assertEquals($finalised->record->attachment, $decoded->record->attachment);
+        self::assertSame($envelope, $codec->encode($codec->decode($codec->encode($decoded))));
+    }
+
+    /**
+     * The golden bundle, of the golden members sealed once under the test
+     * encrypter and signed under the golden key, decodes and encodes back byte
+     * for byte; its manifest is the settled golden, and its members open to the
+     * golden canonical form.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheGoldenBundleDecodes(): void
+    {
+        $envelope = self::goldenBundle('envelope');
+        $codec    = self::codec([self::goldenBundle('key_id') => self::goldenBundle('secret')], self::goldenBundle('key_id'));
+        $decoded  = $codec->decode($envelope, self::ID);
+
+        self::assertSame($envelope, $codec->encode($decoded));
+
+        $attachment = $decoded->record->attachment;
+
+        self::assertNotNull($attachment);
+        self::assertSame(self::GOLDEN_DIGEST, self::goldenBundle('digest'));
+        self::assertSame(self::GOLDEN_DIGEST, $attachment->digest);
+        self::assertSame(3, $attachment->memberCount);
+        self::assertSame(self::ARTIFACT_ID, $attachment->id);
+        self::assertSame(Attachment::KIND_BULK, $attachment->kind);
+
+        $members = RecordFactory::encrypter()->decryptString($attachment->members);
+
+        self::assertSame(self::goldenBundle('members'), $members);
+        self::assertSame(['count' => 3, 'digest' => self::GOLDEN_DIGEST], Manifest::readCanonical($members));
+        self::assertSame(['artifact_id' => self::ARTIFACT_ID, 'count' => 3, 'digest' => self::GOLDEN_DIGEST], self::assoc($envelope)['record']['properties']['_audit']['manifest']);
+    }
+
+    /**
+     * Rows of `[the bundle's keys in place of its own, the id named]`: a bundle
+     * without one of its keys, with a key added, or holding its record as
+     * something other than an object; one without its version is not a bundle
+     * at all and is held to a plain envelope's schema.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @return iterable<string, array{0: array<string, mixed>, 1: list<string>, 2: ?string}>
+     */
+    public static function provideBundleKeys(): iterable
+    {
+        yield from [
+            'no attachment'                  => [[], ['attachment'], self::ID],
+            'no record'                      => [[], ['record'], null],
+            'no version'                     => [[], ['bundle_version'], null],
+            'an added key'                   => [['extra' => true], [], self::ID],
+            'an added id'                    => [['id' => self::ID], [], self::ID],
+            'a version as a string'          => [['bundle_version' => '1'], [], self::ID],
+            'a version of null'              => [['bundle_version' => null], [], self::ID],
+            'a record as a list'             => [['record' => [self::ID]], [], null],
+            'a record of null'               => [['record' => null], [], null],
+            'an attachment as a list'        => [['attachment' => [1]], [], self::ID],
+            'an attachment of null'          => [['attachment' => null], [], self::ID],
+            'an attachment as a string'      => [['attachment' => 'members'], [], self::ID],
+            'nothing but a version'          => [[], ['attachment', 'record'], null],
+            'a version and a bare record id' => [['record' => (object) ['id' => self::ID]], [], self::ID],
+        ];
+    }
+
+    /**
+     * A bundle with a key missing, a key added, a version that is not an
+     * integer, or a record or attachment that is not an object is malformed,
+     * naming its record's id where it has one.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $top
+     * @param  list<string>  $removed
+     * @param  ?string  $id
+     * @return void
+     */
+    #[DataProvider('provideBundleKeys')]
+    public function testABundleWithAMissingOrExtraKeyIsMalformed(array $top, array $removed, ?string $id): void
+    {
+        $bundle    = array_diff_key(self::bundle(top: $top), array_flip($removed));
+        $exception = self::rejection(CanonicalEncoder::encode($bundle));
+
+        self::assertSame(EnvelopeFailure::MALFORMED, $exception->failure);
+        self::assertSame($id, $exception->id);
+    }
+
+    /**
+     * Every refusal of a bundle names its record's id, never its attachment's
+     * or its entry's, whatever the failure.
+     *
+     * @return void
+     */
+    public function testABundlesRefusalNamesItsRecordsId(): void
+    {
+        $other = '01932b4e-8a40-7000-8000-000000000002';
+
+        $inputs = [
+            'unsigned'                  => [self::bundle(top: ['unsigned' => true]), null, EnvelopeFailure::UNSIGNED],
+            'an unsupported version'    => [self::bundle(top: ['bundle_version' => 2]), null, EnvelopeFailure::UNSUPPORTED_VERSION],
+            'an added key'              => [self::bundle(top: ['extra' => true]), null, EnvelopeFailure::MALFORMED],
+            'a record column added'     => [self::bundle(['extra' => true]), null, EnvelopeFailure::MALFORMED],
+            'an unknown key'            => [self::bundle(['key_id' => 'k1999']), null, EnvelopeFailure::UNKNOWN_KEY],
+            'a mismatch'                => [self::bundle(['hmac' => str_repeat('a', 64)]), null, EnvelopeFailure::SIGNATURE_MISMATCH],
+            'an attachment of another'  => [self::bundle(attachment: ['entry_id' => $other]), null, EnvelopeFailure::MALFORMED],
+            'an id mismatch'            => [self::bundle(), $other, EnvelopeFailure::ID_MISMATCH],
+            'an attachment not covered' => [self::bundle(attachment: ['member_count' => 4]), null, EnvelopeFailure::MALFORMED],
+            'the attachment\'s id'      => [self::bundle(), self::ARTIFACT_ID, EnvelopeFailure::ID_MISMATCH],
+        ];
+
+        foreach ($inputs as $what => [$bundle, $expectedId, $failure]) {
+            $exception = self::rejection(CanonicalEncoder::encode($bundle), $expectedId);
+
+            self::assertSame($failure, $exception->failure, $what);
+            self::assertSame(self::ID, $exception->id, $what);
+        }
+    }
+
+    /**
+     * Rows of `[bundle version, failure]`: integers this release does not read,
+     * and values that are not integers.
+     *
+     * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure}>
+     */
+    public static function provideBundleVersions(): iterable
+    {
+        yield from [
+            'version 0'          => ['0', EnvelopeFailure::UNSUPPORTED_VERSION],
+            'version 2'          => ['2', EnvelopeFailure::UNSUPPORTED_VERSION],
+            'a negative version' => ['-1', EnvelopeFailure::UNSUPPORTED_VERSION],
+            'a float of 1'       => ['1.0', EnvelopeFailure::MALFORMED],
+            'true'               => ['true', EnvelopeFailure::MALFORMED],
+            'an object'          => ['{"v":1}', EnvelopeFailure::MALFORMED],
+        ];
+    }
+
+    /**
+     * A bundle version this release does not read is unsupported, and one that
+     * is not an integer is malformed, each naming the record's id, before the
+     * record is read at all.
+     *
+     * @param  string  $version
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure  $failure
+     * @return void
+     */
+    #[DataProvider('provideBundleVersions')]
+    public function testAnUnsupportedBundleVersionIsRefused(string $version, EnvelopeFailure $failure): void
+    {
+        $bundle    = self::raw(CanonicalEncoder::encode(self::bundle(['event' => 1], top: ['bundle_version' => self::MARKER])), $version);
+        $exception = self::rejection($bundle);
+
+        self::assertSame($failure, $exception->failure);
+        self::assertSame(self::ID, $exception->id);
+    }
+
+    /**
+     * An attachment that names another entry, or names it in another form, is
+     * malformed, even though the record verifies and the descriptor describes
+     * it.
+     *
+     * @return void
+     */
+    public function testAnAttachmentOfAnotherEntryIsMalformed(): void
+    {
+        foreach (['01932b4e-8a40-7000-8000-000000000002', strtoupper(self::ID), self::ARTIFACT_ID, self::ID . ' '] as $entry) {
+            $exception = self::rejection(CanonicalEncoder::encode(self::bundle(attachment: ['entry_id' => $entry])));
+
+            self::assertSame(EnvelopeFailure::MALFORMED, $exception->failure, $entry);
+            self::assertSame(self::ID, $exception->id, $entry);
+        }
+
+        self::assertSame(self::ID, self::codec()->decode(CanonicalEncoder::encode(self::bundle()))->record->id);
+    }
+
+    /**
+     * Rows of `[record fields in place of its own, attachment fields in place
+     * of its own]`: an attachment whose id, digest or count is not the signed
+     * descriptor's, a signed descriptor that is not the attachment's, one with
+     * a field added, and a record that signs no descriptor at all.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @return iterable<string, array{0: array<string, mixed>, 1: array<string, mixed>}>
+     */
+    public static function provideUndescribedAttachments(): iterable
+    {
+        $other = '01932b4e-8a40-7000-8000-0000000000b2';
+
+        yield from [
+            'another artifact id'       => [[], ['id' => $other]],
+            'another digest'            => [[], ['digest' => str_repeat('a', 64)]],
+            'another count'             => [[], ['member_count' => 4]],
+            'a descriptor of another'   => [['properties' => self::properties(['artifact_id' => $other])], []],
+            'a descriptor of a digest'  => [['properties' => self::properties(['digest' => str_repeat('b', 64)])], []],
+            'a descriptor of a count'   => [['properties' => self::properties(['count' => 2])], []],
+            'a count as a string'       => [['properties' => self::properties(['count' => '3'])], []],
+            'a descriptor with more'    => [['properties' => self::properties(['extra' => true])], []],
+            'a descriptor as a string'  => [['properties' => ['batch' => 'march', '_audit' => ['manifest' => 'bulk']]], []],
+            'no descriptor'             => [['properties' => ['batch' => 'march']], []],
+            'no properties'             => [['properties' => null], []],
+            'another kind'              => [[], ['kind' => 'other']],
+            'an upper-case artifact id' => [[], ['id' => strtoupper(self::ARTIFACT_ID)]],
+            'no members'                => [[], ['members' => '']],
+            'no member'                 => [['properties' => self::properties(['count' => 0])], ['member_count' => 0]],
+        ];
+    }
+
+    /**
+     * A bundle whose attachment is not the one its record's signed descriptor
+     * describes, or that its constructor refuses, is malformed, naming the
+     * record's id, though the record verifies.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $record
+     * @param  array<string, mixed>  $attachment
+     * @return void
+     */
+    #[DataProvider('provideUndescribedAttachments')]
+    public function testAnAttachmentThatDoesNotMatchTheSignedDescriptorIsMalformed(array $record, array $attachment): void
+    {
+        $bundle = self::bundle($record, $attachment);
+
+        self::assertTrue(self::signer()->verifies($bundle['record']));
+
+        $exception = self::rejection(CanonicalEncoder::encode($bundle));
+
+        self::assertSame(EnvelopeFailure::MALFORMED, $exception->failure);
+        self::assertSame(self::ID, $exception->id);
+    }
+
+    /**
+     * Rows of `[attachment fields in place of its own, fields removed]`: an
+     * attachment with a field missing, added, or of another kind.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @return iterable<string, array{0: array<string, mixed>, 1: list<string>}>
+     */
+    public static function provideAttachmentShapes(): iterable
+    {
+        yield from [
+            'no members'               => [[], ['members']],
+            'no entry'                 => [[], ['entry_id']],
+            'no count'                 => [[], ['member_count']],
+            'an added field'           => [['extra' => true], []],
+            'a count as a string'      => [['member_count' => '3'], []],
+            'members of null'          => [['members' => null], []],
+            'members as an object'     => [['members' => ['a' => 'b']], []],
+            'an id as an integer'      => [['id' => 1], []],
+            'an entry of null'         => [['entry_id' => null], []],
+            'a digest as a list'       => [['digest' => [self::GOLDEN_DIGEST]], []],
+            'a kind of null'           => [['kind' => null], []],
+            'the record in its place'  => [['record' => true], []],
+            'nothing but its entry id' => [[], ['id', 'kind', 'member_count', 'digest', 'members']],
+        ];
+    }
+
+    /**
+     * An attachment held to its schema, exactly its six fields, each of its
+     * kind, refuses any other as malformed, naming the record's id.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $fields
+     * @param  list<string>  $removed
+     * @return void
+     */
+    #[DataProvider('provideAttachmentShapes')]
+    public function testAnAttachmentIsHeldToItsSchema(array $fields, array $removed): void
+    {
+        $bundle               = self::bundle(attachment: $fields);
+        $bundle['attachment'] = array_diff_key($bundle['attachment'], array_flip($removed));
+
+        $exception = self::rejection(CanonicalEncoder::encode($bundle));
+
+        self::assertSame(EnvelopeFailure::MALFORMED, $exception->failure);
+        self::assertSame(self::ID, $exception->id);
+    }
+
+    /**
+     * A plain envelope whose properties hold a manifest descriptor is
+     * malformed, though it verifies, so a bulk record never comes back without
+     * its members; one whose metadata holds anything else decodes.
+     *
+     * @return void
+     */
+    public function testAPlainEnvelopeWithADescriptorIsMalformed(): void
+    {
+        $record = self::bundle()['record'];
+
+        self::assertTrue(self::signer()->verifies($record));
+
+        $exception = self::rejection(CanonicalEncoder::encode($record));
+
+        self::assertSame(EnvelopeFailure::MALFORMED, $exception->failure);
+        self::assertSame(self::ID, $exception->id);
+
+        foreach ([['manifest' => null], ['manifest' => []]] as $metadata) {
+            $plain = self::envelope(['properties' => ['batch' => 'march', '_audit' => $metadata]]);
+
+            self::assertSame(EnvelopeFailure::MALFORMED, self::rejection($plain)->failure);
+        }
+
+        $note = self::envelope(['properties' => ['_audit' => ['note' => 'manifest']]]);
+
+        self::assertNull(self::codec()->decode($note)->record->attachment);
+    }
+
+    /**
+     * A bundle that says it is unsigned is counted as unsigned, naming its
+     * record's id, never verified, whatever its record lacks; the bundle a
+     * record never finalised is spilled as is one.
+     *
+     * @return void
+     */
+    public function testAnUnsignedBundleIsUnsigned(): void
+    {
+        $record = self::bundledRecord();
+
+        $inputs = [
+            'never finalised'       => EnvelopeCodec::unsignedEnvelopeOf($record),
+            'with every column'     => self::bundle(top: ['unsigned' => true]),
+            'with an unknown key'   => self::bundle(['key_id' => 'k1999'], top: ['unsigned' => true]),
+            'a version unsupported' => self::bundle(top: ['unsigned' => true, 'bundle_version' => 2]),
+            'with a key added'      => self::bundle(top: ['unsigned' => true, 'extra' => true]),
+        ];
+
+        foreach ($inputs as $what => $bundle) {
+            $exception = self::rejection(CanonicalEncoder::encode($bundle));
+
+            self::assertSame(EnvelopeFailure::UNSIGNED, $exception->failure, $what);
+            self::assertSame(self::ID, $exception->id, $what);
+        }
+
+        foreach (['recorded_at', 'integrity_version', 'key_id', 'hmac'] as $column) {
+            self::assertArrayNotHasKey($column, $inputs['never finalised']['record'], "An unsigned bundle's record holds `{$column}`.");
+        }
+    }
+
+    /**
+     * A bundle whose envelope is exactly the bound is encoded, and one byte
+     * more is refused as oversize, naming its record's id: the bound applies to
+     * the whole bundle, its attachment included (protects against an off-by-one
+     * mutation of the bound, and against a bound on the record's columns
+     * alone).
+     *
+     * @return void
+     */
+    public function testABundleOverTheBoundIsOversize(): void
+    {
+        self::withMemory(static function (): void {
+
+            $codec = self::codec();
+            $base  = strlen($codec->encode(self::paddedBundle(1)));
+            $fits  = self::paddedBundle(EnvelopeCodec::MAX_BYTES - $base + 1);
+
+            self::assertSame(EnvelopeCodec::MAX_BYTES, strlen($codec->encode($fits)));
+            self::assertLessThan(65536, strlen(CanonicalEncoder::encode($fits->toArray())));
+
+            unset($fits);
+
+            try {
+                $codec->encode(self::paddedBundle(EnvelopeCodec::MAX_BYTES - $base + 2));
+                self::fail('Expected a bundle over the bound to be refused.');
+            } catch (EnvelopeRejectedException $exception) {
+                self::assertSame(EnvelopeFailure::OVERSIZE, $exception->failure);
+                self::assertSame(self::ID, $exception->id);
+            }
+        });
+    }
+
+    /**
+     * A bundle's record is held to its version's schema and verified exactly as
+     * a plain envelope is: a changed column is a signature mismatch, an unknown
+     * key, an unsupported version, a column missing, added or of another kind,
+     * and a value its constructor refuses, each as it would be.
+     *
+     * @return void
+     */
+    public function testABundlesRecordIsVerifiedAsAnyRecord(): void
+    {
+        $tampered = self::bundle();
+
+        $tampered['record']['event'] = 'invoice.voided';
+
+        $missing = self::bundle();
+
+        unset($missing['record']['outcome']);
+
+        $inputs = [
+            'a changed column'            => [$tampered, EnvelopeFailure::SIGNATURE_MISMATCH],
+            'a changed hmac'              => [self::bundle(['hmac' => str_repeat('a', 64)]), EnvelopeFailure::SIGNATURE_MISMATCH],
+            'another secret'              => [self::bundle(secret: self::RETIRED_SECRET), EnvelopeFailure::SIGNATURE_MISMATCH],
+            'an unknown key'              => [self::bundle(['key_id' => 'k1999']), EnvelopeFailure::UNKNOWN_KEY],
+            'an unsupported record'       => [self::bundle(['record_version' => 2]), EnvelopeFailure::UNSUPPORTED_VERSION],
+            'an unsupported integrity'    => [self::bundle(['integrity_version' => 2]), EnvelopeFailure::UNSUPPORTED_VERSION],
+            'a missing version'           => [self::bundle(['record_version' => null]), EnvelopeFailure::MALFORMED],
+            'a missing column'            => [$missing, EnvelopeFailure::MALFORMED],
+            'an added column'             => [self::bundle(['extra' => true]), EnvelopeFailure::MALFORMED],
+            'a column of another kind'    => [self::bundle(['event' => 1]), EnvelopeFailure::MALFORMED],
+            'recorded before it occurred' => [self::bundle(['recorded_at' => '2026-11-01T11:00:00.000000Z']), EnvelopeFailure::MALFORMED],
+        ];
+
+        foreach ($inputs as $what => [$bundle, $failure]) {
+            self::assertSame($failure, self::rejection(CanonicalEncoder::encode($bundle))->failure, $what);
+        }
+    }
+
+    /**
+     * The expected id is the bundle's record's: another id, or the attachment's
+     * own, is an id mismatch naming the record's id, and the record's id,
+     * exactly, passes, as does no id expected.
+     *
+     * @return void
+     */
+    public function testTheExpectedIdAppliesToABundle(): void
+    {
+        $codec  = self::codec();
+        $bundle = CanonicalEncoder::encode(self::bundle());
+
+        foreach (['01932b4e-8a40-7000-8000-000000000002', self::ARTIFACT_ID, strtoupper(self::ID), ''] as $expected) {
+            $exception = self::rejection($bundle, $expected);
+
+            self::assertSame(EnvelopeFailure::ID_MISMATCH, $exception->failure, $expected);
+            self::assertSame(self::ID, $exception->id, $expected);
+        }
+
+        self::assertSame(self::ID, $codec->decode($bundle, self::ID)->record->id);
+        self::assertSame(self::ID, $codec->decode($bundle)->record->id);
+    }
+
+    /**
+     * Rows of `[bundle, expected id, failure]`: two failures of a bundle at
+     * once, and the one checked first.
+     *
+     * @return iterable<string, array{0: string, 1: ?string, 2: \SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure}>
+     */
+    public static function provideBundleOrder(): iterable
+    {
+        $other   = '01932b4e-8a40-7000-8000-000000000002';
+        $broken  = ['member_count' => '3'];
+        $forged  = ['hmac' => str_repeat('a', 64)];
+        $missing = self::bundle(top: ['bundle_version' => 2]);
+
+        unset($missing['attachment']);
+
+        yield from [
+            'unsigned before a key'                   => [self::encoded(self::bundle(top: ['unsigned' => true, 'extra' => true])), null, EnvelopeFailure::UNSIGNED],
+            'a key before an unsupported version'     => [self::encoded($missing), null, EnvelopeFailure::MALFORMED],
+            'an unsupported version before a record'  => [self::encoded(self::bundle(['event' => 1], top: ['bundle_version' => 2])), null, EnvelopeFailure::UNSUPPORTED_VERSION],
+            'an unknown key before an attachment'     => [self::encoded(self::bundle(['key_id' => 'k1999'], $broken)), null, EnvelopeFailure::UNKNOWN_KEY],
+            'a mismatch before an attachment'         => [self::encoded(self::bundle($forged, ['entry_id' => $other])), null, EnvelopeFailure::SIGNATURE_MISMATCH],
+            'an attachment before an id mismatch'     => [self::encoded(self::bundle(attachment: $broken)), $other, EnvelopeFailure::MALFORMED],
+            'another entry before an id mismatch'     => [self::encoded(self::bundle(attachment: ['entry_id' => $other])), $other, EnvelopeFailure::MALFORMED],
+            'an id mismatch before the descriptor'    => [self::encoded(self::bundle(attachment: ['digest' => str_repeat('a', 64)])), $other, EnvelopeFailure::ID_MISMATCH],
+            'the descriptor last'                     => [self::encoded(self::bundle(attachment: ['digest' => str_repeat('a', 64)])), self::ID, EnvelopeFailure::MALFORMED],
+            'a refused record with a good attachment' => [self::encoded(self::bundle(['recorded_at' => '2026-11-01T11:00:00.000000Z'])), self::ID, EnvelopeFailure::MALFORMED],
+        ];
+    }
+
+    /**
+     * With two failures of a bundle, the one checked first is the one named, in
+     * the order unsigned, the bundle's keys, its version, its record as any
+     * record's, its attachment, the id and the descriptor.
+     *
+     * @param  string  $input
+     * @param  ?string  $expectedId
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure  $failure
+     * @return void
+     */
+    #[DataProvider('provideBundleOrder')]
+    public function testEachOfABundlesOutcomesIsCheckedInOrder(string $input, ?string $expectedId, EnvelopeFailure $failure): void
+    {
+        self::assertSame($failure, self::rejection($input, $expectedId)->failure);
+    }
+
+    /**
+     * A bundle's record is decoded to the same depth as a plain envelope, one
+     * level inside the bundle, so its deepest column is one level shallower
+     * than a plain envelope's, far deeper than capture keeps; a column one
+     * level deeper is malformed, never cut.
+     *
+     * @return void
+     */
+    public function testABundlesRecordNestsOneLevelInsideTheBundle(): void
+    {
+        // The canonical encoding recurses once per level, past a debugger's
+        // default limit on nested calls
+        $nesting = ini_set('xdebug.max_nesting_level', '4096');
+
+        try {
+            $deepest = self::encoded(self::bundle(['properties' => self::properties(more: ['a' => self::nested(509)])]));
+            $deeper  = self::encoded(self::bundle(['properties' => self::properties(more: ['a' => self::nested(510)])]));
+
+            self::assertSame($deepest, self::codec()->encode(self::codec()->decode($deepest)));
+            self::assertSame(EnvelopeFailure::MALFORMED, self::rejection($deeper)->failure);
+        } finally {
+            if ($nesting !== false) {
+                ini_set('xdebug.max_nesting_level', $nesting);
+            }
+        }
+    }
+
+    /**
+     * No refusal of a bundle carries it: neither its record nor its
+     * attachment's members are in the refusal's message, its previous exception
+     * or any frame of its trace, with the arguments of every frame kept.
+     *
+     * @return void
+     */
+    public function testNoBundleRefusalCarriesTheBundle(): void
+    {
+        $planted = ['properties' => self::properties(more: ['note' => self::SECRET])];
+        $members = ['members' => self::SECRET];
+
+        $inputs = [
+            'unsigned'               => self::bundle($planted, $members, ['unsigned' => true]),
+            'an unsupported version' => self::bundle($planted, $members, ['bundle_version' => 2]),
+            'an added key'           => self::bundle($planted, $members, ['extra' => self::SECRET]),
+            'a mismatch'             => self::bundle([...$planted, 'hmac' => str_repeat('a', 64)], $members),
+            'another entry'          => self::bundle($planted, [...$members, 'entry_id' => self::ARTIFACT_ID]),
+            'an undescribed one'     => self::bundle($planted, [...$members, 'member_count' => 4]),
+            'a refused attachment'   => self::bundle($planted, [...$members, 'kind' => self::SECRET]),
+            'a plain descriptor'     => self::bundle($planted)['record'],
+        ];
+
+        $ignored = ini_set('zend.exception_ignore_args', '0');
+
+        try {
+            foreach ($inputs as $what => $bundle) {
+                $exception = self::rejection(CanonicalEncoder::encode($bundle));
+
+                self::assertNull($exception->getPrevious(), $what);
+                self::assertHoldsNoSecret($exception, "the refusal of {$what}");
+            }
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $ignored);
+        }
+    }
+
+    /**
+     * The record each envelope is made of is marked sensitive, so no frame of
+     * the codec shows it.
+     *
+     * @return void
+     */
+    public function testTheEnvelopesRecordIsMarkedSensitive(): void
+    {
+        foreach (['envelopeOf', 'unsignedEnvelopeOf'] as $method) {
+            $parameter = (new \ReflectionMethod(EnvelopeCodec::class, $method))->getParameters()[0];
+
+            self::assertSame('record', $parameter->getName());
+            self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class), $method);
+        }
+    }
+
+    /**
      * The envelope's columns: a captured record finalised under `k2026`, with
      * the fields given in place of its own and signed over the result with the
      * secret, as the signer signs, unless an HMAC is given; then the columns
@@ -1099,5 +1742,152 @@ final class EnvelopeCodecTest extends TestCase
         $config = new Repository(['audit-log' => ['integrity' => ['keys' => $keys, 'current' => $current]], 'app' => ['key' => self::APP_KEY]]);
 
         return new RecordSigner(new KeyRing(new IntegritySettings($config)));
+    }
+
+    /**
+     * The captured bulk record of three invoices, its artifact's id and its own
+     * pinned, carrying its sealed manifest.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     */
+    private static function bundledRecord(): AuditRecord
+    {
+        Str::createUuidsUsingSequence([Uuid::fromString(self::ARTIFACT_ID), Uuid::fromString(self::ID)]);
+
+        try {
+            return RecordFactory::bundled();
+        } finally {
+            Str::createUuidsNormally();
+        }
+    }
+
+    /**
+     * A bundle's envelope as arrays: the bulk record finalised under `k2026`,
+     * with the record's columns given in place of its own and signed over the
+     * result with the secret, as the signer signs, unless an HMAC is given;
+     * its attachment's fields given in place of its own; then the keys given at
+     * the top in place of the bundle's.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $record
+     * @param  array<string, mixed>  $attachment
+     * @param  array<string, mixed>  $top
+     * @param  string  $secret
+     * @return array{attachment: array<string, mixed>, bundle_version: int, record: array<string, mixed>}
+     */
+    private static function bundle(array $record = [], array $attachment = [], array $top = [], string $secret = self::CURRENT_SECRET): array
+    {
+        $finalised = new FinalisedRecord(self::bundledRecord(), self::RECORDED_AT, 1, self::KEY_ID, self::PLACEHOLDER_HMAC);
+        $envelope  = EnvelopeCodec::envelopeOf($finalised);
+
+        self::assertIsArray($envelope['record']);
+        self::assertIsArray($envelope['attachment']);
+
+        $columns = array_replace($envelope['record'], $record);
+        $signed  = array_intersect_key($columns, array_flip(RecordSigner::SIGNED_COLUMNS));
+
+        $columns['hmac'] = array_key_exists('hmac', $record) ? $record['hmac'] : hash_hmac('sha256', CanonicalEncoder::encode($signed), $secret);
+
+        // phpcs:disable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+
+        /** @var array{attachment: array<string, mixed>, bundle_version: int, record: array<string, mixed>} */
+        return array_replace(['attachment' => array_replace($envelope['attachment'], $attachment), 'bundle_version' => 1, 'record' => $columns], $top);
+
+        // phpcs:enable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+    }
+
+    /**
+     * The bulk record's properties: its own key, the keys given, and its
+     * manifest descriptor with the fields given in place of its own.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $descriptor
+     * @param  array<string, mixed>  $more
+     * @return array<string, mixed>
+     *
+     * @throws \JsonException
+     */
+    private static function properties(array $descriptor = [], array $more = []): array
+    {
+        $members = Manifest::encode(array_map(static fn (int $id): array => [RecordFactory::MEMBER_TYPE, (string) $id], [1, 2, 3]));
+        $own     = ['artifact_id' => self::ARTIFACT_ID, 'digest' => hash('sha256', $members), 'count' => 3];
+
+        return ['batch' => 'march', ...$more, '_audit' => ['manifest' => array_replace($own, $descriptor)]];
+    }
+
+    /**
+     * The canonical encoding of the envelope given as arrays.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $envelope
+     * @return string
+     */
+    private static function encoded(array $envelope): string
+    {
+        return CanonicalEncoder::encode($envelope);
+    }
+
+    /**
+     * The envelope decoded to arrays.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  string  $envelope
+     * @return array<string, mixed>
+     *
+     * @throws \JsonException
+     */
+    private static function assoc(string $envelope): array
+    {
+        $decoded = json_decode($envelope, true, 513, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($decoded);
+
+        // phpcs:disable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+
+        /** @var array<string, mixed> $decoded */
+        // phpcs:enable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+
+        return $decoded;
+    }
+
+    /**
+     * The bulk record finalised with its attachment's sealed members replaced
+     * by a string of the length given, for a bundle of an exact size; the
+     * descriptor still describes it.
+     *
+     * @param  int  $length
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     */
+    private static function paddedBundle(int $length): FinalisedRecord
+    {
+        $record = self::bundledRecord();
+
+        self::assertNotNull($record->attachment);
+
+        $padded = Attachment::fromEnvelope([...$record->attachment->envelopeFor(self::ID), 'members' => str_repeat('a', $length)]);
+
+        return new FinalisedRecord(RecordFactory::withFields(['attachment' => $padded], $record), self::RECORDED_AT, 1, self::KEY_ID, self::PLACEHOLDER_HMAC);
+    }
+
+    /**
+     * The golden bundle's field.
+     *
+     * @param  'digest'|'envelope'|'key_id'|'members'|'secret'  $field
+     * @return string
+     *
+     * @throws \JsonException
+     */
+    private static function goldenBundle(string $field): string
+    {
+        $golden = json_decode((string) file_get_contents(self::GOLDEN_BUNDLE), true, 512, JSON_THROW_ON_ERROR);
+        $value  = is_array($golden) ? ($golden[$field] ?? null) : null;
+
+        self::assertIsString($value, sprintf('The golden bundle has no `%s`.', $field));
+
+        return $value;
     }
 }

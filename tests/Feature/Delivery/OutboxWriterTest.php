@@ -25,6 +25,7 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule;
 use SineMacula\Laravel\AuditLog\Delivery\Outbox;
@@ -52,7 +53,9 @@ use Tests\TestCase;
  * Feature tests for the outbox write path: where a record goes by its timing
  * and the selected transaction, what the row holds, and what a failed write
  * does under each rule, a spill bound to the commit it depends on above all,
- * with the write guard around the insert.
+ * with the write guard around the insert; and a capture's signal, carried into
+ * the insert, marked when the insert waits for another connection's commit,
+ * with nothing let out of that commit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,6 +87,9 @@ final class OutboxWriterTest extends TestCase
 
     /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditWriteFailed> The failed writes said, in order. */
     private array $failures = [];
+
+    /** @var list<string> The class each capture's signal passed on, in order. */
+    private array $signalled = [];
 
     /**
      * Bind the reporter, capture the spill lines and keep every failed write
@@ -1278,6 +1284,239 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
+     * A capture's failed insert is spilled once, reported once and said once,
+     * and its signal is told once, with the failure's class.
+     *
+     * @return void
+     */
+    public function testACapturesOutboxFailureIsSignalledOnce(): void
+    {
+        $this->pointOutboxAtProbeTable();
+
+        $signal = $this->signal();
+
+        $this->write($this->record(), Timing::IMMEDIATE, null, FailureRule::REPORT, $signal);
+
+        self::assertCount(1, $this->spillLines());
+        self::assertCount(1, $this->reporter->reports());
+        self::assertSame('outbox', $this->firstReport()->operation);
+        self::assertCount(1, $this->failures);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertFalse($signal->isDeferred());
+    }
+
+    /**
+     * A capture whose transaction is on the outbox connection is inserted at
+     * once, inside it, and is not deferred: the rollback takes the row.
+     *
+     * @return void
+     */
+    public function testACaptureOnTheOutboxConnectionIsInsertedInsideTheHost(): void
+    {
+        $this->begin();
+
+        $signal = $this->signal();
+
+        $this->write($this->record(), Timing::AFTER_COMMIT, null, FailureRule::REPORT, $signal);
+
+        self::assertSame(1, $this->outboxCount());
+        self::assertFalse($signal->isDeferred());
+
+        $this->outboxConnection()->rollBack();
+
+        self::assertSame(0, $this->outboxCount());
+        self::assertFalse($signal->hasFailed());
+    }
+
+    /**
+     * A capture whose transaction is on another connection is marked deferred
+     * when its insert is queued, and inserted when that transaction commits.
+     *
+     * @return void
+     */
+    public function testACaptureOnAnotherConnectionIsDeferredAndMarked(): void
+    {
+        $this->begin(self::OTHER);
+
+        $signal = $this->signal();
+
+        $this->write($this->record(), Timing::AFTER_COMMIT, null, FailureRule::REPORT, $signal);
+
+        self::assertTrue($signal->isDeferred());
+        self::assertSame(0, $this->outboxCount());
+
+        DB::connection(self::OTHER)->commit();
+
+        self::assertSame(1, $this->outboxCount());
+        self::assertFalse($signal->hasFailed());
+    }
+
+    /**
+     * A deferred capture's failed insert reaches its signal at the commit, not
+     * before, and the commit stands.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesFailedInsertIsSignalledAtTheCommit(): void
+    {
+        $this->pointOutboxAtProbeTable();
+        $this->begin(self::OTHER);
+
+        $signal = $this->signal();
+
+        $this->write($this->record(), Timing::AFTER_COMMIT, null, FailureRule::REPORT, $signal);
+
+        self::assertFalse($signal->hasFailed());
+
+        DB::connection(self::OTHER)->commit();
+
+        self::assertSame(0, DB::connection(self::OTHER)->transactionLevel());
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertCount(1, $this->reporter->reports());
+        self::assertCount(1, $this->spillLines());
+    }
+
+    /**
+     * A deferred capture whose transaction rolls back is never inserted and
+     * signals nothing.
+     *
+     * @return void
+     */
+    public function testARolledBackCaptureSignalsNothing(): void
+    {
+        $this->pointOutboxAtProbeTable();
+        $this->begin(self::OTHER);
+
+        $signal = $this->signal();
+
+        $this->write($this->record(), Timing::AFTER_COMMIT, null, FailureRule::REPORT, $signal);
+
+        DB::connection(self::OTHER)->rollBack();
+
+        self::assertFalse($signal->hasFailed());
+        self::assertSame([], $this->reporter->reports());
+    }
+
+    /**
+     * Nothing leaves a deferred capture's commit callback: a failure outside
+     * the failure path's attempt, here the connection resolver the insert reads
+     * the open transactions from, is reported once, by its class alone, and
+     * signalled, and the commit succeeds.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesInsertNeverThrowsFromTheCommit(): void
+    {
+        $other  = DB::connection(self::OTHER);
+        $signal = $this->signal();
+
+        $this->begin(self::OTHER);
+
+        $this->write($this->record(), Timing::AFTER_COMMIT, null, FailureRule::REPORT, $signal);
+
+        $this->breakTheConnectionResolver();
+
+        try {
+            $other->commit();
+        } finally {
+            $this->app?->alias('db', ConnectionResolverInterface::class);
+        }
+
+        self::assertSame(0, $other->transactionLevel());
+        self::assertCount(1, $this->reporter->reports());
+        self::assertSame(\RuntimeException::class, $this->firstReport()->exceptionClass);
+        self::assertSame('outbox', $this->firstReport()->operation);
+        self::assertSame(Outbox::class, $this->firstReport()->store);
+        self::assertSame([\RuntimeException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertSame(0, $this->outboxCount());
+        self::assertHoldsNoSecret($this->reporter->reports(), 'the reports');
+    }
+
+    /**
+     * The same failure in an ordinary record's deferred insert still reaches
+     * the code that commits, as it always has: only a capture contains it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeferredOrdinaryInsertsEscapeStillReachesTheCommit(): void
+    {
+        $other = DB::connection(self::OTHER);
+
+        $this->begin(self::OTHER);
+
+        $this->write($this->record(), Timing::AFTER_COMMIT);
+
+        $this->breakTheConnectionResolver();
+
+        try {
+            $other->commit();
+
+            self::fail('Expected the failure to reach the commit.');
+        } catch (\RuntimeException $thrown) {
+            self::assertSame('The resolver is broken.', $thrown->getMessage());
+        } finally {
+            $this->app?->alias('db', ConnectionResolverInterface::class);
+        }
+    }
+
+    /**
+     * A synchronous capture's insert inside the host's transaction that
+     * deadlocks is thrown sanitised, and its signal is told it is fatal, with
+     * the class Laravel raised it as inside the transaction.
+     *
+     * @return void
+     */
+    public function testACapturesFatalInsertInsideTheHostIsThrownAndSignalledFatal(): void
+    {
+        $this->breakTheInsert(self::DEADLOCK, '40001', 1213);
+        $this->begin();
+
+        $signal = $this->signal();
+
+        $thrown = $this->thrownBy($this->record(), Timing::AFTER_COMMIT, null, FailureRule::REPORT, $signal);
+
+        self::assertInstanceOf(DeadlockException::class, $thrown);
+        self::assertSame([DeadlockException::class], $this->signalled);
+        self::assertTrue($signal->isFatal());
+        self::assertSame([], $this->reporter->reports());
+    }
+
+    /**
+     * A deferred capture's insert that deadlocks inside a transaction open on
+     * the outbox connection when the other connection commits is spilled at
+     * once, since the work it records has committed, reported, sanitised, never
+     * thrown from that commit, and signalled.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesFatalInsertIsReported(): void
+    {
+        $this->breakTheInsert(self::DEADLOCK, '40001', 1213);
+        $this->begin(self::OTHER);
+
+        $signal = $this->signal();
+
+        $this->write($this->record(), Timing::AFTER_COMMIT, self::OTHER, FailureRule::REPORT, $signal);
+
+        $this->outboxConnection()->beginTransaction();
+
+        DB::connection(self::OTHER)->commit();
+
+        $reports = $this->reporter->reports();
+
+        self::assertCount(1, $reports);
+        self::assertInstanceOf(DeadlockException::class, $reports[0]);
+        self::assertSame([DeadlockException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertCount(1, $this->spillLines());
+        self::assertSame(1, $this->outboxConnection()->transactionLevel());
+    }
+
+    /**
      * Spill to a channel that writes nowhere, and register the second
      * transacting connection, with a table prefix of its own.
      *
@@ -1328,15 +1567,16 @@ final class OutboxWriterTest extends TestCase
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  ?string  $transaction
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \Illuminate\Database\DeadlockException
      * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
-    private function write(AuditRecord $record, Timing $timing, ?string $transaction = null, FailureRule $rule = FailureRule::REPORT): void
+    private function write(AuditRecord $record, Timing $timing, ?string $transaction = null, FailureRule $rule = FailureRule::REPORT, ?CaptureSignal $capture = null): void
     {
-        $this->writer()->write($record, $timing, $transaction, $rule);
+        $this->writer()->write($record, $timing, $transaction, $rule, $capture);
     }
 
     /**
@@ -1346,17 +1586,43 @@ final class OutboxWriterTest extends TestCase
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  ?string  $transaction
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
      * @return \RuntimeException
      */
-    private function thrownBy(AuditRecord $record, Timing $timing, ?string $transaction, FailureRule $rule): \RuntimeException
+    private function thrownBy(AuditRecord $record, Timing $timing, ?string $transaction, FailureRule $rule, ?CaptureSignal $capture = null): \RuntimeException
     {
         try {
-            $this->write($record, $timing, $transaction, $rule);
+            $this->write($record, $timing, $transaction, $rule, $capture);
         } catch (\RuntimeException $thrown) {
             return $thrown;
         }
 
         self::fail('Expected the write to throw.');
+    }
+
+    /**
+     * A capture's signal that keeps the class it passes on.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal
+     */
+    private function signal(): CaptureSignal
+    {
+        return new CaptureSignal(function (string $exceptionClass): void {
+            $this->signalled[] = $exceptionClass;
+        });
+    }
+
+    /**
+     * Make the connection resolver the insert reads the open transactions from
+     * fail, outside the insert's attempt; the test puts it back.
+     *
+     * @return void
+     */
+    private function breakTheConnectionResolver(): void
+    {
+        $this->app?->bind(ConnectionResolverInterface::class, static function (): never {
+            throw new \RuntimeException('The resolver is broken.');
+        });
     }
 
     /**

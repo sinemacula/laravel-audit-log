@@ -33,6 +33,10 @@ use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
  * @method static \SineMacula\Laravel\AuditLog\Records\PendingRecord accessed(\BackedEnum|string $code, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference $subject, \BackedEnum|string $purpose, \BackedEnum|string $channel)
  * @method static void define(\SineMacula\Laravel\AuditLog\Definitions\EventDefinition|string $definition)
  * @method static void contribute(string $contributor)
+ * @method static void map(string $classOrInterface, string $mapper, list<string> $except = [])
+ * @method static \SineMacula\Laravel\AuditLog\Records\AuditRecord|null capture(object $event)
+ * @method static void watch(string $model, string $as, array<int|string, \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling|string> $fields)
+ * @method static \SineMacula\Laravel\AuditLog\Records\PendingRecord bulk(\BackedEnum|string $code, iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference> $subjects)
  *
  * @phpcs:enable Generic.Files.LineLength.TooLong
  *

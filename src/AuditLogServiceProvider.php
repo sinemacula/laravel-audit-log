@@ -4,6 +4,17 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog;
 
+use Illuminate\Auth\Access\Events\GateEvaluated;
+use Illuminate\Auth\Events\CurrentDeviceLogout;
+use Illuminate\Auth\Events\Failed;
+use Illuminate\Auth\Events\Lockout;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
+use Illuminate\Auth\Events\OtherDeviceLogout;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Auth\Events\PasswordResetLinkSent;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Scheduling\Schedule;
@@ -18,6 +29,10 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
+use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
+use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
+use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
 use SineMacula\Laravel\AuditLog\Console\IntegritySchedule;
@@ -38,6 +53,8 @@ use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
+use SineMacula\Laravel\AuditLog\Listeners\RecordGateDenial;
+use SineMacula\Laravel\AuditLog\Listeners\RecordLaravelAuthEvent;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
@@ -51,13 +68,15 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
 /**
  * Package service provider: registers the package's configuration, its clock,
  * integrity settings, key ring, store and field encrypter, the anchor seals are
- * kept in and the prune ledger, the recorder with its catalogue and
- * contributors, the scoped runtime state, the listeners that track execution
- * frames and carry context into jobs, the global middleware that enters an HTTP
- * frame, its publishing tags (the configuration and the migrations, which it
- * never loads itself) and the `audit-log:check`, `audit-log:drain`,
- * `audit-log:replay`, `audit-log:seal` and `audit-log:verify` console commands.
- * It adds no route.
+ * kept in and the prune ledger, the recorder with its catalogue, contributors,
+ * event mappers and model watcher, the scoped runtime and capture state, the
+ * listeners that track execution frames and carry context into jobs, the
+ * listeners that capture Laravel's authentication events and Gate denials, the
+ * package's own event codes, the global middleware that enters an HTTP frame,
+ * its publishing tags (the configuration and the migrations, the artifacts
+ * table's among them, which it never loads itself) and the `audit-log:check`,
+ * `audit-log:drain`, `audit-log:replay`, `audit-log:seal` and
+ * `audit-log:verify` console commands. It adds no route.
  *
  * In the console it schedules sealing, the sweep and a strict verification,
  * each of which its schedule setting can turn off, once the application
@@ -69,10 +88,15 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
  * capture, so none outlives a request. The anchor is made from the settings on
  * each resolution, so a changed setting takes effect without a restart.
  *
- * Registration of definitions and contributors is frozen once the application
- * has booted, so a long-lived worker registers once. Booting still issues no
- * query and reads no setting that could stop it, so a malformed one reaches
- * `audit-log:check`.
+ * The package's own codes are defined while it boots, so an application or an
+ * integration that defines one of them differently is refused at boot. The
+ * listener that routes mapped events is added by the first mapping, never by
+ * the provider, so an application that maps nothing pays nothing for it.
+ *
+ * Registration of definitions, contributors, event mappers and watched models
+ * is frozen once the application has booted, so a long-lived worker registers
+ * once. Booting still issues no query and reads no setting that could stop it,
+ * so a malformed one, a capture setting included, reaches `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,6 +116,7 @@ final class AuditLogServiceProvider extends ServiceProvider
         '2026_11_02_000300_create_audit_log_checkpoints_table.php',
         '2026_11_02_000400_create_audit_log_checkpoint_members_table.php',
         '2026_11_02_000500_create_audit_log_integrity_state_table.php',
+        '2026_11_02_000600_create_audit_log_artifacts_table.php',
     ];
 
     /**
@@ -124,12 +149,15 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->bindIf(CheckpointAnchor::class, static fn (Application $app): CheckpointAnchor => $app->make(AnchorFactory::class)->make());
         $this->app->singletonIf(EventCatalogue::class);
         $this->app->singletonIf(ContributorRegistry::class);
+        $this->app->singletonIf(MapperRegistry::class);
+        $this->app->singletonIf(ModelWatcher::class);
         $this->app->singletonIf(Recorder::class);
         $this->app->scopedIf(ExecutionFrames::class);
         $this->app->scopedIf(RequestIdentity::class);
         $this->app->scopedIf(ReportLatch::class);
         $this->app->scopedIf(WriteGuard::class);
         $this->app->scopedIf(CommitQueue::class);
+        $this->app->scopedIf(CapturedEvents::class);
     }
 
     /**
@@ -143,6 +171,7 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->registerCommands();
         $this->registerSchedule();
         $this->registerListeners();
+        $this->registerCapture();
         $this->registerHttpFrame();
         $this->freezeRegistrationOnceBooted();
     }
@@ -233,6 +262,46 @@ final class AuditLogServiceProvider extends ServiceProvider
     }
 
     /**
+     * Listen for Laravel's authentication events and for Gate evaluations, and
+     * define the package's own codes, unless the catalogue is already frozen
+     * because the provider is booted again after the application has, when they
+     * were defined on its first boot. Nothing is read from configuration: each
+     * listener reads its settings when an event reaches it, so a malformed one
+     * never stops boot.
+     *
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    protected function registerCapture(): void
+    {
+        Event::listen([
+            Login::class,
+            Failed::class,
+            Lockout::class,
+            Logout::class,
+            CurrentDeviceLogout::class,
+            OtherDeviceLogout::class,
+            Registered::class,
+            Verified::class,
+            PasswordReset::class,
+            PasswordResetLinkSent::class,
+        ], RecordLaravelAuthEvent::class);
+
+        Event::listen(GateEvaluated::class, RecordGateDenial::class);
+
+        $catalogue = $this->app->make(EventCatalogue::class);
+
+        if ($catalogue->isFrozen()) {
+            return;
+        }
+
+        $catalogue->define(CapturedActivity::class);
+    }
+
+    /**
      * Put the middleware that enters an HTTP frame first on the kernel's global
      * stack, so a record in any other global middleware has its request.
      *
@@ -251,8 +320,9 @@ final class AuditLogServiceProvider extends ServiceProvider
     }
 
     /**
-     * Freeze the catalogue and the contributors once the application has
-     * booted, after which each refuses any further registration.
+     * Freeze the catalogue, the contributors, the event mappers and the model
+     * watcher once the application has booted, after which each refuses any
+     * further registration.
      *
      * @return void
      */
@@ -261,6 +331,8 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->booted(static function (Application $app): void {
             $app->make(EventCatalogue::class)->freeze();
             $app->make(ContributorRegistry::class)->freeze();
+            $app->make(MapperRegistry::class)->freeze();
+            $app->make(ModelWatcher::class)->freeze();
         });
     }
 }

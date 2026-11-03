@@ -7,6 +7,7 @@ namespace Tests\Unit\Config;
 use Illuminate\Config\Repository;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
@@ -35,6 +36,9 @@ final class ShippedConfigTest extends TestCase
 
     /** @var string Env var naming the entries table. */
     private const string TABLE_ENV = 'AUDIT_LOG_ENTRIES_TABLE';
+
+    /** @var string Env var naming the artifacts table. */
+    private const string ARTIFACTS_TABLE_ENV = 'AUDIT_LOG_ENTRIES_ARTIFACTS_TABLE';
 
     /** @var string Env var naming the current integrity key. */
     private const string CURRENT_ENV = 'AUDIT_LOG_INTEGRITY_CURRENT';
@@ -102,6 +106,18 @@ final class ShippedConfigTest extends TestCase
     /** @var string Env var refusing a code with no registered definition. */
     private const string REQUIRE_REGISTERED_ENV = 'AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED';
 
+    /** @var string Env var naming the credential a failed sign-in is read for. */
+    private const string IDENTIFIER_KEY_ENV = 'AUDIT_LOG_CAPTURE_LARAVEL_IDENTIFIER_KEY';
+
+    /** @var string Env var turning on the capture of Gate denials. */
+    private const string GATE_ENABLED_ENV = 'AUDIT_LOG_CAPTURE_GATE_ENABLED';
+
+    /** @var string Env var holding the most subjects a manifest holds. */
+    private const string BULK_MAX_MEMBERS_ENV = 'AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS';
+
+    /** @var string Env var holding the most bytes a manifest encodes to. */
+    private const string BULK_MAX_BYTES_ENV = 'AUDIT_LOG_CAPTURE_BULK_MAX_BYTES';
+
     /** @var string Env var naming the source's id. */
     private const string SOURCE_ID_ENV = 'AUDIT_LOG_SOURCE_ID';
 
@@ -155,6 +171,7 @@ final class ShippedConfigTest extends TestCase
         self::CONNECTION_ENV,
         self::MAINTENANCE_ENV,
         self::TABLE_ENV,
+        self::ARTIFACTS_TABLE_ENV,
         self::CURRENT_ENV,
         self::LOG_ID_ENV,
         self::CHECKPOINTS_TABLE_ENV,
@@ -177,6 +194,10 @@ final class ShippedConfigTest extends TestCase
         self::REQUEST_ID_HEADER_ENV,
         self::TRUST_TRACEPARENT_ENV,
         self::REQUIRE_REGISTERED_ENV,
+        self::IDENTIFIER_KEY_ENV,
+        self::GATE_ENABLED_ENV,
+        self::BULK_MAX_MEMBERS_ENV,
+        self::BULK_MAX_BYTES_ENV,
         self::SOURCE_ID_ENV,
         self::SOURCE_REGION_ENV,
         self::REDACTION_KEY_ENV,
@@ -282,6 +303,33 @@ final class ShippedConfigTest extends TestCase
         putenv(self::TABLE_ENV . '=reporting_entries');
 
         self::assertSame('reporting_entries', $this->config()['entries']['table']);
+    }
+
+    /**
+     * With nothing in the environment each bulk operation's manifest lives in
+     * `audit_log_artifacts`.
+     *
+     * @return void
+     */
+    public function testTheArtifactsTableDefaultsToAuditLogArtifacts(): void
+    {
+        putenv(self::ARTIFACTS_TABLE_ENV);
+
+        self::assertSame('audit_log_artifacts', $this->config()['entries']['artifacts_table']);
+    }
+
+    /**
+     * The artifacts table is read from its env var, whatever the entries table
+     * is.
+     *
+     * @return void
+     */
+    public function testTheArtifactsTableIsReadFromTheEnvironment(): void
+    {
+        putenv(self::ARTIFACTS_TABLE_ENV . '=reporting_artifacts');
+
+        self::assertSame('reporting_artifacts', $this->config()['entries']['artifacts_table']);
+        self::assertSame('audit_log_entries', $this->config()['entries']['table']);
     }
 
     /**
@@ -652,6 +700,73 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * With nothing in the environment no guard is excepted, `email` is the
+     * credential read, Gate capture is off and selects every ability with no
+     * reason code kept, and a manifest holds 100000 subjects and 4194304 bytes,
+     * as integers; and the shipped capture settings pass.
+     *
+     * @return void
+     */
+    public function testTheCaptureLeavesHaveTheirDefaults(): void
+    {
+        foreach ([self::IDENTIFIER_KEY_ENV, self::GATE_ENABLED_ENV, self::BULK_MAX_MEMBERS_ENV, self::BULK_MAX_BYTES_ENV] as $env) {
+            putenv($env);
+        }
+
+        self::assertSame([
+            'laravel' => [
+                'except_guards'  => [],
+                'identifier_key' => 'email',
+            ],
+            'gate' => [
+                'enabled'          => false,
+                'only_abilities'   => null,
+                'except_abilities' => [],
+                'reason_codes'     => [],
+            ],
+            'bulk' => [
+                'max_members' => 100000,
+                'max_bytes'   => 4194304,
+            ],
+        ], $this->config()['capture']);
+
+        (new CaptureSettings(new Repository(['audit-log' => $this->config()])))->validate();
+    }
+
+    /**
+     * Each capture setting with an env var is read from it, raw, so a malformed
+     * number fails closed when it is read rather than casting to `0`, and the
+     * flag is the boolean `env()` makes of `true`.
+     *
+     * @return void
+     */
+    public function testTheCaptureLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::IDENTIFIER_KEY_ENV . '=username');
+        putenv(self::GATE_ENABLED_ENV . '=true');
+        putenv(self::BULK_MAX_MEMBERS_ENV . '=5000');
+        putenv(self::BULK_MAX_BYTES_ENV . '=65536');
+
+        $capture = $this->config()['capture'];
+
+        self::assertSame('username', $capture['laravel']['identifier_key']);
+        self::assertTrue($capture['gate']['enabled']);
+        self::assertSame('5000', $capture['bulk']['max_members']);
+        self::assertSame('65536', $capture['bulk']['max_bytes']);
+
+        $settings = new CaptureSettings(new Repository(['audit-log' => $this->config()]));
+
+        self::assertSame('username', $settings->identifierKey());
+        self::assertTrue($settings->isGateEnabled());
+        self::assertSame(5000, $settings->bulkMaxMembers());
+        self::assertSame(65536, $settings->bulkMaxBytes());
+
+        putenv(self::GATE_ENABLED_ENV . '=yes');
+
+        self::assertSame('yes', $this->config()['capture']['gate']['enabled']);
+    }
+
+    /**
      * With nothing in the environment the source has no id of its own, so it
      * takes a slug of the application's name.
      *
@@ -712,6 +827,7 @@ final class ShippedConfigTest extends TestCase
             'storage.connection',
             'storage.maintenance_connection',
             'entries.table',
+            'entries.artifacts_table',
             'integrity.keys',
             'integrity.current',
             'integrity.log_id',
@@ -736,6 +852,14 @@ final class ShippedConfigTest extends TestCase
             'context.request_id_header',
             'context.trust_traceparent',
             'definitions.require_registered',
+            'capture.laravel.except_guards',
+            'capture.laravel.identifier_key',
+            'capture.gate.enabled',
+            'capture.gate.only_abilities',
+            'capture.gate.except_abilities',
+            'capture.gate.reason_codes',
+            'capture.bulk.max_members',
+            'capture.bulk.max_bytes',
             'source.id',
             'source.region',
             'redaction.keys',
@@ -1051,7 +1175,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -1059,7 +1183,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
         $config = require self::CONFIG;
 
         return $config;

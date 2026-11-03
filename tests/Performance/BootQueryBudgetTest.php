@@ -5,10 +5,19 @@ declare(strict_types = 1);
 namespace Tests\Performance;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
+use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
+use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
+use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
+use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
+use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
+use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
@@ -16,16 +25,21 @@ use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Recorder;
+use SineMacula\Laravel\AuditLog\RecordPipeline;
+use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
+use Tests\Fixtures\Capture\Events\PortalSignedIn;
+use Tests\Fixtures\Capture\Mappers\PortalMapper;
+use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\TestCase;
 
 /**
  * Performance contract for booting the package: registering it adds no query to
- * a request that records nothing, and resolving the store, what finalises a
- * record, or the recorder and what it works with issues none and opens no
- * connection.
+ * a request that records nothing, booting with capture wired issues none, and
+ * resolving the store, what finalises a record, or the recorder and what it
+ * works with issues none and opens no connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -98,5 +112,53 @@ final class BootQueryBudgetTest extends TestCase
 
         self::assertSame([], DB::getQueryLog());
         self::assertArrayNotHasKey('audit_unopened', DB::getConnections());
+    }
+
+    /**
+     * Booting with capture wired, an event mapped and a model watched from a
+     * provider's `boot()`, issues no statement and opens no connection, and
+     * neither does resolving everything a capture resolves: the listeners, the
+     * package's codes and the freeze are registration alone.
+     *
+     * @return void
+     */
+    public function testBootingWithCaptureWiredCostsNoQuery(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
+        $config->set('audit-log.storage.connection', 'audit_unopened');
+
+        $catalogue = new EventCatalogue;
+        $mappers   = new MapperRegistry;
+        $watcher   = new ModelWatcher($catalogue, app(Dispatcher::class));
+        $queries   = [];
+
+        $this->app?->instance(EventCatalogue::class, $catalogue);
+        $this->app?->instance(ContributorRegistry::class, new ContributorRegistry);
+        $this->app?->instance(MapperRegistry::class, $mappers);
+        $this->app?->instance(ModelWatcher::class, $watcher);
+        $this->app?->forgetInstance(Recorder::class);
+
+        Event::listen(QueryExecuted::class, static function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        $recorder = app(Recorder::class);
+
+        $recorder->map(PortalSignedIn::class, PortalMapper::class);
+        $recorder->watch(PlainLine::class, as: 'line', fields: ['description']);
+
+        (new AuditLogServiceProvider($this->app))->boot();
+
+        foreach ([CaptureCoordinator::class, CapturedEvents::class, CaptureSettings::class, RecordPipeline::class] as $abstract) {
+            self::assertIsObject(app($abstract));
+        }
+
+        self::assertSame([], $queries);
+        self::assertArrayNotHasKey('audit_unopened', DB::getConnections());
+        self::assertTrue($catalogue->isRegistered(EventCode::of(CapturedActivity::SIGNED_IN)));
+        self::assertTrue($mappers->isFrozen());
+        self::assertTrue($watcher->isFrozen());
     }
 }

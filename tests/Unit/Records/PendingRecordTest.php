@@ -12,6 +12,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
 use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -233,10 +234,10 @@ final class PendingRecordTest extends TestCase
             $snapshot->credentialId, $snapshot->correlationId, $snapshot->reason, $snapshot->properties,
             $snapshot->note, $snapshot->noteOwner, $snapshot->guard, $snapshot->sessionId, $snapshot->requestId,
             $snapshot->traceId, $snapshot->ip, $snapshot->userAgent, $snapshot->origin, $snapshot->context,
-            $snapshot->timing, $snapshot->connection, $snapshot->identifier,
+            $snapshot->timing, $snapshot->connection, $snapshot->identifier, $snapshot->manifest,
         ];
 
-        self::assertSame(array_fill(0, 22, null), $absent);
+        self::assertSame(array_fill(0, 23, null), $absent);
     }
 
     /**
@@ -280,8 +281,85 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
+     * A bulk builder's manifest travels in its snapshot, the same instance, and
+     * in the final snapshot that uses the builder up, and taking a snapshot
+     * leaves the manifest in place.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAManifestTravelsInTheSnapshot(): void
+    {
+        $manifest = self::manifest();
+        $pending  = (new PendingRecord)->event('invoice.bulk_approved');
+
+        self::assertSame($pending, $pending->withManifest($manifest));
+        self::assertSame($manifest, $pending->snapshot()->manifest);
+        self::assertSame($manifest, $pending->snapshot()->manifest);
+        self::assertSame($manifest, $pending->consume()->manifest);
+    }
+
+    /**
+     * A builder has one manifest: a second is refused, even the same one, and
+     * the first stays.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testASecondManifestIsRefused(): void
+    {
+        $manifest = self::manifest();
+        $pending  = (new PendingRecord)->withManifest($manifest);
+
+        foreach ([self::manifest(), $manifest] as $second) {
+            try {
+                $pending->withManifest($second);
+                self::fail('Expected a second manifest to be refused.');
+            } catch (\LogicException $exception) {
+                self::assertSame('A bulk operation has one manifest.', $exception->getMessage());
+            }
+        }
+
+        self::assertSame($manifest, $pending->snapshot()->manifest);
+    }
+
+    /**
+     * A builder that has been used up takes no manifest.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAManifestOnAUsedBuilderIsRefused(): void
+    {
+        $pending = (new PendingRecord)->event('invoice.bulk_approved');
+        $pending->consume();
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(self::REUSED);
+
+        $pending->withManifest(self::manifest());
+    }
+
+    /**
+     * The manifest given to a builder is marked sensitive: it holds the members
+     * of the bulk operation.
+     *
+     * @return void
+     */
+    public function testTheManifestIsSensitive(): void
+    {
+        $given = (new \ReflectionMethod(PendingRecord::class, 'withManifest'))->getParameters()[0];
+
+        self::assertSame('manifest', $given->getName());
+        self::assertCount(1, $given->getAttributes(\SensitiveParameter::class));
+    }
+
+    /**
      * Rows of `[call]`: one call of each public mutator, the seventeen fluent
-     * methods and the nine fillers, each with a valid argument.
+     * methods, the nine fillers and the manifest, each with a valid argument.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
      */
@@ -312,6 +390,9 @@ final class PendingRecordTest extends TestCase
             }],
             'fillTenant' => [static function (PendingRecord $pending): void {
                 $pending->fillTenant(Reference::of('organisation', '1'));
+            }],
+            'withManifest' => [static function (PendingRecord $pending): void {
+                $pending->withManifest(self::manifest());
             }],
         ];
     }
@@ -422,6 +503,9 @@ final class PendingRecordTest extends TestCase
             'fillContext' => [static function (PendingRecord $pending): void {
                 $pending->fillContext(['a']);
             }],
+            'withManifest' => [static function (PendingRecord $pending): void {
+                $pending->withManifest(self::manifest());
+            }],
         ];
     }
 
@@ -466,7 +550,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(26, $mutators);
+        self::assertCount(27, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }
@@ -568,6 +652,9 @@ final class PendingRecordTest extends TestCase
             }, \LogicException::class],
             'recording without a code' => [static function (PendingRecord $pending): void {
                 $pending->consume();
+            }, \LogicException::class],
+            'a second manifest' => [static function (PendingRecord $pending): void {
+                $pending->withManifest(self::manifest())->withManifest(self::manifest());
             }, \LogicException::class],
         ];
     }
@@ -674,6 +761,18 @@ final class PendingRecordTest extends TestCase
         }
 
         return $pending;
+    }
+
+    /**
+     * A manifest of three invoices, as a bulk operation gives a builder.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\Manifest
+     *
+     * @throws \JsonException
+     */
+    private static function manifest(): Manifest
+    {
+        return Manifest::of(RecordFactory::members(3), 3, 65536);
     }
 
     /**

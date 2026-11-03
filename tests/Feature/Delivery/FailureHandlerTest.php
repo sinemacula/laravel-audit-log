@@ -17,6 +17,7 @@ use Monolog\Handler\NullHandler;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
+use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule;
 use SineMacula\Laravel\AuditLog\Delivery\FailedWrite;
 use SineMacula\Laravel\AuditLog\Delivery\FailureHandler;
@@ -42,7 +43,8 @@ use Tests\TestCase;
  * the report and `AuditWriteFailed` each rule asks for, in that order and each
  * on its own; what is thrown and that it is sanitised; a spill bound to a
  * commit; the failures fatal to an open transaction, the write's and a step's;
- * and the write guard around all of it.
+ * the write guard around all of it; and a capture's signal, told once after
+ * every step, with a deferred capture's fatal failure reported, never thrown.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,6 +91,12 @@ final class FailureHandlerTest extends TestCase
 
     /** @var list<array{0: string, 1: bool}> Each step as it ran, in order, with whether the write guard was active. */
     private array $steps = [];
+
+    /** @var list<string> The class each capture's signal passed on, in order. */
+    private array $signalled = [];
+
+    /** @var bool Whether a capture's signal fails once it has kept what it was told. */
+    private bool $signalFails = false;
 
     /**
      * Bind the reporter, observe each step and capture the spill lines.
@@ -1414,6 +1422,316 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
+     * A capture's failed write is spilled once, reported once and said once, as
+     * any record's under the `REPORT` rule, and only then is its signal told,
+     * once, of the failure's class, not as fatal.
+     *
+     * @return void
+     */
+    public function testACaptureIsSpilledReportedAndSignalledOnce(): void
+    {
+        $signal = $this->signal();
+
+        $this->handle($this->failedWrite($this->failure()), FailureRule::REPORT, null, $signal);
+
+        self::assertSame(['spill', 'report', 'event', 'signal'], $this->stepNames());
+        self::assertCount(1, $this->spillLines());
+        self::assertSame(['store'], $this->reportedOperations());
+        self::assertCount(1, $this->events);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertTrue($signal->hasFailed());
+        self::assertFalse($signal->isFatal());
+        self::assertSame(QueryException::class, $signal->exceptionClass());
+    }
+
+    /**
+     * The signal is told outside the write guard, after it is released, so what
+     * the capture does with it is the capture's to guard.
+     *
+     * @return void
+     */
+    public function testTheSignalIsToldOutsideTheGuard(): void
+    {
+        $this->handle($this->failedWrite($this->failure()), FailureRule::REPORT, null, $this->signal());
+
+        self::assertSame([['signal', false]], array_slice($this->steps, -1));
+    }
+
+    /**
+     * A synchronous capture's failure fatal to the open transaction is thrown
+     * sanitised, as any record's is, never spilled or reported, and its signal
+     * is told it is fatal.
+     *
+     * @return void
+     */
+    public function testASynchronousCapturesFatalFailureIsThrownAndSignalledFatal(): void
+    {
+        $signal = $this->signal();
+
+        $this->beginTransaction();
+
+        $thrown = $this->thrownBy($this->failedWrite($this->deadlock(), hostOpen: $this->isTransactionOpen()), FailureRule::REPORT, null, $signal);
+
+        self::assertInstanceOf(DeadlockException::class, $thrown);
+        self::assertNull($thrown->getPrevious());
+        self::assertSame([], $this->spillLines());
+        self::assertSame([], $this->reporter->reports());
+        self::assertCount(1, $this->events);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertTrue($signal->isFatal());
+    }
+
+    /**
+     * A deferred capture's failure fatal to an open transaction runs inside a
+     * commit callback, long after the capture returned, so it is never thrown:
+     * the record of the work that committed is spilled first, at once and
+     * inside the write guard, the sanitised exception is reported once, inside
+     * the write guard, and the signal is told, not as fatal.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesFatalFailureIsReportedAndSignalled(): void
+    {
+        $signal = $this->signal();
+
+        $signal->defer();
+
+        $this->beginTransaction();
+
+        $this->handle($this->failedWrite($this->deadlock(), hostOpen: $this->isTransactionOpen()), FailureRule::REPORT, null, $signal);
+
+        $reports = $this->reporter->reports();
+
+        self::assertCount(1, $reports);
+        self::assertInstanceOf(DeadlockException::class, $reports[0]);
+        self::assertNull($reports[0]->getPrevious());
+        self::assertSame(['spill', 'event', 'signal', 'report'], $this->stepNames());
+        self::assertTrue($this->steps[0][1], 'The spill runs inside the write guard.');
+        self::assertTrue($this->steps[3][1], 'The report runs inside the write guard.');
+        self::assertCount(1, $this->spillLines());
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertFalse($this->guard()->isActive());
+        self::assertHoldsNoSecret($reports, 'the reports');
+    }
+
+    /**
+     * A deferred capture's spill that fails, even with a failure fatal to an
+     * open transaction, is reported and goes no further, since nothing may
+     * leave the commit callback: the write's own failure is still reported and
+     * the signal still told.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesFailedSpillIsReportedAndNeverThrown(): void
+    {
+        $signal = $this->signal();
+
+        $signal->defer();
+
+        $this->breakSpill(self::DEADLOCK);
+
+        $this->handle($this->failedWrite($this->deadlock(), hostOpen: true), FailureRule::REPORT, null, $signal);
+
+        self::assertSame(['spill', DeadlockException::class], $this->reportedOperations());
+        self::assertSame([], $this->spillLines());
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($this->guard()->isActive());
+    }
+
+    /**
+     * A deferred capture's lost connection is reported as the sanitised
+     * exception of the write, never thrown.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesLostConnectionIsReportedAndSignalled(): void
+    {
+        $signal = $this->signal();
+
+        $signal->defer();
+
+        $this->handle($this->failedWrite($this->lostConnection(), hostOpen: true), FailureRule::REPORT, null, $signal);
+
+        self::assertSame(['store'], $this->reportedOperations());
+        self::assertSame(QueryException::class, $this->firstReport()->exceptionClass);
+        self::assertSame([QueryException::class], $this->signalled);
+    }
+
+    /**
+     * A deferred capture's step that deadlocks while a transaction is open is
+     * reported too, after the write's own failure, and never thrown.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesFatalStepIsReportedAndNeverThrown(): void
+    {
+        $signal = $this->signal();
+
+        $signal->defer();
+
+        $this->listenerFailure = self::DEADLOCK;
+
+        $this->handle($this->failedWrite($this->failure(), hostOpen: true), FailureRule::REPORT, null, $signal);
+
+        self::assertSame(['store', DeadlockException::class], $this->reportedOperations());
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+    }
+
+    /**
+     * A reporter that fails over a deferred capture's fatal failure is ignored:
+     * nothing may leave a commit callback.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesBrokenReporterThrowsNothing(): void
+    {
+        $signal = $this->signal();
+
+        $signal->defer();
+
+        $this->reporterFailure = self::DEADLOCK;
+
+        $this->handle($this->failedWrite($this->deadlock(), hostOpen: true), FailureRule::REPORT, null, $signal);
+
+        self::assertCount(1, $this->reporter->reports());
+        self::assertTrue($signal->hasFailed());
+        self::assertFalse($this->guard()->isActive());
+    }
+
+    /**
+     * A deferred capture whose failure is not fatal follows the rule as any
+     * other: reported once, by the step, and not again.
+     *
+     * @return void
+     */
+    public function testADeferredCapturesOrdinaryFailureIsReportedOnce(): void
+    {
+        $signal = $this->signal();
+
+        $signal->defer();
+
+        $this->handle($this->failedWrite($this->failure()), FailureRule::REPORT, null, $signal);
+
+        self::assertSame(['store'], $this->reportedOperations());
+        self::assertCount(1, $this->spillLines());
+        self::assertSame([QueryException::class], $this->signalled);
+    }
+
+    /**
+     * A signal whose callback throws stops no step, and nothing escapes under
+     * the `REPORT` rule.
+     *
+     * @return void
+     */
+    public function testAThrowingSignalCallbackStopsNoStep(): void
+    {
+        $this->signalFails = true;
+
+        $signal = $this->signal();
+
+        $this->handle($this->failedWrite($this->failure()), FailureRule::REPORT, null, $signal);
+
+        self::assertSame(['spill', 'report', 'event', 'signal'], $this->stepNames());
+        self::assertCount(1, $this->spillLines());
+        self::assertCount(1, $this->reporter->reports());
+        self::assertCount(1, $this->events);
+        self::assertTrue($signal->hasFailed());
+    }
+
+    /**
+     * A signal whose callback throws does not stop a synchronous capture's
+     * fatal failure from being thrown, sanitised, in place of the callback's.
+     *
+     * @return void
+     */
+    public function testAThrowingSignalCallbackLeavesAFatalFailureThrown(): void
+    {
+        $this->signalFails = true;
+
+        $thrown = $this->thrownBy($this->failedWrite($this->deadlock(), hostOpen: true), FailureRule::REPORT, null, $this->signal());
+
+        self::assertInstanceOf(DeadlockException::class, $thrown);
+    }
+
+    /**
+     * A signal already told keeps its first failure: a second failed write of
+     * the same capture tells it nothing more.
+     *
+     * @return void
+     */
+    public function testASignalIsToldOnlyOnce(): void
+    {
+        $signal = $this->signal();
+
+        $this->handle($this->failedWrite($this->failure()), FailureRule::REPORT, null, $signal);
+        $this->handle($this->failedWrite(new \RuntimeException('Another failure.')), FailureRule::REPORT, null, $signal);
+
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertSame(QueryException::class, $signal->exceptionClass());
+    }
+
+    /**
+     * What a deferred capture's write let out beyond the failure path is
+     * reported once, by the record's id and the failure's class, holding
+     * nothing of either, and its signal is told; nothing is spilled or said.
+     *
+     * @return void
+     */
+    public function testContainingAnEscapedFailureReportsAndSignals(): void
+    {
+        $signal = $this->signal();
+        $record = $this->record();
+
+        (new FailureHandler(app()))->contain($record, $this->deadlock(), FailedOperation::STORE, self::STORE, $signal);
+
+        $report = $this->firstReport();
+
+        self::assertCount(1, $this->reporter->reports());
+        self::assertSame($record->id, $report->recordId);
+        self::assertSame(QueryException::class, $report->exceptionClass);
+        self::assertSame('store', $report->operation);
+        self::assertSame(self::STORE, $report->store);
+        self::assertNull($report->getPrevious());
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertSame([], $this->spillLines());
+        self::assertSame([], $this->events);
+        self::assertHoldsNoSecret($report, 'the report');
+    }
+
+    /**
+     * Containing an escaped failure with a broken reporter throws nothing, and
+     * still tells the signal.
+     *
+     * @return void
+     */
+    public function testContainingAnEscapedFailureWithABrokenReporterThrowsNothing(): void
+    {
+        $this->reporterFailure = self::DEADLOCK;
+
+        $signal = $this->signal();
+
+        (new FailureHandler(app()))->contain($this->record(), new \RuntimeException('Escaped.'), FailedOperation::STORE, self::STORE, $signal);
+
+        self::assertSame([\RuntimeException::class], $this->signalled);
+        self::assertFalse($this->guard()->isActive());
+    }
+
+    /**
+     * The report of an escaped failure runs inside the write guard.
+     *
+     * @return void
+     */
+    public function testContainingAnEscapedFailureReportsInsideTheGuard(): void
+    {
+        (new FailureHandler(app()))->contain($this->record(), new \RuntimeException('Escaped.'), FailedOperation::STORE, self::STORE, $this->signal());
+
+        self::assertSame([['report', true], ['signal', false]], $this->steps);
+    }
+
+    /**
      * Spill to a channel that writes nowhere.
      *
      * @param  mixed  $app
@@ -1460,15 +1778,16 @@ final class FailureHandlerTest extends TestCase
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  ?\Illuminate\Database\DatabaseTransactionRecord  $commitBound
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \Illuminate\Database\DeadlockException
      * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
-    private function handle(FailedWrite $failed, FailureRule $rule, ?DatabaseTransactionRecord $commitBound = null): void
+    private function handle(FailedWrite $failed, FailureRule $rule, ?DatabaseTransactionRecord $commitBound = null, ?CaptureSignal $capture = null): void
     {
-        (new FailureHandler(app()))->handle($failed, $rule, $commitBound);
+        (new FailureHandler(app()))->handle($failed, $rule, $commitBound, $capture);
     }
 
     /**
@@ -1477,12 +1796,13 @@ final class FailureHandlerTest extends TestCase
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  ?\Illuminate\Database\DatabaseTransactionRecord  $commitBound
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
      * @return \RuntimeException
      */
-    private function thrownBy(FailedWrite $failed, FailureRule $rule, ?DatabaseTransactionRecord $commitBound = null): \RuntimeException
+    private function thrownBy(FailedWrite $failed, FailureRule $rule, ?DatabaseTransactionRecord $commitBound = null, ?CaptureSignal $capture = null): \RuntimeException
     {
         try {
-            $this->handle($failed, $rule, $commitBound);
+            $this->handle($failed, $rule, $commitBound, $capture);
         } catch (\RuntimeException $thrown) {
             return $thrown;
         }
@@ -1623,6 +1943,24 @@ final class FailureHandlerTest extends TestCase
     private function isTransactionOpen(): bool
     {
         return DB::transactionLevel() > 0;
+    }
+
+    /**
+     * A capture's signal that notes when it is told and the class it passes on,
+     * then fails when a test has said so.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal
+     */
+    private function signal(): CaptureSignal
+    {
+        return new CaptureSignal(function (string $exceptionClass): void {
+            $this->steps[]     = ['signal', $this->guard()->isActive()];
+            $this->signalled[] = $exceptionClass;
+
+            if ($this->signalFails) {
+                throw new \RuntimeException('The capture failed to say so: ' . self::SECRET);
+            }
+        });
     }
 
     /**

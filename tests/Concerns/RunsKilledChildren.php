@@ -162,7 +162,15 @@ trait RunsKilledChildren
             self::fail('The child failed: ' . file_get_contents($failure));
         }
 
-        return pcntl_wifsignaled($status) ? pcntl_wtermsig($status) : 0;
+        if (!pcntl_wifsignaled($status)) {
+            return 0;
+        }
+
+        $signal = pcntl_wtermsig($status);
+
+        self::assertIsInt($signal, 'The signal that ended the child is unknown.');
+
+        return $signal;
     }
 
     /**
@@ -185,7 +193,7 @@ trait RunsKilledChildren
     protected function childFile(string $name): string
     {
         if ($this->childDirectory === null) {
-            $this->childDirectory = sys_get_temp_dir() . '/audit-killed-children-' . bin2hex(random_bytes(8));
+            $this->childDirectory = sys_get_temp_dir() . '/' . uniqid('audit-killed-children-', true);
 
             mkdir($this->childDirectory);
         }

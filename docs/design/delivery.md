@@ -4,8 +4,9 @@
 
 This note records how a finalised record reaches its store and what is left when it does not: the pipeline, the outbox
 and its drain, the receipts each destination keeps, the spill channel and the replay that reads it, the stores the
-package ships and what each can promise, and the formatters that project a record as one line. A delivery mechanism that
-loses, repeats or invents a record changes what the log is evidence of, so each of those limits is stated here.
+package ships and what each can promise, the path a record captured from an event takes and the bundle a bulk
+operation travels as, and the formatters that project a record as one line. A delivery mechanism that loses, repeats or
+invents a record changes what the log is evidence of, so each of those limits is stated here.
 `outcomes.md` holds the table of what each timing, mode and failure guarantees; this note holds the machinery behind it.
 
 ## Invariants
@@ -31,6 +32,9 @@ loses, repeats or invents a record changes what the log is evidence of, so each 
   through `encryptString()` and `decryptString()`, never PHP serialisation. The row's id is the record's id, and a row
   whose envelope holds another is refused as `id_mismatch`.
 - The spill and the outbox hold personal data, and `threat-model.md` says what follows from that.
+- A record captured from an event is delivered with its capture's signal, `Delivery\CaptureSignal`, and follows the
+  `REPORT` rule whatever `failure.mode` says. A record with an attachment, a bulk operation's, is delivered as one
+  bundle, and only to a store that keeps attachments.
 - No payload reaches `failed_jobs`, because no job exists. The drain is a command, and an empty job would not have been
   enough on its own: Laravel stores exception text in `failed_jobs` separately from the payload.
 
@@ -216,16 +220,17 @@ non-zero when anything was skipped or failed.
 ## Stores And Capabilities
 
 `Contracts\DurableAuditStore` extends `AuditStore` with two separate questions, since a durable remote store cannot be
-atomic with local data, and a store that joins a transaction is durable only once it commits:
+atomic with local data, and a store that joins a transaction is durable only once it commits.
+`Contracts\AcceptsAttachments` asks a third, whether the store keeps a record's attachment with its entry:
 
-| Store                | `isDurable()` | `participatesIn()`               |
-|----------------------|---------------|----------------------------------|
-| `DatabaseAuditStore` | yes           | its storage connection           |
-| `StackAuditStore`    | as its first  | only when every destination does |
-| `LogAuditStore`      | no            | no                               |
-| `NullAuditStore`     | no            | no                               |
-| `FakeAuditStore`     | yes           | any connection                   |
-| Without the contract | no            | no                               |
+| Store                | `isDurable()` | `participatesIn()`               | `acceptsAttachments()`           |
+|----------------------|---------------|----------------------------------|----------------------------------|
+| `DatabaseAuditStore` | yes           | its storage connection           | yes                              |
+| `StackAuditStore`    | as its first  | only when every destination does | only when every destination does |
+| `LogAuditStore`      | no            | no                               | no                               |
+| `NullAuditStore`     | no            | no                               | yes                              |
+| `FakeAuditStore`     | yes           | any connection                   | yes                              |
+| Without the contract | no            | no                               | no                               |
 
 ```php
 $this->app->singleton(AuditStore::class, static fn ($app): AuditStore => new StackAuditStore([
@@ -252,9 +257,60 @@ $this->app->singleton(AuditStore::class, static fn ($app): AuditStore => new Sta
   line. So the store writes past Laravel's log wrapper, where no shared context joins the line and no `MessageLogged`
   listener receives it, and writes the `%` that opens each such token as `%25`. A `%` that opens nothing is left alone.
   The log store's line is a projection, not the integrity artefact. The stored row, with its HMAC, is the evidence.
-- `NullAuditStore` writes nothing, so a return from it means nothing was kept.
+- `NullAuditStore` writes nothing, so a return from it means nothing was kept, and it accepts attachments because it
+  keeps nothing of any record, so no part of one is lost selectively. `LogAuditStore` accepts none, because its line
+  would lose the members.
 - A store of the application's own should implement `DurableAuditStore`, answer from its configuration and never from
   the record, and keep no state between calls.
+
+## Captures And Bundles
+
+A record captured from an event, by a mapper, by Laravel's authentication events, by a Gate denial or by a watched
+model, is written through the same delivery as any other, with one difference: its failures go back to the capture.
+
+- The capture hands the delivery a `Delivery\CaptureSignal`. The record is written now, or after commit for a watched
+  model's change, never fail-closed or transactional: a capture asking for either is a `\LogicException` before
+  anything is consumed. A capture never reads `failure.mode`, so a malformed mode never stops one, and its rule is
+  always `REPORT`.
+- A failed write is handled once by `Delivery\FailureHandler`, spilled, reported and said as `AuditWriteFailed`, then
+  the signal is told once, and the capture dispatches `AuditCaptureFailed`. A later failure of the same write changes
+  nothing.
+- The signal is marked deferred before a write is queued for a commit, so the failure path knows the capture has
+  returned. A deferred capture's failure, a host-fatal one included, is reported and signalled when the commit runs the
+  write, and its record is spilled even when the failure ended a transaction still open on the storage connection,
+  since the work it records has committed. Whatever the write lets out, nothing leaves its commit callback: beyond the
+  failure path it is reported as a `Stores\AuditWriteFailedException` by its class alone, inside the write guard, and
+  signalled.
+- A synchronous capture's deadlock or lost connection inside a transaction open on its connection is thrown sanitised,
+  as any record's is, and the signal is told it was fatal.
+- In outbox mode the signal travels with the insert. A watched model's change whose transaction is on the outbox
+  connection is inserted inside it, and one whose transaction is on another connection waits for that commit, marked
+  deferred.
+
+A bulk operation's record carries a `Records\Attachment`, the artifact descriptor and the members sealed once with
+`encryptString()`, and travels as one bundle:
+
+- The envelope of a record with an attachment is a bundle of three keys, through the canonical encoding:
+  `bundle_version` (`EnvelopeCodec::BUNDLE_VERSION`, 1), `record`, the record's 36 columns, and `attachment`, its `id`,
+  `entry_id`, `kind`, `member_count`, `digest` and sealed `members`. A record without one keeps its plain envelope.
+- `EnvelopeCodec::MAX_BYTES` applies to the whole bundle, so a bundle over it is `oversize` like any record. A bundle
+  version this release does not read is `unsupported_version`, and one with another key, or an attachment the signed
+  descriptor does not describe or that names another entry, is `malformed`.
+- The attachment is not signed itself. The record signs `properties._audit.manifest`, its `artifact_id`, `digest` and
+  `count`, and the descriptor binds the attachment, so a plain envelope whose properties hold a descriptor never
+  becomes a record that lost its members.
+- The outbox row and the spill line hold the whole bundle. A drain asks each destination whether it keeps attachments
+  before calling it: one that keeps none is refused, as that destination's failure, its attempt counted, so the others
+  are still tried and the row is retried, then failed and kept, never deleted. A destination's receipt is marked
+  delivered only once it stored both.
+- A replay asks the bound store first, and a bundle it would lose is counted failed and stays in the file. A bundle
+  stored already is a no-op.
+- In sync mode a store that keeps no attachments refuses the bundle inside the attempt, with a `\LogicException` that
+  follows the record's rule, so the spill keeps the whole bundle. `bulk()` refuses up front, so that is reached only
+  when the binding changed in between.
+- `DatabaseAuditStore` writes the artifact and the entry in one transaction, a savepoint inside a host's, and compares
+  a duplicate by the artifact's `id`, `entry_id`, `kind`, `member_count` and `digest`, never its ciphertext; the
+  members are sealed once, so a retry, a drain and a replay carry the same bytes.
 
 ## Formatters
 
@@ -312,6 +368,9 @@ else does yet. A projection is never the integrity artefact.
   `src/Delivery/DeliverySettings.php`.
 - `src/Stores/Enums/FailureMode.php`, `src/Delivery/Enums/DeliveryMode.php`, `src/Stores/Enums/FailedOperation.php`.
 - `src/Contracts/DurableAuditStore.php`: `isDurable()`, `participatesIn()`; `src/Delivery/StoreCapabilities.php`.
+- `src/Contracts/AcceptsAttachments.php`: `acceptsAttachments()`; `src/Records/Attachment.php`;
+  `src/Records/EnvelopeCodec.php`: `BUNDLE_VERSION`, `SUPPORTED_BUNDLE_VERSIONS`.
+- `src/Delivery/CaptureSignal.php`: `defer()`, `fail()`, `isFatal()`; `src/Capture/CaptureCoordinator.php`.
 - `src/Stores/LogAuditStore.php`: `MARKER`; `src/Stores/DirectLog.php`: `channel()`; `src/Stores/NullAuditStore.php`;
   `src/Stores/StackAuditStore.php`: `DESTINATION_PATTERN`; `src/Stores/StackDeliveryException.php`.
 - `src/Contracts/AuditFormatter.php`: `format()`; `src/Contracts/OcsfMapper.php`: `map()`;
@@ -428,6 +487,32 @@ else does yet. A projection is never the integrity artefact.
 - `tests/Unit/Export/CefFormatterTest.php` `testTheHeaderIsPinned`, `testTheExtensionIsPinnedInOrder`,
   `testTheSeverityFollowsTheOutcome`, `testEscapesEachHeaderSeparator`, `testEscapesEachExtensionSeparator`,
   `testAValueCannotForgeAnExtension`
+- `tests/Feature/Delivery/RecordDeliveryTest.php` `testACaptureIsRefusedFailClosed`,
+  `testACaptureIsRefusedTransactional`, `testACaptureFollowsTheReportRuleUnderTheThrowMode`,
+  `testACaptureIgnoresAMalformedFailureMode`, `testACapturesWriteFailureIsSignalledOnce`,
+  `testADeferredCaptureIsMarkedBeforeItIsQueued`, `testADeferredCapturesFailureIsSignalledAtCommit`,
+  `testADeferredCaptureNeverThrowsFromTheCommit`, `testADeliveredBundleToAStoreKeepingNoAttachmentsFollowsTheRule`,
+  `testABundleReachesAStoreThatKeepsAttachments`
+- `tests/Unit/Delivery/CaptureSignalTest.php` `testTheFailureIsPassedOnOnce`, `testAThrowingCallbackIsContained`,
+  `testDeferralIsKept`
+- `tests/Feature/Capture/CaptureCoordinatorTest.php` `testAWriteFailureIsHandledOnce`,
+  `testTheThrowFailureModeIsIgnored`
+- `tests/Unit/Records/EnvelopeCodecTest.php` `testTheBundleVersionsArePinned`, `testARecordWithAnAttachmentIsABundle`,
+  `testABundleRoundTripsByteForByte`, `testTheGoldenBundleDecodes`, `testAnUnsupportedBundleVersionIsRefused`,
+  `testAnAttachmentThatDoesNotMatchTheSignedDescriptorIsMalformed`, `testABundleOverTheBoundIsOversize`
+- `tests/Feature/Stores/FailureSpillTest.php` `testASpilledBundleHoldsItsAttachment`
+- `tests/Feature/Delivery/DeliveryCoordinatorTest.php` `testADestinationKeepingNoAttachmentsFailsAndTheOthersAreTried`,
+  `testARecordWithoutAnAttachmentAsksNoDestination`, `testABundleReachesEachDestinationWhole`
+- `tests/Feature/Delivery/OutboxDrainerTest.php` `testABundleIsDeliveredWhole`,
+  `testABundleToAStoreKeepingNoAttachmentsIsKeptForRetry`
+- `tests/Feature/Delivery/ReplayerTest.php` `testASpilledBundleIsReplayedWhole`,
+  `testABundleToAStoreKeepingNoAttachmentsIsCountedFailed`, `testAReplayedBundleThatIsStoredAlreadyIsANoOp`
+- `tests/Integration/Delivery/BundleDeliveryEnginesTest.php` `testAnOutboxBundleIsDrainedWhole`,
+  `testASpilledBundleReplaysWhole`, `testTwoConcurrentReplaysOfOneBundleLeaveOneEntryAndOneArtifact`,
+  `testADrainToAStoreKeepingNoAttachmentsKeepsTheRow`
+- `tests/Feature/Delivery/StoreCapabilitiesTest.php` `testAStoreWithoutTheContractAcceptsNoAttachments`,
+  `testAStoreThatSaysSoAcceptsAttachments`
+- `tests/Unit/Stores/StackAuditStoreTest.php` `testAStackAcceptsAttachmentsOnlyWhenEveryDestinationDoes`
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheDocumentedChannelIsTheTestedOne`,
   `testTheSpillAndOutboxArePersonalData`
 
@@ -442,4 +527,6 @@ Update this note when any of the following change:
 - the documented spill channel, how a line reaches it, the line's format or what the reader accepts
 - what a replay verifies, what it skips or what it may change
 - what a store says of itself, or how a stack answers for its destinations
+- the rule a capture follows, when its signal is told, or what leaves a deferred capture's commit
+- the bundle's keys or version, what the attachment holds, or who is asked whether it keeps one
 - the pinned OCSF version, the base attributes, the fallback, or the CEF header or extension

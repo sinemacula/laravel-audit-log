@@ -186,7 +186,7 @@ trait TampersWithTheLog
      */
     protected function membershipOf(int $sequence): array
     {
-        /** @var list<object{entry_id: string, hmac: string}> $members */
+        /** @var list<object{entry_id: string, hmac: string}&\stdClass> $members */
         $members = $this->tamperedTable(IntegrityTables::membersTable())->where('checkpoint_id', $this->sealIdAt($sequence))->get(['entry_id', 'hmac'])->all();
         $pairs   = array_map(static fn (object $member): array => [$member->entry_id, $member->hmac], $members);
 

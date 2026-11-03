@@ -38,7 +38,12 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  * as the seal counts, and their entry ids and HMACs, sorted bytewise and never
  * in the order the database returned them, must give the members digest.
  * Missing entries are pruned only under a prune record whose signature verifies
- * and which binds exactly this seal; anything else is reported.
+ * and which binds exactly this seal; anything else is reported. A sealed
+ * bundle's manifest is checked with its seal: each entry that verified and
+ * signs a manifest has its artifact checked by the manifest verifier, in
+ * batches, never one statement per entry. An entry pruned under a verified
+ * prune record is missing, so it has no descriptor to check, and its artifact
+ * goes with it.
  *
  * Anchoring comes from the anchor, never from the receipt kept beside the seal.
  * An anchor's head at this sequence with another digest is `contradicted`; no
@@ -69,6 +74,7 @@ final readonly class SegmentVerifier
      * @param  \SineMacula\Laravel\AuditLog\Contracts\PruneLedger  $prunes
      * @param  \SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
      * @param  \Illuminate\Database\DatabaseManager  $database
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier  $manifests
      */
     public function __construct(
 
@@ -92,6 +98,9 @@ final readonly class SegmentVerifier
 
         /** The connections the storage connection is resolved from on every segment. */
         private DatabaseManager $database,
+
+        /** The verifier of the manifests the segment's verified entries sign. */
+        private ManifestVerifier $manifests,
     ) {}
 
     /**
@@ -228,10 +237,17 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * How many member rows the seal has, the findings of its members and of the
-     * set of them, and the first missing entry's id in member order, if any
-     * entry is missing. Only as many member pairs as the seal counts are kept,
-     * so a seal given extra member rows costs no more memory than its own.
+     * How many member rows the seal has, the findings of its members, of the
+     * manifests its verified entries sign and of the set of members, and the
+     * first missing entry's id in member order, if any entry is missing. Only
+     * as many member pairs as the seal counts are kept, so a seal given extra
+     * member rows costs no more memory than its own.
+     *
+     * Only an entry that verified is trusted for its manifest descriptor, and
+     * the manifests are checked together, in batches, never one statement per
+     * entry; a segment with no bundle costs no statement more. A missing entry
+     * has no descriptor to check, so a pruned entry's artifact, which goes with
+     * it, is never asked for.
      *
      * @formatter:off
      *
@@ -248,9 +264,10 @@ final readonly class SegmentVerifier
      */
     private function members(SealEnvelope $seal): array
     {
-        $count = 0;
-        $pairs = [];
-        $first = [];
+        $count     = 0;
+        $pairs     = [];
+        $first     = [];
+        $manifests = [];
 
         foreach ($this->memberRows($seal->id) as $row) {
             $entry  = (array) $row;
@@ -266,6 +283,8 @@ final readonly class SegmentVerifier
             $finding = $this->memberFinding($entry, $hmac);
 
             if ($finding === null) {
+                $manifests[$member] = $this->manifests->descriptorOf($entry);
+
                 continue;
             }
 
@@ -276,9 +295,10 @@ final readonly class SegmentVerifier
 
         unset($first[Finding::MISSING_ENTRY->value]);
 
-        $found = array_map(static fn (string $finding, string $id): array => [Finding::from($finding), $id], array_keys($first), $first);
+        $found     = array_map(static fn (string $finding, string $id): array => [Finding::from($finding), $id], array_keys($first), $first);
+        $manifests = $this->manifests->findings(array_filter($manifests, is_array(...)));
 
-        return [$count, [...$found, ...self::membership($seal, $count, $pairs)], $missing];
+        return [$count, [...$found, ...$manifests, ...self::membership($seal, $count, $pairs)], $missing];
     }
 
     /**

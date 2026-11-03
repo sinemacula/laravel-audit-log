@@ -37,6 +37,7 @@ use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Symfony\Component\Console\Output\BufferedOutput;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SearchesForSecrets;
+use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -63,7 +64,7 @@ use Tests\TestCase;
 #[CoversClass(VerifyCommand::class)]
 final class VerifyCommandTest extends TestCase
 {
-    use SealsEntries, SearchesForSecrets;
+    use SealsEntries, SearchesForSecrets, SeedsArtifacts;
 
     /** @var string When the log is sealed by the seal command. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -273,6 +274,32 @@ final class VerifyCommandTest extends TestCase
         self::assertStringContainsString(sprintf("integrity=tampered anchoring=unanchored members=3 finding=entry_hmac first=%s\n", $members[1]), $this->printed());
         self::assertStringEndsWith("Verification failed.\n", $this->printed());
         self::assertSame($members[1], $this->singleAlarm()->firstBadId);
+    }
+
+    /**
+     * A log holding a bundle whose artifact was deleted after sealing exits
+     * non-zero, its seal tampered with `manifest_missing` at the bundle's
+     * entry, and alarms once.
+     *
+     * @return void
+     */
+    public function testATamperedArtifactExitsNonZero(): void
+    {
+        $this->storeEntries(1);
+
+        $entryId = $this->seedBundle();
+
+        $this->seal();
+        $this->artifactsTable()->where('entry_id', $entryId)->delete();
+
+        self::assertSame(1, $this->verify());
+        self::assertStringContainsString(sprintf("integrity=tampered anchoring=unanchored members=2 finding=manifest_missing first=%s\n", $entryId), $this->printed());
+        self::assertStringEndsWith("Verification failed.\n", $this->printed());
+        $alarm = $this->singleAlarm();
+
+        self::assertSame(self::integrity(['tampered' => 1]), $alarm->integrity);
+        self::assertSame('manifest_missing', $alarm->finding);
+        self::assertSame($entryId, $alarm->firstBadId);
     }
 
     /**

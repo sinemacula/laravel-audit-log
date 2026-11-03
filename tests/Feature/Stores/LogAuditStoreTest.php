@@ -14,6 +14,7 @@ use Monolog\Level;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditFormatter;
 use SineMacula\Laravel\AuditLog\Export\CefFormatter;
 use SineMacula\Laravel\AuditLog\Export\NdjsonFormatter;
@@ -30,7 +31,7 @@ use Tests\TestCase;
  * at `info` through the formatter, after the marker, with any line break a
  * formatter left escaped, on the channel named; that Monolog never expands the
  * line again; that a failed channel propagates; and that it is neither durable
- * nor joins a transaction.
+ * nor joins a transaction, and keeps no attachment.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -475,6 +476,22 @@ final class LogAuditStoreTest extends TestCase
     public function testIsNotDurable(): void
     {
         self::assertFalse($this->logStore()->isDurable());
+    }
+
+    /**
+     * It keeps no attachment: its line is a projection of the record, which
+     * would lose a bulk operation's members, so it says so, whatever its
+     * formatter or channel.
+     *
+     * @return void
+     */
+    public function testItKeepsNoAttachments(): void
+    {
+        $store = $this->logStore();
+
+        self::assertInstanceOf(AcceptsAttachments::class, $store);
+        self::assertFalse($store->acceptsAttachments());
+        self::assertFalse((new LogAuditStore(app(LogManager::class), self::formatterReturning('{}')))->acceptsAttachments());
     }
 
     /**

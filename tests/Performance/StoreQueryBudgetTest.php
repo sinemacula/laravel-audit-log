@@ -6,15 +6,21 @@ namespace Tests\Performance;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
+use SineMacula\Laravel\AuditLog\Stores\RecordConflictException;
+use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
  * Statement-budget contract for the database store: one plain insert per
  * record, and inside a transaction only Laravel's savepoint beside it; a
- * duplicate adds one read, and inside a transaction the savepoint's rollback.
+ * duplicate adds one read, and inside a transaction the savepoint's rollback. A
+ * bundle is two plain inserts, its artifact's first, in one transaction of its
+ * own or one savepoint inside a host's; its duplicate is the one insert that
+ * fails and two reads, and the rollback of that transaction or savepoint.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -182,6 +188,141 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * Outside a transaction a bundle costs two plain inserts, its artifact's
+     * then its entry's, no read, and one transaction of its own, committed
+     * once.
+     *
+     * @return void
+     */
+    public function testStoringABundleIsTwoInsertsInOneTransaction(): void
+    {
+        $bundle = $this->bundle();
+
+        $this->assertTransactionBudget(1, 1, fn () => $this->assertStatementBudget(0, 2, 0, 0, fn () => $this->store()->store($bundle)));
+
+        $writes = $this->capturedWrites();
+
+        self::assertStringContainsString(EntrySettings::artifactsTable(), $writes[0]);
+        self::assertStringContainsString(EntrySettings::table(), $writes[1]);
+
+        foreach ($writes as $write) {
+            self::assertStringStartsWith('insert into ', $write);
+            self::assertDoesNotMatchRegularExpression('/\b(ignore|on conflict|on duplicate key|replace)\b/i', $write);
+        }
+
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * Inside a transaction a bundle costs the same two inserts and one
+     * savepoint, and begins and commits no transaction of its own.
+     *
+     * @return void
+     */
+    public function testStoringABundleInsideATransactionIsTwoInsertsInOneSavepoint(): void
+    {
+        $bundle = $this->bundle();
+
+        DB::beginTransaction();
+
+        $this->assertTransactionBudget(0, 0, fn () => $this->assertStatementBudget(0, 2, 1, 0, fn () => $this->store()->store($bundle)));
+
+        self::assertSame(1, DB::connection()->transactionLevel());
+
+        DB::commit();
+
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * Outside a transaction a bundle's duplicate costs the artifact's insert,
+     * which fails, so the entry's never runs; the rollback of its transaction;
+     * and two reads, of the entry and of the artifact. Nothing is committed.
+     *
+     * @return void
+     */
+    public function testABundleDuplicateIsOneInsertAndTwoReads(): void
+    {
+        $bundle = $this->bundle();
+
+        $this->store()->store($bundle);
+
+        $this->assertTransactionBudget(1, 0, fn () => $this->assertStatementBudget(2, 1, 0, 1, fn () => $this->store()->store($bundle)));
+
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * Inside a transaction a bundle's duplicate costs its one insert, the two
+     * reads, the savepoint and the savepoint's rollback.
+     *
+     * @return void
+     */
+    public function testABundleDuplicateInsideATransactionAlsoRollsBackItsSavepoint(): void
+    {
+        $bundle = $this->bundle();
+
+        $this->store()->store($bundle);
+
+        DB::beginTransaction();
+
+        $this->assertStatementBudget(2, 1, 1, 1, fn () => $this->store()->store($bundle));
+
+        DB::commit();
+
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
+     * A bundle whose entry is stored without its artifact costs both inserts,
+     * the entry's failing, the rollback that takes the artifact back, and the
+     * two reads that find the conflict.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABundleWhoseEntryIsStoredAloneIsTwoInsertsAndTwoReads(): void
+    {
+        $bundle = $this->bundle();
+
+        DB::table(EntrySettings::table())->insert((new RowCodec)->encode($bundle));
+
+        $this->assertStatementBudget(2, 2, 0, 1, function () use ($bundle): void {
+            try {
+                $this->store()->store($bundle);
+
+                self::fail('Expected the bundle to conflict.');
+            } catch (RecordConflictException) {
+                // The conflict is the outcome whose cost is measured
+            }
+        });
+
+        self::assertSame(0, DB::table(EntrySettings::artifactsTable())->count());
+    }
+
+    /**
+     * A hundred distinct bundles cost two hundred inserts and nothing else, in
+     * a hundred transactions, and store a hundred entries and a hundred
+     * artifacts.
+     *
+     * @return void
+     */
+    public function testEachDistinctBundleCostsTwoInserts(): void
+    {
+        $bundles = array_map(fn (): FinalisedRecord => $this->bundle(), range(1, 100));
+
+        $this->assertTransactionBudget(100, 100, fn () => $this->assertStatementBudget(0, 200, 0, 0, function () use ($bundles): void {
+            foreach ($bundles as $bundle) {
+                $this->store()->store($bundle);
+            }
+        }));
+
+        self::assertSame(100, $this->entryCount());
+        self::assertSame(100, DB::table(EntrySettings::artifactsTable())->count());
+    }
+
+    /**
      * The captured record of an approved invoice under the pinned id, finalised
      * on the frozen clock.
      *
@@ -190,5 +331,15 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     private function finalised(): FinalisedRecord
     {
         return $this->finaliser()->finalise(RecordFactory::captured(id: self::ID));
+    }
+
+    /**
+     * A bulk record of three members, finalised on the frozen clock.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     */
+    private function bundle(): FinalisedRecord
+    {
+        return $this->finaliser()->finalise(RecordFactory::bundled());
     }
 }

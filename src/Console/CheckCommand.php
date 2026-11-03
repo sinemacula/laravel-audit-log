@@ -25,9 +25,9 @@ use Symfony\Component\Console\Attribute\AsCommand;
 /**
  * `audit-log:check`: reads every setting the package stores entries, captures
  * records, seals, anchors and delivers them with, the connections, guards, log
- * channels and disks they name, the entries table, the integrity keys and
- * tables and, in outbox mode, the outbox and deliveries tables, and exits
- * non-zero on a problem, for deploy pipelines and readiness probes.
+ * channels and disks they name, the entries and artifacts tables, the integrity
+ * keys and tables and, in outbox mode, the outbox and deliveries tables, and
+ * exits non-zero on a problem, for deploy pipelines and readiness probes.
  *
  * Every check runs, so one run lists every problem, each as
  * `[<subject>] <message>`, and a subject without one as `[<subject>] OK`, in
@@ -42,31 +42,35 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * only beside an explicit ring and an empty `audit-log.redaction.key`, since
  * otherwise the integrity settings read it and it is listed once; then the
  * failure and delivery settings, the delivery tables' names and the outbox
- * connection), `[connections]` (the storage and maintenance connections are
- * each configured in `database.connections`, and use the same driver; skipped
- * when a connection setting is malformed), `[schema]` (the storage connection's
- * engine and the entries table's shape; see `EngineChecks` and `SchemaChecks`,
- * skipped when the storage connection or the table's name is malformed or the
- * connection is not configured), `[integrity]` (a key signs and, once the
- * storage connection, the sealing and anchor settings and the integrity tables'
- * names are well formed, the checkpoints, checkpoint members and integrity
- * state tables have their shape and a disk anchor's disk is configured; see
- * `IntegrityChecks`, skipped when the integrity key settings are malformed) and
- * `[delivery]` (the spill channel, the store when a failure is thrown, and in
- * outbox mode the outbox and deliveries tables; see `DeliveryChecks`, skipped
- * when the storage connection or a failure or delivery setting is malformed). A
- * malformed context, source, definition or redaction setting skips nothing,
- * since no later subject reads it. After every subject, `[spill] OK` says the
- * spill channel is the one the documentation gives, or a `[spill]` warning says
- * replaying what it holds is unverified; that is a note, not a problem, and
- * leaves the exit code as it is, and it is left out while the channel setting
- * is malformed. It does not warn about a storage connection shared with the
- * application, which every default install would trip. The command writes
- * nothing and prints no secret, statement or binding: a malformed setting is
- * named by its key and never its value, only the name of a connection, guard,
- * log channel or disk is printed, and a connection that cannot be opened or
- * read, or a store that cannot be resolved, is named with the class of what was
- * thrown, never its message.
+ * connection; then the capture settings and the artifacts table's name, and the
+ * guards the automatic capture skips, each configured in `auth.guards`, skipped
+ * when the list is malformed or is `['*']`), `[connections]` (the storage and
+ * maintenance connections are each configured in `database.connections`, and
+ * use the same driver; skipped when a connection setting is malformed),
+ * `[schema]` (the storage connection's engine and the entries and artifacts
+ * tables' shapes; see `EngineChecks` and `SchemaChecks`, skipped when the
+ * storage connection or the entries table's name is malformed or the connection
+ * is not configured, and the artifacts table left out while its name is
+ * malformed), `[integrity]` (a key signs and, once the storage connection, the
+ * sealing and anchor settings and the integrity tables' names are well formed,
+ * the checkpoints, checkpoint members and integrity state tables have their
+ * shape and a disk anchor's disk is configured; see `IntegrityChecks`, skipped
+ * when the integrity key settings are malformed) and `[delivery]` (the spill
+ * channel, the store when a failure is thrown, and in outbox mode the outbox
+ * and deliveries tables; see `DeliveryChecks`, skipped when the storage
+ * connection or a failure or delivery setting is malformed). A malformed
+ * context, source, definition, redaction or capture setting, or artifacts
+ * table's name, skips nothing, since no later subject reads it. After every
+ * subject, `[spill] OK` says the spill channel is the one the documentation
+ * gives, or a `[spill]` warning says replaying what it holds is unverified;
+ * that is a note, not a problem, and leaves the exit code as it is, and it is
+ * left out while the channel setting is malformed. It does not warn about a
+ * storage connection shared with the application, which every default install
+ * would trip. The command writes nothing and prints no secret, statement or
+ * binding: a malformed setting is named by its key and never its value, only
+ * the name of a connection, guard, log channel or disk is printed, and a
+ * connection that cannot be opened or read, or a store that cannot be resolved,
+ * is named with the class of what was thrown, never its message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -271,9 +275,12 @@ final class CheckCommand extends Command
      * The checks of the settings records are captured and delivered with, one
      * for each, so one run reports every malformed setting: the context
      * settings, the source settings, the definition setting, the guards the
-     * actor is read from, the redaction settings, then the failure and delivery
-     * settings, the delivery tables' names and the outbox connection. Only the
-     * delivery subject depends on the last of them.
+     * actor is read from, the redaction settings, the failure and delivery
+     * settings, the delivery tables' names and the outbox connection, then the
+     * capture settings, the artifacts table's name and the guards the automatic
+     * capture skips. Only the delivery subject depends on any of them: the
+     * failure and delivery settings, the delivery tables' names and the outbox
+     * connection.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -304,6 +311,8 @@ final class CheckCommand extends Command
             self::reading(DeliveryTables::outboxTable(...)),
             self::reading(DeliveryTables::deliveriesTable(...)),
             self::reading(DeliveryTables::outboxConnection(...)),
+            ...array_map(self::reading(...), CaptureChecks::readers($config)),
+            static fn (): array => CaptureChecks::guardProblems($config),
         ];
     }
 
@@ -385,9 +394,10 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The check of the storage connection's engine and the entries table on it;
-     * the table is checked only when the engine is supported and the connection
-     * opens, and a statement that fails is named by its class.
+     * The check of the storage connection's engine and the entries and
+     * artifacts tables on it; the tables are checked only when the engine is
+     * supported and the connection opens, and a statement that fails is named
+     * by its class.
      *
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @return \Closure(): list<string>
@@ -398,6 +408,7 @@ final class CheckCommand extends Command
             $connection = StorageConnection::resolvedName();
             $table      = EntrySettings::table();
             $engine     = new EngineChecks($database);
+            $schemas    = new SchemaChecks($database);
 
             // The framework declares nothing for a statement that fails, though
             // it throws a `QueryException`, whose message holds the statement
@@ -408,11 +419,33 @@ final class CheckCommand extends Command
                     return [$blocking];
                 }
 
-                return [...$engine->problems($connection, $table), ...(new SchemaChecks($database))->problems($connection, $table)];
+                return [...$engine->problems($connection, $table), ...$schemas->problems($connection, $table), ...self::artifactsProblems($schemas, $connection)];
             } catch (\PDOException $exception) { // @phpstan-ignore catch.neverThrown
                 return [sprintf('The storage connection [%s] could not be read (%s).', $connection, $exception::class)];
             }
         };
+    }
+
+    /**
+     * The problems of the artifacts table on the storage connection, or none
+     * while its name is malformed, which `config` reports and which leaves the
+     * entries table's checks to run.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Console\SchemaChecks  $schemas
+     * @param  string  $connection
+     * @return list<string>
+     */
+    private static function artifactsProblems(SchemaChecks $schemas, string $connection): array
+    {
+        try {
+            $table = EntrySettings::artifactsTable();
+        } catch (\InvalidArgumentException) {
+            // The malformed name is listed under `config`, and names no table
+            // to check
+            return [];
+        }
+
+        return $schemas->problems($connection, $table, TableShape::artifacts());
     }
 
     /**

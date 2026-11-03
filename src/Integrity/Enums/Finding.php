@@ -77,6 +77,14 @@ enum Finding: string
     // An entry's signature does not match its content
     case ENTRY_HMAC = 'entry_hmac';
 
+    // An entry's manifest names an artifact that is not stored
+    case MANIFEST_MISSING = 'manifest_missing';
+
+    // An entry's artifact is not the one its manifest signed: another id,
+    // entry, kind, count or digest, or members that are not the canonical form
+    // the manifest describes
+    case MANIFEST_MISMATCH = 'manifest_mismatch';
+
     // A prune record is signed under a key the ring does not hold
     case PRUNE_KEY = 'prune_key';
 
@@ -85,6 +93,9 @@ enum Finding: string
 
     // An entry is signed under a key the ring does not hold
     case ENTRY_KEY = 'entry_key';
+
+    // An entry's artifact cannot be decrypted with the application's keys
+    case MANIFEST_UNREADABLE = 'manifest_unreadable';
 
     // A sealed entry is missing, with no prune record to account for it
     case MISSING_ENTRY = 'missing_entry';
@@ -112,7 +123,8 @@ enum Finding: string
             self::LOG_MISMATCH,
             self::PRUNE_KEY,
             self::ENTRY_MALFORMED,
-            self::ENTRY_KEY => IntegrityStatus::UNVERIFIABLE,
+            self::ENTRY_KEY,
+            self::MANIFEST_UNREADABLE => IntegrityStatus::UNVERIFIABLE,
             self::MISSING_ENTRY,
             self::OVERDUE_UNSEALED,
             self::FUTURE_UNSEALED => IntegrityStatus::INCOMPLETE,

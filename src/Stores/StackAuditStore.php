@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Stores;
 
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
@@ -13,9 +14,10 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * An audit store that delivers each record to several destinations, in order,
  * each under a stable id: the database and a log, say.
  *
- * Every destination is tried, and receives the same finalised record. One that
- * fails does not stop the others or undo what they kept: its failure's class is
- * kept and the next is tried, and once all have been tried a single
+ * Every destination is tried, and receives the same finalised record, a bulk
+ * record's attachment included, so a database destination keeps the bundle. One
+ * that fails does not stop the others or undo what they kept: its failure's
+ * class is kept and the next is tried, and once all have been tried a single
  * `StackDeliveryException` names each destination that failed. A destination id
  * is 1 to 64 lower-case letters, digits, dots, underscores or hyphens, starting
  * with a letter or a digit; it names the destination in receipts and
@@ -25,7 +27,9 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * first is the acknowledgement. It joins a transaction only when every
  * destination does on that connection: a stack of the database and a log writes
  * its line for a business change that may then roll back, so it is not atomic,
- * and a transactional record needs the outbox to use it. A stack cannot hold
+ * and a transactional record needs the outbox to use it. It keeps attachments
+ * only when every destination says it does, so a bulk record is never handed to
+ * a stack of which one destination would lose its manifest. A stack cannot hold
  * another stack.
  *
  * @api
@@ -33,7 +37,7 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class StackAuditStore implements DurableAuditStore
+final readonly class StackAuditStore implements AcceptsAttachments, DurableAuditStore
 {
     /** @var string What a destination id must match. */
     public const string DESTINATION_PATTERN = '/\A[a-z0-9][a-z0-9._-]{0,63}\z/';
@@ -120,6 +124,25 @@ final readonly class StackAuditStore implements DurableAuditStore
     {
         foreach ($this->destinations as $destination) {
             if (!$destination instanceof DurableAuditStore || !$destination->participatesIn($connection)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether the stack keeps a record's attachment with its entry: only when
+     * every destination implements `Contracts\AcceptsAttachments` and says it
+     * does.
+     *
+     * @return bool
+     */
+    #[\Override]
+    public function acceptsAttachments(): bool
+    {
+        foreach ($this->destinations as $destination) {
+            if (!$destination instanceof AcceptsAttachments || !$destination->acceptsAttachments()) {
                 return false;
             }
         }

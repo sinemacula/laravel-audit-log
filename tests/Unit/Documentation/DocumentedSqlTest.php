@@ -16,8 +16,9 @@ use Tests\Concerns\RunsDocumentedSql;
  * database or user but the placeholders, grants exactly the documented
  * privileges and nothing that changes the schema, and creates exactly the
  * documented triggers; each engine's checkpoints trigger guards every immutable
- * column and no anchor column; the SQLite prune recreates the very trigger it
- * drops; and the note states what it must, in its own section, in order.
+ * column and no anchor column; the artifacts' triggers are the entries' own;
+ * the SQLite prune recreates the very triggers it drops; and the note states
+ * what it must, in its own section, in order.
  *
  * The integration tests run the same blocks against each engine; this test
  * holds them to what the note says on any engine, SQLite included.
@@ -33,7 +34,10 @@ final class DocumentedSqlTest extends TestCase
     use RunsDocumentedSql;
 
     /** @var list<string> The tables the triggers are on, in the order they are created. */
-    private const array TABLES = ['audit_log_entries', 'audit_log_checkpoints', 'audit_log_checkpoint_members'];
+    private const array TABLES = ['audit_log_entries', 'audit_log_artifacts', 'audit_log_checkpoints', 'audit_log_checkpoint_members'];
+
+    /** @var list<string> The tables only the maintenance user deletes from, whose delete triggers the SQLite prune drops and recreates, in order. */
+    private const array PRUNED_TABLES = ['audit_log_entries', 'audit_log_artifacts'];
 
     /** @var list<string> The sections of the storage note, in order. */
     private const array SECTIONS = [
@@ -225,11 +229,12 @@ final class DocumentedSqlTest extends TestCase
     {
         yield from [
             'the placeholders'           => ['Replace `app_db`, `audit_writer` and `audit_maintenance` with your database and users.'],
-            'the writer\'s grants'       => ['is granted `SELECT` and `INSERT` on the entries, the checkpoints and the members'],
+            'the writer\'s grants'       => ['is granted `SELECT` and `INSERT` on the entries, the artifacts, the checkpoints and the members'],
             'the writer\'s anchor grant' => ['`UPDATE` on the checkpoints\' four anchor columns alone, and `SELECT`'],
             'the writer\'s state grants' => ['and `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the integrity state table'],
             'the sweep\'s delete'        => ['the `DELETE` is for the sweep, which forgets its cursor when it completes'],
-            'the maintenance user'       => ['the maintenance user is granted `DELETE` on the entries alone, because pruning keeps every checkpoint and member'],
+            'the maintenance user'       => ['the maintenance user is granted `DELETE` on the entries and the artifacts alone, because pruning deletes an entry\'s artifact'
+                . ' with it and keeps every checkpoint and member'],
             'no DDL'                     => ['no DDL for the application user'],
             'no documented DDL'          => ['no documented user holds `DROP`, `TRUNCATE`, `TRIGGER` or `ALTER`'],
             'the verify user'            => ['the user that runs `audit-log:verify` also needs `SELECT`, `INSERT` and `UPDATE` on the integrity state table'],
@@ -240,8 +245,8 @@ final class DocumentedSqlTest extends TestCase
             'truncate on MySQL'          => ['On MySQL `TRUNCATE` needs `DROP`, which no documented user holds, and fires no trigger'],
             'the owner'                  => ['The tables\' owner can drop the triggers: they guard against the application\'s users, not against the owner'],
             'SQLite'                     => ['SQLite has no users, so its triggers refuse every update and delete, with no maintenance exception'],
-            'pruning on SQLite'          => ['with no maintenance exception, and pruning on SQLite drops and recreates the delete trigger'],
-            'a failed prune'             => ['A prune that fails before `COMMIT` is rolled back, and the rollback restores the trigger'],
+            'pruning on SQLite'          => ['with no maintenance exception, and pruning on SQLite drops and recreates the delete triggers of the entries and the artifacts'],
+            'a failed prune'             => ['A prune that fails before `COMMIT` is rolled back, and the rollback restores the triggers'],
             'column grants'              => ['column grants exist on MySQL and PostgreSQL only'],
             'the anchor columns'         => ['The anchor columns are the only ones written after a seal is inserted'],
             'the integrity tables'       => ['are always on the storage connection, beside the entries they describe, and no setting moves them'],
@@ -249,6 +254,12 @@ final class DocumentedSqlTest extends TestCase
             'the existing two tables'    => ['`delivery.deliveries_table` (`audit_log_deliveries` by default) is always on the storage connection'],
             'the existing outbox'        => ['`delivery.outbox.table` (`audit_log_outbox` by default) is on `delivery.outbox.connection`'],
             'the existing outbox grants' => ['In outbox mode the writer also needs'],
+            'the artifacts table'        => ['`entries.artifacts_table` (`audit_log_artifacts` by default) is always on the storage connection'],
+            'one artifact per entry'     => ['under the unique `<table>_entry_unique`, so an entry has at most one artifact'],
+            'the artifacts\' lifecycle'  => ['An artifact is written with its entry and never changed. It is kept as long as its entry and deleted only with it,'
+                . ' by the maintenance user'],
+            'the writer\'s artifacts'    => ['the application\'s writer needs `SELECT` and `INSERT` on the entries and the artifacts tables and nothing else'],
+            'the four truncate triggers' => ['a statement trigger on each of the four tables'],
         ];
     }
 
@@ -329,14 +340,15 @@ final class DocumentedSqlTest extends TestCase
             'mysql'        => ['mysql-triggers', self::triggersOf(['no_update', 'no_delete'])],
             'pgsql'        => ['pgsql-triggers', self::triggersOf(['no_update', 'no_delete', 'no_truncate'])],
             'sqlite'       => ['sqlite-triggers', self::triggersOf(['no_update', 'no_delete'])],
-            'sqlite prune' => ['sqlite-prune', ['audit_log_entries_no_delete' => 'audit_log_entries']],
+            'sqlite prune' => ['sqlite-prune', ['audit_log_entries_no_delete' => 'audit_log_entries', 'audit_log_artifacts_no_delete' => 'audit_log_artifacts']],
         ];
     }
 
     /**
-     * Each engine creates an update and a delete trigger on each of the three
+     * Each engine creates an update and a delete trigger on each of the four
      * tables, and PostgreSQL a truncate trigger on each too, each named after
-     * its table; the SQLite prune creates the entries' delete trigger alone.
+     * its table; the SQLite prune creates the entries' and the artifacts'
+     * delete triggers alone.
      *
      * @param  string  $marker
      * @param  array<string, string>  $triggers
@@ -350,9 +362,9 @@ final class DocumentedSqlTest extends TestCase
 
     /**
      * The PostgreSQL triggers call the two documented functions: the entries'
-     * delete trigger the one that lets the maintenance user through, by
-     * `current_user`, and every other trigger the one that refuses everyone;
-     * the truncate triggers fire once per statement.
+     * and the artifacts' delete triggers the one that lets the maintenance user
+     * through, by `current_user`, and every other trigger the one that refuses
+     * everyone; the truncate triggers fire once per statement.
      *
      * @return void
      */
@@ -365,7 +377,7 @@ final class DocumentedSqlTest extends TestCase
 
         foreach (array_keys(self::documentedTriggers($sql)) as $trigger) {
             $statement = self::statementCreating($sql, $trigger);
-            $function  = $trigger === 'audit_log_entries_no_delete' ? 'audit_log_refuse_delete' : 'audit_log_refuse';
+            $function  = in_array($trigger, ['audit_log_entries_no_delete', 'audit_log_artifacts_no_delete'], true) ? 'audit_log_refuse_delete' : 'audit_log_refuse';
 
             self::assertStringEndsWith('EXECUTE FUNCTION ' . $function . '()', $statement, $trigger);
             self::assertSame(str_ends_with($trigger, '_no_truncate'), str_contains($statement, 'FOR EACH STATEMENT'), $trigger);
@@ -386,11 +398,13 @@ final class DocumentedSqlTest extends TestCase
 
         yield 'mysql' => ['mysql-grants', [
             ['SELECT, INSERT', 'app_db.audit_log_entries', $writer],
+            ['SELECT, INSERT', 'app_db.audit_log_artifacts', $writer],
             ['SELECT, INSERT', 'app_db.audit_log_checkpoints', $writer],
             [$anchor, 'app_db.audit_log_checkpoints', $writer],
             ['SELECT, INSERT', 'app_db.audit_log_checkpoint_members', $writer],
             ['SELECT, INSERT, UPDATE, DELETE', 'app_db.audit_log_integrity_state', $writer],
             ['SELECT, DELETE', 'app_db.audit_log_entries', $upkeep],
+            ['SELECT, DELETE', 'app_db.audit_log_artifacts', $upkeep],
             ['SELECT', 'app_db.audit_log_checkpoints', $upkeep],
             ['SELECT', 'app_db.audit_log_checkpoint_members', $upkeep],
         ]];
@@ -398,19 +412,19 @@ final class DocumentedSqlTest extends TestCase
         yield 'pgsql' => ['pgsql-grants', [
             ['CONNECT', 'DATABASE app_db', 'audit_writer, audit_maintenance'],
             ['USAGE', 'SCHEMA public', 'audit_writer, audit_maintenance'],
-            ['SELECT, INSERT', 'audit_log_entries, audit_log_checkpoints, audit_log_checkpoint_members', 'audit_writer'],
+            ['SELECT, INSERT', 'audit_log_entries, audit_log_artifacts, audit_log_checkpoints, audit_log_checkpoint_members', 'audit_writer'],
             [$anchor, 'audit_log_checkpoints', 'audit_writer'],
             ['SELECT, INSERT, UPDATE, DELETE', 'audit_log_integrity_state', 'audit_writer'],
-            ['SELECT, DELETE', 'audit_log_entries', 'audit_maintenance'],
+            ['SELECT, DELETE', 'audit_log_entries, audit_log_artifacts', 'audit_maintenance'],
             ['SELECT', 'audit_log_checkpoints, audit_log_checkpoint_members', 'audit_maintenance'],
         ]];
     }
 
     /**
      * Each grants block makes exactly the documented grants: the writer may
-     * read and insert the entries and the evidence, update the anchor columns
-     * alone and keep the state table; the maintenance user may read and delete
-     * the entries and read the evidence.
+     * read and insert the entries, the artifacts and the evidence, update the
+     * anchor columns alone and keep the state table; the maintenance user may
+     * read and delete the entries and the artifacts and read the evidence.
      *
      * @param  string  $marker
      * @param  list<array{0: string, 1: string, 2: string}>  $grants
@@ -458,24 +472,80 @@ final class DocumentedSqlTest extends TestCase
 
     /**
      * The SQLite prune runs in one immediate transaction: it drops the entries'
-     * delete trigger, leaves the line where the prune's own statements go,
-     * recreates the trigger exactly as the triggers block creates it, and
-     * commits.
+     * and the artifacts' delete triggers, leaves the line where the prune's own
+     * statements go, recreates each trigger exactly as the triggers block
+     * creates it, and commits.
      *
      * @return void
      */
     public function testTheSqlitePruneRecreatesTheDocumentedDeleteTrigger(): void
     {
-        $prune     = self::documentedSql('sqlite-prune');
-        $statement = self::statementCreating($prune, 'audit_log_entries_no_delete');
+        $prune = self::documentedSql('sqlite-prune');
 
         self::assertStringStartsWith("BEGIN IMMEDIATE;\n", $prune);
         self::assertStringEndsWith("COMMIT;\n", $prune);
-        self::assertStringContainsString("\nDROP TRIGGER audit_log_entries_no_delete;\n", $prune);
         self::assertStringContainsString("\n" . self::PRUNE_STATEMENTS . "\n", $prune);
-        self::assertSame(self::statementCreating(self::documentedSql('sqlite-triggers'), 'audit_log_entries_no_delete'), $statement);
-        self::assertLessThan(strpos($prune, $statement), strpos($prune, self::PRUNE_STATEMENTS));
-        self::assertLessThan(strpos($prune, self::PRUNE_STATEMENTS), strpos($prune, 'DROP TRIGGER'));
+        self::assertSame(count(self::PRUNED_TABLES), substr_count($prune, 'DROP TRIGGER'));
+
+        foreach (self::PRUNED_TABLES as $table) {
+            $trigger   = $table . '_no_delete';
+            $statement = self::statementCreating($prune, $trigger);
+            $drop      = strpos($prune, "\nDROP TRIGGER {$trigger};\n");
+
+            self::assertIsInt($drop, "The prune does not drop {$trigger}.");
+            self::assertSame(self::statementCreating(self::documentedSql('sqlite-triggers'), $trigger), $statement);
+            self::assertLessThan(strpos($prune, $statement), strpos($prune, self::PRUNE_STATEMENTS));
+            self::assertLessThan(strpos($prune, self::PRUNE_STATEMENTS), $drop);
+        }
+    }
+
+    /**
+     * Rows of `[marker, suffixes]`: each engine's triggers, with the suffix of
+     * each trigger the entries and the artifacts get.
+     *
+     * @return iterable<string, array{0: string, 1: list<string>}>
+     */
+    public static function provideEntryLikeTriggers(): iterable
+    {
+        yield from [
+            'mysql'  => ['mysql-triggers', ['no_update', 'no_delete']],
+            'pgsql'  => ['pgsql-triggers', ['no_update', 'no_delete', 'no_truncate']],
+            'sqlite' => ['sqlite-triggers', ['no_update', 'no_delete']],
+        ];
+    }
+
+    /**
+     * Each engine's artifacts triggers are the entries' own, with only the
+     * table's name changed: an update of an artifact is refused always, with no
+     * condition and no column list, and a delete is refused but for the
+     * maintenance user exactly as an entry's is (on SQLite, refused always).
+     *
+     * @param  string  $marker
+     * @param  list<string>  $suffixes
+     * @return void
+     */
+    #[DataProvider('provideEntryLikeTriggers')]
+    public function testTheArtifactTriggersRefuseEveryUpdate(string $marker, array $suffixes): void
+    {
+        $sql = self::documentedSql($marker);
+
+        foreach ($suffixes as $suffix) {
+            $entries = self::statementCreating($sql, 'audit_log_entries_' . $suffix);
+
+            self::assertSame(str_replace('audit_log_entries', 'audit_log_artifacts', $entries), self::statementCreating($sql, 'audit_log_artifacts_' . $suffix));
+        }
+
+        $update = self::statementCreating($sql, 'audit_log_artifacts_no_update');
+
+        self::assertDoesNotMatchRegularExpression('/\bWHEN\b|\bUPDATE OF\b|\bIF\b/', $update);
+
+        if ($marker === 'pgsql-triggers') {
+            self::assertStringEndsWith('EXECUTE FUNCTION audit_log_refuse()', $update);
+
+            return;
+        }
+
+        self::assertStringContainsString('audit_log_artifacts refuses UPDATE', $update);
     }
 
     /**
@@ -513,7 +583,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The MySQL triggers script is split into its six triggers, each whole.
+     * The MySQL triggers script is split into its eight triggers, each whole.
      *
      * @return void
      */
@@ -521,7 +591,7 @@ final class DocumentedSqlTest extends TestCase
     {
         $statements = self::statementsOf(self::documentedSql('mysql-triggers'));
 
-        self::assertCount(6, $statements);
+        self::assertCount(8, $statements);
 
         foreach ($statements as $statement) {
             self::assertStringStartsWith('CREATE TRIGGER ', $statement);

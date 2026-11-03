@@ -49,9 +49,12 @@ final class FindingTest extends TestCase
             'PRUNE_RECORD'         => 'prune_record',
             'MEMBER_HMAC'          => 'member_hmac',
             'ENTRY_HMAC'           => 'entry_hmac',
+            'MANIFEST_MISSING'     => 'manifest_missing',
+            'MANIFEST_MISMATCH'    => 'manifest_mismatch',
             'PRUNE_KEY'            => 'prune_key',
             'ENTRY_MALFORMED'      => 'entry_malformed',
             'ENTRY_KEY'            => 'entry_key',
+            'MANIFEST_UNREADABLE'  => 'manifest_unreadable',
             'MISSING_ENTRY'        => 'missing_entry',
             'OVERDUE_UNSEALED'     => 'overdue_unsealed',
             'FUTURE_UNSEALED'      => 'future_unsealed',
@@ -60,10 +63,11 @@ final class FindingTest extends TestCase
 
     /**
      * Each finding gives its status: a seal or entry that cannot be read or
-     * whose key is unknown is `unverifiable`, a missing entry, or an unsealed
-     * one overdue or far ahead of the clock, is `incomplete`, and every other
-     * finding shows the log was altered. The whole map is compared at once, so
-     * a finding moved to another status fails.
+     * whose key is unknown, or an artifact that cannot be decrypted, is
+     * `unverifiable`, a missing entry, or an unsealed one overdue or far ahead
+     * of the clock, is `incomplete`, and every other finding, a missing or
+     * mismatched artifact among them, shows the log was altered. The whole map
+     * is compared at once, so a finding moved to another status fails.
      *
      * @return void
      */
@@ -88,9 +92,12 @@ final class FindingTest extends TestCase
             'prune_record'         => 'tampered',
             'member_hmac'          => 'tampered',
             'entry_hmac'           => 'tampered',
+            'manifest_missing'     => 'tampered',
+            'manifest_mismatch'    => 'tampered',
             'prune_key'            => 'unverifiable',
             'entry_malformed'      => 'unverifiable',
             'entry_key'            => 'unverifiable',
+            'manifest_unreadable'  => 'unverifiable',
             'missing_entry'        => 'incomplete',
             'overdue_unsealed'     => 'incomplete',
             'future_unsealed'      => 'incomplete',

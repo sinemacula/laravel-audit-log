@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\AuditLog\Stores;
 use Illuminate\Log\LogManager;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
@@ -16,7 +17,9 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  *
  * A finalised record is spilled with its integrity fields, so a replay can
  * verify it; a record that failed before it was finalised is spilled with
- * `unsigned` set and no signature, and a replay leaves it. Every `%` in the
+ * `unsigned` set and no signature, and a replay leaves it. Either is the
+ * envelope the codec reads back, so a record with an attachment is spilled as
+ * its complete bundle, the record and the attachment together. Every `%` in the
  * envelope is written as the JSON escape `\u0025`, which decodes to the same
  * value, because Monolog's `LineFormatter` rewrites a `%token%` in its output
  * even after the message is substituted; the HMAC is over decoded values, so
@@ -57,7 +60,8 @@ final readonly class FailureSpill
     ) {}
 
     /**
-     * Spill the finalised record with its integrity fields.
+     * Spill the finalised record with its integrity fields, as its columns or,
+     * with an attachment, as its bundle.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return void
@@ -68,12 +72,12 @@ final readonly class FailureSpill
      */
     public function spillFinalised(#[\SensitiveParameter] FinalisedRecord $record): void
     {
-        $this->write($record->toArray());
+        $this->write(EnvelopeCodec::envelopeOf($record));
     }
 
     /**
      * Spill a record that was never finalised, marked `unsigned`, with no
-     * integrity fields.
+     * integrity fields, as its columns or, with an attachment, as its bundle.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return void
@@ -84,7 +88,7 @@ final readonly class FailureSpill
      */
     public function spillUnsigned(#[\SensitiveParameter] AuditRecord $record): void
     {
-        $this->write(['unsigned' => true, ...$record->toArray()]);
+        $this->write(EnvelopeCodec::unsignedEnvelopeOf($record));
     }
 
     /**

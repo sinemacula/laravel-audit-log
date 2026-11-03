@@ -13,10 +13,10 @@ use Tests\Fixtures\Database\EntriesTableShape;
 /**
  * Unit tests for the shapes the schema checks compare the package's tables
  * against: the entries table's is what its migration gives, column by column
- * and index by index, the outbox's, the deliveries', the checkpoints', the
- * checkpoint members' and the integrity state's are what theirs give, and each
- * names its table and describes a column the package does not write in its own
- * words.
+ * and index by index, the artifacts', the outbox's, the deliveries', the
+ * checkpoints', the checkpoint members' and the integrity state's are what
+ * theirs give, and each names its table and describes a column the package does
+ * not write in its own words.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,6 +67,31 @@ final class TableShapeTest extends TestCase
             '_recorded_index'  => [['recorded_at', 'id'], false],
             '_source_unique'   => [['source_id', 'source_record_id'], true],
         ], $shape->indexes);
+        self::assertSame(['id'], $shape->primary);
+    }
+
+    /**
+     * The artifacts shape is what its migration gives: the artifact's id as the
+     * key, the entry it belongs to, its kind, its count and digest, the
+     * encrypted members, when it was recorded, and an entry with at most one
+     * artifact.
+     *
+     * @return void
+     */
+    public function testTheArtifactsShape(): void
+    {
+        $shape = TableShape::artifacts();
+
+        self::assertSame([
+            'id'           => ['uuid', 36, false],
+            'entry_id'     => ['uuid', 36, false],
+            'kind'         => ['string', 16, false],
+            'member_count' => ['integer', null, false],
+            'digest'       => ['string', 64, false],
+            'members'      => ['longtext', null, false],
+            'created_at'   => ['datetime', 6, false],
+        ], $shape->columns);
+        self::assertSame(['_entry_unique' => [['entry_id'], true]], $shape->indexes);
         self::assertSame(['id'], $shape->primary);
     }
 
@@ -207,6 +232,7 @@ final class TableShapeTest extends TestCase
     {
         yield from [
             'the entries'            => [TableShape::entries(), 'entries', 'Column `notes` is not one the package writes, so no entry\'s HMAC covers it.'],
+            'the artifacts'          => [TableShape::artifacts(), 'artifacts', 'Column `notes` is not one the package writes.'],
             'the outbox'             => [TableShape::outbox(), 'outbox', 'Column `notes` is not one the package writes.'],
             'the deliveries'         => [TableShape::deliveries(), 'deliveries', 'Column `notes` is not one the package writes.'],
             'the checkpoints'        => [TableShape::checkpoints(), 'checkpoints', 'Column `notes` is not one the package writes, so no seal covers it.'],
@@ -218,7 +244,8 @@ final class TableShapeTest extends TestCase
     /**
      * Each shape names its table, and describes a column the package does not
      * write in its own words: an entry is covered by an HMAC, a seal and its
-     * members by the seal, and nothing else by either.
+     * members by the seal, and nothing else, an artifact's own columns
+     * included, by either.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
      * @param  string  $label

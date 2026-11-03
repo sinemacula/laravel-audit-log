@@ -22,9 +22,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
+use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\FailedWrite;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
@@ -63,7 +65,10 @@ use Tests\TestCase;
  * and the store are resolved when the write happens, that the notification sits
  * outside the write, what a failed write does under each rule and when its
  * spill goes, which stores a strict record may use, how the delivery mode
- * routes it, and what happens to a record made inside a write.
+ * routes it, what happens to a record made inside a write, that a bundle is
+ * refused by a store keeping no attachments, and how a captured record is
+ * delivered: under the `REPORT` rule whatever the mode, never strict, with its
+ * failure signalled once and nothing let out of a deferred one's commit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,9 +95,18 @@ final class RecordDeliveryTest extends TestCase
     /** @var string A value of the record made inside a write. */
     private const string INNER_VALUE = 'kept-out-of-every-frame';
 
+    /** @var string What a fail-closed or a transactional capture is refused with. */
+    private const string STRICT_CAPTURE = 'A captured record is written immediately or after commit, never fail-closed or transactional.';
+
+    /** @var string A failure Laravel reads as a concurrency error. */
+    private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock';
+
     /** @var string What a fail-closed or a transactional record made inside the guard is refused with. */
     private const string STRICT_REFUSAL = 'A fail-closed or transactional record was made while an audit record was being written or its failure handled,'
         . ' so its guarantee cannot be met.';
+
+    /** @var list<string> The class each capture's signal passed on, in order. */
+    private array $signalled = [];
 
     /**
      * Capture every line logged.
@@ -2361,6 +2375,545 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
+     * A capture asked to be fail-closed is refused by the check, before
+     * anything is read, and by a delivery made without a check.
+     *
+     * @return void
+     */
+    public function testACaptureIsRefusedFailClosed(): void
+    {
+        $fake = FakeAuditStore::fake();
+
+        $record = RecordFactory::captured();
+
+        $this->assertThrows(fn () => $this->delivery()->check(Timing::IMMEDIATE, null, true, $this->signal()), \LogicException::class, self::STRICT_CAPTURE);
+        $this->assertThrows(fn () => $this->delivery()->deliver($record, Timing::IMMEDIATE, null, true, $this->signal()), \LogicException::class, self::STRICT_CAPTURE);
+
+        self::assertSame(0, $fake->count());
+        self::assertSame([], $this->signalled);
+    }
+
+    /**
+     * A capture asked to be transactional is refused before the existing
+     * checks, so the refusal names the capture and not the transaction it
+     * lacks, and by a delivery made without a check.
+     *
+     * @return void
+     */
+    public function testACaptureIsRefusedTransactional(): void
+    {
+        $fake = FakeAuditStore::fake();
+
+        $this->assertThrows(fn () => $this->delivery()->check(Timing::TRANSACTIONAL, null, false, $this->signal()), \LogicException::class, self::STRICT_CAPTURE);
+
+        DB::connection(self::CONNECTION)->beginTransaction();
+
+        $record = RecordFactory::captured();
+
+        $this->assertThrows(fn () => $this->delivery()->deliver($record, Timing::TRANSACTIONAL, null, false, $this->signal()), \LogicException::class, self::STRICT_CAPTURE);
+
+        self::assertSame(0, $fake->count());
+    }
+
+    /**
+     * A capture inside the write guard asked to be strict is refused as a
+     * capture first, whatever the guard would say.
+     *
+     * @return void
+     */
+    public function testAStrictCaptureInsideTheGuardIsRefusedAsACapture(): void
+    {
+        $thrown = null;
+
+        app(WriteGuard::class)->during(function () use (&$thrown): void {
+            try {
+                $this->delivery()->check(Timing::IMMEDIATE, null, true, $this->signal());
+            } catch (\LogicException $exception) {
+                $thrown = $exception;
+            }
+        });
+
+        self::assertInstanceOf(\LogicException::class, $thrown);
+        self::assertSame(self::STRICT_CAPTURE, $thrown->getMessage());
+    }
+
+    /**
+     * Under the `throw` mode a capture still follows the `REPORT` rule: its
+     * failed write returns, spilled once and reported once.
+     *
+     * @return void
+     */
+    public function testACaptureFollowsTheReportRuleUnderTheThrowMode(): void
+    {
+        $reporter = $this->reporter();
+
+        $this->failureMode('throw');
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $signal = $this->signal();
+
+        $this->delivery()->check(Timing::IMMEDIATE, null, false, $signal);
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, false, $signal);
+
+        self::assertSame(\RuntimeException::class, self::reportOf($reporter)->exceptionClass);
+        self::assertCount(1, $reporter->reports());
+        $this->assertSpilled(1);
+        self::assertTrue($signal->hasFailed());
+    }
+
+    /**
+     * A capture's failed write is signalled once, with the failure's class,
+     * after it is said once.
+     *
+     * @return void
+     */
+    public function testACapturesWriteFailureIsSignalledOnce(): void
+    {
+        $this->reporter();
+
+        $failures = [];
+
+        Event::listen(AuditWriteFailed::class, static function (AuditWriteFailed $event) use (&$failures): void {
+            $failures[] = $event;
+        });
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $signal = $this->signal();
+        $record = RecordFactory::captured();
+
+        $this->delivery()->deliver($record, Timing::IMMEDIATE, null, false, $signal);
+
+        self::assertCount(1, $failures);
+        self::assertSame($record->id, $failures[0]->id);
+        self::assertSame([\RuntimeException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertFalse($signal->isDeferred());
+    }
+
+    /**
+     * A capture that is written signals nothing, and is said as any record is.
+     *
+     * @return void
+     */
+    public function testACapturesWriteSuccessSignalsNothing(): void
+    {
+        $fake   = FakeAuditStore::fake();
+        $heard  = 0;
+        $signal = $this->signal();
+
+        Event::listen(AuditRecorded::class, static function () use (&$heard): void {
+            $heard++;
+        });
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, false, $signal);
+
+        self::assertSame(1, $fake->count());
+        self::assertSame(1, $heard);
+        self::assertFalse($signal->hasFailed());
+        self::assertSame([], $this->signalled);
+    }
+
+    /**
+     * A deferred capture's signal is marked deferred when its write is queued
+     * for the commit, before the write runs.
+     *
+     * @return void
+     */
+    public function testADeferredCaptureIsMarkedBeforeItIsQueued(): void
+    {
+        $fake       = FakeAuditStore::fake();
+        $connection = DB::connection(self::CONNECTION);
+        $signal     = $this->signal();
+        $seen       = null;
+
+        $connection->beginTransaction();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, null, false, $signal);
+
+        self::assertTrue($signal->isDeferred());
+        self::assertSame(0, $fake->count());
+
+        Event::listen(AuditRecorded::class, static function () use ($signal, &$seen): void {
+            $seen = $signal->isDeferred();
+        });
+
+        $connection->commit();
+
+        self::assertSame(1, $fake->count());
+        self::assertTrue($seen);
+        self::assertFalse($signal->hasFailed());
+    }
+
+    /**
+     * An after-commit capture with no transaction open is written now, so its
+     * signal is never marked deferred.
+     *
+     * @return void
+     */
+    public function testAnAfterCommitCaptureWithNothingOpenIsNotDeferred(): void
+    {
+        $fake   = FakeAuditStore::fake();
+        $signal = $this->signal();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, null, false, $signal);
+
+        self::assertSame(1, $fake->count());
+        self::assertFalse($signal->isDeferred());
+    }
+
+    /**
+     * A deferred capture's failure reaches its signal when the commit runs the
+     * write, not before, and the commit stands.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeferredCapturesFailureIsSignalledAtCommit(): void
+    {
+        $reporter   = $this->reporter();
+        $connection = DB::connection(self::CONNECTION);
+        $signal     = $this->signal();
+
+        $this->failureMode('throw');
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $connection->beginTransaction();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, null, false, $signal);
+
+        self::assertFalse($signal->hasFailed());
+
+        $connection->commit();
+
+        self::assertSame(0, $connection->transactionLevel());
+        self::assertSame([\RuntimeException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertCount(1, $reporter->reports());
+        $this->assertSpilled(1);
+    }
+
+    /**
+     * A deferred capture whose transaction rolls back is never written, and
+     * signals and reports nothing.
+     *
+     * @return void
+     */
+    public function testARolledBackCaptureSignalsNothing(): void
+    {
+        $reporter   = $this->reporter();
+        $connection = DB::connection(self::CONNECTION);
+        $signal     = $this->signal();
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $connection->beginTransaction();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, null, false, $signal);
+
+        $connection->rollBack();
+
+        self::assertFalse($signal->hasFailed());
+        self::assertSame([], $reporter->reports());
+        $this->assertSpilled(0);
+    }
+
+    /**
+     * A bundle delivered to a store that keeps no attachments is refused inside
+     * the attempt, so it follows the rule: one spill line, one report naming
+     * the store and the refusal, and one `AuditWriteFailed`, with nothing
+     * handed to the store.
+     *
+     * @return void
+     */
+    public function testADeliveredBundleToAStoreKeepingNoAttachmentsFollowsTheRule(): void
+    {
+        $reporter = $this->reporter();
+        $store    = new PlainStore;
+        $failures = 0;
+
+        app()->instance(AuditStore::class, $store);
+
+        Event::listen(AuditWriteFailed::class, static function () use (&$failures): void {
+            $failures++;
+        });
+
+        $this->delivery()->deliver(RecordFactory::bundled(), Timing::IMMEDIATE, null);
+
+        $report = self::reportOf($reporter);
+
+        self::assertSame(0, $store->calls());
+        self::assertCount(1, $reporter->reports());
+        self::assertSame(\LogicException::class, $report->exceptionClass);
+        self::assertSame(FailedOperation::STORE->value, $report->operation);
+        self::assertSame(PlainStore::class, $report->store);
+        self::assertSame(1, $failures);
+        $this->assertSpilled(1);
+    }
+
+    /**
+     * Under the `throw` mode the refused bundle is thrown, sanitised, as any
+     * failed write is.
+     *
+     * @return void
+     */
+    public function testARefusedBundleIsThrownUnderTheThrowMode(): void
+    {
+        $this->failureMode('throw');
+
+        app()->instance(AuditStore::class, new PlainStore);
+
+        try {
+            $this->delivery()->deliver(RecordFactory::bundled(), Timing::IMMEDIATE, null);
+
+            self::fail('Expected the bundle to be refused.');
+        } catch (AuditWriteFailedException $caught) {
+            self::assertSame(\LogicException::class, $caught->exceptionClass);
+            self::assertNull($caught->getPrevious());
+        }
+    }
+
+    /**
+     * A bundle reaches a store that keeps attachments, with its attachment, and
+     * a record without one reaches a store that keeps none.
+     *
+     * @return void
+     */
+    public function testABundleReachesAStoreThatKeepsAttachments(): void
+    {
+        $store  = $this->storeKeepingAttachments();
+        $plain  = new PlainStore;
+        $record = RecordFactory::bundled();
+
+        app()->instance(AuditStore::class, $store);
+
+        $this->delivery()->deliver($record, Timing::IMMEDIATE, null);
+
+        app()->instance(AuditStore::class, $plain);
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null);
+
+        self::assertCount(1, $store->received);
+        self::assertSame($record->attachment, $store->received[0]->record->attachment);
+        self::assertSame(1, $plain->calls());
+    }
+
+    /**
+     * A capture never reads the failure mode, so a malformed one stops neither
+     * its check nor its delivery, and its failure still follows the `REPORT`
+     * rule; a record without a signal is still refused.
+     *
+     * @return void
+     */
+    public function testACaptureIgnoresAMalformedFailureMode(): void
+    {
+        $reporter = $this->reporter();
+        $fake     = FakeAuditStore::fake();
+
+        $this->failureMode('nonsense');
+
+        $this->delivery()->check(Timing::IMMEDIATE, null, false, $this->signal());
+        $this->delivery()->check(Timing::AFTER_COMMIT, null, false, $this->signal());
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, false, $this->signal());
+
+        self::assertSame(1, $fake->count());
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, false, $this->signal());
+
+        self::assertCount(1, $reporter->reports());
+        self::assertSame([\RuntimeException::class], $this->signalled);
+
+        $this->assertThrows(fn () => $this->delivery()->check(Timing::IMMEDIATE, null), \InvalidArgumentException::class, '`audit-log.failure.mode`');
+        $this->assertThrows(fn () => $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null), \InvalidArgumentException::class, '`audit-log.failure.mode`');
+    }
+
+    /**
+     * A capture's check asks nothing of the store, since a capture is never
+     * strict.
+     *
+     * @return void
+     */
+    public function testACaptureAsksNothingOfTheStore(): void
+    {
+        app()->bind(AuditStore::class, static function (): never {
+            throw new \RuntimeException('The store must not be resolved by a check.');
+        });
+
+        $this->delivery()->check(Timing::IMMEDIATE, null, false, $this->signal());
+        $this->delivery()->check(Timing::AFTER_COMMIT, self::CONNECTION, false, $this->signal());
+
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * Nothing leaves a deferred capture's commit callback: a listener's
+     * deadlock while another connection has a transaction open, which the
+     * notification throws and which lies outside the failure path's attempt, is
+     * reported once, by its class alone, and signalled, and the commit succeeds
+     * with the record stored.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeferredCaptureNeverThrowsFromTheCommit(): void
+    {
+        $reporter   = $this->reporter();
+        $fake       = FakeAuditStore::fake();
+        $connection = DB::connection(self::CONNECTION);
+        $signal     = $this->signal();
+
+        $this->listenerThrows(new \RuntimeException(self::DEADLOCK . ': ' . self::SECRET));
+
+        DB::connection(self::OTHER)->beginTransaction();
+
+        $connection->beginTransaction();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, self::CONNECTION, false, $signal);
+
+        $connection->commit();
+
+        $report = self::reportOf($reporter);
+
+        self::assertSame(0, $connection->transactionLevel());
+        self::assertSame(1, $fake->count());
+        self::assertCount(1, $reporter->reports());
+        self::assertSame(DeadlockException::class, $report->exceptionClass);
+        self::assertNull($report->getPrevious());
+        self::assertSame([DeadlockException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertHoldsNoSecret($report, 'the report');
+    }
+
+    /**
+     * The same escape from an ordinary record's deferred write still reaches
+     * the code that commits, as it always has: only a capture contains it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeferredOrdinaryRecordsEscapeStillReachesTheCommit(): void
+    {
+        $this->reporter();
+
+        FakeAuditStore::fake();
+
+        $connection = DB::connection(self::CONNECTION);
+
+        $this->listenerThrows(new \RuntimeException(self::DEADLOCK));
+
+        DB::connection(self::OTHER)->beginTransaction();
+
+        $connection->beginTransaction();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, self::CONNECTION);
+
+        $this->expectException(DeadlockException::class);
+
+        $connection->commit();
+    }
+
+    /**
+     * A synchronous capture's listener deadlock inside a host transaction is
+     * not the delivery's to contain: it propagates, sanitised, for the capture
+     * to judge.
+     *
+     * @return void
+     */
+    public function testASynchronousCapturesEscapeIsNotContained(): void
+    {
+        FakeAuditStore::fake();
+
+        DB::connection(self::CONNECTION)->beginTransaction();
+
+        $this->listenerThrows(new \RuntimeException(self::DEADLOCK));
+
+        $this->expectException(DeadlockException::class);
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, false, $this->signal());
+    }
+
+    /**
+     * A deferred capture's write failure is signalled once, by the failure
+     * path, and the containment adds no second report or signal.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeferredCapturesWriteFailureIsReportedOnce(): void
+    {
+        $reporter   = $this->reporter();
+        $connection = DB::connection(self::CONNECTION);
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $connection->beginTransaction();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, null, false, $this->signal());
+
+        $connection->commit();
+
+        self::assertCount(1, $reporter->reports());
+        self::assertSame([\RuntimeException::class], $this->signalled);
+    }
+
+    /**
+     * In outbox mode a capture carries its signal to the writer: a failed
+     * insert under the `throw` mode returns, reported and signalled.
+     *
+     * @return void
+     */
+    public function testACaptureInOutboxModeCarriesItsSignal(): void
+    {
+        $reporter = $this->reporter();
+
+        $this->failureMode('throw');
+        $this->outboxModeOn();
+        $this->pointOutboxAtProbeTable();
+
+        $this->beforeApplicationDestroyed(fn () => $this->removeOutboxProbeTable());
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, false, $this->signal());
+
+        self::assertSame(FailedOperation::OUTBOX->value, self::reportOf($reporter)->operation);
+        self::assertSame([QueryException::class], $this->signalled);
+        $this->assertSpilled(1);
+    }
+
+    /**
+     * A record delivered without a signal keeps every rule it had: under the
+     * `throw` mode its failure is thrown, a fail-closed check is accepted, and
+     * a transactional one still needs its transaction.
+     *
+     * @return void
+     */
+    public function testAnOrdinaryRecordIgnoresTheSignalPath(): void
+    {
+        $this->failureMode('throw');
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $this->assertThrows(fn () => $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null), AuditWriteFailedException::class);
+
+        app()->instance(AuditStore::class, CallbackStore::saying(true, [self::CONNECTION]));
+
+        $this->delivery()->check(Timing::IMMEDIATE, null, true);
+
+        $this->assertThrows(
+            fn () => $this->delivery()->check(Timing::TRANSACTIONAL, null),
+            \LogicException::class,
+            'A transactional record needs a transaction open on the storage connection',
+        );
+    }
+
+    /**
      * Add the second connection, on its own in-memory SQLite database.
      *
      * @param  mixed  $app
@@ -2383,6 +2936,55 @@ final class RecordDeliveryTest extends TestCase
     private function delivery(): RecordDelivery
     {
         return app(RecordDelivery::class);
+    }
+
+    /**
+     * A capture's signal that keeps the class it passes on.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal
+     */
+    private function signal(): CaptureSignal
+    {
+        return new CaptureSignal(function (string $exceptionClass): void {
+            $this->signalled[] = $exceptionClass;
+        });
+    }
+
+    /**
+     * A store that says it keeps attachments, and keeps every record it is
+     * handed.
+     *
+     * @return object{received: list<\SineMacula\Laravel\AuditLog\Records\FinalisedRecord>}&\SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments
+     */
+    private function storeKeepingAttachments(): AcceptsAttachments
+    {
+        return new class implements AcceptsAttachments {
+            /** @var list<\SineMacula\Laravel\AuditLog\Records\FinalisedRecord> The records received, oldest first. */
+            public array $received = [];
+
+            /**
+             * Keep the record.
+             *
+             * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+             * @return void
+             */
+            #[\Override]
+            public function store(#[\SensitiveParameter] FinalisedRecord $record): void
+            {
+                $this->received[] = $record;
+            }
+
+            /**
+             * Keep every attachment.
+             *
+             * @return bool
+             */
+            #[\Override]
+            public function acceptsAttachments(): bool
+            {
+                return true;
+            }
+        };
     }
 
     /**

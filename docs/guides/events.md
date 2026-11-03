@@ -1,15 +1,17 @@
 # Events
 
-The package tells the application what became of each record, and of the log as a whole, through three events. None
-holds a value of a record, so a listener can pass one to an alerting tool or a queue without copying personal data.
+The package tells the application what became of each record, of each capture and of the log as a whole, through four
+events. None holds a value of a record, so a listener can pass one to an alerting tool or a queue without copying
+personal data.
 
 | Event                                                     | Dispatched when                                                                             | Carries                                                                                                         |
 |-----------------------------------------------------------|---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `SineMacula\Laravel\AuditLog\Events\AuditRecorded`        | The store has accepted a record                                                             | `id`, `code` and `category`                                                                                     |
 | `SineMacula\Laravel\AuditLog\Events\AuditWriteFailed`     | A record could not be written                                                               | `id`, `code`, the `store` and `exception` classes                                                               |
+| `SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed`   | An event could not be captured                                                              | the `eventClass`, `mapperClass` and `exceptionClass`                                                            |
 | `SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed` | Sealing or verifying found the log altered, incomplete or unverifiable, or a verify stopped | `command`, the `integrity` and `anchoring` counts, `finding`, `firstBadId`, `head`, `remoteHead` and `complete` |
 
-All three implement `SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent`, and none is sent anywhere unless a listener
+All four implement `SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent`, and none is sent anywhere unless a listener
 is registered. [The event model](../design/event-model.md) has the exact timing of each, and
 [outcomes](../design/outcomes.md) has what each timing, mode and failure guarantees.
 
@@ -42,6 +44,41 @@ Event::listen(static function (AuditWriteFailed $event): void {
   healthy; see [delivery](../design/delivery.md).
 - Do not record from this listener. The write it reports just failed, so a record made here is refused, as the last
   section says.
+
+## Alert on a failed capture
+
+Listen for `AuditCaptureFailed`. It fires once for each event the package could not capture, whether a mapper threw,
+returned something it may not, or the write failed, and the capture itself returns `null`, so the code that dispatched
+the event goes on as if nothing was mapped:
+
+```php
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
+
+Event::listen(static function (AuditCaptureFailed $event): void {
+    Log::channel('ops')->error('An event could not be captured.', [
+        'event'     => $event->eventClass,
+        'mapper'    => $event->mapperClass,
+        'exception' => $event->exceptionClass,
+    ]);
+});
+```
+
+- It carries class names alone: the event's, the mapper's or the package listener's that translated it, and the
+  exception's. `mapperClass` is `null` when more than one mapping matched the event. For a watched model, `eventClass`
+  is the model's class. No value of the event and no text of the exception reaches the listener.
+- A capture whose write failed is handled as any failed write first: the record is spilled, reported and
+  `AuditWriteFailed` fires, then `AuditCaptureFailed` fires once. Any other failure is reported as a
+  `SineMacula\Laravel\AuditLog\Capture\CaptureFailedException`, which names the same three classes and holds no
+  previous exception, so route the package's reports to the same place.
+- A watched model's change is written after its transaction commits, so its event fires when that commit runs the
+  write, not when the model was saved.
+- One failure is not contained. A deadlock or a lost connection that ended a transaction open on its connection, during
+  a capture that writes at once, propagates sanitised, as it does from any write, because the application's
+  transaction is already gone.
+- It is dispatched inside the write guard, so alert through logs or notifications. An audit record a listener makes is
+  refused, never written.
 
 ## Alert on an integrity failure
 
@@ -154,9 +191,9 @@ it nor sees it fail.
   });
   ```
 
-- **Not record from `AuditWriteFailed`.** The same goes for a store, a reporter or a spill channel. An ordinary record
-  made there comes back unwritten and one report of a `\LogicException` says so, and a `failClosed()` or
-  `transactional()` record throws it.
+- **Not record from `AuditWriteFailed` or `AuditCaptureFailed`.** The same goes for a store, a reporter or a spill
+  channel. An ordinary record made there comes back unwritten and one report of a `\LogicException` says so, and a
+  `failClosed()` or `transactional()` record throws it.
 - **Not assume a request.** A drain and a replay run on the command line, so read nothing from the request or the
   authenticated user in a listener that has to work in `outbox` mode.
 

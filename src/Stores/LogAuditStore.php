@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Stores;
 
 use Illuminate\Log\LogManager;
+use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditFormatter;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
@@ -30,14 +31,16 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * It is not durable, since a log handler may buffer, drop or rotate a line
  * after it returns, and it joins no transaction. The store contract's clause
  * that a record is stored at most once is waived for it: a log line cannot be
- * taken back or deduplicated, so a retried record is written again.
+ * taken back or deduplicated, so a retried record is written again. It keeps no
+ * attachment: its line is a projection of the record, which would lose a bulk
+ * operation's members, so a bulk record is never handed to it.
  *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class LogAuditStore implements DurableAuditStore
+final readonly class LogAuditStore implements AcceptsAttachments, DurableAuditStore
 {
     /** @var string What every line starts with, its trailing space included. */
     public const string MARKER = 'audit-log:v1 ';
@@ -107,6 +110,18 @@ final readonly class LogAuditStore implements DurableAuditStore
      */
     #[\Override]
     public function participatesIn(string $connection): bool
+    {
+        return false;
+    }
+
+    /**
+     * Whether the store keeps a record's attachment with its entry: never,
+     * since its line is a projection that would lose the members.
+     *
+     * @return bool
+     */
+    #[\Override]
+    public function acceptsAttachments(): bool
     {
         return false;
     }

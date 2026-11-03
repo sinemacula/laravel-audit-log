@@ -8,8 +8,11 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Delivery\SpillLine;
 use SineMacula\Laravel\AuditLog\Delivery\SpillReader;
+use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
@@ -404,6 +407,36 @@ final class SpillReaderTest extends TestCase
 
         self::assertSame($object, $lines[0]->json);
         self::assertSame([2, '{"b":2}'], [$lines[1]->number, $lines[1]->json]);
+    }
+
+    /**
+     * A bundle's line, framed by a channel's prefix and suffix and longer than
+     * several chunks, is taken whole: the bundle's one object, its attachment
+     * and its record together, which the codec decodes to the record and its
+     * attachment, and the next line is read as its own.
+     *
+     * @return void
+     */
+    public function testABundleLineIsExtractedWhole(): void
+    {
+        $record   = RecordFactory::finalisedBundle(200);
+        $envelope = EnvelopeCodec::envelopeOf($record);
+        $line     = FailureSpill::line($envelope);
+
+        self::assertGreaterThan(2 * SpillReader::FRAMING_BYTES, strlen($line));
+
+        $lines = $this->read('[2026-11-01 12:00:00] production.CRITICAL: ' . $line . " [] []\n" . self::MARKER . '{"b":2}' . "\n");
+
+        self::assertCount(2, $lines);
+        self::assertSame([1, null], [$lines[0]->number, $lines[0]->failure]);
+        self::assertSame(substr($line, strlen(self::MARKER)), $lines[0]->json);
+        self::assertSame(CanonicalEncoder::encode($envelope), $lines[0]->json);
+        self::assertSame([2, '{"b":2}'], [$lines[1]->number, $lines[1]->json]);
+
+        $decoded = app(EnvelopeCodec::class)->decode($lines[0]->json, $record->record->id);
+
+        self::assertSame($record->hmac, $decoded->hmac);
+        self::assertEquals($record->record->attachment, $decoded->record->attachment);
     }
 
     /**

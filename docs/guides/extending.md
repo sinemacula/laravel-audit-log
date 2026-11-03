@@ -1,0 +1,184 @@
+# Extending
+
+The package records what it can see on its own, and gives an application or an integration two seams for the rest: a
+mapper, which translates an event of its own into a record, and a contributor, which fills in what a record leaves
+out. Neither needs the package to know anything about the code that uses it. What the package captures by itself is in
+[the automatic-capture guide](automatic-capture.md).
+
+## Extensibility
+
+Every concrete class of the package is `final`. It is extended through the contracts below, each bound in the container
+or registered from a service provider's `boot()`; each contract's docblock says what an implementation must keep to:
+
+| Extension point                              | How                                                                                                               |
+|----------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Where records are kept                       | Implement `Contracts\AuditStore` and bind it; bind a `Stores\StackAuditStore` to reach several stores             |
+| What a store's return means                  | Implement `Contracts\DurableAuditStore` on the store: whether a return is durable, and whose transaction it joins |
+| Bulk manifests on a custom store             | Implement `Contracts\AcceptsAttachments` on the store, as below                                                   |
+| Events of the application or another package | Implement `Contracts\EventMapper` and register it with `AuditLog::map()`, as below                                |
+| What a record leaves out                     | Implement `Contracts\ContextContributor` and register it with `AuditLog::contribute()`                            |
+| The application's event codes                | Implement `Contracts\DefinesAuditEvents` on a string-backed enum and register it with `AuditLog::define()`        |
+| Encrypted fields                             | Implement `Contracts\FieldEncrypter` and bind it; until then every encrypted value is dropped                     |
+| Where seals are anchored                     | Set `integrity.anchor.driver`, or implement `Contracts\CheckpointAnchor` and bind it                              |
+| Seals whose entries were pruned              | Implement `Contracts\PruneLedger` and bind it, in the journal that writes each prune                              |
+| Lines for a log or a security tool           | Implement `Contracts\AuditFormatter` and give it to the `Stores\LogAuditStore` the application binds              |
+| OCSF classes of a code                       | Implement `Contracts\OcsfMapper` and name it in the code's definition with `EventDefinition::ocsf()`              |
+| The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                           |
+
+A store that keeps a bulk operation's manifest implements `Contracts\AcceptsAttachments` and returns `true` from
+`acceptsAttachments()` only when it keeps the attachment and its entry atomically, both or neither, so an entry never
+points at a manifest that is not there. It answers from its own configuration, never from the record. Storing the same
+id with the same artifact again is a success, and the same id with a different artifact, or an entry without its own,
+is a `Stores\RecordConflictException`. A store that does not implement the contract, or returns `false`, is never
+handed an attachment, and `AuditLog::bulk()` is refused while it is bound.
+
+## Mapping another package's events
+
+A mapper implements `Contracts\EventMapper`. It receives the event and a builder, sets the code and the fields it
+translates from the event, and returns the same builder, or `null` to skip the event:
+
+```php
+public function map(object $event, PendingRecord $record): ?PendingRecord;
+```
+
+Register it from a service provider's `boot()`, for the event's class or for a parent class or interface its events
+share, leaving out any subtype that should not be recorded:
+
+```php
+AuditLog::map(OrderEvent::class, OrderEventMapper::class, except: [OrderViewed::class]);
+```
+
+- An event is resolved to the mapping of its exact class first, and otherwise to the one mapping of a parent class or
+  interface it has. Two broad mappings that both apply are an ambiguity, never a choice: the capture fails, contained,
+  with no mapper named. The answer for a class is worked out once and kept.
+- Each entry of `except:` must be a class or interface that exists and is a proper subtype of the mapped one. An event
+  that is any of them, or a subtype of one, skips that mapping, the exact-class lookup included.
+- `AuditLog::map()` is refused once the application has booted. Mapping a class or interface again with the same mapper
+  and exceptions changes nothing, and any other second mapping of it is refused. The package's own events are never
+  mapped, nor captured by a broad mapping.
+- The first `map()` registers one listener for every event the application dispatches, so a mapped event is captured
+  whenever it is dispatched, and an application that maps nothing pays nothing.
+- An event the dispatcher never sees, or one a listener of the application's own wants the record of, is captured with
+  `AuditLog::capture($event)`, through the same mapping. It returns the record written, or `null`. One event object is
+  recorded once, whoever captures it first.
+- A mapper is resolved from the container for each capture and keeps no state. Its builder has no recorder, and
+  nothing it records is written: calling `record()`, recording through the facade, returning another builder, choosing
+  a timing, `failClosed()` or `transactional()` are each a contained failure that writes nothing. The capture writes
+  the builder returned, at once.
+- What the mapper's own work sets off is captured as it would be anywhere else: a watched model it saves and a Gate
+  check it denies are each recorded by their own capture. Capturing or dispatching the event it is mapping again
+  writes nothing, so a mapper never runs inside itself.
+- The mapper names its own codes, never one of the package's own codes (those `Capture\Enums\CapturedActivity`
+  defines) and never a code derived from the event's class, so renaming the class never changes the trail. An
+  integration records under the reserved prefix that fits its activity, such as `mfa.` or `sso.`; an application's own
+  events use the application's own prefixes.
+- A capture never throws into the code that dispatched the event, but for a failure that ended the application's
+  transaction; the automatic-capture guide says what each failure does.
+
+## Recording one row per sign-in
+
+A package with a guard of its own, a session guard named `identity`, fires Laravel's `Login` when it signs a user in,
+and its own `Acme\Identity\Events\UserSignedIn` too. Laravel's event is captured by the package, so mapping the other
+one alone would record each sign-in twice. Map the package's event, and exclude its guard from core capture.
+
+The mapper records the user as both actor and subject, read from the event, and ties the record to the sign-in attempt
+with a correlation id:
+
+<!-- recipe:mapper -->
+
+```php
+<?php
+
+namespace App\Audit;
+
+use Acme\Identity\Events\UserSignedIn;
+use SineMacula\Laravel\AuditLog\Contracts\EventMapper;
+use SineMacula\Laravel\AuditLog\Records\PendingRecord;
+
+final readonly class IdentitySignInMapper implements EventMapper
+{
+    /**
+     * The sign-in, by the user who signed in and on them, correlated with the
+     * attempt it completed; any other event is skipped.
+     *
+     * @param  object  $event
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $record
+     * @return ?\SineMacula\Laravel\AuditLog\Records\PendingRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    #[\Override]
+    public function map(#[\SensitiveParameter] object $event, #[\SensitiveParameter] PendingRecord $record): ?PendingRecord
+    {
+        if (!$event instanceof UserSignedIn) {
+            return null;
+        }
+
+        return $record->event('identity.signed_in')
+            ->by($event->user)
+            ->on($event->user)
+            ->correlatedWith('identity:' . $event->attemptId);
+    }
+}
+```
+
+Register it from a service provider's `boot()`:
+
+<!-- recipe:boot -->
+
+```php
+use Acme\Identity\Events\UserSignedIn;
+use App\Audit\IdentitySignInMapper;
+use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+
+public function boot(): void
+{
+    AuditLog::map(UserSignedIn::class, IdentitySignInMapper::class);
+}
+```
+
+And leave the guard's own `Login` to the mapper, in `config/audit-log.php`:
+
+<!-- recipe:config -->
+
+```php
+'capture' => [
+    'laravel' => [
+        'except_guards' => ['identity'],
+    ],
+],
+```
+
+- Each sign-in on the `identity` guard is now one row, `identity.signed_in`. A sign-in on any other guard is still
+  `authentication.signed_in`, from Laravel's own event.
+- The guard is excluded by configuration. The package never looks for another package, so nothing is excluded unless
+  the application says so, and `audit-log:check` names an excluded guard `auth.guards` does not configure.
+- Use the same shape for any integration whose events say more than Laravel's: map its events, and exclude the guards
+  whose Laravel events would repeat them.
+
+## Correlation ids
+
+A correlation id ties a record to other activity, such as the tickets, attempts or jobs of another system. It is
+written `<namespace>:<value>`, as in `app:ticket-123`:
+
+```php
+AuditLog::event('invoice.approved')->on($invoice)->correlatedWith('app:ticket-123')->record();
+```
+
+- The namespace is a lower-case letter followed by up to 31 lower-case letters, digits, underscores or hyphens, so a
+  lower-case namespace of up to 32 characters, then a colon.
+- The value starts with a character that is not a space. The whole id is 1 to 191 characters, with no control
+  characters.
+- The id is validated, never cleaned or cut: one that does not fit is an `\InvalidArgumentException` from
+  `correlatedWith()`, and the last id given wins.
+- Choose a namespace per source, such as `identity` for the attempts of the recipe above, so ids from two systems never
+  collide.
+
+## Contributors
+
+A contributor fills what a record leaves out, such as the principal or the tenant, on every record, the captured ones
+included. Register one from a service provider's `boot()` with `AuditLog::contribute()`; it implements
+`Contracts\ContextContributor` and fills only what is still a gap, so a value a mapper set, or an actor a capture
+names as no one, is never replaced. [The context note](../design/context-resolution.md) says what each contributor may
+fill and in what order.

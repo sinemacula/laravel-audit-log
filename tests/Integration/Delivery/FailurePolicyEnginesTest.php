@@ -23,6 +23,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\FailureHandler;
 use SineMacula\Laravel\AuditLog\Delivery\Outbox;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
@@ -34,6 +35,7 @@ use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
@@ -42,6 +44,7 @@ use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
@@ -60,7 +63,8 @@ use Tests\TestCase;
  * without a fatal error, unless the spill would wait for a commit that is
  * really a rollback, or the channel is on the aborted database itself, which is
  * what `audit-log:check` flags. Every insert reaches the writer of a read/write
- * split.
+ * split. A captured record follows the `REPORT` rule under either mode, and a
+ * refusal of it is reported and signalled, never thrown.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,6 +113,9 @@ final class FailurePolicyEnginesTest extends TestCase
 
     /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditWriteFailed> Every `AuditWriteFailed` heard. */
     private array $failures = [];
+
+    /** @var list<string> The class each capture's signal was told, in order. */
+    private array $signalled = [];
 
     /** @var string The documented channel's file. */
     private string $file = '';
@@ -345,6 +352,94 @@ final class FailurePolicyEnginesTest extends TestCase
         self::assertSame(1, self::lineCount($this->spilled()));
         self::assertCount(1, $this->reporter->reports());
         self::assertCount(1, $this->failures);
+    }
+
+    /**
+     * Rows of `[failure mode, write mode]`: a captured record under each mode
+     * it never reads, written to the store and to the outbox.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideCapturedModes(): iterable
+    {
+        yield from [
+            'captured in report mode to the store'  => ['report', self::SYNC],
+            'captured in throw mode to the store'   => ['throw', self::SYNC],
+            'captured in report mode to the outbox' => ['report', self::OUTBOX],
+            'captured in throw mode to the outbox'  => ['throw', self::OUTBOX],
+        ];
+    }
+
+    /**
+     * A captured record the engine refuses inside a host follows the `REPORT`
+     * rule whatever the mode: never thrown, it costs only its savepoint, so the
+     * host writes again and commits, and the record is spilled, reported, said
+     * and signalled once each.
+     *
+     * @param  string  $failureMode
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideCapturedModes')]
+    public function testACapturedFailureIsReportedAndNeverThrown(string $failureMode, string $mode): void
+    {
+        $signal = $this->signal();
+
+        app(ConfigRepository::class)->set('audit-log.failure.mode', $failureMode);
+
+        $this->failNextWrite($mode);
+
+        $this->host()->transaction(function () use ($signal): void {
+            $this->writeTheBusinessChange('before');
+
+            app(RecordDelivery::class)->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, false, $signal);
+
+            $this->writeTheBusinessChange('after');
+        });
+
+        $this->assertAnotherSessionSeesTheBusinessChanges(2);
+
+        self::assertSame(2, $this->hostRows());
+        self::assertSame(1, self::lineCount($this->spilled()));
+        self::assertCount(1, $this->reporter->reports());
+        self::assertCount(1, $this->failures);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+    }
+
+    /**
+     * A captured record written after the host commits, refused by the engine,
+     * follows the `REPORT` rule whatever the mode: the commit stands, and the
+     * record is spilled, reported and signalled once, with nothing thrown from
+     * the commit.
+     *
+     * @param  string  $failureMode
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideCapturedModes')]
+    public function testACapturedFailureAfterCommitIsReportedAndNeverThrown(string $failureMode, string $mode): void
+    {
+        $signal = $this->signal();
+
+        app(ConfigRepository::class)->set('audit-log.failure.mode', $failureMode);
+
+        $this->failNextWrite($mode);
+
+        $this->host()->transaction(function () use ($signal): void {
+            $this->writeTheBusinessChange();
+
+            app(RecordDelivery::class)->deliver(RecordFactory::captured(), Timing::AFTER_COMMIT, null, false, $signal);
+        });
+
+        $this->assertAnotherSessionSeesTheBusinessChanges(1);
+
+        self::assertSame(1, $this->hostRows());
+        self::assertSame(1, self::lineCount($this->spilled()));
+        self::assertCount(1, $this->reporter->reports());
+        self::assertCount(1, $this->failures);
+        self::assertSame([QueryException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
     }
 
     /**
@@ -1072,6 +1167,18 @@ final class FailurePolicyEnginesTest extends TestCase
         }
 
         self::fail('Expected the failed write to be thrown.');
+    }
+
+    /**
+     * A capture's signal that keeps the class it is told.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal
+     */
+    private function signal(): CaptureSignal
+    {
+        return new CaptureSignal(function (string $exceptionClass): void {
+            $this->signalled[] = $exceptionClass;
+        });
     }
 
     /**
