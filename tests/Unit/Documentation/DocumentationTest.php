@@ -236,6 +236,7 @@ final class DocumentationTest extends TestCase
         'Keys and their lifetimes',
         'Grants and triggers',
         'Sealing at volume',
+        'Scale',
         'Compliance',
     ];
 

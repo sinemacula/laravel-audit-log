@@ -110,7 +110,42 @@ and `--reference` the ticket or case, so keep the maintenance connection's crede
 
 ## Monitor
 
-A failure raises an alarm; a run that does not happen raises none.
+A failure raises an alarm; a run that does not happen raises none. Wire `php artisan audit-log:check --freshness` into
+cron or an uptime monitor: it is the one command that finds a scheduled run that stopped. Run it from outside Laravel's
+scheduler, every few minutes, since a scheduler that stopped would stop it too. It is separate from the deploy-time
+check, so a deploy never fails because a scheduled run is late.
+
+```bash
+*/5 * * * * cd /srv/app && php artisan audit-log:check --freshness
+```
+
+With `--freshness`, `audit-log:check` runs only these signals, and exits 1 when any is a problem and 0 otherwise. It
+reads the progress below and, in outbox mode, the outbox's oldest row due, a fixed number of reads whatever the tables
+hold, and writes nothing.
+
+| Signal         | Reads                                | A problem when                                                                                 | Limit                          |
+|----------------|--------------------------------------|------------------------------------------------------------------------------------------------|--------------------------------|
+| `sealing`      | `seal.last_run`                      | It is older than the limit                                                                     | `monitor.seal_minutes` (30)    |
+| `sweep`        | `sweep.completed`                    | It is older than the limit                                                                     | `monitor.daily_minutes` (1560) |
+| `verification` | `verify.last_full`                   | It is older than the limit, or `passed` is false                                               | `monitor.daily_minutes` (1560) |
+| `retention`    | `retention.last_run`                 | Retention is configured and it is older than the limit, or its `status` is `failed`            | `monitor.daily_minutes` (1560) |
+| `anchoring`    | `anchor.last`, `anchor.last_failure` | An anchor is configured and `anchor.last_failure` is newer than `anchor.last`                  | none                           |
+| `outbox`       | the outbox table                     | The delivery mode is `outbox` and the oldest row not failed fell due longer ago than the limit | `monitor.outbox_minutes` (15)  |
+
+- Each signal prints one line, its status and, where it has them, its age and its limit in seconds, such as
+  `[freshness] sealing: ok (age 120s, limit 1800s)`. The status is `ok`, `stale` (older than its limit), `failed` (the
+  run recorded a failure), `never_run` (nothing recorded yet) or `not_applicable`: retention while nothing is kept for
+  less than forever and no policy of your own is bound, anchoring while the anchor is `null`, and the outbox in `sync`
+  mode. `--json` writes each signal as one JSON object instead, of exactly `signal`, `status`, `age_seconds` and
+  `limit_seconds`, `null` where the signal has none.
+- `never_run` is a problem only when that run's schedule is set and the oldest entry in the log is older than the
+  signal's limit, so a fresh install is not stale. A run whose schedule is `null` or empty is still checked against
+  what it recorded: you run that command elsewhere, and this is how you find out that it stopped.
+- `monitor.seal_minutes` is 5 to 1440, `monitor.daily_minutes` 60 to 10080 and `monitor.outbox_minutes` 1 to 1440,
+  each in minutes. A malformed one fails the freshness run, named under `[config]`, and the ordinary `audit-log:check`
+  reports it too. Progress that cannot be read fails the run, named by the class of what was thrown.
+
+Route these to alerting as well:
 
 - Each of these dispatches `IntegrityCheckFailed` and reports an `IntegrityCheckFailedException`: a verification that
   fails or stops, and, in sealing, a refused head, an entry that cannot be sealed, an anchor conflict or a refused seal.
@@ -121,8 +156,8 @@ A failure raises an alarm; a run that does not happen raises none.
 - An unavailable anchor only warns: the class of its failure is kept on the seal and in `anchor.last_failure`, and the
   next run tries again. Only a strict verification fails on it.
 - Nothing alarms on a run that does not happen: a missed scheduled run raises nothing, since a stopped scheduler, a
-  server that is down or a cron line that was lost dispatches no event and reports nothing. So read the progress the
-  package records, and alert when it goes stale.
+  server that is down or a cron line that was lost dispatches no event and reports nothing. So run
+  `audit-log:check --freshness`, or read the progress the package records, and alert when it goes stale.
 - A lifecycle operation whose activity record cannot be written stays committed: its result says `recorded: false`,
   its command warns, and the failure is reported as a `LifecycleRecordFailedException` naming its class. Run
   `audit-log:reconcile` then, which writes the missing records from the journal.
@@ -173,12 +208,20 @@ SELECT name, value, updated_at FROM audit_log_integrity_state ORDER BY name;
 - **An entry recorded far ahead of the clock**, more than the lookback beyond the verification's own clock, is never
   taken by a seal while it stays ahead, so verification reports it `future_unsealed` and the log `incomplete` rather
   than counting it pending. A clock that runs that far ahead on a recording server shows up here first.
-- Run `php artisan audit-log:check` in the deploy pipeline: it reports a malformed integrity, retention or import
-  setting, a retention shorter than its preservation, a missing or misshapen integrity or lifecycle table, a missing
-  lock row, a missing installation id, a maintenance connection that reaches another installation, a lifecycle journal
-  that does not verify, holds projection drift and an anchor disk that is not configured. It notes, without failing, a
-  hold whose review date has passed and an import batch left `running` for an hour. It writes nothing: the migrations
-  seed the installation id, and a check only reads it.
+- Run `php artisan audit-log:check` in the deploy pipeline: it reports a malformed integrity, retention, import or
+  monitoring setting, a retention shorter than its preservation, a missing or misshapen integrity or lifecycle table, a
+  missing lock row, a missing installation id, a maintenance connection that reaches another installation, a lifecycle
+  journal that does not verify, holds projection drift and an anchor disk that is not configured. It notes, without
+  failing, a hold whose review date has passed and an import batch left `running` for an hour. It writes nothing: the
+  migrations seed the installation id, and a check only reads it.
+- When the application's environment is `production`, `audit-log:check` also lists a `[production]` subject: the
+  testing `FakeAuditStore` bound as the store, or as a destination of a stack, is a problem, since it keeps records in
+  memory and loses them. A seal, sweep or verification schedule set to `null` or empty is a `[production] note:`,
+  which does not fail the run, saying to run that command elsewhere and watch it with `--freshness`.
+
+**Clocks.** Recording servers and the database must run NTP. The package records time from the application's clock,
+and verification reports an entry recorded far ahead of its own clock as `future_unsealed`, so a server whose clock
+runs ahead shows up there.
 
 ## Anchor outside the application
 
@@ -468,6 +511,19 @@ and taking 82.9 ms, which is why the sweep of the sealed table on PostgreSQL too
 entries, against 12 times on MySQL. In a separate run over a table filled the same way, the planner chose a nested-loop
 join for the same window, probing the members' unique entry index for each of its 5,000 entries in 4.3 ms, and the
 sweep of the sealed table took 1.80 s.
+
+## Scale
+
+- A single entries table, with the indexes the migrations create, handles tens of millions of rows comfortably: every
+  read the package makes, from the trail to sealing, the sweep and verification, pages through an index in batches.
+- Batched pruning keeps it that size: `audit-log:prune` deletes in chunks of `retention.batch`, each its own
+  transaction, so retention holds the table to the entries it must keep without one long lock.
+- For hundreds of millions of rows, or for analytics, stream entries to a warehouse or SIEM through a delivery
+  destination, such as a destination of a stack store or the outbox's drain, and keep a shorter retention in the
+  database.
+- Partitioning is not supported. The entries table's primary key is `id` alone, and partitioning the table yourself is
+  not supported: an engine that partitions needs the partition key in every unique key, which would break the
+  uniqueness of `id`, and the seals assume one table in which every entry is found by its id.
 
 ## Compliance
 

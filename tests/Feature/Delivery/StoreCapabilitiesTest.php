@@ -13,6 +13,7 @@ use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\NullAuditStore;
+use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Fixtures\Stores\CallbackStore;
 use Tests\Fixtures\Stores\PlainStore;
@@ -174,6 +175,24 @@ final class StoreCapabilitiesTest extends TestCase
         });
 
         self::assertSame('SineMacula\Laravel\AuditLog\Contracts\AuditStore@anonymous', $this->capabilities()->storeClass());
+    }
+
+    /**
+     * Each destination the bound store delivers to is named by its class: a
+     * stack's by their ids, in order, and any other store as itself under
+     * `store`.
+     *
+     * @return void
+     */
+    public function testNamesTheClassOfEachDestination(): void
+    {
+        $this->app?->instance(AuditStore::class, new NullAuditStore);
+
+        self::assertSame(['store' => NullAuditStore::class], $this->capabilities()->destinationClasses());
+
+        $this->app?->instance(AuditStore::class, new StackAuditStore(['database' => new PlainStore, 'fake' => FakeAuditStore::fake(new Container)]));
+
+        self::assertSame(['database' => PlainStore::class, 'fake' => FakeAuditStore::class], $this->capabilities()->destinationClasses());
     }
 
     /**

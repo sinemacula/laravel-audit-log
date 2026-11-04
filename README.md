@@ -172,6 +172,9 @@ php artisan migrate
 | `delivery.outbox.max_attempts`              | `10`                           | `AUDIT_LOG_DELIVERY_OUTBOX_MAX_ATTEMPTS`              | How many attempts a row gets before it is failed and kept, from 1 to 1000.                                                                                                                                                  |
 | `delivery.outbox.backoff_seconds`           | `60`                           | `AUDIT_LOG_DELIVERY_OUTBOX_BACKOFF_SECONDS`           | How long the first retry waits, doubling up to an hour, from 1 to 3600.                                                                                                                                                     |
 | `delivery.deliveries_table`                 | `audit_log_deliveries`         | `AUDIT_LOG_DELIVERY_DELIVERIES_TABLE`                 | The table of each destination's receipts, on the storage connection: the same grammar as the entries table.                                                                                                                 |
+| `monitor.seal_minutes`                      | `30`                           | `AUDIT_LOG_MONITOR_SEAL_MINUTES`                      | How old the last seal run may grow before `audit-log:check --freshness` calls sealing stale, from 5 to 1440 minutes.                                                                                                        |
+| `monitor.daily_minutes`                     | `1560`                         | `AUDIT_LOG_MONITOR_DAILY_MINUTES`                     | How old the last sweep, full verification and prune may grow before `--freshness` calls each stale, from 60 to 10080 minutes.                                                                                               |
+| `monitor.outbox_minutes`                    | `15`                           | `AUDIT_LOG_MONITOR_OUTBOX_MINUTES`                    | How long the oldest outbox row may wait for a drain before `--freshness` calls the backlog stale, from 1 to 1440 minutes.                                                                                                   |
 
 The package schedules `audit-log:seal` every five minutes, and `audit-log:seal --sweep` and `audit-log:verify --strict
 --sweep-first` daily, on Laravel's scheduler, each in the background, kept from overlapping itself and, on a cache store
@@ -255,6 +258,10 @@ A row on the connection the application's transactions run on commits exactly wh
 in no guaranteed order, and a row that keeps failing is kept rather than deleted, for `audit-log:replay --outbox` to
 requeue. See [delivery](docs/design/delivery.md) for what each mode guarantees and how to configure a spill channel a
 replay can read.
+
+Watch the scheduled runs from cron or an uptime monitor with `php artisan audit-log:check --freshness`, which exits
+non-zero once sealing, the sweep, verification, retention, anchoring or the outbox is stale or failed; see
+[monitoring](docs/guides/operations.md#monitor).
 
 Register event definitions and your own context contributors from a service provider's `boot()`; registration is refused
 once the application has booted:

@@ -108,9 +108,23 @@ final readonly class IntegritySchedule
     }
 
     /**
+     * Whether the prune can delete something: the bound retention policy is not
+     * the configured one, or the configured one keeps anything for less than
+     * forever. A bound policy that cannot be resolved is reported, and counts
+     * as one that can delete.
+     *
+     * @return bool
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function prunes(): bool
+    {
+        return !$this->isConfiguredPolicy() || $this->retention->retainsAnythingForLess();
+    }
+
+    /**
      * When the prune runs: its setting's cron expression, or `null` when the
-     * setting gives none, or when the policy is the configured one and keeps
-     * everything forever.
+     * setting gives none, or when the prune cannot delete anything.
      *
      * @return ?string
      *
@@ -120,11 +134,7 @@ final readonly class IntegritySchedule
     {
         $cron = $this->retention->schedule();
 
-        if ($cron === null || !$this->isConfiguredPolicy()) {
-            return $cron;
-        }
-
-        return $this->retention->retainsAnythingForLess() ? $cron : null;
+        return $cron !== null && $this->prunes() ? $cron : null;
     }
 
     /**

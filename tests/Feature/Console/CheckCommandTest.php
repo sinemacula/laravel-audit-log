@@ -235,6 +235,9 @@ final class CheckCommandTest extends TestCase
         'privacy.owner_erasures_table'              => 'owner-erasures',
         'privacy.key_uses_table'                    => '1uses',
         'privacy.rewrap_batch'                      => 99,
+        'monitor.seal_minutes'                      => 4,
+        'monitor.daily_minutes'                     => 59,
+        'monitor.outbox_minutes'                    => 0,
     ];
 
     /** @var array<string, array<string, string>|string> An explicit ring whose settings all pass, so none of them reads `app.key`. */

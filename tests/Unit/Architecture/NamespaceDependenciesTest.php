@@ -217,9 +217,9 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Contracts\AuditStore'],
             'allows'  => [],
         ],
-        'only the testing helpers and the facade name the testing helpers' => [
+        'only the testing helpers, the facade and the production check name the testing helpers' => [
             'from'    => ['*'],
-            'except'  => ['Testing', 'Facades'],
+            'except'  => ['Testing', 'Facades', 'Console\ProductionChecks'],
             'forbids' => ['Testing'],
             'allows'  => [],
         ],

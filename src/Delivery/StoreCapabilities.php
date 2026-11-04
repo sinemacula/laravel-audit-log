@@ -8,11 +8,13 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
+use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 
 /**
  * What the bound audit store says of itself: whether a return is durable,
  * whether a write joins a transaction on a connection, whether it keeps a
- * record's attachment, and its class.
+ * record's attachment, its class, and the class of each destination it delivers
+ * to.
  *
  * The store is resolved from the container on every call, so a store bound
  * later is the one read, and nothing is kept between calls. A store that does
@@ -116,6 +118,23 @@ final readonly class StoreCapabilities
     public function storeClass(): string
     {
         return get_debug_type($this->store());
+    }
+
+    /**
+     * The class of each destination the bound store delivers to, as
+     * `get_debug_type()` names it, by id: each of a stack's destinations, or
+     * the store itself under `store`.
+     *
+     * @return non-empty-array<string, string>
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    public function destinationClasses(): array
+    {
+        $store        = $this->store();
+        $destinations = $store instanceof StackAuditStore ? $store->destinations() : [DeliveryCoordinator::STORE_DESTINATION => $store];
+
+        return array_map(get_debug_type(...), $destinations);
     }
 
     /**
