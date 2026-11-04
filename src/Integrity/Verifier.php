@@ -12,6 +12,7 @@ use Illuminate\Database\Query\JoinClause;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
@@ -20,6 +21,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorConflictException;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
+use SineMacula\Laravel\AuditLog\Privacy\KeyStoreUse;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
@@ -57,11 +59,15 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * below 1), for member rows of no seal in the chain, and for unsealed entries:
  * those older than the allowed age are overdue, and those recorded further
  * ahead of the run's clock than the lookback are never sealed and are a
- * finding, never pending. It records its completion, with whether it passed at
- * the strictness it ran at. Every run, a ranged one included, then verifies the
- * whole lifecycle journal and each seal's commitment to it, and a journal
- * finding fails the run as any finding of its status does. Every statement
- * reads the writer, so a replica's lag never reads as a missing row.
+ * finding, never pending. Every run, a ranged one included, then verifies the
+ * whole lifecycle journal and each seal's commitment to it. A run of the whole
+ * log then verifies the owners' key store, with the package's key store in use,
+ * which it is while the bound field encrypter is the package's or none, and
+ * says it skipped it, naming the encrypter, otherwise; a journal or key finding
+ * fails the run as any finding of its status does. A run of the whole log
+ * records its completion, with whether it passed at the strictness it ran at.
+ * Every statement reads the writer, so a replica's lag never reads as a missing
+ * row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,6 +92,8 @@ final readonly class Verifier
      * @param  \SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalVerifier  $journal
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\KeyStoreVerifier  $keys
+     * @param  \SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter  $encrypter
      */
     public function __construct(
 
@@ -109,12 +117,19 @@ final readonly class Verifier
 
         /** The verifier of the lifecycle journal and the seals' commitments to it. */
         private JournalVerifier $journal,
+
+        /** The verifier of the owners' key store, on a run of the whole log. */
+        private KeyStoreVerifier $keys,
+
+        /** The bound field encrypter, which says whether the package's key store is in use. */
+        private FieldEncrypter $encrypter,
     ) {}
 
     /**
      * Verify the range, giving each segment's report to the callback as it is
-     * made, and summarise the run; a run of the whole log records whether it
-     * passed at the strictness given.
+     * made, then the journal and, for the whole log, the key store, and
+     * summarise the run; a run of the whole log records whether it passed at
+     * the strictness given.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationRange  $range
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Integrity\SegmentReport): void  $each
@@ -145,7 +160,8 @@ final readonly class Verifier
         }
 
         $journal = $this->journal->verify($tally);
-        $summary = VerificationSummary::of($bounds, $head, $remote?->sequence, $status, $range->isComplete(), $this->discovers(), $tally)->withJournal($journal);
+        $keys    = $range->isComplete() ? $this->keys->verify($tally, KeyStoreUse::covers($this->encrypter))->naming(KeyStoreUse::describe($this->encrypter)) : null;
+        $summary = VerificationSummary::of($bounds, $head, $remote?->sequence, $status, $range->isComplete(), $this->discovers(), $tally)->withJournal($journal)->withKeys($keys);
 
         if ($range->isComplete()) {
             $last = ['at' => StoredTime::format($now), 'head' => $head, 'passed' => !$summary->fails($strict), 'strict' => $strict];

@@ -658,7 +658,7 @@ final class AppendOnlyTriggersTest extends TestCase
         self::createLogin($root, $this->names['audit_writer']);
         self::createLogin($root, $this->names['audit_maintenance']);
         self::createLogin($root, $this->names['audit_verifier']);
-        self::runDocumentedSql($root, $root->getDriverName() . '-grants', $this->names);
+        self::runDocumentedGrants($root, $this->names);
         self::connectAs(self::WRITER, self::CONNECTION, $this->names['audit_writer']);
         self::connectAs(self::MAINTENANCE, self::CONNECTION, $this->names['audit_maintenance']);
         self::connectAs(self::VERIFIER, self::CONNECTION, $this->names['audit_verifier']);

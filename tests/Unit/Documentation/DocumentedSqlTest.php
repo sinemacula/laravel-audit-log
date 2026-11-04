@@ -13,7 +13,7 @@ use Tests\Concerns\RunsDocumentedSql;
 
 /**
  * A drift guard for the grants and triggers the storage note documents as SQL:
- * each of the six blocks is marked and found by its marker alone, names no
+ * each of the eleven blocks is marked and found by its marker alone, names no
  * database or user but the placeholders, grants exactly the documented
  * privileges and nothing that changes the schema, grants each of the writer,
  * the maintenance user and the verifier what the role matrix says, and creates
@@ -21,9 +21,12 @@ use Tests\Concerns\RunsDocumentedSql;
  * triggers guard every immutable column and no column written later, the lock's
  * guards its id alone, and the journal's refuse everything; the artifacts' and
  * the holds' triggers are the entries' own; the SQLite prune takes the lock
- * first and recreates the very triggers it drops; the note states what it must,
- * in its own section, in order; and it lists the entries' indexes as the schema
- * checks expect them.
+ * first and recreates the very triggers it drops; each engine's key blocks
+ * grant no role a delete, let the maintenance user update a key's four mutable
+ * columns alone, refuse every change of a key use or a marker, and hold a key
+ * to its immutable columns and its three transitions; the note states what it
+ * must, in its own section, in order; and it lists the entries' indexes as the
+ * schema checks expect them.
  *
  * The integration tests run the same blocks against each engine; this test
  * holds them to what the note says on any engine, SQLite included.
@@ -72,6 +75,27 @@ final class DocumentedSqlTest extends TestCase
         'audit_log_holds',
         'audit_log_lifecycle_lock',
         'audit_log_import_batches',
+        'audit_log_subject_keys',
+        'audit_log_owner_erasures',
+        'audit_log_key_uses',
+    ];
+
+    /** @var list<string> The key tables, in the order the role matrix lists them and their triggers are created. */
+    private const array KEY_TABLES = ['audit_log_subject_keys', 'audit_log_owner_erasures', 'audit_log_key_uses'];
+
+    /** @var list<string> The subject key columns no update may change, in the order the triggers compare them. */
+    private const array KEY_IMMUTABLE_COLUMNS = ['id', 'owner_type', 'owner_id', 'tenant_type', 'tenant_id', 'category', 'unit', 'generation', 'created_at', 'key_id', 'hmac'];
+
+    /** @var list<string> The subject key columns the maintenance user updates, in the order the grants name them. */
+    private const array KEY_MUTABLE_COLUMNS = ['state', 'wrapped_key', 'wrap_key_id', 'erasure_id'];
+
+    /** @var list<string> What every engine's subject keys update trigger says of the transitions, whitespace made one space. */
+    private const array KEY_TRANSITIONS = [
+        'OLD.state NOT IN (\'live\', \'superseded\')',
+        '(NEW.state = OLD.state OR (OLD.state = \'live\' AND NEW.state = \'superseded\'))',
+        'AND NEW.wrapped_key IS NOT NULL AND NEW.wrap_key_id IS NOT NULL AND NEW.erasure_id IS NULL)',
+        'OR (NEW.state = \'erased\' AND NEW.wrapped_key IS NULL AND NEW.wrap_key_id',
+        'AND OLD.erasure_id IS NULL AND NEW.erasure_id IS NOT NULL))',
     ];
 
     /** @var array<string, string> Each placeholder user, by the role matrix's column that names it. */
@@ -97,6 +121,22 @@ final class DocumentedSqlTest extends TestCase
     ];
 
     /**
+     * Rows of `[marker]`: the marker of each documented key block.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function provideKeyMarkers(): array
+    {
+        return [
+            'keys-grants:mysql'    => ['keys-grants:mysql'],
+            'keys-triggers:mysql'  => ['keys-triggers:mysql'],
+            'keys-grants:pgsql'    => ['keys-grants:pgsql'],
+            'keys-triggers:pgsql'  => ['keys-triggers:pgsql'],
+            'keys-triggers:sqlite' => ['keys-triggers:sqlite'],
+        ];
+    }
+
+    /**
      * Rows of `[marker]`: the marker of each documented block.
      *
      * @return iterable<string, array{0: string}>
@@ -110,6 +150,7 @@ final class DocumentedSqlTest extends TestCase
             'pgsql-triggers'  => ['pgsql-triggers'],
             'sqlite-triggers' => ['sqlite-triggers'],
             'sqlite-prune'    => ['sqlite-prune'],
+            ...self::provideKeyMarkers(),
         ];
     }
 
@@ -223,6 +264,12 @@ final class DocumentedSqlTest extends TestCase
             'pgsql-triggers'  => ['pgsql-triggers', ['audit_maintenance']],
             'sqlite-triggers' => ['sqlite-triggers', []],
             'sqlite-prune'    => ['sqlite-prune', []],
+
+            'keys-grants:mysql'    => ['keys-grants:mysql', ['app_db', 'audit_maintenance', 'audit_verifier', 'audit_writer']],
+            'keys-triggers:mysql'  => ['keys-triggers:mysql', ['audit_maintenance']],
+            'keys-grants:pgsql'    => ['keys-grants:pgsql', ['audit_maintenance', 'audit_verifier', 'audit_writer']],
+            'keys-triggers:pgsql'  => ['keys-triggers:pgsql', ['audit_maintenance']],
+            'keys-triggers:sqlite' => ['keys-triggers:sqlite', []],
         ];
     }
 
@@ -335,6 +382,21 @@ final class DocumentedSqlTest extends TestCase
             'no collation on the id'  => ['no collation is applied to `id`, which compares in the type the migration gives it'],
             'a combined read'         => ['uses one index and filters the rest of its conditions row by row'],
             'the plans'               => ['`tests/Integration/Querying/TrailPlansTest.php` reads each engine\'s plan'],
+            'the key tables'          => ['`privacy.key_uses_table` (`audit_log_key_uses`) are always on the storage connection'],
+            'the unit\'s uniqueness'  => ['a composite unique index over the nullable tenant columns would let two tenantless rows share a generation on every'
+                . ' engine'],
+            'the writer\'s keys'    => ['the writer is granted `SELECT` and `INSERT` on the subject keys and the key uses'],
+            'no key update'         => ['it updates no key'],
+            'the maintenance keys'  => ['`SELECT` on the subject keys with `UPDATE` of `state`, `wrapped_key`, `wrap_key_id` and `erasure_id` alone'],
+            'no key delete'         => ['No role has `DELETE` on the subject keys, the owner erasures or the key uses'],
+            'the advisory locks'    => ['The advisory locks need no grant'],
+            'the key transitions'   => ['it is one of three transitions'],
+            'erased never reopens'  => ['An erased key is refused every update, so an erased generation never reopens'],
+            'the keys\' guarantees' => ['Database credentials can still destroy keys, key uses and markers'],
+            'the keys\' evidence'   => ['detectable by `audit-log:verify`, never impossible'],
+            'the key truncates'     => ['and on each of the three key tables in their own block'],
+            'never deleted'         => ['A key row is never deleted, by an erasure, a prune or anything else'],
+            'key uses stay'         => ['a prune leaves its rows'],
         ];
     }
 
@@ -805,9 +867,10 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each grants block gives each user, on each table, exactly the privileges
-     * the role matrix lists, and nothing on a table the matrix gives the user
-     * none of; the grants the writer needs only in outbox mode are in no block.
+     * Each engine's grants block and its key block together give each user, on
+     * each table, exactly the privileges the role matrix lists, and nothing on
+     * a table the matrix gives the user none of; the grants the writer needs
+     * only in outbox mode are in no block.
      *
      * @param  string  $marker
      * @return void
@@ -815,7 +878,8 @@ final class DocumentedSqlTest extends TestCase
     #[DataProvider('provideGrantMarkers')]
     public function testEachGrantsBlockGrantsWhatTheRoleMatrixSays(string $marker): void
     {
-        $granted = self::privilegesGranted(self::documentedSql($marker));
+        $engine  = explode('-', $marker)[0];
+        $granted = self::privilegesGranted(self::documentedSql($marker) . "\n" . self::documentedSql('keys-grants:' . $engine));
 
         self::assertSame([], array_diff(array_keys($granted), self::PACKAGE_TABLES), 'A grant names a table the matrix does not.');
 
@@ -908,6 +972,189 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
+     * The role matrix has a row for each key table, after the others, giving
+     * the writer `SELECT` and `INSERT` on the keys and the key uses and only
+     * `SELECT` on the markers, the maintenance user `SELECT` on the keys with
+     * `UPDATE` of the four mutable columns named, `SELECT` and `INSERT` on the
+     * markers and `SELECT` on the key uses, and the verifier `SELECT` on all
+     * three; the columns the matrix names are the ones the key blocks grant.
+     *
+     * @return void
+     */
+    public function testTheRoleMatrixHasARowPerKeyTable(): void
+    {
+        $rows = array_slice(self::roleMatrix(), -3);
+
+        self::assertSame([
+            ['`audit_log_subject_keys`', '`SELECT`, `INSERT`', '`SELECT`, `UPDATE` of `state`, `wrapped_key`, `wrap_key_id` and `erasure_id`', '`SELECT`'],
+            ['`audit_log_owner_erasures`', '`SELECT`', '`SELECT`, `INSERT`', '`SELECT`'],
+            ['`audit_log_key_uses`', '`SELECT`, `INSERT`', '`SELECT`', '`SELECT`'],
+        ], $rows);
+
+        preg_match_all('/`([a-z_]+)`/', $rows[0][2], $columns);
+
+        self::assertSame(self::KEY_MUTABLE_COLUMNS, $columns[1]);
+
+        foreach (['keys-grants:mysql', 'keys-grants:pgsql'] as $marker) {
+            self::assertSame(1, preg_match('/\bGRANT UPDATE \(([^)]*)\)/', self::documentedSql($marker), $granted), $marker);
+            self::assertSame(self::KEY_MUTABLE_COLUMNS, self::listOf($granted[1]), $marker);
+        }
+    }
+
+    /**
+     * Rows of `[marker, grants]`: each key grants block with every grant it
+     * makes, as its privileges, its object and its grantees.
+     *
+     * @return iterable<string, array{0: string, 1: list<array{0: string, 1: string, 2: string}>}>
+     */
+    public static function provideKeyGrants(): iterable
+    {
+        $mutable  = 'UPDATE (state, wrapped_key, wrap_key_id, erasure_id)';
+        $writer   = '\'audit_writer\'@\'%\'';
+        $upkeep   = '\'audit_maintenance\'@\'%\'';
+        $verifier = '\'audit_verifier\'@\'%\'';
+
+        yield 'mysql' => ['keys-grants:mysql', [
+            ['SELECT, INSERT', 'app_db.audit_log_subject_keys', $writer],
+            ['SELECT', 'app_db.audit_log_owner_erasures', $writer],
+            ['SELECT, INSERT', 'app_db.audit_log_key_uses', $writer],
+            ['SELECT', 'app_db.audit_log_subject_keys', $upkeep],
+            [$mutable, 'app_db.audit_log_subject_keys', $upkeep],
+            ['SELECT, INSERT', 'app_db.audit_log_owner_erasures', $upkeep],
+            ['SELECT', 'app_db.audit_log_key_uses', $upkeep],
+            ['SELECT', 'app_db.audit_log_subject_keys', $verifier],
+            ['SELECT', 'app_db.audit_log_owner_erasures', $verifier],
+            ['SELECT', 'app_db.audit_log_key_uses', $verifier],
+        ]];
+
+        yield 'pgsql' => ['keys-grants:pgsql', [
+            ['SELECT, INSERT', 'audit_log_subject_keys, audit_log_key_uses', 'audit_writer'],
+            ['SELECT', 'audit_log_owner_erasures', 'audit_writer'],
+            ['SELECT', 'audit_log_subject_keys, audit_log_key_uses', 'audit_maintenance'],
+            [$mutable, 'audit_log_subject_keys', 'audit_maintenance'],
+            ['SELECT, INSERT', 'audit_log_owner_erasures', 'audit_maintenance'],
+            ['SELECT', 'audit_log_subject_keys, audit_log_owner_erasures, audit_log_key_uses', 'audit_verifier'],
+        ]];
+    }
+
+    /**
+     * Each engine with users documents its key grants in a block of its own,
+     * after the others, that grants exactly the documented privileges on the
+     * key tables alone, every statement a grant, none of them a delete, a
+     * privilege that changes the schema or one that can be passed on.
+     *
+     * @param  string  $marker
+     * @param  list<array{0: string, 1: string, 2: string}>  $grants
+     * @return void
+     */
+    #[DataProvider('provideKeyGrants')]
+    public function testEachKeyGrantBlockIsDocumentedPerEngine(string $marker, array $grants): void
+    {
+        $sql    = self::documentedSql($marker);
+        $engine = explode(':', $marker)[1];
+        $note   = self::note();
+
+        self::assertSame($grants, self::grantsIn($sql));
+        self::assertEqualsCanonicalizing(self::KEY_TABLES, array_keys(self::privilegesGranted($sql)));
+        self::assertCount(count($grants), array_filter(explode(';', $sql), static fn (string $statement): bool => trim($statement) !== ''));
+        self::assertStringNotContainsStringIgnoringCase('GRANT OPTION', $sql);
+        self::assertGreaterThan(strpos($note, '<!-- sql: ' . $engine . '-triggers -->'), strpos($note, '<!-- sql: ' . $marker . ' -->'));
+
+        foreach (self::grantsIn($sql) as [$privileges]) {
+            self::assertDoesNotMatchRegularExpression('/\b(?:ALL|ALTER|CREATE|DELETE|DROP|INDEX|REFERENCES|SUPER|TRIGGER|TRUNCATE)\b/i', $privileges);
+        }
+    }
+
+    /**
+     * Rows of `[marker, suffixes]`: each engine's key triggers, with the suffix
+     * of each trigger every key table gets.
+     *
+     * @return iterable<string, array{0: string, 1: list<string>}>
+     */
+    public static function provideKeyTriggers(): iterable
+    {
+        yield from [
+            'mysql'  => ['keys-triggers:mysql', ['no_update', 'no_delete']],
+            'pgsql'  => ['keys-triggers:pgsql', ['no_update', 'no_delete', 'no_truncate']],
+            'sqlite' => ['keys-triggers:sqlite', ['no_update', 'no_delete']],
+        ];
+    }
+
+    /**
+     * Each engine documents its key triggers in a block of its own: each key
+     * table gets an update and a delete trigger, and on PostgreSQL a truncate
+     * trigger, named after it; the key uses' and the markers' refuse every
+     * change, as the members' do; and the subject keys' update trigger guards
+     * the eleven immutable columns in order and none of the four mutable ones,
+     * refuses an erased key, allows the three transitions alone, and lets the
+     * maintenance user alone through on MySQL and PostgreSQL, while SQLite,
+     * which has no users, checks no role.
+     *
+     * @param  string  $marker
+     * @param  list<string>  $suffixes
+     * @return void
+     */
+    #[DataProvider('provideKeyTriggers')]
+    public function testEachKeyTriggerBlockIsDocumentedPerEngine(string $marker, array $suffixes): void
+    {
+        $sql      = self::documentedSql($marker);
+        $engine   = explode(':', $marker)[1];
+        $triggers = [];
+
+        foreach (self::KEY_TABLES as $table) {
+            foreach ($suffixes as $suffix) {
+                $triggers[$table . '_' . $suffix] = $table;
+            }
+        }
+
+        self::assertSame($triggers, self::documentedTriggers($sql));
+
+        $update    = self::statementCreating($sql, 'audit_log_subject_keys_no_update');
+        $collapsed = (string) preg_replace('/\s+/', ' ', $update);
+
+        foreach (self::keyGuardedColumnLists($engine, $update) as $list) {
+            self::assertSame(self::KEY_IMMUTABLE_COLUMNS, $list);
+        }
+
+        foreach (self::KEY_TRANSITIONS as $clause) {
+            self::assertStringContainsString($clause, $collapsed);
+        }
+
+        self::assertStringContainsString(match ($engine) {
+            'mysql' => 'NEW.wrap_key_id <=> OLD.wrap_key_id',
+            'pgsql' => 'NEW.wrap_key_id IS NOT DISTINCT FROM OLD.wrap_key_id',
+            default => 'NEW.wrap_key_id IS OLD.wrap_key_id',
+        }, $collapsed);
+
+        self::assertSame($engine !== 'sqlite', str_contains($update, '\'audit_maintenance\''));
+        self::assertSame([], array_values(array_intersect(self::KEY_IMMUTABLE_COLUMNS, self::KEY_MUTABLE_COLUMNS)));
+        self::assertSame(array_keys(TableShape::subjectKeys()->columns), array_values(array_filter(
+            array_keys(TableShape::subjectKeys()->columns),
+            static fn (string $column): bool => in_array($column, [...self::KEY_IMMUTABLE_COLUMNS, ...self::KEY_MUTABLE_COLUMNS], true),
+        )));
+        self::assertCount(count(TableShape::subjectKeys()->columns), [...self::KEY_IMMUTABLE_COLUMNS, ...self::KEY_MUTABLE_COLUMNS]);
+
+        self::assertRefusesEveryChange($engine, $sql);
+    }
+
+    /**
+     * The MySQL key triggers script is split into its six triggers, each whole.
+     *
+     * @return void
+     */
+    public function testTheMySqlKeyTriggersSplitIntoTheirTriggers(): void
+    {
+        $statements = self::statementsOf(self::documentedSql('keys-triggers:mysql'));
+
+        self::assertCount(6, $statements);
+
+        foreach ($statements as $statement) {
+            self::assertStringStartsWith('CREATE TRIGGER ', $statement);
+            self::assertStringEndsWith('END', $statement);
+        }
+    }
+
+    /**
      * The script splitter ends a statement at a line ending with the delimiter
      * in force, `;` until a `DELIMITER` line declares another, keeps a body's
      * own semicolons under another delimiter, drops comment lines and empty
@@ -987,6 +1234,78 @@ final class DocumentedSqlTest extends TestCase
         $this->expectExceptionMessage('`root` is not a placeholder of the documented SQL.');
 
         self::withNames('SELECT 1', ['app_db' => 'shop', 'root' => 'admin']);
+    }
+
+    /**
+     * Assert the engine's key block refuses every change of a key use and a
+     * marker and every delete of a key, with no condition: on MySQL and SQLite
+     * each such trigger is the checkpoint members' own with the table renamed,
+     * and on PostgreSQL every trigger but the subject keys' update calls the
+     * one refusing function the block creates, a truncate once per statement.
+     *
+     * @param  string  $engine
+     * @param  string  $sql
+     * @return void
+     */
+    private static function assertRefusesEveryChange(string $engine, string $sql): void
+    {
+        $refusing = [
+            'audit_log_subject_keys_no_delete',
+            'audit_log_owner_erasures_no_update',
+            'audit_log_owner_erasures_no_delete',
+            'audit_log_key_uses_no_update',
+            'audit_log_key_uses_no_delete',
+        ];
+
+        if ($engine === 'pgsql') {
+            self::assertSame(['audit_log_keys_refuse'], self::documentedFunctions($sql));
+
+            foreach (array_keys(self::documentedTriggers($sql)) as $trigger) {
+                $statement = self::statementCreating($sql, $trigger);
+
+                self::assertStringEndsWith('EXECUTE FUNCTION audit_log_keys_refuse()', $statement, $trigger);
+                self::assertSame(str_ends_with($trigger, '_no_truncate'), str_contains($statement, 'FOR EACH STATEMENT'), $trigger);
+                self::assertSame($trigger === 'audit_log_subject_keys_no_update', str_contains($statement, 'WHEN'), $trigger);
+            }
+
+            return;
+        }
+
+        $members = self::documentedSql($engine . '-triggers');
+
+        foreach ($refusing as $trigger) {
+            $table  = (string) preg_replace('/_no_(?:update|delete)$/', '', $trigger);
+            $suffix = substr($trigger, strlen($table));
+            $model  = self::statementCreating($members, 'audit_log_checkpoint_members' . $suffix);
+
+            self::assertSame(str_replace('audit_log_checkpoint_members', $table, $model), self::statementCreating($sql, $trigger), $trigger);
+        }
+    }
+
+    /**
+     * The lists of columns the subject keys' update trigger holds unchanged, as
+     * the engine writes them: the old and new columns of each null-safe
+     * comparison on MySQL and SQLite, and the old and new rows on PostgreSQL.
+     *
+     * @param  string  $engine
+     * @param  string  $trigger
+     * @return list<list<string>>
+     */
+    private static function keyGuardedColumnLists(string $engine, string $trigger): array
+    {
+        if ($engine === 'pgsql') {
+            self::assertSame(1, preg_match('/\((OLD\.id,[^()]*)\)\s+IS DISTINCT FROM\s+\((NEW\.id,[^()]*)\)/s', $trigger, $rows));
+
+            return [self::listOf((string) preg_replace('/\bOLD\./', '', $rows[1])), self::listOf((string) preg_replace('/\bNEW\./', '', $rows[2]))];
+        }
+
+        $operator = $engine === 'mysql' ? '<=>' : 'IS';
+
+        self::assertSame(1, preg_match('/NOT \((OLD\.id ' . preg_quote($operator, '/') . ' NEW\.id[^()]*)\)/s', $trigger, $group));
+
+        preg_match_all('/\bOLD\.(\w+) ' . preg_quote($operator, '/') . ' NEW\.(\w+)/', $group[1], $pairs);
+
+        return [$pairs[1], $pairs[2]];
     }
 
     /**

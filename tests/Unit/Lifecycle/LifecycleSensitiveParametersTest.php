@@ -8,9 +8,11 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
+use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions;
 use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
+use SineMacula\Laravel\AuditLog\Lifecycle\Rewrapper;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
@@ -20,11 +22,12 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * Holds the lifecycle to the rule that keeps what it handles out of a stack
  * trace: with `zend.exception_ignore_args` off every frame keeps its arguments,
  * so a parameter that holds a row, a record, a payload, a line of an import
- * file, a record's properties, a hold scope or one of its references, or a
- * closure is marked `#[\SensitiveParameter]` on every method it passes through,
- * and a closure's own parameters too, which reflection of a class cannot reach
- * and so are read from the source. Ids, codes, counts, digests, sequences,
- * class names and a decision's tenant are not payload.
+ * file, a record's properties, a data key, a wrapped key, an owner's key row, a
+ * hold scope or one of its references, or a closure is marked
+ * `#[\SensitiveParameter]` on every method it passes through, and a closure's
+ * own parameters too, which reflection of a class cannot reach and so are read
+ * from the source. Ids, codes, counts, digests, sequences, class names and a
+ * decision's tenant are not payload.
  *
  * Every class under `src/Lifecycle` is held, whatever it holds when the test
  * runs, and the retention policy contract beside them. The scan must read each
@@ -53,14 +56,17 @@ final class LifecycleSensitiveParametersTest extends TestCase
     private const array FILES = ['Contracts/RetentionPolicy.php'];
 
     /** @var list<string> The names a parameter holding a payload goes by. */
-    private const array PAYLOAD_NAMES = ['row', 'rows', 'record', 'records', 'payload', 'line', 'lines', 'envelope', 'plaintext', 'ciphertext', 'members', 'properties'];
+    private const array PAYLOAD_NAMES = [
+        'row', 'rows', 'record', 'records', 'payload', 'line', 'lines', 'envelope', 'plaintext', 'ciphertext', 'members', 'properties', 'dataKey', 'wrapped',
+    ];
 
-    /** @var list<string> The types a parameter holding a payload goes by: a closure, a record, a hold scope and a parsed import line. */
+    /** @var list<string> The types a parameter holding a payload goes by: a closure, a record, an owner's key row, a hold scope and a parsed import line. */
     private const array PAYLOAD_TYPES = [
         \Closure::class,
         AuditRecord::class,
         FinalisedRecord::class,
         PendingRecord::class,
+        SubjectKeyRow::class,
         self::HOLD_SCOPE,
         self::NAMESPACE . 'Lifecycle\ImportLine',
     ];
@@ -72,16 +78,16 @@ final class LifecycleSensitiveParametersTest extends TestCase
     private const string HOLD_SCOPE_FILE = 'Lifecycle/HoldScope.php';
 
     /** @var string What a closure's parameter holding a payload is typed as, read from the source, where no type can be resolved. */
-    private const string PAYLOAD_TYPE_IN_SOURCE = '/\b(?:AuditRecord|FinalisedRecord|PendingRecord|HoldScope|ImportLine|Closure)\b/';
+    private const string PAYLOAD_TYPE_IN_SOURCE = '/\b(?:AuditRecord|FinalisedRecord|PendingRecord|SubjectKeyRow|HoldScope|ImportLine|Closure)\b/';
 
     /** @var string What a closure's parameter holding a reference is typed as, read from the source. */
     private const string REFERENCE_TYPE_IN_SOURCE = '/\bReference\b/';
 
     /** @var list<class-string> The classes the scan must read, from those this suite already holds. */
-    private const array MUST_READ = [RetentionPolicy::class, RetentionDecisions::class, RetentionSettings::class, ImportStatus::class];
+    private const array MUST_READ = [RetentionPolicy::class, RetentionDecisions::class, RetentionSettings::class, ImportStatus::class, Rewrapper::class];
 
     /** @var list<string> The files whose closures the source scan must read. */
-    private const array MUST_READ_CLOSURES_OF = ['Lifecycle/RetentionSettings.php'];
+    private const array MUST_READ_CLOSURES_OF = ['Lifecycle/RetentionSettings.php', 'Lifecycle/Rewrapper.php'];
 
     /** @var string The class a source is written for, to show what the scan flags. */
     private const string FIXTURE = 'Tests\Unit\Lifecycle\Scanned\EveryKind';
@@ -176,6 +182,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
 
             namespace Tests\Unit\Lifecycle\Scanned;
 
+            use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
             use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
             use SineMacula\Laravel\AuditLog\Lifecycle\ImportLine;
             use SineMacula\Laravel\AuditLog\Records\AuditRecord;
@@ -198,8 +205,11 @@ final class LifecycleSensitiveParametersTest extends TestCase
                     string $ciphertext,
                     string $members,
                     array $properties,
+                    string $dataKey,
+                    string $wrapped,
                     FinalisedRecord $finalised,
                     PendingRecord $built,
+                    ?SubjectKeyRow $key,
                     HoldScope $scope,
                     ?HoldScope $narrowed,
                     ImportLine $parsed,
@@ -238,7 +248,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
         self::assertSame(
             [
                 'row', 'rows', 'record', 'records', 'payload', 'line', 'lines', 'envelope', 'plaintext', 'ciphertext', 'members', 'properties',
-                'finalised', 'built', 'scope', 'narrowed', 'parsed', 'work', 'then',
+                'dataKey', 'wrapped', 'finalised', 'built', 'key', 'scope', 'narrowed', 'parsed', 'work', 'then',
             ],
             $flagged,
         );
@@ -333,6 +343,9 @@ final class LifecycleSensitiveParametersTest extends TestCase
             'an unmarked record'          => [['AuditRecord $kept'], false, ['kept']],
             'an unmarked finalised one'   => [['?FinalisedRecord $kept'], false, ['kept']],
             'an unmarked hold scope'      => [['HoldScope $scope'], false, ['scope']],
+            'an unmarked key row'         => [['SubjectKeyRow $key'], false, ['key']],
+            'an unmarked data key'        => [['string $dataKey'], false, ['dataKey']],
+            'an unmarked wrapped key'     => [['?string $wrapped'], false, ['wrapped']],
             'a closure'                   => [['\Closure $work'], false, ['work']],
             'a payload by its name'       => [['string $payload'], false, ['payload']],
             'properties by their name'    => [['array $properties'], false, ['properties']],

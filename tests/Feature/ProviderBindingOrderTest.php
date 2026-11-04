@@ -17,6 +17,8 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
@@ -25,6 +27,8 @@ use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
+use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
@@ -60,6 +64,8 @@ final class ProviderBindingOrderTest extends TestCase
             Clock::class,
             AuditStore::class,
             FieldEncrypter::class,
+            FieldReader::class,
+            KeyWrapper::class,
             RetentionPolicy::class,
             PruneLedger::class,
             CheckpointAnchor::class,
@@ -165,6 +171,31 @@ final class ProviderBindingOrderTest extends TestCase
 
         self::assertSame($policy, $container->make(RetentionPolicy::class));
         self::assertSame($ledger, $container->make(PruneLedger::class));
+    }
+
+    /**
+     * With nothing bound before it, the package's provider binds its own field
+     * encrypter, made afresh on every resolution; an application that chooses
+     * never to encrypt binds `NoFieldEncrypter` before it, and that is what the
+     * container resolves instead, as a plain binding too.
+     *
+     * @return void
+     */
+    public function testAnEncrypterBoundEarlierIsKeptEvenUnshared(): void
+    {
+        $app = $this->app;
+
+        assert($app !== null);
+
+        self::assertInstanceOf(SubjectKeyEncrypter::class, $app->make(FieldEncrypter::class));
+        self::assertNotSame($app->make(FieldEncrypter::class), $app->make(FieldEncrypter::class));
+
+        $container = self::container();
+
+        $container->bind(FieldEncrypter::class, NoFieldEncrypter::class);
+        (new AuditLogServiceProvider($container))->register();
+
+        self::assertInstanceOf(NoFieldEncrypter::class, $container->make(FieldEncrypter::class));
     }
 
     /**

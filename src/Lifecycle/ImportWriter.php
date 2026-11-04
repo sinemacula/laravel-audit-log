@@ -14,8 +14,10 @@ use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Keys\KeyUses;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -33,11 +35,14 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  * database's write lock before anything is read; classifies the lines against
  * the stored rows and each other; inserts the new ones, 24 rows to a statement
  * on SQLite, whose oldest builds allow 999 placeholders, and up to 1,000 on
- * MySQL and PostgreSQL, under their 65,535; writes the batch's counts; and
- * commits, so the counts never run ahead of or behind the rows. The transaction
- * makes one attempt and is refused inside another, so it is never a savepoint
- * and never a subtransaction of the host's, whatever the chunk's size; a row's
- * failure fails its chunk.
+ * MySQL and PostgreSQL, under their 65,535; inserts the key uses of the new
+ * ones' envelopes, one row for each distinct key of each entry, 400 rows to a
+ * statement on SQLite and up to 10,000 elsewhere, never one statement per
+ * entry; writes the batch's counts; and commits, so the counts never run ahead
+ * of or behind the rows, and no entry is kept without its key uses. The
+ * transaction makes one attempt and is refused inside another, so it is never a
+ * savepoint and never a subtransaction of the host's, whatever the chunk's
+ * size; a row's failure fails its chunk.
  *
  * A concurrent import of the same source records can insert one between the
  * classification and the insert: the source's unique index refuses the insert,
@@ -60,9 +65,9 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  * class, and never rejects a line or fails a chunk.
  *
  * A dry run builds the lines encrypting nothing and classifies them against the
- * stored rows outside any transaction, writing nothing; lines repeated in
- * different chunks of one file are not compared, since nothing of an earlier
- * chunk is stored.
+ * stored rows outside any transaction, writing nothing, key uses included;
+ * lines repeated in different chunks of one file are not compared, since
+ * nothing of an earlier chunk is stored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -165,9 +170,10 @@ final readonly class ImportWriter
         }
 
         $rows = array_map(fn (#[\SensitiveParameter] AuditRecord $record): array => $this->codec->encode($this->finaliser->finalise($record)), $records);
+        $uses = array_map(static fn (#[\SensitiveParameter] AuditRecord $record): array => self::keyUsesOf($record), $records);
 
         try {
-            $tally->countPlan($this->attempts($connection, $batchId, $built, $rows, $tally));
+            $tally->countPlan($this->attempts($connection, $batchId, $built, $rows, $uses, $tally));
         } catch (QueryException $failure) {
             FailureClassifier::rethrowMasked($failure);
         }
@@ -216,14 +222,23 @@ final readonly class ImportWriter
      * @param  string  $batchId
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
      * @param  array<int, array<string, int|string|null>>  $rows
+     * @param  array<int, list<array{key_id: string, entry_id: string}>>  $uses
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportTally  $tally
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\ImportPlan
      *
      * @throws \Illuminate\Database\QueryException
      * @throws \Throwable
      */
-    private function attempts(Connection $connection, string $batchId, #[\SensitiveParameter] array $lines, #[\SensitiveParameter] array $rows, ImportTally $tally): ImportPlan
-    {
+    private function attempts(
+        Connection $connection,
+        string $batchId,
+        #[\SensitiveParameter]
+        array $lines,
+        #[\SensitiveParameter]
+        array $rows,
+        array $uses,
+        ImportTally $tally,
+    ): ImportPlan {
         $planned    = null;
         $violations = 0;
         $attempt    = 0;
@@ -232,7 +247,7 @@ final readonly class ImportWriter
             $attempt++;
 
             try {
-                return $this->attempt($connection, $batchId, $lines, $rows, $tally, $planned);
+                return $this->attempt($connection, $batchId, $lines, $rows, $uses, $tally, $planned);
             } catch (UniqueConstraintViolationException) {
                 // The chunk rolled back whole: classified again once, and after
                 // that its new lines are conflicts
@@ -274,13 +289,15 @@ final readonly class ImportWriter
     /**
      * Make one attempt at the chunk, in one transaction of one attempt: the
      * batch's time written first, the lines classified, the new ones inserted
-     * and the counts written, and return the plan once it has committed. The
-     * plan is kept as made, whether or not the attempt commits.
+     * and then their key uses, and the counts written, and return the plan once
+     * it has committed. The plan is kept as made, whether or not the attempt
+     * commits.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $batchId
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
      * @param  array<int, array<string, int|string|null>>  $rows
+     * @param  array<int, list<array{key_id: string, entry_id: string}>>  $uses
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportTally  $tally
      * @param  ?\SineMacula\Laravel\AuditLog\Lifecycle\ImportPlan  $planned
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\ImportPlan
@@ -295,16 +312,19 @@ final readonly class ImportWriter
         array $lines,
         #[\SensitiveParameter]
         array $rows,
+        array $uses,
         ImportTally $tally,
         ?ImportPlan &$planned,
     ): ImportPlan {
-        return $connection->transaction(function (Connection $connection) use ($batchId, $lines, $rows, $tally, &$planned): ImportPlan {
+        return $connection->transaction(function (Connection $connection) use ($batchId, $lines, $rows, $uses, $tally, &$planned): ImportPlan {
             $this->batches->claim($connection, $batchId);
 
             $plan    = $this->classifier->classify($connection, $lines);
             $planned = $plan;
 
             self::insert($connection, array_map(static fn (#[\SensitiveParameter] ImportLine $line): array => $rows[$line->number], $plan->lines));
+
+            KeyUses::insert($connection, array_merge(...array_map(static fn (#[\SensitiveParameter] ImportLine $line): array => $uses[$line->number], $plan->lines)));
 
             $this->batches->progress($connection, $batchId, $tally->with($plan));
 
@@ -446,6 +466,23 @@ final readonly class ImportWriter
         }
 
         return $this->builder->build($line, $source, $importedAt, $dryRun);
+    }
+
+    /**
+     * The key uses of the record's envelopes: one row for each distinct key
+     * that is a canonical lower-case UUID, and none for a record that holds no
+     * envelope.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @return list<array{key_id: string, entry_id: string}>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function keyUsesOf(#[\SensitiveParameter] AuditRecord $record): array
+    {
+        $keys = EnvelopeKeys::ofRecord($record);
+
+        return $keys === [] ? [] : KeyUses::rowsFor($record->id, $keys);
     }
 
     /**

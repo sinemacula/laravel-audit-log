@@ -5,8 +5,12 @@ declare(strict_types = 1);
 namespace Tests\Unit\Querying;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Config\Repository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
+use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
 use SineMacula\Laravel\AuditLog\Querying\EntryProjector;
 use SineMacula\Laravel\AuditLog\Querying\StoredEntry;
@@ -154,7 +158,7 @@ final class TrailEntryTest extends TestCase
         date_default_timezone_set('Pacific/Auckland');
 
         $stored = StoredEntry::fromRow((new RowCodec)->encode(RecordFactory::finalisedBundle(1)), new RowCodec);
-        $entry  = (new EntryProjector(new SealedFieldReader, new RecordingExceptionHandler))->project([$stored])[0];
+        $entry  = self::projector()->project([$stored], false)->entries[0];
 
         self::assertSame('UTC', $entry->occurredAt->getTimezone()->getName());
         self::assertSame('UTC', $entry->recordedAt->getTimezone()->getName());
@@ -176,12 +180,11 @@ final class TrailEntryTest extends TestCase
      */
     public function testTheSourceDigestIsProjectedFromTheStoredEntry(): void
     {
-        $projector = new EntryProjector(new SealedFieldReader, new RecordingExceptionHandler);
-        $imported  = new FinalisedRecord(RecordFactory::imported(), RecordFactory::IMPORTED_AT, 1, 'k1', self::HMAC);
-        $entries   = $projector->project([
+        $imported = new FinalisedRecord(RecordFactory::imported(), RecordFactory::IMPORTED_AT, 1, 'k1', self::HMAC);
+        $entries  = self::projector()->project([
             StoredEntry::fromRow((new RowCodec)->encode($imported), new RowCodec),
             StoredEntry::fromRow((new RowCodec)->encode(RecordFactory::finalisedBundle(1)), new RowCodec),
-        ]);
+        ], false)->entries;
 
         self::assertSame(RecordFactory::source()->sourceDigest, $entries[0]->sourceDigest);
         self::assertSame(RecordFactory::source()->sourceDigest, $entries[0]->toArray()['source_digest']);
@@ -201,7 +204,7 @@ final class TrailEntryTest extends TestCase
     {
         $finalised = RecordFactory::finalisedWithArtifact(ArtifactKind::DISCLOSURE, RecordFactory::canonical(ArtifactKind::DISCLOSURE, 2), 2);
         $stored    = StoredEntry::fromRow((new RowCodec)->encode($finalised), new RowCodec);
-        $entry     = (new EntryProjector(new SealedFieldReader, new RecordingExceptionHandler))->project([$stored])[0];
+        $entry     = self::projector()->project([$stored], false)->entries[0];
         $array     = $entry->toArray();
 
         $attachment = $finalised->record->attachment;
@@ -281,5 +284,19 @@ final class TrailEntryTest extends TestCase
 
         // @phpstan-ignore argument.type
         return new TrailEntry(...[...$defaults, ...$fields]);
+    }
+
+    /**
+     * The projector of the package's own field reader, which reads nothing of a
+     * page that does not reveal its fields, with a signer no entry here
+     * reaches.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Querying\EntryProjector
+     */
+    private static function projector(): EntryProjector
+    {
+        $signer = new RecordSigner(new KeyRing(new IntegritySettings(new Repository(['app' => ['key' => str_repeat('k', 32)]]))));
+
+        return new EntryProjector(new SealedFieldReader, new RecordingExceptionHandler, $signer);
     }
 }

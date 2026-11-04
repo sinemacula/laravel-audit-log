@@ -15,6 +15,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose;
+use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
@@ -47,6 +48,7 @@ use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Export\ReservedKeyMapper;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Querying\ClosurePolicy;
+use Tests\Fixtures\Querying\RevealingFieldReader;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
@@ -73,6 +75,9 @@ final class ExporterTest extends TestCase
 
     /** @var string The code of an export's journal. */
     private const string TRAIL_EXPORTED = 'audit_log.trail_exported';
+
+    /** @var string What a reader would reveal of a card, which no hex, base64url or UUID holds by chance. */
+    private const string REVEALED_CARD = 'revealed-card-s3cr3t';
 
     /** @var string The directory every test exports to, made for it alone. */
     private string $directory = '';
@@ -1007,6 +1012,38 @@ final class ExporterTest extends TestCase
             'file_sha256'       => $result->fileSha256,
             'outcome'           => 'success',
         ], $properties);
+    }
+
+    /**
+     * An export under a scope that reveals the encrypted fields decrypts
+     * nothing: no field reader is asked, each envelope is exported as stored,
+     * and the journal keeps its evidence as it is, its scope fingerprint the
+     * granted scope's, which differs from the same scope's without the grant.
+     *
+     * @return void
+     */
+    public function testARevealingScopeExportsTheStoredEnvelopesAndAsksNoReader(): void
+    {
+        $reader = new RevealingFieldReader(['properties.card' => self::REVEALED_CARD]);
+
+        app()->instance(FieldReader::class, $reader);
+
+        $this->revealEverything();
+
+        $id     = $this->seedEntry(['properties' => ['card' => ['v' => 1, 'k' => 'key_42', 'c' => 'Y2FyZA']]]);
+        $result = $this->trail()->export($this->target());
+
+        $properties = self::propertiesOf($this->storedRow($result->entryId));
+        $revealing  = self::termsOf(null, AccessScope::all()->revealingEncryptedFields())->scopeFingerprint;
+
+        self::assertSame(0, $reader->calls());
+        self::assertSame([CanonicalEncoder::encode($this->storedRow($id))], $this->lines());
+        self::assertStringContainsString('Y2FyZA', $this->lines()[0]);
+        self::assertStringNotContainsString(self::REVEALED_CARD, $this->lines()[0]);
+        self::assertSame($revealing, $properties['scope_fingerprint']);
+        self::assertNotSame(self::termsOf(null, AccessScope::all())->scopeFingerprint, $revealing);
+        self::assertArrayNotHasKey('reveal', $properties);
+        self::assertArrayNotHasKey('fields', $properties);
     }
 
     /**

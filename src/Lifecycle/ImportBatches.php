@@ -115,7 +115,9 @@ final readonly class ImportBatches
     /**
      * Write the running batch's counts and the time, inside the transaction the
      * connection holds, a chunk's own; a batch closed while its import ran is
-     * refused, which rolls the chunk back.
+     * refused, which rolls the chunk back. The tally is the import's, so the
+     * lines read only grow and each chunk's update changes the row, which MySQL
+     * needs to count it as updated.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $id

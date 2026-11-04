@@ -18,9 +18,12 @@ use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
 use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
@@ -34,9 +37,12 @@ use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
+use SineMacula\Laravel\AuditLog\Keys\LocalKeyWrapper;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Symfony\Component\Console\Output\BufferedOutput;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Concerns\SeedsArtifacts;
@@ -44,6 +50,7 @@ use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
@@ -53,12 +60,14 @@ use Tests\TestCase;
  * as it is verified, then each finding of the run and the summary, in text or
  * one JSON object a line; the coverage is always printed, and a ranged run says
  * it is not the whole log; the journal's line follows the anchoring, its counts
- * in the JSON summary; it fails non-zero on a tampered, incomplete or
- * unverifiable log, a journal finding among them, and, with `--strict` and an
- * anchor, on anything the anchor does not confirm, except a seal awaiting its
- * first anchoring; it refuses a malformed option or range before verifying
- * anything and alarms nothing; and a failure or a stopped run dispatches the
- * event and reports the exception, none of which holds a value of an entry.
+ * in the JSON summary; a run of the whole log prints the key store's line and
+ * holds its member, or says it skipped it for a custom encrypter; it fails
+ * non-zero on a tampered, incomplete or unverifiable log, a journal or key
+ * finding among them, and, with `--strict` and an anchor, on anything the
+ * anchor does not confirm, except a seal awaiting its first anchoring; it
+ * refuses a malformed option or range before verifying anything and alarms
+ * nothing; and a failure or a stopped run dispatches the event and reports the
+ * exception, none of which holds a value of an entry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,7 +77,7 @@ use Tests\TestCase;
 #[CoversClass(VerifyCommand::class)]
 final class VerifyCommandTest extends TestCase
 {
-    use SealsEntries, SearchesForSecrets, SeedsArtifacts, WritesTheJournal;
+    use MakesSubjectKeys, SealsEntries, SearchesForSecrets, SeedsArtifacts, WritesTheJournal;
 
     /** @var string When the log is sealed by the seal command. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -93,6 +102,7 @@ final class VerifyCommandTest extends TestCase
         . "Integrity: 2 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n"
         . "Anchoring: 0 anchored, 2 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
         . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
+        . "Keys: 0 verified, 0 erased, 0 findings.\n"
         . "Unsealed: 0 pending, 0 overdue.\n"
         . "Verification passed.\n";
 
@@ -138,6 +148,7 @@ final class VerifyCommandTest extends TestCase
 
         app()->instance(CheckpointAnchor::class, new NullAnchor);
         app()->instance(PruneLedger::class, new NullPruneLedger);
+        app()->bindIf(KeyWrapper::class, LocalKeyWrapper::class);
         app()->instance(ExceptionHandler::class, $this->handler);
 
         $alarms = $this->alarms;
@@ -191,6 +202,7 @@ final class VerifyCommandTest extends TestCase
             . "Integrity: 1 valid, 0 pruned, 0 incomplete, 0 unverifiable, 1 tampered.\n"
             . "Anchoring: 0 anchored, 2 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
             . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
+            . "Keys: 0 verified, 0 erased, 0 findings.\n"
             . "Unsealed: 0 pending, 1 overdue.\n"
             . "Verification failed.\n",
             $this->printed(),
@@ -240,6 +252,7 @@ final class VerifyCommandTest extends TestCase
             'pending'         => 0,
             'overdue'         => 1,
             'journal'         => ['rows' => 0, 'head' => null, 'committed' => null],
+            'keys'            => ['keys' => 0, 'erased' => 0, 'findings' => 0, 'skipped' => false, 'encrypter' => null],
             'first_finding'   => 'overdue_unsealed',
             'first_bad_id'    => $late,
             'passed'          => false,
@@ -262,6 +275,7 @@ final class VerifyCommandTest extends TestCase
         self::assertStringContainsString(
             "Anchoring: 0 anchored, 1 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
             . "Journal: 2 rows to sequence 2; the latest seal commits to 1.\n"
+            . "Keys: 0 verified, 0 erased, 0 findings.\n"
             . "Unsealed: 0 pending, 0 overdue.\n",
             $this->printed(),
         );
@@ -307,6 +321,92 @@ final class VerifyCommandTest extends TestCase
 
         self::assertSame('journal_transition', $alarm->finding);
         self::assertSame($release->id, $alarm->firstBadId);
+    }
+
+    /**
+     * A run of the whole log prints the key store's line after the journal's:
+     * the keys verified, those erased and the key findings; a ranged run prints
+     * none, and a custom encrypter's run says it skipped the key store, naming
+     * the encrypter.
+     *
+     * @return void
+     */
+    public function testItPrintsTheKeysLine(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        $this->sealLog(1);
+        $this->makeSubjectKey($owner);
+        $this->makeSubjectKey(Reference::of('App\Models\User', '43'));
+        $this->eraseByHand($owner);
+
+        self::assertSame(0, $this->verify());
+        self::assertStringContainsString(
+            "Journal: 1 rows to sequence 1; the latest seal commits to none.\n"
+            . "Keys: 2 verified, 1 erased, 0 findings.\n"
+            . "Unsealed: 0 pending, 0 overdue.\n",
+            $this->printed(),
+        );
+
+        self::assertSame(0, $this->verify(['--from' => '1', '--to' => '1']));
+        self::assertStringNotContainsString('Keys:', $this->printed());
+
+        app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
+
+        self::assertSame(0, $this->verify());
+        $skipped = sprintf("Keys: skipped; the bound field encrypter %s does not use the package's key store.\n", RecordingFieldEncrypter::class);
+
+        self::assertStringContainsString($skipped, $this->printed());
+    }
+
+    /**
+     * A key finding is printed as a finding of the run, counted on the key
+     * store's line, fails the run non-zero and alarms with it.
+     *
+     * @return void
+     */
+    public function testAKeyFindingExitsNonZero(): void
+    {
+        $this->sealLog(1);
+
+        [$key] = $this->makeSubjectKey(Reference::of('App\Models\User', '42'));
+
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['wrapped_key' => null]);
+
+        self::assertSame(1, $this->verify());
+        self::assertStringContainsString(sprintf("finding key_destroyed_unjournalled integrity=tampered count=1 first=%s\n", $key->id), $this->printed());
+        self::assertStringContainsString("Keys: 1 verified, 1 erased, 1 findings.\n", $this->printed());
+        self::assertStringEndsWith("Verification failed.\n", $this->printed());
+
+        $alarm = $this->singleAlarm();
+
+        self::assertSame('key_destroyed_unjournalled', $alarm->finding);
+        self::assertSame($key->id, $alarm->firstBadId);
+    }
+
+    /**
+     * The JSON summary holds the key store's member: its counts on a run of the
+     * whole log, `null` on a ranged run, and the encrypter it was skipped for
+     * with a custom one.
+     *
+     * @return void
+     */
+    public function testTheJsonHasTheKeysMember(): void
+    {
+        $this->sealLog(1);
+        $this->makeSubjectKey(Reference::of('App\Models\User', '42'));
+
+        self::assertSame(0, $this->verify(['--json' => true]));
+        self::assertSame(['keys' => 1, 'erased' => 0, 'findings' => 0, 'skipped' => false, 'encrypter' => null], $this->summaryLine()['keys'] ?? null);
+
+        self::assertSame(0, $this->verify(['--json' => true, '--from' => '1']));
+        self::assertArrayHasKey('keys', $this->summaryLine());
+        self::assertNull($this->summaryLine()['keys']);
+
+        app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
+
+        self::assertSame(0, $this->verify(['--json' => true]));
+        self::assertSame(['keys' => 0, 'erased' => 0, 'findings' => 0, 'skipped' => true, 'encrypter' => RecordingFieldEncrypter::class], $this->summaryLine()['keys'] ?? null);
     }
 
     /**
@@ -678,6 +778,7 @@ final class VerifyCommandTest extends TestCase
             . "Integrity: 2 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n"
             . "Anchoring: 2 anchored, 0 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
             . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
+            . "Keys: 0 verified, 0 erased, 0 findings.\n"
             . "Unsealed: 0 pending, 0 overdue.\n"
             . "Verification passed.\n",
             $this->printed(),
@@ -740,6 +841,7 @@ final class VerifyCommandTest extends TestCase
             . "Integrity: 0 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n"
             . "Anchoring: 0 anchored, 0 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
             . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
+            . "Keys: 0 verified, 0 erased, 0 findings.\n"
             . "Unsealed: 0 pending, 0 overdue.\n"
             . "Verification passed.\n",
             $this->printed(),
@@ -1298,19 +1400,31 @@ final class VerifyCommandTest extends TestCase
     /**
      * Each line the last run printed, decoded from JSON.
      *
-     * @return list<array<string, array<string, int>|bool|int|string|null>>
+     * @return list<array<string, array<string, bool|int|string|null>|bool|int|string|null>>
      */
     private function jsonLines(): array
     {
         $lines = [];
 
         foreach (explode("\n", rtrim($this->printed(), "\n")) as $line) {
-            /** @var array<string, array<string, int>|bool|int|string|null> $decoded */
+            /** @var array<string, array<string, bool|int|string|null>|bool|int|string|null> $decoded */
             $decoded = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
             $lines[] = $decoded;
         }
 
         return $lines;
+    }
+
+    /**
+     * The summary line of the last JSON run, its last line.
+     *
+     * @return array<string, array<string, bool|int|string|null>|bool|int|string|null>
+     */
+    private function summaryLine(): array
+    {
+        $lines = $this->jsonLines();
+
+        return $lines[array_key_last($lines)] ?? [];
     }
 
     /**

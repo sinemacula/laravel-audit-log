@@ -16,6 +16,8 @@ use SineMacula\Laravel\AuditLog\Privacy\IpMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\OmissionLog;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
+use SineMacula\Laravel\AuditLog\Privacy\SealingScope;
+use SineMacula\Laravel\AuditLog\Privacy\TypedPlaintext;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Privacy\MalformedFieldEncrypter;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -49,6 +51,9 @@ final class IpMinimiserTest extends TestCase
 
     /** @var int How many bytes an envelope of `k` as its key and version 1 encodes to with an empty ciphertext. */
     private const int ENVELOPE_FRAME_BYTES = 22;
+
+    /** @var string The id of the entry every address is sealed for. */
+    private const string ENTRY_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
 
     /** @var array{count: int, paths: list<string>} What the log holds once an address was not stored. */
     private const array DIAGNOSED = ['count' => 1, 'paths' => ['$ip']];
@@ -96,7 +101,7 @@ final class IpMinimiserTest extends TestCase
             $encrypter = new RecordingFieldEncrypter;
             $omissions = new OmissionLog;
 
-            self::assertSame($stored, self::minimiser($mode)->minimise($input, self::actor(), self::sealer($encrypter), $omissions), $mode);
+            self::assertSame($stored, self::minimiser($mode)->minimise($input, self::actor(), self::sealer($encrypter), $omissions, self::scope()), $mode);
             self::assertSame([], $encrypter->calls(), $mode);
             self::assertNull($omissions->toArray(), $mode);
         }
@@ -181,7 +186,7 @@ final class IpMinimiserTest extends TestCase
     #[DataProvider('provideNetworks')]
     public function testTheTruncatedNetworkIsExact(string $input, string $network): void
     {
-        $minimised = self::minimiser(IpMode::TRUNCATE->value)->minimise($input, null, self::sealer(new RecordingFieldEncrypter), new OmissionLog);
+        $minimised = self::minimiser(IpMode::TRUNCATE->value)->minimise($input, null, self::sealer(new RecordingFieldEncrypter), new OmissionLog, self::scope());
 
         self::assertSame($network, $minimised);
     }
@@ -213,7 +218,7 @@ final class IpMinimiserTest extends TestCase
     {
         $encrypter = new RecordingFieldEncrypter;
 
-        self::assertNull(self::minimiser($mode)->minimise($address, self::actor(), self::sealer($encrypter), new OmissionLog));
+        self::assertNull(self::minimiser($mode)->minimise($address, self::actor(), self::sealer($encrypter), new OmissionLog, self::scope()));
         self::assertSame([], $encrypter->calls());
     }
 
@@ -231,7 +236,7 @@ final class IpMinimiserTest extends TestCase
     {
         $omissions = new OmissionLog;
 
-        self::minimiser($mode)->minimise($address, self::actor(), self::sealer(new RecordingFieldEncrypter), $omissions);
+        self::minimiser($mode)->minimise($address, self::actor(), self::sealer(new RecordingFieldEncrypter), $omissions, self::scope());
 
         self::assertSame(self::DIAGNOSED, $omissions->toArray());
     }
@@ -261,7 +266,7 @@ final class IpMinimiserTest extends TestCase
         $encrypter = new RecordingFieldEncrypter;
         $omissions = new OmissionLog;
 
-        self::assertNull(self::minimiser($mode)->minimise(null, self::actor(), self::sealer($encrypter), $omissions));
+        self::assertNull(self::minimiser($mode)->minimise(null, self::actor(), self::sealer($encrypter), $omissions, self::scope()));
         self::assertNull($omissions->toArray());
         self::assertSame([], $encrypter->calls());
     }
@@ -276,7 +281,7 @@ final class IpMinimiserTest extends TestCase
     {
         $omissions = new OmissionLog;
 
-        self::assertNull(self::minimiser(IpMode::DROP->value)->minimise('203.0.113.7', self::actor(), self::sealer(new RecordingFieldEncrypter), $omissions));
+        self::assertNull(self::minimiser(IpMode::DROP->value)->minimise('203.0.113.7', self::actor(), self::sealer(new RecordingFieldEncrypter), $omissions, self::scope()));
         self::assertNull($omissions->toArray());
     }
 
@@ -367,11 +372,70 @@ final class IpMinimiserTest extends TestCase
         $omissions = new OmissionLog;
         $actor     = self::actor();
 
-        $stored = self::minimiser(IpMode::ENCRYPT->value)->minimise($input, $actor, self::sealer($encrypter), $omissions);
+        $stored = self::minimiser(IpMode::ENCRYPT->value)->minimise($input, $actor, self::sealer($encrypter), $omissions, self::scope());
 
-        self::assertSame(sprintf('{"c":"%s","k":"key_42","v":1}', base64_encode($canonical)), $stored);
-        self::assertSame([[$actor, $canonical]], $encrypter->calls());
+        self::assertSame(sprintf('{"c":"%s","k":"key_42","v":1}', base64_encode('"' . $canonical . '"')), $stored);
+        self::assertSame([[$actor, '"' . $canonical . '"']], $encrypter->calls());
         self::assertNull($omissions->toArray());
+    }
+
+    /**
+     * The address is sealed for the path `["ip"]` of the scope's entry, with
+     * the scope's log, tenant, category and owners, so its envelope opens in
+     * that column of that entry and nowhere else.
+     *
+     * @return void
+     */
+    public function testTheEncryptModeSealsTheAddressAtTheIpPath(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+
+        self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), self::sealer($encrypter), new OmissionLog, self::scope());
+
+        $context = $encrypter->contexts()[0];
+
+        self::assertSame([['ip']], $encrypter->paths());
+        self::assertSame(self::ENTRY_ID, $context->entryId);
+        self::assertSame('app-eu-1', $context->logId);
+        self::assertSame('organisation', $context->tenant?->type);
+        self::assertSame('finance', $context->category);
+        self::assertSame([self::actor()->id], array_map(static fn (Reference $owner): string => $owner->id, $context->owners));
+    }
+
+    /**
+     * The address's plaintext is its typed plaintext, the JSON string of its
+     * canonical form, which decodes back to the address and to nothing of
+     * another type.
+     *
+     * @return void
+     */
+    public function testTheAddressPlaintextIsItsJsonString(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+
+        self::minimiser(IpMode::ENCRYPT->value)->minimise('2001:DB8::1', self::actor(), self::sealer($encrypter), new OmissionLog, self::scope());
+
+        $plaintext = $encrypter->calls()[0][1];
+
+        self::assertSame('"2001:db8::1"', $plaintext);
+        self::assertSame('2001:db8::1', TypedPlaintext::decode($plaintext));
+    }
+
+    /**
+     * No mode but `encrypt` asks the encrypter for anything, whatever the
+     * scope.
+     *
+     * @return void
+     */
+    public function testNoOtherModeSealsTheAddress(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+
+        foreach ([IpMode::FULL, IpMode::TRUNCATE, IpMode::HASH, IpMode::DROP] as $mode) {
+            self::minimiser($mode->value)->minimise('203.0.113.7', self::actor(), self::sealer($encrypter), new OmissionLog, self::scope());
+        }
+
+        self::assertSame([], $encrypter->calls());
     }
 
     /**
@@ -385,7 +449,7 @@ final class IpMinimiserTest extends TestCase
         $encrypter = new RecordingFieldEncrypter;
         $omissions = new OmissionLog;
 
-        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', null, self::sealer($encrypter), $omissions));
+        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', null, self::sealer($encrypter), $omissions, self::scope()));
         self::assertSame(self::DIAGNOSED, $omissions->toArray());
         self::assertSame([], $encrypter->calls());
     }
@@ -402,7 +466,7 @@ final class IpMinimiserTest extends TestCase
         $omissions = new OmissionLog;
         $sealer    = new EnvelopeSealer(new NoFieldEncrypter, $handler);
 
-        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions));
+        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions, self::scope()));
         self::assertSame(self::DIAGNOSED, $omissions->toArray());
         self::assertSame([], $handler->reports());
     }
@@ -419,7 +483,7 @@ final class IpMinimiserTest extends TestCase
         $omissions = new OmissionLog;
         $sealer    = new EnvelopeSealer(new ThrowingFieldEncrypter, $handler);
 
-        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions));
+        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions, self::scope()));
         self::assertSame(self::DIAGNOSED, $omissions->toArray());
         self::assertCount(1, $handler->reports());
     }
@@ -435,7 +499,7 @@ final class IpMinimiserTest extends TestCase
         $omissions = new OmissionLog;
         $sealer    = new EnvelopeSealer(new MalformedFieldEncrypter(['v' => 1, 'k' => 'k']), $handler);
 
-        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions));
+        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions, self::scope()));
         self::assertSame(self::DIAGNOSED, $omissions->toArray());
         self::assertCount(1, $handler->reports());
     }
@@ -453,9 +517,9 @@ final class IpMinimiserTest extends TestCase
         $omissions = new OmissionLog;
         $sealer    = new EnvelopeSealer($encrypter, $handler);
 
-        $sealer->seal(self::actor(), 'an earlier field');
+        $sealer->seal(self::actor(), '"an earlier field"', self::scope()->at(['properties', 'field']));
 
-        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions));
+        self::assertNull(self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), $sealer, $omissions, self::scope()));
         self::assertSame(self::DIAGNOSED, $omissions->toArray());
         self::assertSame(1, $encrypter->calls());
         self::assertCount(1, $handler->reports());
@@ -538,7 +602,7 @@ final class IpMinimiserTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('`audit-log.redaction.ip` must be `full`, `truncate`, `hash`, `drop` or `encrypt`.');
 
-        self::minimiser('partial')->minimise(null, null, self::sealer(new RecordingFieldEncrypter), new OmissionLog);
+        self::minimiser('partial')->minimise(null, null, self::sealer(new RecordingFieldEncrypter), new OmissionLog, self::scope());
     }
 
     /**
@@ -553,11 +617,11 @@ final class IpMinimiserTest extends TestCase
         $minimiser = new IpMinimiser($settings, new IdentifierHasher($settings));
         $sealer    = self::sealer(new RecordingFieldEncrypter);
 
-        self::assertSame('203.0.113.7', $minimiser->minimise('203.0.113.7', null, $sealer, new OmissionLog));
+        self::assertSame('203.0.113.7', $minimiser->minimise('203.0.113.7', null, $sealer, new OmissionLog, self::scope()));
 
         $config->set('audit-log.redaction.ip', IpMode::TRUNCATE->value);
 
-        self::assertSame('203.0.113.0', $minimiser->minimise('203.0.113.7', null, $sealer, new OmissionLog));
+        self::assertSame('203.0.113.0', $minimiser->minimise('203.0.113.7', null, $sealer, new OmissionLog, self::scope()));
     }
 
     /**
@@ -570,7 +634,7 @@ final class IpMinimiserTest extends TestCase
     public function testAnIpHashIsNeverAnIdentifierHash(): void
     {
         $hasher = new IdentifierHasher(self::settings(IpMode::HASH->value));
-        $stored = (string) self::minimiser(IpMode::HASH->value)->minimise('203.0.113.7', null, self::sealer(new RecordingFieldEncrypter), new OmissionLog);
+        $stored = (string) self::minimiser(IpMode::HASH->value)->minimise('203.0.113.7', null, self::sealer(new RecordingFieldEncrypter), new OmissionLog, self::scope());
 
         $identifier = (string) $hasher->identifier('203.0.113.7');
         $field      = $hasher->field('203.0.113.7');
@@ -625,7 +689,7 @@ final class IpMinimiserTest extends TestCase
         $ignored   = ini_set('zend.exception_ignore_args', '0');
 
         try {
-            $minimiser->minimise('203.0.113.7', null, self::sealer(new RecordingFieldEncrypter), new OmissionLog);
+            $minimiser->minimise('203.0.113.7', null, self::sealer(new RecordingFieldEncrypter), new OmissionLog, self::scope());
             self::fail('Expected the key to be refused.');
         } catch (\InvalidArgumentException $exception) {
             self::assertStringNotContainsString('203.0.113.7', $exception->getMessage());
@@ -648,7 +712,7 @@ final class IpMinimiserTest extends TestCase
     {
         $encrypter = new MalformedFieldEncrypter(['c' => $ciphertext, 'k' => 'k', 'v' => 1]);
 
-        return self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), self::sealer($encrypter), $omissions);
+        return self::minimiser(IpMode::ENCRYPT->value)->minimise('203.0.113.7', self::actor(), self::sealer($encrypter), $omissions, self::scope());
     }
 
     /**
@@ -684,6 +748,17 @@ final class IpMinimiserTest extends TestCase
     private static function sealer(FieldEncrypter $encrypter): EnvelopeSealer
     {
         return new EnvelopeSealer($encrypter, new RecordingExceptionHandler);
+    }
+
+    /**
+     * The scope every address is sealed in: an entry of an organisation's,
+     * encrypting for the actor.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Privacy\SealingScope
+     */
+    private static function scope(): SealingScope
+    {
+        return new SealingScope(self::ENTRY_ID, 'app-eu-1', Reference::of('organisation', 'org_01'), 'finance', [self::actor()]);
     }
 
     /**

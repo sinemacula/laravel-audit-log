@@ -8,21 +8,30 @@ use Carbon\CarbonImmutable;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Access\AccessScope;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
+use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Querying\ExportResult;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerification;
+use SineMacula\Laravel\AuditLog\Querying\InvalidCursorException;
+use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
@@ -35,7 +44,10 @@ use Tests\Unit\Stubs\StubAuthUser;
  * terminal call without a viewer or with a page size outside the range is
  * refused before anything is queried or recorded; an export and its
  * verification read through the exporter and the verifier, for the trail's
- * viewer; there is no probe of whether a viewer may read.
+ * viewer; there is no probe of whether a viewer may read. The entries holding
+ * an owner's encrypted fragments are found through the package's key store, in
+ * a page, a count and an export alike, bound into a page's cursor, and refused
+ * naming the bound encrypter when the encrypter keeps its keys elsewhere.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,7 +57,7 @@ use Tests\Unit\Stubs\StubAuthUser;
 #[CoversClass(AuditTrail::class)]
 final class AuditTrailTest extends TestCase
 {
-    use InteractsWithAuditStore, ReadsTheTrail;
+    use InteractsWithAuditStore, MakesSubjectKeys, ReadsTheTrail;
 
     /** @var string What a terminal call without a viewer is refused with. */
     private const string NO_VIEWER = 'A read of the audit trail names its viewer; call visibleTo() first.';
@@ -85,6 +97,7 @@ final class AuditTrailTest extends TestCase
             'outcome'     => [static fn (AuditTrail $trail): AuditTrail => $trail->withOutcome(Outcome::DENIED)],
             'window'      => [static fn (AuditTrail $trail): AuditTrail => $trail->between(new CarbonImmutable('2026-11-01T00:00:00Z'), null)],
             'correlation' => [static fn (AuditTrail $trail): AuditTrail => $trail->correlatedWith('app:ticket-123')],
+            'holding'     => [static fn (AuditTrail $trail): AuditTrail => $trail->holdingDataOf(Reference::of('App\Models\User', '42'))],
             'viewer'      => [static fn (AuditTrail $trail): AuditTrail => $trail->visibleTo(Reference::of('App\Models\User', '7'))],
         ];
     }
@@ -146,20 +159,22 @@ final class AuditTrailTest extends TestCase
             ->inCategory('finance', 'hr')->inCategory('security')
             ->withOutcome(Outcome::DENIED, Outcome::FAILURE)->withOutcome(Outcome::SUCCESS)
             ->between(new CarbonImmutable('2026-11-01T00:00:00Z'), new CarbonImmutable('2026-11-02T00:00:00Z'))->between(null, null)
-            ->correlatedWith('app:ticket-1')->correlatedWith('app:ticket-2'));
+            ->correlatedWith('app:ticket-1')->correlatedWith('app:ticket-2')
+            ->holdingDataOf(Reference::of('App\Models\User', '1'))->holdingDataOf(Reference::of('App\Models\User', '2')));
 
         self::assertSame([
-            'actor'          => ['user', '2'],
-            'categories'     => ['security'],
-            'correlation_id' => 'app:ticket-2',
-            'event_prefix'   => null,
-            'events'         => ['invoice.voided'],
-            'from'           => null,
-            'outcomes'       => ['success'],
-            'principal'      => ['team', 'b'],
-            'subject'        => ['invoice', 'b'],
-            'tenant'         => ['organisation', 'b'],
-            'to'             => null,
+            'actor'           => ['user', '2'],
+            'categories'      => ['security'],
+            'correlation_id'  => 'app:ticket-2',
+            'event_prefix'    => null,
+            'events'          => ['invoice.voided'],
+            'from'            => null,
+            'holding_data_of' => ['App\Models\User', '2'],
+            'outcomes'        => ['success'],
+            'principal'       => ['team', 'b'],
+            'subject'         => ['invoice', 'b'],
+            'tenant'          => ['organisation', 'b'],
+            'to'              => null,
         ], $filters);
     }
 
@@ -194,6 +209,8 @@ final class AuditTrailTest extends TestCase
         foreach (['actor', 'subject', 'principal', 'tenant'] as $dimension) {
             self::assertSame([$built->type, $built->id], $filters[$dimension], $dimension);
         }
+
+        self::assertSame([$built->type, $built->id], self::filtersOf(app(AuditTrail::class)->holdingDataOf($model))['holding_data_of']);
 
         self::assertSame([StubAuthUser::class, '42'], [$built->type, $built->id]);
     }
@@ -557,6 +574,220 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
+     * A trail holding the data of an owner reads the entries holding one of its
+     * encrypted fragments, whichever field holds it and whatever else the entry
+     * holds, given by a model or by its reference, and no entry holding only
+     * another owner's fragments or none.
+     *
+     * @return void
+     */
+    public function testHoldingDataOfFindsEntriesHoldingTheOwnersFragments(): void
+    {
+        $this->allowEverything();
+
+        $model = (new StubAuthUser)->forceFill(['id' => 42]);
+        $owner = Reference::to($model);
+        $other = Reference::of('App\Models\User', '43');
+
+        $own  = $this->seedHolding([$owner]);
+        $both = $this->seedHolding([$other, $owner]);
+
+        $this->seedHolding([$other]);
+        $this->seedEntry();
+
+        $trail = app(AuditTrail::class)->visibleTo($this->viewer());
+
+        self::assertSame(self::sorted([$own, $both]), self::sorted(self::idsOf($trail->holdingDataOf($model)->cursorPaginate())));
+        self::assertSame(self::sorted([$own, $both]), self::sorted(self::idsOf($trail->holdingDataOf($owner)->cursorPaginate())));
+        self::assertSame(self::sorted([$own, $both]), self::sorted(self::idsOf($trail->holdingDataOf($other)->holdingDataOf($owner)->cursorPaginate())));
+        self::assertSame([], self::idsOf($trail->holdingDataOf(Reference::of('App\Models\User', '44'))->cursorPaginate()));
+    }
+
+    /**
+     * With a field encrypter bound that keeps its keys outside the package's
+     * key store, an anonymous one included, the filter is refused naming the
+     * bound class, before anything is queried; the package's encrypter and the
+     * one that never encrypts are accepted.
+     *
+     * @return void
+     */
+    public function testACustomEncrypterThrowsNamingTheBinding(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        $this->keyWrapper();
+        $this->captureQueries();
+
+        $anonymous = new class implements FieldEncrypter {
+            /**
+             * No envelope.
+             *
+             * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+             * @param  string  $plaintext
+             * @param  \SineMacula\Laravel\AuditLog\Privacy\FieldContext  $context
+             * @return null
+             */
+            #[\Override]
+            public function encrypt(#[\SensitiveParameter] Reference $owner, #[\SensitiveParameter] string $plaintext, FieldContext $context): null
+            {
+                return null;
+            }
+        };
+
+        $refusals = [RecordingFieldEncrypter::class => new RecordingFieldEncrypter, FieldEncrypter::class . '@anonymous' => $anonymous];
+
+        foreach ($refusals as $named => $encrypter) {
+            app()->instance(FieldEncrypter::class, $encrypter);
+
+            try {
+                app(AuditTrail::class)->visibleTo($this->viewer())->holdingDataOf($owner);
+
+                self::fail("Expected {$named} to be refused.");
+            } catch (\LogicException $refusal) {
+                $message = 'holdingDataOf() finds an owner\'s entries through the package\'s key store, which the bound field encrypter, %s, does not use.';
+
+                self::assertSame(sprintf($message, $named), $refusal->getMessage());
+            }
+        }
+
+        self::assertSame([], $this->capturedQueries());
+
+        foreach ([NoFieldEncrypter::class, SubjectKeyEncrypter::class] as $covered) {
+            app()->bind(FieldEncrypter::class, $covered);
+
+            self::assertSame([$owner->type, $owner->id], self::filtersOf(app(AuditTrail::class)->holdingDataOf($owner))['holding_data_of'], $covered);
+        }
+    }
+
+    /**
+     * The encrypter is the one bound when the trail was made, carried by every
+     * filter and by the viewer, never looked up again: a trail made under a
+     * custom encrypter is refused after the binding changes, and one made under
+     * the package's store is not.
+     *
+     * @return void
+     */
+    public function testTheTrailKeepsTheEncrypterItWasMadeWith(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
+
+        $custom = app(AuditTrail::class)->inCategory('finance')->visibleTo($this->viewer())->forActor(Reference::of('user', '42'));
+
+        app()->instance(FieldEncrypter::class, new NoFieldEncrypter);
+
+        $package = app(AuditTrail::class)->inCategory('finance')->visibleTo($this->viewer());
+
+        app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
+
+        self::assertSame([$owner->type, $owner->id], self::filtersOf($package->forActor(Reference::of('user', '42'))->holdingDataOf($owner))['holding_data_of']);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(RecordingFieldEncrypter::class);
+
+        $custom->holdingDataOf($owner);
+    }
+
+    /**
+     * A count and an export of the trail holding an owner's data apply it as a
+     * page does: each counts or writes only the entries holding the owner's
+     * fragments.
+     *
+     * @return void
+     */
+    public function testTheCountAndTheExportApplyIt(): void
+    {
+        $this->allowEverything();
+
+        $owner = Reference::of('App\Models\User', '42');
+        $held  = [$this->seedHolding([$owner]), $this->seedHolding([$owner, Reference::of('App\Models\User', '43')])];
+        $other = $this->seedHolding([Reference::of('App\Models\User', '43')]);
+
+        $this->seedEntry();
+
+        $trail     = app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
+        $directory = uniqid(sys_get_temp_dir() . '/audit-log-trail-', true);
+
+        mkdir($directory, 0700);
+
+        try {
+            $result   = $trail->holdingDataOf($owner)->export($directory . '/trail.ndjson');
+            $contents = (string) file_get_contents($directory . '/trail.ndjson');
+        } finally {
+            array_map(unlink(...), glob($directory . '/*') ?: []);
+            rmdir($directory);
+        }
+
+        self::assertSame(2, $trail->holdingDataOf($owner)->count());
+        self::assertSame(4, $trail->count());
+        self::assertSame(2, $result->lines);
+
+        foreach ($held as $id) {
+            self::assertStringContainsString($id, $contents);
+        }
+
+        self::assertStringNotContainsString($other, $contents);
+    }
+
+    /**
+     * An erased owner's entries are still found: erasure destroys its keys and
+     * leaves the key uses, so the entries holding its now unreadable fragments
+     * can still be reviewed.
+     *
+     * @return void
+     */
+    public function testAnErasedOwnersEntriesAreStillFound(): void
+    {
+        $this->allowEverything();
+
+        $owner = Reference::of('App\Models\User', '42');
+        $ids   = [$this->seedHolding([$owner]), $this->seedHolding([$owner, Reference::of('App\Models\User', '43')])];
+
+        $this->seedHolding([Reference::of('App\Models\User', '43')]);
+        $this->eraseByHand($owner);
+
+        $trail = app(AuditTrail::class)->visibleTo($this->viewer())->holdingDataOf($owner);
+
+        self::assertSame(self::sorted($ids), self::sorted(self::idsOf($trail->cursorPaginate())));
+        self::assertSame(2, $trail->count());
+    }
+
+    /**
+     * A page's cursor is bound to the owner whose data the trail holds: it
+     * opens the next page of the same owner's entries and is refused for
+     * another owner's, or for the trail without the owner.
+     *
+     * @return void
+     */
+    public function testTheCursorBindsTheOwner(): void
+    {
+        $this->allowEverything();
+
+        $owner = Reference::of('App\Models\User', '42');
+        $other = Reference::of('App\Models\User', '43');
+        $ids   = [$this->seedHolding([$owner, $other]), $this->seedHolding([$owner, $other]), $this->seedHolding([$owner, $other])];
+        $trail = app(AuditTrail::class)->visibleTo($this->viewer());
+        $first = $trail->holdingDataOf($owner)->cursorPaginate(2);
+
+        self::assertIsString($first->nextCursor);
+
+        $next = $trail->holdingDataOf($owner)->cursorPaginate(2, $first->nextCursor);
+
+        self::assertSame(self::sorted($ids), self::sorted([...self::idsOf($first), ...self::idsOf($next)]));
+
+        foreach ([$trail->holdingDataOf($other), $trail] as $index => $another) {
+            try {
+                $another->cursorPaginate(2, $first->nextCursor);
+
+                self::fail("Expected read {$index} to refuse the cursor.");
+            } catch (InvalidCursorException $refusal) {
+                self::assertEquals(InvalidCursorException::refused(), $refusal);
+            }
+        }
+    }
+
+    /**
      * Read a count and a page as the viewer, and assert the policy was handed
      * the viewer itself each time and the reads were recorded under the
      * reference given.
@@ -582,6 +813,51 @@ final class AuditTrailTest extends TestCase
         }
 
         self::assertCount(2, $this->readRecords());
+    }
+
+    /**
+     * Store an entry holding a fragment of each owner, each sealed under the
+     * owner's key in a field of its own, and return its id.
+     *
+     * @param  list<\SineMacula\Laravel\AuditLog\Records\Reference>  $owners
+     * @return string
+     */
+    private function seedHolding(array $owners): string
+    {
+        $id         = Str::uuid7()->toString();
+        $properties = [];
+
+        foreach ($owners as $index => $owner) {
+            [$key, $dataKey] = $this->makeSubjectKey($owner);
+
+            $properties['field_' . $index] = $this->sealEnvelope($dataKey, $key->id, 'fragment ' . $index, $id, ['properties', 'field_' . $index]);
+        }
+
+        return $this->seedEntry(['properties' => $properties], id: $id);
+    }
+
+    /**
+     * The ids of the entries the page shows, in order.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
+     * @return list<string>
+     */
+    private static function idsOf(TrailPage $page): array
+    {
+        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
+    }
+
+    /**
+     * The ids, sorted.
+     *
+     * @param  list<string>  $ids
+     * @return list<string>
+     */
+    private static function sorted(array $ids): array
+    {
+        sort($ids, SORT_STRING);
+
+        return $ids;
     }
 
     /**

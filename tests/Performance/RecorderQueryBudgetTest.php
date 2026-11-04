@@ -87,6 +87,9 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     /** @var string The code every test records. */
     private const string CODE = 'invoice.approved';
 
+    /** @var string The id of the entry every capture here is minimised as. */
+    private const string ENTRY_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
+
     /** @var string The session guard tests sign users into. */
     private const string GUARD = 'web';
 
@@ -407,8 +410,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
         self::assertSame(app(IdentifierHasher::class)->ip('203.0.113.9'), $record->ip);
         self::assertSame(Redactor::MARKER, $record->properties['customer'] ?? null);
         self::assertSame(app(IdentifierHasher::class)->field('alice@example.com'), $record->properties['email'] ?? null);
-        self::assertSame(['v' => 1, 'k' => 'key_7', 'c' => base64_encode('078-05-1120')], $record->properties['ssn'] ?? null);
-        self::assertSame(['v' => 1, 'k' => 'key_7', 'c' => base64_encode('Erasable.')], $record->properties['_audit']['note'] ?? null);
+        self::assertSame(['v' => 1, 'k' => 'key_7', 'c' => base64_encode('"078-05-1120"')], $record->properties['ssn'] ?? null);
+        self::assertSame(['v' => 1, 'k' => 'key_7', 'c' => base64_encode('"Erasable."')], $record->properties['_audit']['note'] ?? null);
         self::assertSame(app(IdentifierHasher::class)->identifier('alice@example.com'), $record->properties['_audit']['identifier_hash'] ?? null);
     }
 
@@ -433,7 +436,7 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     {
         $snapshot = $this->fullyMinimisedPending()->snapshot();
 
-        $this->assertStatementBudget(0, 0, 0, 0, static fn (): Minimised => app(RecordMinimiser::class)->minimise($snapshot, self::everyHandling()));
+        $this->assertStatementBudget(0, 0, 0, 0, static fn (): Minimised => app(RecordMinimiser::class)->minimise($snapshot, self::everyHandling(), self::ENTRY_ID));
     }
 
     /**

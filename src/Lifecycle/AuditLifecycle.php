@@ -5,38 +5,47 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
+use SineMacula\Laravel\AuditLog\Keys\KeyUseRebuilder;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
-use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
-use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
  * The privileged operations on the log's lifecycle: placing and releasing
  * holds, pruning what retention no longer keeps, importing another system's
  * records and closing an import that stopped, listing the active holds and
- * rebuilding their projection, and writing again the activity records the
- * journal says are missing.
+ * rebuilding their projection, erasing an owner, reinstating one, rewrapping
+ * and rotating the owners' keys, erasing again after a restore, rebuilding the
+ * key uses, and writing again the activity records the journal says are
+ * missing.
  *
  * Each operation commits with the journal row that describes it, and its
- * activity record, `audit_log.held`, `audit_log.released`, `audit_log.pruned`
- * or `audit_log.imported`, is written only after that commit: a record that
- * cannot be written never undoes the operation, is reported, and shows as
- * `recorded: false` on the result, and `reconcile()` writes it later from the
- * journal. "Fail closed" names the recording attempt alone. A release of a hold
- * that is not active is recorded `denied` and rethrown, and an import that
- * fails once its start has committed is recorded as a failure, after its hold,
- * and rethrown. A dry run commits nothing and records nothing.
+ * activity record, `audit_log.held`, `audit_log.released`, `audit_log.pruned`,
+ * `audit_log.imported`, `audit_log.subject_erased`, `audit_log.keys_reinstated`
+ * or `audit_log.keys_rewrapped`, is written only after that commit, through
+ * `LifecycleRecords`: a record that cannot be written never undoes the
+ * operation, is reported, and shows as `recorded: false` on the result, and
+ * `reconcile()` writes it later from the journal. "Fail closed" names the
+ * recording attempt alone. A release of a hold that is not active, a refused
+ * erasure and a reinstatement of an owner who is not erased are recorded
+ * `denied` and rethrown; an import that fails once its start has committed is
+ * recorded as a failure, after its hold, and an erasure or a rewrap that fails
+ * is recorded as a failure, each then rethrown. A dry run commits nothing and
+ * records nothing.
  *
  * The class authorises nothing: the authority is whoever the caller says it is,
  * and the boundary is the maintenance connection's credentials and the
- * application's own authorisation before it calls. Holds, prunes and the
- * journal make the destruction of entries accountable, never impossible:
- * whoever holds the maintenance credentials can still delete rows, and the
- * seals and the journal make that detectable.
+ * application's own authorisation before it calls. Holds, prunes, erasures and
+ * the journal make the destruction of entries and keys accountable, never
+ * impossible: whoever holds the database credentials can still delete rows and
+ * keys, or restore them, and the seals, the key rows' signatures and the
+ * journal make that detectable.
  *
  * Every operation resolves its services from the container on each call, so the
  * class outlives requests safely.
@@ -48,15 +57,6 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
  */
 final readonly class AuditLifecycle
 {
-    /** @var string The reason a release of a hold that is not active is recorded denied with. */
-    private const string UNKNOWN_HOLD = 'unknown_hold';
-
-    /** @var string The reason an import that failed is recorded with. */
-    private const string IMPORT_FAILED = 'import_failed';
-
-    /** @var string The reason a closed import is recorded with. */
-    private const string INTERRUPTED = 'interrupted';
-
     /**
      * Constructor.
      *
@@ -91,7 +91,7 @@ final readonly class AuditLifecycle
         $operationId = $this->operationId();
         $hold        = $this->container->make(HoldKeeper::class)->place($operationId, $scope, $authority, $basis, $reviewBy);
 
-        return new HoldResult($operationId, $this->recordHeld($hold), $hold);
+        return new HoldResult($operationId, $this->records()->recordHeld($hold), $hold);
     }
 
     /**
@@ -116,7 +116,7 @@ final readonly class AuditLifecycle
         $operationId = $this->operationId();
         $hold        = $this->released($operationId, $holdId, $authority);
 
-        return new ReleaseResult($operationId, $this->recordReleased($operationId, $holdId, $authority, Outcome::SUCCESS), $hold);
+        return new ReleaseResult($operationId, $this->records()->recordReleased($operationId, $holdId, $authority, Outcome::SUCCESS), $hold);
     }
 
     /**
@@ -140,24 +140,7 @@ final readonly class AuditLifecycle
             return $result;
         }
 
-        $failed   = $result->status === PruneStatus::FAILED;
-        $evidence = new LifecycleEvidence([
-            'operation_id'     => $result->operationId,
-            'status'           => $result->status->value,
-            'policy_version'   => $result->policyVersion,
-            'deleted'          => $result->deleted,
-            'seals'            => $result->seals,
-            'held'             => $result->held,
-            'pending_delivery' => $result->pendingDelivery,
-            'skipped_seals'    => $result->skippedSeals,
-            'categories'       => $result->categories,
-            'tenants_affected' => $result->tenantsAffected,
-            'outcome'          => ($failed ? Outcome::FAILURE : Outcome::SUCCESS)->value,
-        ]);
-
-        $recorded = $this->recorder()->record(PackageActivity::PRUNED, null, $evidence, $failed ? Outcome::FAILURE : Outcome::SUCCESS, $failed ? $result->failure : null);
-
-        return $result->withRecorded($recorded);
+        return $result->withRecorded($this->records()->recordPruned($result));
     }
 
     /**
@@ -194,7 +177,7 @@ final readonly class AuditLifecycle
 
         [$result, $held] = $this->imported($importer, $source, $authority, $hold, $basis);
 
-        $recorded = $this->recordImported($result, $source->sourceId, $source->format->value, $authority);
+        $recorded = $this->records()->recordImported($result, $source->sourceId, $source->format->value, $authority);
 
         return $result->withRecorded($recorded && $held);
     }
@@ -230,7 +213,7 @@ final readonly class AuditLifecycle
         $source = $batch['source_id']    ?? null;
         $format = $batch['input_format'] ?? null;
 
-        $recorded = $this->recordImported($result, is_string($source) ? $source : null, is_string($format) ? $format : null, $authority);
+        $recorded = $this->records()->recordImported($result, is_string($source) ? $source : null, is_string($format) ? $format : null, $authority);
 
         return $result->withRecorded($recorded);
     }
@@ -287,6 +270,157 @@ final readonly class AuditLifecycle
     }
 
     /**
+     * Erase the owner on the authority given, all or nothing unless `$partial`
+     * lets the keys nothing blocks go, refusing outbox rows older than the
+     * erasure unless `$pending` accepts them, then record it. An owner already
+     * erased that holds no key is recorded `already_erased`. A refusal, an
+     * `ErasureRefusedException`, is recorded `denied` and rethrown; a failure,
+     * a `JournalBrokenException` for a journal that does not verify, a
+     * `LifecycleContentionException`, an `OwnerLockTimeoutException`, an
+     * `InstallationMismatchException` or anything else, is recorded as one and
+     * rethrown. The owner's fingerprint is taken first, so a ring that cannot
+     * take it throws before anything is recorded.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
+     * @param  bool  $partial
+     * @param  bool  $pending
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\ErasureResult
+     *
+     * @throws \Throwable
+     */
+    public function erase(#[\SensitiveParameter] Model|Reference $owner, Authority $authority, bool $partial = false, bool $pending = false): ErasureResult
+    {
+        $operationId = $this->operationId();
+        $reference   = $owner instanceof Model ? Reference::to($owner) : $owner;
+        $fingerprint = $this->container->make(OwnerFingerprint::class)->of($reference);
+
+        return $this->records()->recordedErasure(
+            $operationId,
+            $fingerprint,
+            $authority,
+            fn (string $operationId): ErasureResult => $this->container->make(Eraser::class)->erase($operationId, $reference, $authority, $partial, $pending),
+        );
+    }
+
+    /**
+     * Reinstate the erased owner on the authority given, so a key may be
+     * created for the owner again above the floor of its erasure, then record
+     * it. An owner who is not erased is recorded `denied` and its
+     * `ReinstatementRefusedException` rethrown; any other failure, a
+     * `JournalBrokenException` for a journal or a marker the verified chain
+     * does not hold among them, is rethrown unrecorded.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\ReinstateResult
+     *
+     * @throws \Throwable
+     */
+    public function reinstate(#[\SensitiveParameter] Model|Reference $owner, Authority $authority): ReinstateResult
+    {
+        $operationId = $this->operationId();
+        $reference   = $owner instanceof Model ? Reference::to($owner) : $owner;
+        $fingerprint = $this->container->make(OwnerFingerprint::class)->of($reference);
+
+        try {
+            $result = $this->container->make(Reinstater::class)->reinstate($operationId, $reference, $authority);
+        } catch (\Throwable $exception) {
+            if ($exception instanceof ReinstatementRefusedException) {
+                $this->records()->recordReinstatementRefused($operationId, $fingerprint, $authority);
+            }
+
+            throw $exception;
+        }
+
+        return $result->withRecorded($this->records()->recordReinstated($result, $authority));
+    }
+
+    /**
+     * Rewrap every owner's key onto the key wrapper's current wrapping key on
+     * the authority given, and with `$rotate` supersede every live key, so the
+     * next write of each unit opens its next generation; or with `$dryRun`
+     * count what a run would do. Then, unless it was a dry run, record it: a
+     * run that fails, with a `JournalBrokenException` or anything else, is
+     * recorded as a failure and rethrown, and the batches it committed stand.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
+     * @param  bool  $rotate
+     * @param  bool  $dryRun
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\RewrapResult
+     *
+     * @throws \Throwable
+     */
+    public function rewrap(Authority $authority, bool $rotate = false, bool $dryRun = false): RewrapResult
+    {
+        $operationId = $this->operationId();
+
+        try {
+            $result = $this->container->make(Rewrapper::class)->rewrap($operationId, $authority, $rotate, $dryRun);
+        } catch (\Throwable $exception) {
+            if (!$dryRun) {
+                $this->records()->recordRewrapFailed($operationId, $authority, $exception);
+            }
+
+            throw $exception;
+        }
+
+        return $dryRun ? $result : $result->withRecorded($this->records()->recordRewrapped($result, $authority));
+    }
+
+    /**
+     * Erase again every owner the erasures file at the path names, after a
+     * restore, on the authority given: each owner erased in part and accepting
+     * pending deliveries, as `erase()` erases and records one, the run
+     * confirming the installation once and carrying the verified journal from
+     * owner to owner, and the restore journalled reconciled, with the anchor's
+     * head, only once every owner is erased whole or was already.
+     *
+     * @param  string  $path
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\ReapplyResult
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Lifecycle\JournalBrokenException
+     * @throws \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleContentionException
+     * @throws \SineMacula\Laravel\AuditLog\Database\InstallationMismatchException
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     * @throws \UnexpectedValueException
+     * @throws \Throwable
+     */
+    public function reapplyErasures(string $path, Authority $authority): ReapplyResult
+    {
+        return $this->container->make(ErasureReapplier::class)->reapply(
+            $this->operationId(),
+            $path,
+            $authority,
+            fn (#[\SensitiveParameter] Reference $owner, ErasureRun $erasures): ErasureResult => $this->records()->recordedErasure(
+                $this->operationId(),
+                $this->container->make(OwnerFingerprint::class)->of($owner),
+                $authority,
+                fn (string $operationId): ErasureResult => $this->container->make(Eraser::class)->erase($operationId, $owner, $authority, true, true, $erasures),
+            ),
+        );
+    }
+
+    /**
+     * Add the key uses missing from the entries whose signature verifies, on
+     * the storage connection's writer, never removing one; or with `$dryRun`
+     * count what a rebuild would add.
+     *
+     * @param  bool  $dryRun
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\KeyUseRebuildResult
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     */
+    public function rebuildKeyUses(bool $dryRun = false): KeyUseRebuildResult
+    {
+        return $this->container->make(KeyUseRebuilder::class)->rebuild($dryRun);
+    }
+
+    /**
      * The hold of the id released on the authority given, under the operation;
      * a hold the verified journal does not hold active is recorded `denied`,
      * and its refusal rethrown, as is any other failure.
@@ -304,7 +438,7 @@ final readonly class AuditLifecycle
             return $this->container->make(HoldKeeper::class)->release($operationId, $holdId, $authority);
         } catch (\Throwable $exception) {
             if ($exception instanceof UnknownHoldException) {
-                $this->recordReleased($operationId, $holdId, $authority, Outcome::DENIED);
+                $this->records()->recordReleased($operationId, $holdId, $authority, Outcome::DENIED);
             }
 
             throw $exception;
@@ -334,116 +468,17 @@ final readonly class AuditLifecycle
         try {
             $result = $importer->import($source, $authority, false, $hold, $basis, function (ImportResult $start) use (&$started, &$held): void {
                 $started = $start;
-                $held    = $start->hold === null || $this->recordHeld($start->hold);
+                $held    = $start->hold === null || $this->records()->recordHeld($start->hold);
             });
         } catch (\Throwable $exception) {
             if ($started instanceof ImportResult) {
-                $this->recordImported($this->failed($started), $source->sourceId, $source->format->value, $authority);
+                $this->records()->recordImported($this->failed($started), $source->sourceId, $source->format->value, $authority);
             }
 
             throw $exception;
         }
 
         return [$result, $held];
-    }
-
-    /**
-     * Record the hold placed, by its operator, and say whether the record was
-     * written.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Hold  $hold
-     * @return bool
-     *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
-     * @throws \InvalidArgumentException
-     *
-     * @imperative
-     */
-    private function recordHeld(#[\SensitiveParameter] Hold $hold): bool
-    {
-        $evidence = new LifecycleEvidence([
-            'operation_id'     => $hold->operationId,
-            'hold_id'          => $hold->id,
-            'basis'            => $hold->basis->value,
-            'scope_digest'     => $hold->scope->digest(),
-            'review_by'        => $hold->reviewBy,
-            'authority_reason' => $hold->reason,
-            'outcome'          => Outcome::SUCCESS->value,
-        ]);
-
-        return $this->recorder()->record(PackageActivity::HELD, $hold->operator, $evidence, Outcome::SUCCESS);
-    }
-
-    /**
-     * Record the release of the hold, or its refusal, by the authority's
-     * operator, and say whether the record was written.
-     *
-     * @param  string  $operationId
-     * @param  string  $holdId
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
-     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
-     * @return bool
-     *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
-     * @throws \InvalidArgumentException
-     *
-     * @imperative
-     */
-    private function recordReleased(string $operationId, string $holdId, Authority $authority, Outcome $outcome): bool
-    {
-        $evidence = new LifecycleEvidence([
-            'operation_id'     => $operationId,
-            'hold_id'          => $holdId,
-            'authority_reason' => $authority->reason,
-            'outcome'          => $outcome->value,
-        ]);
-
-        return $this->recorder()->record(PackageActivity::RELEASED, $authority->operator, $evidence, $outcome, $outcome === Outcome::DENIED ? self::UNKNOWN_HOLD : null);
-    }
-
-    /**
-     * Record the import, or the close of its batch, by the authority's
-     * operator: a success for a complete or partial batch, and a failure, with
-     * its reason, for a failed or interrupted one; and say whether the record
-     * was written.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportResult  $result
-     * @param  ?string  $sourceId
-     * @param  ?string  $format
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
-     * @return bool
-     *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
-     * @throws \InvalidArgumentException
-     *
-     * @imperative
-     */
-    private function recordImported(ImportResult $result, ?string $sourceId, ?string $format, Authority $authority): bool
-    {
-        $reason = match ($result->status) {
-            ImportStatus::FAILED      => self::IMPORT_FAILED,
-            ImportStatus::INTERRUPTED => self::INTERRUPTED,
-            default                   => null,
-        };
-
-        $outcome  = $reason === null ? Outcome::SUCCESS : Outcome::FAILURE;
-        $evidence = new LifecycleEvidence([
-            'operation_id'     => $result->operationId,
-            'batch_id'         => $result->batchId,
-            'source_id'        => $sourceId,
-            'format'           => $format,
-            'status'           => $result->status?->value,
-            'lines_read'       => $result->linesRead,
-            'imported'         => $result->imported,
-            'duplicates'       => $result->duplicates,
-            'conflicts'        => $result->conflicts,
-            'rejected'         => $result->rejected,
-            'hold_id'          => $result->holdId,
-            'authority_reason' => $authority->reason,
-            'outcome'          => $outcome->value,
-        ]);
-
-        return $this->recorder()->record(PackageActivity::IMPORTED, $authority->operator, $evidence, $outcome, $reason);
     }
 
     /**
@@ -513,14 +548,15 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * The writer of the operations' activity records.
+     * The records of the operations' activity, each written after its operation
+     * has committed.
      *
-     * @return \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecorder
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecords
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
-    private function recorder(): LifecycleRecorder
+    private function records(): LifecycleRecords
     {
-        return $this->container->make(LifecycleRecorder::class);
+        return $this->container->make(LifecycleRecords::class);
     }
 }

@@ -46,6 +46,9 @@ final class PackageActivityTest extends TestCase
             'HELD'                  => 'audit_log.held',
             'RELEASED'              => 'audit_log.released',
             'IMPORTED'              => 'audit_log.imported',
+            'SUBJECT_ERASED'        => 'audit_log.subject_erased',
+            'KEYS_REWRAPPED'        => 'audit_log.keys_rewrapped',
+            'KEYS_REINSTATED'       => 'audit_log.keys_reinstated',
         ], array_column(array_map(static fn (PackageActivity $case): array => [$case->name, $case->value], PackageActivity::cases()), 1, 0));
     }
 
@@ -92,7 +95,7 @@ final class PackageActivityTest extends TestCase
         yield from [
             'a read' => [
                 PackageActivity::TRAIL_READ,
-                ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'outcome'],
+                ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'reveal', 'fields', 'outcome'],
             ],
             'a count' => [
                 PackageActivity::TRAIL_COUNTED,
@@ -111,6 +114,7 @@ final class PackageActivityTest extends TestCase
                 ['export_entry', 'outcome'],
             ],
             ...self::lifecycleRetained(),
+            ...self::privacyRetained(),
         ];
     }
 
@@ -227,6 +231,121 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
+     * Rows of `[case, the properties its record keeps, in the order it gives
+     * them]`: an owner's erasure, the keys' rewrap and an owner's
+     * reinstatement.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
+     */
+    public static function providePrivacyRetained(): iterable
+    {
+        yield from self::privacyRetained();
+    }
+
+    /**
+     * Each code of the owners' keys keeps exactly its properties, in the order
+     * its record gives them, and drops everything else: the owner's type and
+     * id, a key's id, an entry's id and the hold a block names included.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
+     * @param  list<string>  $retained
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    #[DataProvider('providePrivacyRetained')]
+    public function testTheErasureCodesKeepExactlyTheirProperties(PackageActivity $case, array $retained): void
+    {
+        $definition = $case->definition();
+
+        self::assertSame($retained, (new \ReflectionMethod(PackageActivity::class, 'retained'))->invoke($case));
+        self::assertSame('audit', $definition->category);
+        self::assertSame(1, $definition->version);
+        self::assertSame(FieldHandling::DROP, $definition->unlisted);
+
+        foreach ($retained as $property) {
+            self::assertSame(FieldHandling::RETAIN, $definition->handlingFor([$property]), $property);
+        }
+
+        foreach (['owner', 'owner_type', 'owner_id', 'key_id', 'entry_id', 'hold_id', 'tenant', 'reason', 'destroyed', 'kept'] as $property) {
+            self::assertSame(FieldHandling::DROP, $definition->handlingFor([$property]), $property);
+        }
+    }
+
+    /**
+     * A map the erasure record keeps, its blocks, is kept whole, so each
+     * reason's count survives as given.
+     *
+     * @return void
+     */
+    public function testTheErasuresBlocksAreKeptWhole(): void
+    {
+        $definition = PackageActivity::SUBJECT_ERASED->definition();
+
+        self::assertSame(FieldHandling::RETAIN, $definition->handlingFor(['blocked', 'held:0192f5a0-7c1e-7000-8000-00000000000a']));
+        self::assertSame(FieldHandling::RETAIN, $definition->handlingFor(['blocked', '_other']));
+    }
+
+    /**
+     * No code of the owners' keys is a read, since none discloses an entry, and
+     * none is protected, so each follows its category's retention.
+     *
+     * @return void
+     */
+    public function testNoPrivacyCodeIsAReadOrProtected(): void
+    {
+        foreach ([PackageActivity::SUBJECT_ERASED, PackageActivity::KEYS_REWRAPPED, PackageActivity::KEYS_REINSTATED] as $case) {
+            self::assertFalse($case->isRead(), $case->value);
+            self::assertFalse($case->isProtected(), $case->value);
+        }
+    }
+
+    /**
+     * The record of a page keeps whether its scope revealed the encrypted
+     * fields and how many of each state it showed, after what it returned and
+     * before its outcome, the counts kept whole.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    public function testTheTrailReadKeepsItsRevealAndFieldCounts(): void
+    {
+        $retained   = (new \ReflectionMethod(PackageActivity::class, 'retained'))->invoke(PackageActivity::TRAIL_READ);
+        $definition = PackageActivity::TRAIL_READ->definition();
+
+        self::assertIsArray($retained);
+        self::assertSame(['returned', 'reveal', 'fields', 'outcome'], array_slice($retained, -4));
+
+        foreach (['reveal', 'fields'] as $property) {
+            self::assertSame(FieldHandling::RETAIN, $definition->handlingFor([$property]), $property);
+        }
+
+        foreach (['encrypted', 'erased', 'revealed', 'unreadable'] as $state) {
+            self::assertSame(FieldHandling::RETAIN, $definition->handlingFor(['fields', $state]), $state);
+        }
+
+        self::assertSame(FieldHandling::DROP, PackageActivity::TRAIL_COUNTED->definition()->handlingFor(['reveal']));
+        self::assertSame(FieldHandling::DROP, PackageActivity::TRAIL_EXPORTED->definition()->handlingFor(['fields']));
+    }
+
+    /**
+     * A read path's code is not the code of an operation, so asking for its
+     * operation's properties is a programming error, named by its code.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    public function testAReadPathsCodeHasNoOperationsProperties(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('`audit_log.trail_read` is not the code of an operation.');
+
+        (new \ReflectionMethod(PackageActivity::class, 'operationRetained'))->invoke(PackageActivity::TRAIL_READ);
+    }
+
+    /**
      * The trail's reads, counts, exports and their verification are reads; a
      * failed publication is not.
      *
@@ -270,6 +389,33 @@ final class PackageActivityTest extends TestCase
         $protected = array_values(array_filter(PackageActivity::cases(), static fn (PackageActivity $case): bool => $case->isProtected()));
 
         self::assertSame([PackageActivity::TRAIL_EXPORTED], $protected);
+    }
+
+    /**
+     * Rows of the codes of the owners' keys and the properties each keeps, in
+     * order.
+     *
+     * @return array<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
+     */
+    private static function privacyRetained(): array
+    {
+        return [
+            'an erasure' => [
+                PackageActivity::SUBJECT_ERASED,
+                [
+                    'operation_id', 'erasure_id', 'owner_fingerprint', 'fingerprint_key', 'status', 'keys_destroyed', 'keys_kept',
+                    'entries_affected', 'blocked', 'pending_accepted', 'authority_reason', 'outcome',
+                ],
+            ],
+            'a rewrap' => [
+                PackageActivity::KEYS_REWRAPPED,
+                ['operation_id', 'status', 'keys_rewrapped', 'keys_rotated', 'keys_skipped', 'wrap_key_id', 'batches', 'authority_reason', 'outcome'],
+            ],
+            'a reinstatement' => [
+                PackageActivity::KEYS_REINSTATED,
+                ['operation_id', 'reinstatement_id', 'owner_fingerprint', 'fingerprint_key', 'generation_floor', 'authority_reason', 'outcome'],
+            ],
+        ];
     }
 
     /**

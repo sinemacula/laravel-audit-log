@@ -32,6 +32,7 @@ $page = AuditLog::trail()
 | `withOutcome(...$outcomes)`                                   | with one of these outcomes                                                          |
 | `between($from, $to)`                                         | that occurred from `$from`, inclusive, before `$to`, exclusive; `null` for no limit |
 | `correlatedWith($correlationId)`                              | carrying the namespaced correlation id                                              |
+| `holdingDataOf($owner)`                                       | holding a fragment sealed under one of the owner's keys, whoever they are about     |
 
 - A model is referred to exactly as capture refers to it, by its morph class and key, so a trail finds what was
   recorded about it. Nothing joins the application's tables, so a deleted user's history reads as it did.
@@ -41,6 +42,10 @@ $page = AuditLog::trail()
 - A filter is validated as it is given, and a malformed one is refused with an `\InvalidArgumentException` naming the
   filter, never its value, before anything is read. A code under `audit_log.` can be filtered on, though no application
   can record one.
+- `holdingDataOf()` keeps the entries holding a fragment sealed under one of the owner's keys, through the key uses the
+  store writes with each entry, whether or not the entry names the owner. It selects entries and reveals nothing: what
+  their fragments show is the scope's to grant. It reads the package's key store, so while a field encrypter other than
+  the package's is bound it is refused with a `\LogicException` naming that encrypter, before anything is read.
 - The trail reads the storage connection, and a replica when the connection configures one, never the writer pinned
   for recording. So the trail is not read-your-writes: a record just written may not be on the page read next.
 
@@ -204,17 +209,59 @@ $description->reason;  // the reason, or null when there is none or it was conce
 ## Encrypted fields
 
 A field sealed under its owner's key, an owned note, or an IP address stored under the `encrypt` mode is never shown as
-its ciphertext. Wherever it sits, it is read through the `Contracts\FieldReader` seam, which answers either a value or a
-`Privacy\Enums\FieldState`, shown as its marker:
+its ciphertext. Wherever it sits, in the properties, the context or the network details, it is shown as its value only
+to a viewer whose scope reveals encrypted fields, and otherwise as the marker of its `Privacy\Enums\FieldState`:
 
-| State        | Marker         | When                                                                              |
-|--------------|----------------|-----------------------------------------------------------------------------------|
-| `encrypted`  | `[ENCRYPTED]`  | sealed under its owner's key, which the bound reader does not open                |
-| `erased`     | `[ERASED]`     | sealed under keys an erasure destroyed, so it can never be read                   |
-| `unreadable` | `[UNREADABLE]` | malformed, or the reader failed; the failure is reported once, by its class alone |
+| State        | Marker         | When                                                                                                                                                                                                       |
+|--------------|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `encrypted`  | `[ENCRYPTED]`  | the scope does not reveal encrypted fields, or the bound reader opens none                                                                                                                                 |
+| `erased`     | `[ERASED]`     | sealed under a key a journalled erasure destroyed; the live store cannot read it, and a restored backup reads it until the erasure is re-applied (see the privacy guide's [Restores](privacy.md#restores)) |
+| `unreadable` | `[UNREADABLE]` | its row or its envelope fails authentication or is malformed, or the reader failed                                                                                                                         |
 
-The package binds `Privacy\SealedFieldReader`, which reads nothing and answers `encrypted` for every field. A reader an
-application binds may reveal a value instead; it must keep no state between calls and never answer with the ciphertext.
+Who may read a sealed field is the access policy's to decide, per viewer and purpose. A scope reveals encrypted fields
+only once the policy grants it `revealingEncryptedFields()`, for instance to the auditors who read pages:
+
+```php
+$scope = AccessScope::tenants(Reference::to($viewer->organisation));
+
+return $purpose === ReadPurpose::READ ? $scope->revealingEncryptedFields() : $scope;
+```
+
+- The grant is off on every starting scope and kept by every narrowing. A denied scope stays denied and reveals nothing.
+  Without the grant no reader is asked, and every sealed field shows `[ENCRYPTED]`.
+- The grant is part of the scope's normalised form and fingerprint, so a cursor issued without it is refused once the
+  scope reveals, and the other way round, as for any change of scope.
+- The grant reveals every encrypted field of every entry the scope sees, whoever owns it: it is not an owner-specific
+  projection. An entry holding one person's fragment can hold another person's, revealed beside it.
+- Only a page reveals. A count and an export never decrypt: an export keeps every envelope as stored, the canonical
+  evidence, whatever the scope grants.
+- A page read under the grant records `reveal` and `fields`, how many fragments it showed `encrypted`, `erased`,
+  `revealed` and `unreadable`, never a value.
+- A decryption already returned cannot be recalled. An erasure stops every read after its commit, never one that has
+  already shown a value.
+
+Under the grant, each row's HMAC is verified before any field of it is read. A row that fails, or that is signed under a
+key the ring does not hold, shows every sealed field it holds as `[UNREADABLE]`, and none of them reaches the reader, so
+a row edited in the database never has an envelope opened. The fields of the authenticated rows of a page are then read
+together, in one call.
+
+The package binds `Privacy\SubjectKeyFieldReader`, which reads the keys of a page in one statement on the storage
+connection's writer, never a replica, so a page read once an erasure has committed never reveals what it revoked. It
+answers each field with:
+
+- its value, typed as it was recorded: a string, a number, a boolean, `null`, a list or a map;
+- `erased` only for a key whose tombstone a verified erasure row lists;
+- `unreadable` for an unknown key, a key destroyed without a journalled erasure, a substituted key, a wrapped key that
+  does not unwrap, or an envelope that fails its authentication, so an envelope moved to another entry or another path
+  never reads.
+
+It keeps no key once the page is read. `Privacy\SealedFieldReader` reads nothing and answers `encrypted` for every
+field: bind it as `Contracts\FieldReader` where nothing should be decrypted in PHP, whatever a policy grants. A reader
+an application binds is given every field of a page in one call to `readAll()`, only under the grant and only from rows
+whose HMAC verified, and answers each, in order and in number; it keeps no state between calls and never answers with
+the ciphertext. One that throws, or answers another count or anything but readings, costs the page's fields, each
+`unreadable`, and is reported once, by its class alone.
+
 Any map of exactly `v`, `k` and `c` in the properties or the context is read as an encryption envelope, even one an
 application stored itself.
 
@@ -311,7 +358,7 @@ codes, but it can filter, describe and assert on them as it does on its own.
 
 | Code                              | Outcomes                                                                                                          | Records                                                                                                                                                                                                                                 |
 |-----------------------------------|-------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `audit_log.trail_read`            | `success`; `denied` (`no_scope`, `cursor_rejected`); `failure` (`policy_failed`, `query_failed`, `format_failed`) | A page read: `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `page`, `per_page`, `returned` and `outcome`, with a `disclosure` attachment of the entries returned                                     |
+| `audit_log.trail_read`            | `success`; `denied` (`no_scope`, `cursor_rejected`); `failure` (`policy_failed`, `query_failed`, `format_failed`) | A page read: `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `page`, `per_page`, `returned`, `reveal`, `fields` and `outcome`, with a `disclosure` attachment of the entries returned                 |
 | `audit_log.trail_counted`         | `success`; `denied` (`no_scope`); `failure` (`policy_failed`, `query_failed`)                                     | A count: `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `returned` and `outcome`, with a `disclosure` attachment and no members                                                                      |
 | `audit_log.trail_exported`        | `success`; `denied` (`no_scope`); `failure` (`policy_failed`, `query_failed`, `format_failed`)                    | An export: `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `format`, `returned`, `file_sha256` and `outcome`, with an `export` attachment, or a `disclosure` attachment and no members when it failed |
 | `audit_log.export_verified`       | `success`, whatever the verification found; `denied` (`no_scope`); `failure` (`policy_failed`, `query_failed`)    | A verification of an export: `purpose`, `scope_fingerprint`, `fingerprint_key`, `policy`, `export_entry`, `verdict`, `findings` and `outcome`, with a `disclosure` attachment of the export's entry when it was found                   |
@@ -449,13 +496,17 @@ rest of the log, and `audit-log:verify` reports whether it has been.
 
 ## Answering a subject access request
 
-An investigator answers a data subject's request for the records about them in two steps: selecting the subject's
-activity, with a canonical export kept as evidence of what was selected, and reviewing it before anything is given to
-the subject. The canonical evidence export is not a copy for the data subject. It holds every column of every entry,
-other people's references and data included, signed so that no part of it can be edited away.
+An investigator answers a data subject's request for the records about them in three steps: selecting the subject's
+activity and the entries holding the subject's encrypted fragments, with canonical exports kept as evidence of what was
+selected; reviewing the selection before anything is given to the subject; and, when the subject asks for erasure too,
+erasing the subject's keys. The canonical evidence export is not a copy for the data subject. It holds every column of
+every entry, other people's references and data included, signed so that no part of it can be edited away.
 
-For the run, bind a policy that lets the investigator, as the application authenticated them, see the subject's own
-activity, and verify the export it journals, and lets no one else see anything:
+For the run, bind a policy that lets the investigator, as the application authenticated them, read the subject's
+activity with its encrypted fields revealed, and verify the exports it journals, and lets no one else see anything. A
+fragment sealed under the subject's keys can be in an entry about anyone, and a policy is not told the trail's filters,
+so while the investigator finds the fragments the policy lets them read every entry, and the selection asks for nothing
+but `holdingDataOf()` under it:
 
 <!-- procedure:policy -->
 
@@ -477,6 +528,7 @@ final readonly class SubjectAccessPolicy implements AuditAccessPolicy
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable  $investigator
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $subject
+     * @param  bool  $fragments
      */
     public function __construct(
 
@@ -486,13 +538,17 @@ final readonly class SubjectAccessPolicy implements AuditAccessPolicy
 
         /** The person the request is about. */
         private Reference $subject,
+
+        /** Whether the investigator is finding the entries that hold the subject's fragments. */
+        private bool $fragments = false,
     ) {}
 
     /**
-     * The subject's activity, as the actor or the subject of an entry, for the
-     * investigator to read, count and export; the audit category, where the
-     * export is journalled, for the investigator to verify the export; and
-     * nothing for anyone else.
+     * For the investigator, the audit category, where an export is journalled,
+     * to verify an export; otherwise, with the encrypted fields revealed, the
+     * subject's activity, as the actor or the subject of an entry, or every
+     * entry while finding the subject's fragments, which can be in an entry
+     * about anyone. Nothing for anyone else.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable|\SineMacula\Laravel\AuditLog\Records\Reference  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose  $purpose
@@ -505,17 +561,21 @@ final readonly class SubjectAccessPolicy implements AuditAccessPolicy
             return AccessScope::none();
         }
 
-        return match ($purpose) {
-            ReadPurpose::VERIFY => AccessScope::all()->onlyCategories('audit'),
-            default             => AccessScope::all()->onlyAbout($this->subject),
-        };
+        if ($purpose === ReadPurpose::VERIFY) {
+            return AccessScope::all()->onlyCategories('audit');
+        }
+
+        $scope = $this->fragments ? AccessScope::all() : AccessScope::all()->onlyAbout($this->subject);
+
+        return $scope->revealingEncryptedFields();
     }
 }
 ```
 
-Select the subject's entries, page by page, export them to `$path`, a file of the investigator's own outside any public
-disk, and verify the export, where `$investigator` is the authenticated user answering the request and `$subject` the
-person it is about:
+Select the subject's activity, then the entries holding the subject's fragments, page by page, keeping an entry both
+find once; export each selection to `$directory`, a directory of the investigator's own outside any public disk, and
+verify each export, where `$investigator` is the authenticated user answering the request and `$subject` the person it
+is about:
 
 <!-- procedure:select -->
 
@@ -525,29 +585,43 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
-app()->instance(AuditAccessPolicy::class, new SubjectAccessPolicy($investigator, Reference::to($subject)));
-
-$trail   = AuditLog::trail()->visibleTo($investigator);
+$you     = Reference::to($subject);
 $entries = [];
-$cursor  = null;
+$exports = [];
 
-do {
-    $page    = $trail->cursorPaginate(100, $cursor);
-    $entries = [...$entries, ...$page->entries];
-    $cursor  = $page->nextCursor;
-} while ($cursor !== null);
+foreach (['activity' => false, 'fragments' => true] as $selection => $fragments) {
+    app()->instance(AuditAccessPolicy::class, new SubjectAccessPolicy($investigator, $you, $fragments));
 
-$export = $trail->export($path);
+    $trail  = AuditLog::trail()->visibleTo($investigator);
+    $trail  = $fragments ? $trail->holdingDataOf($you) : $trail;
+    $cursor = null;
 
-if (!$trail->verifyExport($export->path)->isVerified()) {
-    throw new \RuntimeException('The evidence export does not verify.');
+    do {
+        $page   = $trail->cursorPaginate(100, $cursor);
+        $cursor = $page->nextCursor;
+
+        foreach ($page->entries as $entry) {
+            $entries[$entry->id] ??= $entry;
+        }
+    } while ($cursor !== null);
+
+    $exports[$selection] = $trail->export("{$directory}/{$selection}.ndjson");
+
+    if (!$trail->verifyExport($exports[$selection]->path)->isVerified()) {
+        throw new \RuntimeException('The evidence export does not verify.');
+    }
 }
 ```
 
-Every page, the export and its verification are recorded under the investigator, as any read is. Then review the
-selection: the copy given to the subject keeps what is theirs, and leaves out every other person's reference and
-everything a person has not yet reviewed for third parties' data, the properties, the context and the network details
-among them:
+Every page, export and verification is recorded under the investigator, as any read is, and each page's record says it
+revealed encrypted fields and how many it showed in each state. The exports never decrypt: they keep every envelope as
+stored.
+
+Then review the selection. The grant reveals every encrypted field of each entry, whoever owns it, so an entry holding
+the subject's fragment can show another owner's fragment beside it, such as a colleague's note on the subject's call.
+The copy given to the subject keeps what is theirs, and leaves out every other person's reference, every other owner's
+fragment and everything a person has not yet reviewed for third parties' data, the properties, the context and the
+network details among them:
 
 <!-- procedure:review -->
 
@@ -555,7 +629,6 @@ among them:
 use SineMacula\Laravel\AuditLog\Querying\Describer;
 
 $describer = app(Describer::class);
-$you       = Reference::to($subject);
 $copy      = [];
 
 foreach ($entries as $entry) {
@@ -569,10 +642,37 @@ foreach ($entries as $entry) {
 }
 ```
 
-The selection is no more complete than `onlyAbout()`: principal references, owned fragments and bulk members are not
-found by `onlyAbout()`. An entry whose principal or tenant is the subject, a fragment sealed under the subject's key in
-an entry about someone else, and a bulk operation's members are left to the investigator. Owner discovery and erasure
-are the erasure feature's, which has not shipped yet: this procedure answers a request for access, and erases nothing.
+An entry found only for the fragments it holds is neither by nor about the subject: which of its revealed values are
+the subject's is for the review to establish before any of them is added to the copy.
+
+When the subject asks for erasure too, erase their keys once the copy is made, on the authority of the request, where
+`$case` is its reference in the investigator's own records:
+
+<!-- procedure:erase -->
+
+```php
+use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
+
+$authority = new Authority(Reference::to($investigator), 'gdpr.article_17', $case);
+$erasure   = AuditLog::lifecycle()->erase($you, $authority);
+```
+
+From its commit every fragment sealed under the subject's keys reads `[ERASED]`, in the entries the selection found and
+wherever else it is stored, and every entry, seal and evidence export still verifies: an export keeps the envelopes as
+stored, and no key opens them any more. Other owners' fragments in the same entries are untouched. The erasure is all or
+nothing: a hold, a preservation or an entry that fails its HMAC on any of the subject's keys refuses it with
+`Lifecycle\ErasureRefusedException`, writing nothing, and `partial: true` destroys what nothing blocks and keeps the
+rest, as [the privacy guide](privacy.md) sets out. The erasure revokes the subject's fragments in the live store; it is
+complete only once the backups, replicas, exports, logs, destination stores and pending deliveries that guide lists no
+longer hold them.
+
+The selection finds the entries whose actor or subject is the subject, through `onlyAbout()`, and the entries holding a
+fragment sealed under the subject's keys, through `holdingDataOf()`, and no more. Principal references and bulk members
+are still not found: an entry whose principal or tenant is the subject and that holds no fragment of theirs, and a bulk
+operation's members, are left to the investigator. A value about the subject kept in plaintext, rather than sealed under
+their key, is found only where it sits in an entry by or about them, and no erasure reaches it. `holdingDataOf()` and
+the erasure both need the package's key store: while a field encrypter other than the package's is bound,
+`holdingDataOf()` is refused with a `\LogicException` and the erasure with `unsupported_encrypter`.
 
 ## Limits
 

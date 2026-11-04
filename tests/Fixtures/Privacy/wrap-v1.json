@@ -1,0 +1,20 @@
+{
+    "_comment": "Golden vector of a wrapped data key under the local key wrapper, version 1. Computed once, outside the package, with openssl_encrypt() under the fixed nonce below, which no method of the package takes; LocalKeyWrapperTest::testTheGoldenVectorReproduces unwraps it and recomputes its AES key, context and ciphertext, and WrappingRingTest pins the derived key. Change it only with those tests.",
+    "wrap_key_id": "w2026",
+    "secret": "audit-log golden wrap 0123456789",
+    "aes_key_info": "sinemacula/audit-log:wrap-key:v1",
+    "aes_key": "688ce723d9cde3ff8f42f21cd975d6693ca93ebc16e163a9ae7724a4cb400bf9",
+    "data_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "key_row_id": "01932b4e-e000-7000-8000-000000000001",
+    "unit": "e04da77c985cc0ed5a98c5faf362eab7ebb34e4db753aef921fa2e05e6585a79",
+    "generation": 1,
+    "context": "{\"d\":\"sinemacula/audit-log:wrap:v1\",\"generation\":1,\"k\":\"01932b4e-e000-7000-8000-000000000001\",\"unit\":\"e04da77c985cc0ed5a98c5faf362eab7ebb34e4db753aef921fa2e05e6585a79\",\"wrap_key_id\":\"w2026\"}",
+    "nonce": "b0b1b2b3b4b5b6b7b8b9babb",
+    "wrapped": "sLGys7S1tre4ubq7Ufv8MC459F6SLRHJEYFweHWRYIE_2pVvtOOryuL_sdaRQqx9caKma29mE_fM3Mpg",
+    "derived": {
+        "app_key": "base64:bGFyYXZlbC1hdWRpdC1sb2cgdGVzdCBrZXkhISEhISE=",
+        "derivation_info": "sinemacula/audit-log:subject-wrap:v1",
+        "secret": "6e7fde577a4ef5c834fc47c4f926b0ac41bbf77b4050e4c243770890e4e9270d",
+        "id": "d-0996c88d0aec29cf"
+    }
+}

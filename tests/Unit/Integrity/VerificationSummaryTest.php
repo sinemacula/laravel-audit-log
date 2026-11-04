@@ -12,6 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\JournalSummary;
+use SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary;
 use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
@@ -20,8 +21,9 @@ use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
 /**
  * Unit tests for what one verification run established: when it fails, with and
  * without `strict`, with and without an anchor configured, the anchoring grace
- * and the empty remote it excuses, its summary line with the journal's part,
- * the journal's finding failing it, and the event it gives listeners.
+ * and the empty remote it excuses, its summary line with the journal's and the
+ * key store's parts, their findings failing it, and the event it gives
+ * listeners.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -276,8 +278,8 @@ final class VerificationSummaryTest extends TestCase
     /**
      * The summary line names the range, both heads, how the anchor compared,
      * whether the run was complete and strict, every count, what was read of
-     * the journal, the first failure and whether it passed, in that order of
-     * keys.
+     * the journal and the key store, the first failure and whether it passed,
+     * in that order of keys.
      *
      * @return void
      */
@@ -289,7 +291,9 @@ final class VerificationSummaryTest extends TestCase
         $tally->add(self::report(IntegrityStatus::TAMPERED, AnchorStatus::ANCHORED, false, Finding::ENTRY_HMAC, self::ENTRY_ID));
         $tally->unsealed(3, 1);
 
-        $summary = VerificationSummary::of([2, 4], 5, 4, AnchorStatus::ANCHORED, false, true, $tally)->withJournal(new JournalSummary(3, 3, 2));
+        $summary = VerificationSummary::of([2, 4], 5, 4, AnchorStatus::ANCHORED, false, true, $tally)
+            ->withJournal(new JournalSummary(3, 3, 2))
+            ->withKeys(new KeyStoreSummary(4, 1, 0));
 
         self::assertSame([
             'type'            => 'summary',
@@ -306,6 +310,7 @@ final class VerificationSummaryTest extends TestCase
             'pending'         => 3,
             'overdue'         => 1,
             'journal'         => ['rows' => 3, 'head' => 3, 'committed' => 2],
+            'keys'            => ['keys' => 4, 'erased' => 1, 'findings' => 0, 'skipped' => false, 'encrypter' => null],
             'first_finding'   => 'entry_hmac',
             'first_bad_id'    => self::ENTRY_ID,
             'passed'          => false,
@@ -338,6 +343,40 @@ final class VerificationSummaryTest extends TestCase
         self::assertSame($none->discovers, $kept->discovers);
         self::assertSame($none->firstFinding, $kept->firstFinding);
         self::assertSame($none->fails(true), $kept->fails(true));
+    }
+
+    /**
+     * The key store's section is in each form: none until it is given, as for a
+     * ranged run; kept once given, through the journal's and with everything
+     * else as it was; in the line as its own array; and a key finding the tally
+     * holds is the event's first finding and fails the run, though no segment
+     * failed.
+     *
+     * @return void
+     */
+    public function testTheKeysSectionIsInEachForm(): void
+    {
+        $tally = new VerificationTally;
+
+        $tally->add(self::report(IntegrityStatus::VALID, AnchorStatus::UNANCHORED));
+        $tally->addFinding(new RunFinding(Finding::KEY_RESTORED, self::ENTRY_ID, 2));
+
+        $keys    = new KeyStoreSummary(3, 1, 2);
+        $none    = VerificationSummary::of([1, 1], 1, null, null, true, false, $tally);
+        $kept    = $none->withKeys($keys)->withJournal(new JournalSummary(1, 1, 1));
+        $skipped = $none->withKeys(KeyStoreSummary::skipped()->naming('App\Privacy\VaultEncrypter'));
+
+        self::assertNull($none->keys);
+        self::assertNull($none->toArray(false)['keys']);
+        self::assertSame($keys, $kept->keys);
+        self::assertSame(['keys' => 3, 'erased' => 1, 'findings' => 2, 'skipped' => false, 'encrypter' => null], $kept->toArray(false)['keys']);
+        self::assertSame([...$none->toArray(false), 'journal' => ['rows' => 1, 'head' => 1, 'committed' => 1], 'keys' => $keys->toArray()], $kept->toArray(false));
+        self::assertSame(['keys' => 0, 'erased' => 0, 'findings' => 0, 'skipped' => true, 'encrypter' => 'App\Privacy\VaultEncrypter'], $skipped->toArray(false)['keys']);
+        self::assertNull($kept->withKeys(null)->keys);
+        self::assertTrue($kept->fails(false));
+        self::assertSame(Finding::KEY_RESTORED, $kept->firstFinding);
+        self::assertSame('key_restored', $kept->toEvent('verify')->finding);
+        self::assertSame(self::ENTRY_ID, $kept->toEvent('verify')->firstBadId);
     }
 
     /**

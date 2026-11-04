@@ -19,7 +19,8 @@ enum FieldState: string
     // Sealed under its owner's key, which the field reader does not open
     case ENCRYPTED = 'encrypted';
 
-    // Sealed under keys its owner's erasure destroyed, so it can never be read
+    // Sealed under keys its owner's erasure destroyed, so the live store cannot
+    // read it; a restored backup does until the erasure is re-applied
     case ERASED = 'erased';
 
     // Malformed, or its field reader failed

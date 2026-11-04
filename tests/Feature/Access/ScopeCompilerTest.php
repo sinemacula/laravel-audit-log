@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Access\ScopeCompiler;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Querying\Position;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
@@ -27,9 +28,11 @@ use Tests\TestCase;
  * AND the cursor, every internal `or` grouped, references as exact pairs, the
  * tenantless rows as both columns `null`, times bound with six fractional
  * digits, the prefix through an explicit `like` with its own escape, no
- * collation, and nothing the caller gives in the SQL text. A denied scope is
- * refused, an empty one is known without a query, and an entry is looked up
- * under the scope like any other read.
+ * collation, and nothing the caller gives in the SQL text. The entries holding
+ * an owner's data are an `exists` over the key uses joined to the owner's keys,
+ * correlated on the entry's id and inside the scope. A denied scope is refused,
+ * an empty one is known without a query, and an entry is looked up under the
+ * scope like any other read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,6 +47,19 @@ final class ScopeCompilerTest extends TestCase
 
     /** @var string Another entry id. */
     private const string OTHER_ID = '0192f5a0-7c1e-7000-8000-00000000000b';
+
+    /** @var string A third entry id. */
+    private const string THIRD_ID = '0192f5a0-7c1e-7000-8000-00000000000c';
+
+    /** @var string A key id of the owner. */
+    private const string KEY_ID = '0192f5a0-7c1e-7000-8000-0000000000f1';
+
+    /** @var string A key id of another owner. */
+    private const string OTHER_KEY_ID = '0192f5a0-7c1e-7000-8000-0000000000f2';
+
+    /** @var string The exists the entries holding an owner's data are found by, with the grammar's quotes taken out. */
+    private const string HOLDING = 'exists (select 1 from audit_log_key_uses inner join audit_log_subject_keys on audit_log_subject_keys.id = audit_log_key_uses.key_id'
+        . ' where audit_log_key_uses.entry_id = audit_log_entries.id and audit_log_subject_keys.owner_type = ? and audit_log_subject_keys.owner_id = ?)';
 
     /** @var string A value a caller gives that must never become SQL text. */
     private const string HOSTILE = 'x\' or 1=1 -- ) or (';
@@ -93,6 +109,149 @@ final class ScopeCompilerTest extends TestCase
             '2026-11-01 00:00:00.000000', '2026-11-02 00:00:00.500000', 'app:ticket-123',
             '2026-11-01 12:00:00.123456', '2026-11-01 12:00:00.123456', '2026-11-01 12:00:00.123456', self::ID,
         ], $query->getBindings());
+    }
+
+    /**
+     * The entries holding an owner's data are those with a key use of one of
+     * the owner's keys: an `exists` over the key uses joined to the subject
+     * keys by the key's id, correlated on the entry's id, every column
+     * qualified by its table and the owner's type and id bound; an entry
+     * holding only another owner's data, or none, is not found.
+     *
+     * @return void
+     */
+    public function testHoldingDataOfIsAnExistsOverKeyUsesAndTheOwnersKeys(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        self::insert(self::ID, 'team', '1');
+        self::insert(self::OTHER_ID, 'team', '1');
+        self::insert(self::THIRD_ID, 'team', '1');
+        self::insertKey(self::KEY_ID, $owner);
+        self::insertKey(self::OTHER_KEY_ID, Reference::of('App\Models\User', '43'));
+        self::insertKeyUse(self::KEY_ID, self::ID);
+        self::insertKeyUse(self::OTHER_KEY_ID, self::OTHER_ID);
+
+        $query = (new ScopeCompiler)->apply(self::entries(), AccessScope::all(), TrailFilters::none()->withHoldingDataOf($owner));
+
+        self::assertSame('select * from audit_log_entries where ' . self::HOLDING, self::sqlOf($query));
+        self::assertSame(['App\Models\User', '42'], $query->getBindings());
+        self::assertSame([self::ID], $query->pluck('id')->all());
+    }
+
+    /**
+     * The owner's entries are found only inside the scope: the exists follows
+     * the tenant, category and about groups and the caller's other filters as
+     * one more condition, so no entry the scope leaves out is found, however
+     * much of the owner's data it holds.
+     *
+     * @return void
+     */
+    public function testItStaysInsideTheScope(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        self::insert(self::ID, 'team', '1');
+        self::insert(self::OTHER_ID, 'team', '2');
+        self::insertKey(self::KEY_ID, $owner);
+        self::insertKeyUse(self::KEY_ID, self::ID);
+        self::insertKeyUse(self::KEY_ID, self::OTHER_ID);
+
+        $scope    = AccessScope::tenants(Reference::of('team', '2'), Reference::of('org', '3'))->exceptCategories('auth')->onlyAbout(Reference::of('user', '42'));
+        $filters  = TrailFilters::none()->withHoldingDataOf($owner)->withOutcomes([Outcome::SUCCESS]);
+        $compiler = new ScopeCompiler;
+        $query    = $compiler->apply(self::entries(), $scope, $filters);
+        $sql      = self::sqlOf($query);
+
+        self::assertSame(0, self::topLevelOrs($sql));
+        self::assertStringEndsWith(' and outcome in (?) and ' . self::HOLDING, $sql);
+        self::assertSame(['org', '3', 'team', '2', 'auth', 'user', '42', 'user', '42', 'success', 'App\Models\User', '42'], $query->getBindings());
+
+        $tenant = $compiler->apply(self::entries(), AccessScope::tenants(Reference::of('team', '2')), $filters);
+        $about  = $compiler->apply(self::entries(), AccessScope::tenants(Reference::of('team', '2'))->onlyAbout(Reference::of('user', '7')), $filters);
+
+        self::assertSame([self::OTHER_ID], $tenant->pluck('id')->all());
+        self::assertSame([], $about->pluck('id')->all());
+        self::assertSame([self::ID, self::OTHER_ID], $compiler->apply(self::entries(), AccessScope::all(), $filters)->orderBy('id')->pluck('id')->all());
+    }
+
+    /**
+     * An owner's erased keys still find its entries, and so does every
+     * generation and unit of its keys: the filter reads the key uses and the
+     * owner's columns, never a key's state.
+     *
+     * @return void
+     */
+    public function testEveryKeyOfTheOwnerFindsItsEntries(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        self::insert(self::ID, 'team', '1');
+        self::insert(self::OTHER_ID, 'team', '1');
+        self::insertKey(self::KEY_ID, $owner);
+        self::insertKey(self::OTHER_KEY_ID, $owner, 'erased', 2);
+        self::insertKeyUse(self::KEY_ID, self::ID);
+        self::insertKeyUse(self::OTHER_KEY_ID, self::ID);
+        self::insertKeyUse(self::OTHER_KEY_ID, self::OTHER_ID);
+
+        $query = (new ScopeCompiler)->apply(self::entries(), AccessScope::all(), TrailFilters::none()->withHoldingDataOf($owner));
+
+        self::assertSame([self::ID, self::OTHER_ID], $query->orderBy('id')->pluck('id')->all());
+    }
+
+    /**
+     * A query that reads the entries under an alias correlates the exists on
+     * the alias, so the entry's id is never read from the key uses.
+     *
+     * @return void
+     */
+    public function testAnAliasedQueryIsCorrelatedOnItsAlias(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        self::insert(self::ID, 'team', '1');
+        self::insert(self::OTHER_ID, 'team', '1');
+        self::insertKey(self::KEY_ID, $owner);
+        self::insertKeyUse(self::KEY_ID, self::ID);
+
+        $aliased = DB::connection(StorageConnection::name())->table(EntrySettings::table() . ' as e');
+        $query   = (new ScopeCompiler)->apply($aliased, AccessScope::all(), TrailFilters::none()->withHoldingDataOf($owner));
+
+        self::assertStringContainsString('where audit_log_key_uses.entry_id = e.id and', self::sqlOf($query));
+        self::assertSame([self::ID], $query->pluck('e.id')->all());
+    }
+
+    /**
+     * A query that names no table is refused before anything is added to it,
+     * since the exists could not be correlated on the entry's id.
+     *
+     * @return void
+     */
+    public function testAQueryOfNoTableIsRefusedForTheOwnersEntries(): void
+    {
+        $query = DB::connection(StorageConnection::name())->query();
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('An owner\'s entries are found from a query of the entries table, named as a table.');
+
+        (new ScopeCompiler)->apply($query, AccessScope::all(), TrailFilters::none()->withHoldingDataOf(Reference::of('App\Models\User', '42')));
+    }
+
+    /**
+     * The owner whose data the entries hold never makes a read empty without a
+     * query: whether an owner holds data anywhere is a question only the key
+     * uses can answer.
+     *
+     * @return void
+     */
+    public function testTheOwnerNeverMakesAReadEmpty(): void
+    {
+        $filters  = TrailFilters::none()->withHoldingDataOf(Reference::of('App\Models\User', '42'));
+        $compiler = new ScopeCompiler;
+
+        self::assertFalse($compiler->isEmpty(AccessScope::all(), $filters));
+        self::assertFalse($compiler->isEmpty(AccessScope::tenants(Reference::of('team', '1'))->onlyAbout(Reference::of('user', '7')), $filters));
+        self::assertTrue($compiler->isEmpty(AccessScope::none(), $filters));
     }
 
     /**
@@ -384,7 +543,8 @@ final class ScopeCompilerTest extends TestCase
             ->withReference('subject', $hostile)
             ->withReference('principal', $hostile)
             ->withReference('tenant', $hostile)
-            ->withCorrelation('app:' . self::HOSTILE);
+            ->withCorrelation('app:' . self::HOSTILE)
+            ->withHoldingDataOf($hostile);
 
         $compiler = new ScopeCompiler;
         $query    = $compiler->apply(self::entries(), AccessScope::tenants($hostile)->onlyAbout($hostile), $filters);
@@ -504,6 +664,49 @@ final class ScopeCompilerTest extends TestCase
         }
 
         return $found;
+    }
+
+    /**
+     * Insert a key of the owner, by its id, in the state and at the generation
+     * given; only the columns the filter reads mean anything.
+     *
+     * @param  string  $id
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @param  string  $state
+     * @param  int  $generation
+     * @return void
+     */
+    private static function insertKey(string $id, Reference $owner, string $state = 'live', int $generation = 1): void
+    {
+        DB::connection(StorageConnection::name())->table(KeyTables::subjectKeysTable())->insert([
+            'id'          => $id,
+            'owner_type'  => $owner->type,
+            'owner_id'    => $owner->id,
+            'tenant_type' => null,
+            'tenant_id'   => null,
+            'category'    => 'general',
+            'unit'        => hash('sha256', $owner->type . $owner->id),
+            'generation'  => $generation,
+            'state'       => $state,
+            'wrapped_key' => $state === 'erased' ? null : 'wrapped',
+            'wrap_key_id' => $state === 'erased' ? null : 'd-1',
+            'created_at'  => '2026-11-01 12:00:00.000000',
+            'erasure_id'  => null,
+            'key_id'      => 'k1',
+            'hmac'        => str_repeat('0', 64),
+        ]);
+    }
+
+    /**
+     * Insert a key use of the key for the entry.
+     *
+     * @param  string  $keyId
+     * @param  string  $entryId
+     * @return void
+     */
+    private static function insertKeyUse(string $keyId, string $entryId): void
+    {
+        DB::connection(StorageConnection::name())->table(KeyTables::keyUsesTable())->insert(['key_id' => $keyId, 'entry_id' => $entryId]);
     }
 
     /**

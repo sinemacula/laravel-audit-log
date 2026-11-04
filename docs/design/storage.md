@@ -7,9 +7,10 @@ artifacts table beside it, the connections the tables live on and are maintained
 read model that never writes, and how the database store inserts a finalised record, resolves a duplicate and leaves a
 host transaction usable. It also records the two tables delivery works from, the outbox and the receipts, and the
 connection each is on, the three tables integrity works from, the checkpoints, their members and the integrity state,
-the four tables the lifecycle works from, the journal, the holds, the lock and the import batches, the installation's
-identity, and the grants and optional triggers that keep the log append-only, for each of the writer, the maintenance
-user and the verifier, as SQL the tests run. The table is evidence, so what each column holds, how a time or an id is
+the four tables the lifecycle works from, the journal, the holds, the lock and the import batches, the three tables the
+owners' keys are kept in, the subject keys, the owner erasures and the key uses, the installation's identity, and the
+grants and optional triggers that keep the log append-only, for each of the writer, the maintenance user and the
+verifier, as SQL the tests run. The table is evidence, so what each column holds, how a time or an id is
 written and what the store may do to a row are fixed here; a change to any of them changes what every stored row means.
 
 ## Invariants
@@ -148,22 +149,61 @@ written and what the store may do to a row are fixed here; a change to any of th
   `updated_at` and `finished_at`, indexed by `<table>_status_index` over `status` and `updated_at`. The storage
   connection's writer inserts a batch before its first entry and then updates only its status, counts, conflict ids and
   times. No column is named a reserved word on any engine (`lines_read`, `input_format`), and a batch is never deleted.
+- `privacy.subject_keys_table` (`audit_log_subject_keys` by default), `privacy.owner_erasures_table`
+  (`audit_log_owner_erasures`) and `privacy.key_uses_table` (`audit_log_key_uses`) are always on the storage connection,
+  beside the entries whose fields their keys encrypt, and no setting moves them (`Database\KeyTables`). A setting that
+  is not set, `null` or empty names its default table. Each follows the entries table: the table name's grammar, no
+  foreign keys, and on MySQL `utf8mb4_0900_bin` and `InnoDB`, so each commits with what it describes. Their migrations
+  seed no row.
+- The subject keys table holds one row per key unit and generation, in 15 columns: `id` (a UUID version 7, its primary
+  key, which every envelope the key sealed names and which is never derived from the owner), the unit's `owner_type`,
+  `owner_id`, `tenant_type` and `tenant_id` (`string(191)`, the tenant's pair nullable) and `category` (`string(64)`),
+  `unit` (`string(64)`, the SHA-256 of the unit's canonical list in hex), `generation` (`integer`), `state`
+  (`string(16)`: `live`, `superseded` or `erased`), `wrapped_key` (`text`), `wrap_key_id` (`string(191)`),
+  `created_at` (`dateTime(6)`), `erasure_id` (the erasure's journal row id), `key_id` (`string(32)`) and `hmac`
+  (`string(64)`). Its indexes are the unique `<table>_unit_unique` over `unit` and `generation`, `<table>_owner_index`
+  over `owner_type` and `owner_id`, and `<table>_erasure_index` over `erasure_id`. The uniqueness is on the unit's
+  digest because a composite unique index over the nullable tenant columns would let two tenantless rows share a
+  generation on every engine.
+- The storage connection's writer inserts a key, and never updates or deletes one. Only the maintenance connection
+  updates a key, and only its `state`, `wrapped_key`, `wrap_key_id` and `erasure_id`: a rotation supersedes it, a
+  rewrap replaces its wrapped key, and an erasure tombstones it, with no wrapped key. The other eleven columns are
+  written once, and the `hmac` covers them. A key row is never deleted, by an erasure, a prune or anything else.
+- The owner erasures table holds one marker per erasure or reinstatement of an owner, in 7 columns: `id`, its primary
+  key and the id of the journal row that records it, `owner_type`, `owner_id`, `transition` (`string(16)`: `erased` or
+  `reinstated`), `generation_floor` (`integer`), `journal_sequence` (a signed `bigInteger`) and `created_at`
+  (`dateTime(6)`), indexed by `<table>_owner_index` over `owner_type`, `owner_id` and `journal_sequence`. The
+  maintenance connection inserts a marker with its journal row, and a marker is never updated or deleted. No column is
+  named a reserved word on any engine (`transition`, `generation_floor`).
+- The key uses table holds one row per key and entry with a field the key encrypted, in 2 columns, `key_id` and
+  `entry_id`, keyed by `<table>_primary` over both and indexed by `<table>_entry_index` over `entry_id`. The storage
+  connection's writer inserts the rows with their entry; the table is append-only, an index derived from the entries
+  that `audit-log:verify` proves complete, and a prune leaves its rows.
+- `DatabaseAuditStore` writes a record whose envelopes name a key that is a canonical lower-case UUID together with
+  its key uses: the entry, then one multi-row insert of a row for each distinct key, in one transaction outside a host
+  transaction and in a savepoint inside one, so a failed key use rolls its entry back and neither is ever kept without
+  the other. A record with no such envelope keeps its single insert. A key is created on a session of its own, a second
+  connection to the storage connection's writer that commits on its own (`Keys\KeySession`), except where a second
+  connection could not see or write what the storage connection does: in-memory SQLite, the testing manager's base
+  transaction, and SQLite inside a transaction, where the storage connection itself creates it.
 - The migrations are published under `audit-log-migrations` and never loaded from the package. Each runs on its own
   table's connection (the entries' `getConnection()` is `StorageConnection::name()`), and a collision guard refuses to
-  create a table over an existing one, naming the setting that renames it, such as `entries.table`.
+  create a table over an existing one, naming the setting that renames it, such as `entries.table` or
+  `privacy.subject_keys_table`.
 - `storage.connection` is the connection the table lives on (`null` or empty for the default);
   `storage.maintenance_connection` is the connection pruning, holds and the lifecycle journal run through (`null` or
   empty for the storage connection). Both must reach the same physical database, the maintenance connection with
   credentials of its own, which the installation id confirms. A value that is neither a connection name nor `null` or
   empty fails closed.
 - Grants: to record, the application's writer needs `SELECT` and `INSERT` on the entries and the artifacts tables and
-  nothing else, on every engine. The MySQL duplicate lookup inside a transaction is a shared locking read, which needs
-  `SELECT` alone, never `FOR UPDATE`. Sealing, anchoring, the sweep and verification need the grants under Grants And
-  Triggers below, where the optional triggers are too; the maintenance user has the privileges its operations need, and
-  nothing changes the schema at runtime, except the documented SQLite prune, which drops and recreates the delete
-  triggers inside its own transaction. In outbox mode the writer also needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on
-  the outbox and `SELECT`, `INSERT` and `UPDATE` on the receipts; only the entries, the artifacts and the integrity
-  evidence stay append-only.
+  nothing else, on every engine, but for a record with an encrypted field, which also needs `SELECT` and `INSERT` on the
+  subject keys and the key uses and `SELECT` on the owner erasures. The MySQL duplicate lookup inside a transaction is a
+  shared locking read, which needs `SELECT` alone, never `FOR UPDATE`. Sealing, anchoring, the sweep and verification
+  need the grants under Grants And Triggers below, where the optional triggers are too; the maintenance user has the
+  privileges its operations need, and nothing changes the schema at runtime, except the documented SQLite prune, which
+  drops and recreates the delete triggers inside its own transaction. In outbox mode the writer also needs `SELECT`,
+  `INSERT`, `UPDATE` and `DELETE` on the outbox and `SELECT`, `INSERT` and `UPDATE` on the receipts; only the entries,
+  the artifacts and the integrity evidence stay append-only.
 - The read model, `Models\AuditEntry`, takes its table and connection from the settings, has a string key, no
   timestamps and nothing mass assignable, and refuses every model write with `ImmutableEntryException`: `save()`,
   `saveQuietly()`, `update()`, `updateQuietly()`, `push()`, `touch()`, `delete()`, `deleteQuietly()`,
@@ -201,10 +241,15 @@ written and what the store may do to a row are fixed here; a change to any of th
   application that records many entries in one transaction.
 - The artifacts migration creates the artifacts table on the storage connection under `entries.artifacts_table`.
 - The integrity migrations create the checkpoints, the members and the integrity state tables on the storage connection.
-  Run as the tables' owner once the users exist, the documented grants give a writer what recording, sealing, anchoring,
-  the sweep and verification need, and the documented triggers leave every one of them working.
+  Run as the tables' owner once the users exist, the documented grants, the key block included, give a writer what
+  recording, sealing, anchoring, the sweep and verification need, and the documented triggers leave every one of them
+  working.
 - The lifecycle migrations create the journal, the holds, the lock, with its one row, and the import batches on the
   storage connection.
+- The key migrations create the subject keys, the owner erasures and the key uses on the storage connection, with no
+  row. Run after the blocks above, the documented key grants give the writer what creating a key and recording its key
+  uses need, the maintenance user what erasure, reinstatement and rewrapping need, and the writer and the verifier what
+  verification reads of the key store.
 
 ## Failure / Edge Cases
 
@@ -213,7 +258,8 @@ written and what the store may do to a row are fixed here; a change to any of th
 - An existing table under the configured name stops the migration with a `TableAlreadyExistsException` before any
   schema change, naming the setting that renames it, `lifecycle.journal_table` or `import.batches_table` included.
 - A malformed `lifecycle.journal_table`, `lifecycle.holds_table`, `lifecycle.lock_table` or `import.batches_table`
-  fails closed with an `\InvalidArgumentException` naming its full key, never its value.
+  fails closed with an `\InvalidArgumentException` naming its full key, never its value, as does a malformed
+  `privacy.subject_keys_table`, `privacy.owner_erasures_table` or `privacy.key_uses_table`.
 - A maintenance connection that reads no installation id, or another than the storage connection, is refused with an
   `InstallationMismatchException` naming no value; an installation id that is not a JSON object `{id}` of a lower-case
   UUID reads as absent, and is never replaced. A storage connection that reads no installation id is a problem
@@ -225,12 +271,18 @@ written and what the store may do to a row are fixed here; a change to any of th
 - A model write on an entry throws `ImmutableEntryException` before any statement runs.
 - A writer granted only the documented privileges is refused, by the engine, an update or a delete of an artifact, an
   update of an immutable checkpoint column, an update or a delete of a member, a delete of a seal, a `TRUNCATE` of any
-  of the package's tables and any DDL, and any write of the journal, the holds or the lock; the maintenance user is
-  refused everything but its documented privileges, so it inserts the journal and never updates or deletes a row of it.
+  of the package's tables and any DDL, any write of the journal, the holds or the lock, and any update or delete of a
+  subject key, an owner marker or a key use and any insert of a marker; the maintenance user is refused everything but
+  its documented privileges, so it inserts the journal and never updates or deletes a row of it, and it updates a key's
+  four mutable columns alone and deletes no key, marker or key use.
 - Under the documented triggers, an update of an entry, an artifact, a member, a journal row or a hold, a change to an
   immutable checkpoint or batch column or to the lock's `id`, a delete of a member, a seal, a journal row, a batch or
   the lock, and a delete of an entry, an artifact or a hold by anyone but the maintenance user are refused with an error
   naming the table and the statement, such as `audit_log_entries refuses DELETE`; the tables' owner is refused too.
+- Under the documented key triggers, an update or a delete of a key use or an owner marker, a delete of a subject key,
+  and any update of a subject key but the three transitions, made by the maintenance user, are refused with an error
+  naming the table and the statement, such as `audit_log_subject_keys refuses UPDATE`; an erased key is refused every
+  update, so it never holds a key again.
 
 ## Grants And Triggers
 
@@ -240,24 +292,30 @@ credentials can, and the maintenance credentials can delete what pruning deletes
 makes an unauthorised destruction detectable, never impossible. Both are the SQL below, which the integration tests run
 as written, each block found by the marker line before it. Replace `app_db`, `audit_writer`, `audit_maintenance` and
 `audit_verifier` with your database and users. Create the users first, run each block as the tables' owner, and rename
-a table in the SQL when its setting renames it.
+a table in the SQL when its setting renames it. Run both of your engine's grant blocks, the key block after the other:
+the key tables are always migrated, and while the package's key store is in use verification reads them, so a writer
+or a verifier granted the first block alone cannot verify.
 
 The role matrix is what the blocks grant, per table and user; "outbox mode" marks the grants the writer needs only
-when delivery runs through the outbox, which the blocks leave out:
+when delivery runs through the outbox, which the blocks leave out. The last three rows are granted by each engine's key
+block, which runs after the others:
 
-| Table                          | Writer                                                       | Maintenance                                   | Verifier                     |
-|--------------------------------|--------------------------------------------------------------|-----------------------------------------------|------------------------------|
-| `audit_log_entries`            | `SELECT`, `INSERT`                                           | `SELECT`, `DELETE`                            | `SELECT`                     |
-| `audit_log_artifacts`          | `SELECT`, `INSERT`                                           | `SELECT`, `DELETE`                            | `SELECT`                     |
-| `audit_log_outbox`             | outbox mode: `SELECT`, `INSERT`, `UPDATE`, `DELETE`          | `SELECT`, when on the storage database        | none                         |
-| `audit_log_deliveries`         | outbox mode: `SELECT`, `INSERT`, `UPDATE`                    | `SELECT`, `DELETE`                            | none                         |
-| `audit_log_checkpoints`        | `SELECT`, `INSERT`, `UPDATE` of the four anchor columns      | `SELECT`                                      | `SELECT`                     |
-| `audit_log_checkpoint_members` | `SELECT`, `INSERT`                                           | `SELECT`                                      | `SELECT`                     |
-| `audit_log_integrity_state`    | `SELECT`, `INSERT`, `UPDATE`, `DELETE`                       | `SELECT`                                      | `SELECT`, `INSERT`, `UPDATE` |
-| `audit_log_lifecycle`          | `SELECT`                                                     | `SELECT`, `INSERT`                            | `SELECT`                     |
-| `audit_log_holds`              | `SELECT`                                                     | `SELECT`, `INSERT`, `DELETE`                  | `SELECT`                     |
-| `audit_log_lifecycle_lock`     | none                                                         | `SELECT`, `UPDATE` of `token` and `locked_at` | none                         |
-| `audit_log_import_batches`     | `SELECT`, `INSERT`, `UPDATE` of the status, counts and times | none                                          | none                         |
+| Table                          | Writer                                                       | Maintenance                                                                  | Verifier                     |
+|--------------------------------|--------------------------------------------------------------|------------------------------------------------------------------------------|------------------------------|
+| `audit_log_entries`            | `SELECT`, `INSERT`                                           | `SELECT`, `DELETE`                                                           | `SELECT`                     |
+| `audit_log_artifacts`          | `SELECT`, `INSERT`                                           | `SELECT`, `DELETE`                                                           | `SELECT`                     |
+| `audit_log_outbox`             | outbox mode: `SELECT`, `INSERT`, `UPDATE`, `DELETE`          | `SELECT`, when on the storage database                                       | none                         |
+| `audit_log_deliveries`         | outbox mode: `SELECT`, `INSERT`, `UPDATE`                    | `SELECT`, `DELETE`                                                           | none                         |
+| `audit_log_checkpoints`        | `SELECT`, `INSERT`, `UPDATE` of the four anchor columns      | `SELECT`                                                                     | `SELECT`                     |
+| `audit_log_checkpoint_members` | `SELECT`, `INSERT`                                           | `SELECT`                                                                     | `SELECT`                     |
+| `audit_log_integrity_state`    | `SELECT`, `INSERT`, `UPDATE`, `DELETE`                       | `SELECT`                                                                     | `SELECT`, `INSERT`, `UPDATE` |
+| `audit_log_lifecycle`          | `SELECT`                                                     | `SELECT`, `INSERT`                                                           | `SELECT`                     |
+| `audit_log_holds`              | `SELECT`                                                     | `SELECT`, `INSERT`, `DELETE`                                                 | `SELECT`                     |
+| `audit_log_lifecycle_lock`     | none                                                         | `SELECT`, `UPDATE` of `token` and `locked_at`                                | none                         |
+| `audit_log_import_batches`     | `SELECT`, `INSERT`, `UPDATE` of the status, counts and times | none                                                                         | none                         |
+| `audit_log_subject_keys`       | `SELECT`, `INSERT`                                           | `SELECT`, `UPDATE` of `state`, `wrapped_key`, `wrap_key_id` and `erasure_id` | `SELECT`                     |
+| `audit_log_owner_erasures`     | `SELECT`                                                     | `SELECT`, `INSERT`                                                           | `SELECT`                     |
+| `audit_log_key_uses`           | `SELECT`, `INSERT`                                           | `SELECT`                                                                     | `SELECT`                     |
 
 - The writer, the application's user, is granted `SELECT` and `INSERT` on the entries, the artifacts, the checkpoints
   and the members, `UPDATE` on the checkpoints' four anchor columns alone, and `SELECT`, `INSERT`, `UPDATE` and `DELETE`
@@ -272,14 +330,26 @@ when delivery runs through the outbox, which the blocks leave out:
   checkpoint and member; `SELECT` on the checkpoints, the members, the integrity state, for the installation id, and the
   outbox when it is on the storage database; `SELECT` and `INSERT` on the journal; `SELECT`, `INSERT` and `DELETE` on
   the holds; and `SELECT` and `UPDATE` of `token` and `locked_at` alone on the lock.
+- For the owners' keys, the writer is granted `SELECT` and `INSERT` on the subject keys and the key uses, because it
+  creates a key the first time an owner's field is sealed and inserts each key use with its entry, and `SELECT` on the
+  owner erasures, because it reads the owner's latest marker before it creates a key; it updates no key. The maintenance
+  user is granted `SELECT` on the subject keys with `UPDATE` of `state`, `wrapped_key`, `wrap_key_id` and `erasure_id`
+  alone, which is everything an erasure, a rotation and a rewrap write; `SELECT` and `INSERT` on the owner erasures; and
+  `SELECT` on the key uses, through which an erasure finds the entries a key encrypted. The verifier reads all three. No
+  role has `DELETE` on the subject keys, the owner erasures or the key uses: an erasure destroys a key by updating its
+  row, and a prune leaves all three.
+- The advisory locks need no grant: key creation and erasure exclude each other per owner with
+  `pg_advisory_xact_lock` on PostgreSQL and `GET_LOCK` on MySQL, which any user may take, where a row lock would need
+  `UPDATE` on PostgreSQL, which the writer must not have.
 - There is no DDL for the application user: no documented user holds `DROP`, `TRUNCATE`, `TRIGGER` or `ALTER`, or
   creates anything. On PostgreSQL before 15, also revoke `CREATE` on the `public` schema from `PUBLIC`.
 - Verification needs `SELECT` on the entries, the artifacts, the checkpoints, the members, the journal and the holds,
-  and the user that runs `audit-log:verify` also needs `SELECT`, `INSERT` and `UPDATE` on the integrity state table,
-  where a full run records that it completed. The verifier, an optional third user for scheduled verification, holds
-  exactly those; the writer may verify instead, as it holds them too. The verifier role never needs delete-capable
-  credentials to read prune evidence, which is read on the storage connection. On PostgreSQL every user also needs
-  `CONNECT` on the database and `USAGE` on the schema, which grant no table privilege.
+  and, while the package's key store is in use, on the subject keys, the owner erasures and the key uses, which the key
+  block grants; and the user that runs `audit-log:verify` also needs `SELECT`, `INSERT` and `UPDATE` on the integrity
+  state table, where a full run records that it completed. The verifier, an optional third user for scheduled
+  verification, holds exactly those; the writer may verify instead, as it holds them too. The verifier role never needs
+  delete-capable credentials to read prune evidence, which is read on the storage connection. On PostgreSQL every user
+  also needs `CONNECT` on the database and `USAGE` on the schema, which grant no table privilege.
 - The triggers refuse every change except a maintenance delete of an entry, an artifact or a hold, an update of a
   seal's anchor columns, of a batch's status, counts, conflict ids and times, and of the lock's token and time. Each
   table gets `<table>_no_update` and `<table>_no_delete`: an entry or an artifact is never updated and only the
@@ -293,9 +363,21 @@ when delivery runs through the outbox, which the blocks leave out:
   trigger is the definer, so the MySQL triggers read `USER()`, compared byte for byte. `USER()` is the name the client
   gave, so on MySQL the grants, not the triggers, are the boundary: install the triggers as a second line, or prefer
   grants alone.
-- A row trigger never fires on `TRUNCATE`, so PostgreSQL also gets `<table>_no_truncate`, a statement trigger on each
-  of the eight tables. On MySQL `TRUNCATE` needs `DROP`, which no documented user holds, and fires no trigger, so the
-  grants alone refuse it.
+- The key triggers refuse every update and delete of a key use or an owner marker, with no maintenance exception, and
+  every delete of a subject key. An update of a subject key is refused unless the maintenance user makes it (on
+  PostgreSQL by `current_user`, on MySQL by `USER()`, on SQLite, which has no users, whoever does), the row is `live` or
+  `superseded`, none of `id`, `owner_type`, `owner_id`, `tenant_type`, `tenant_id`, `category`, `unit`, `generation`,
+  `created_at`, `key_id` and `hmac` changes, and it is one of three transitions: `live` to `superseded`, with the
+  wrapped key kept or rewrapped in the same statement and never null; `live` or `superseded` to `erased`, with
+  `wrapped_key` null, `wrap_key_id` kept and `erasure_id` set where it was null; or a rewrap, the state kept and
+  `wrapped_key` and `wrap_key_id` both non-null, `erasure_id` still null. An erased key is refused every update, so an
+  erased generation never reopens. Database credentials can still destroy keys, key uses and markers: the triggers
+  refuse the application's users, and whoever can drop a trigger, the tables' owner included, still can. The package's
+  cryptographic evidence makes a destroyed key or key use, and a key created for an erased owner, detectable by
+  `audit-log:verify`, never impossible.
+- A row trigger never fires on `TRUNCATE`, so PostgreSQL also gets `<table>_no_truncate`, a statement trigger on each of
+  the eight tables, and on each of the three key tables in their own block. On MySQL `TRUNCATE` needs `DROP`, which no
+  documented user holds, and fires no trigger, so the grants alone refuse it.
 - The tables' owner can drop the triggers: they guard against the application's users, not against the owner. A
   trigger refuses the owner's own update or delete while it is installed.
 - SQLite has no users, so its triggers refuse every update and delete they cover, with no maintenance exception, and
@@ -472,6 +554,80 @@ END//
 DELIMITER ;
 ```
 
+<!-- sql: keys-grants:mysql -->
+
+```sql
+GRANT SELECT, INSERT ON app_db.audit_log_subject_keys TO 'audit_writer'@'%';
+GRANT SELECT ON app_db.audit_log_owner_erasures TO 'audit_writer'@'%';
+GRANT SELECT, INSERT ON app_db.audit_log_key_uses TO 'audit_writer'@'%';
+
+GRANT SELECT ON app_db.audit_log_subject_keys TO 'audit_maintenance'@'%';
+GRANT UPDATE (state, wrapped_key, wrap_key_id, erasure_id)
+    ON app_db.audit_log_subject_keys TO 'audit_maintenance'@'%';
+GRANT SELECT, INSERT ON app_db.audit_log_owner_erasures TO 'audit_maintenance'@'%';
+GRANT SELECT ON app_db.audit_log_key_uses TO 'audit_maintenance'@'%';
+
+GRANT SELECT ON app_db.audit_log_subject_keys TO 'audit_verifier'@'%';
+GRANT SELECT ON app_db.audit_log_owner_erasures TO 'audit_verifier'@'%';
+GRANT SELECT ON app_db.audit_log_key_uses TO 'audit_verifier'@'%';
+```
+
+<!-- sql: keys-triggers:mysql -->
+
+```sql
+DELIMITER //
+
+CREATE TRIGGER audit_log_subject_keys_no_update BEFORE UPDATE ON audit_log_subject_keys FOR EACH ROW
+BEGIN
+    IF CAST(SUBSTRING_INDEX(USER(), '@', 1) AS BINARY) <> 'audit_maintenance'
+        OR OLD.state NOT IN ('live', 'superseded')
+        OR NOT (OLD.id <=> NEW.id
+            AND OLD.owner_type <=> NEW.owner_type
+            AND OLD.owner_id <=> NEW.owner_id
+            AND OLD.tenant_type <=> NEW.tenant_type
+            AND OLD.tenant_id <=> NEW.tenant_id
+            AND OLD.category <=> NEW.category
+            AND OLD.unit <=> NEW.unit
+            AND OLD.generation <=> NEW.generation
+            AND OLD.created_at <=> NEW.created_at
+            AND OLD.key_id <=> NEW.key_id
+            AND OLD.hmac <=> NEW.hmac)
+        OR NOT (((NEW.state = OLD.state OR (OLD.state = 'live' AND NEW.state = 'superseded'))
+                AND NEW.wrapped_key IS NOT NULL AND NEW.wrap_key_id IS NOT NULL AND NEW.erasure_id IS NULL)
+            OR (NEW.state = 'erased' AND NEW.wrapped_key IS NULL AND NEW.wrap_key_id <=> OLD.wrap_key_id
+                AND OLD.erasure_id IS NULL AND NEW.erasure_id IS NOT NULL)) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_subject_keys refuses UPDATE';
+    END IF;
+END//
+
+CREATE TRIGGER audit_log_subject_keys_no_delete BEFORE DELETE ON audit_log_subject_keys FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_subject_keys refuses DELETE';
+END//
+
+CREATE TRIGGER audit_log_owner_erasures_no_update BEFORE UPDATE ON audit_log_owner_erasures FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_owner_erasures refuses UPDATE';
+END//
+
+CREATE TRIGGER audit_log_owner_erasures_no_delete BEFORE DELETE ON audit_log_owner_erasures FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_owner_erasures refuses DELETE';
+END//
+
+CREATE TRIGGER audit_log_key_uses_no_update BEFORE UPDATE ON audit_log_key_uses FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_key_uses refuses UPDATE';
+END//
+
+CREATE TRIGGER audit_log_key_uses_no_delete BEFORE DELETE ON audit_log_key_uses FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log_key_uses refuses DELETE';
+END//
+
+DELIMITER ;
+```
+
 ### PostgreSQL
 
 <!-- sql: pgsql-grants -->
@@ -592,6 +748,62 @@ CREATE TRIGGER audit_log_import_batches_no_truncate BEFORE TRUNCATE ON audit_log
     FOR EACH STATEMENT EXECUTE FUNCTION audit_log_refuse();
 ```
 
+<!-- sql: keys-grants:pgsql -->
+
+```sql
+GRANT SELECT, INSERT ON audit_log_subject_keys, audit_log_key_uses TO audit_writer;
+GRANT SELECT ON audit_log_owner_erasures TO audit_writer;
+
+GRANT SELECT ON audit_log_subject_keys, audit_log_key_uses TO audit_maintenance;
+GRANT UPDATE (state, wrapped_key, wrap_key_id, erasure_id) ON audit_log_subject_keys TO audit_maintenance;
+GRANT SELECT, INSERT ON audit_log_owner_erasures TO audit_maintenance;
+
+GRANT SELECT ON audit_log_subject_keys, audit_log_owner_erasures, audit_log_key_uses TO audit_verifier;
+```
+
+<!-- sql: keys-triggers:pgsql -->
+
+```sql
+CREATE OR REPLACE FUNCTION audit_log_keys_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION '% refuses %', TG_TABLE_NAME, TG_OP;
+END;
+$$;
+
+CREATE TRIGGER audit_log_subject_keys_no_update BEFORE UPDATE ON audit_log_subject_keys
+    FOR EACH ROW
+    WHEN (current_user <> 'audit_maintenance'
+        OR OLD.state NOT IN ('live', 'superseded')
+        OR (OLD.id, OLD.owner_type, OLD.owner_id, OLD.tenant_type, OLD.tenant_id, OLD.category, OLD.unit,
+        OLD.generation, OLD.created_at, OLD.key_id, OLD.hmac)
+        IS DISTINCT FROM (NEW.id, NEW.owner_type, NEW.owner_id, NEW.tenant_type, NEW.tenant_id, NEW.category, NEW.unit,
+        NEW.generation, NEW.created_at, NEW.key_id, NEW.hmac)
+        OR NOT (((NEW.state = OLD.state OR (OLD.state = 'live' AND NEW.state = 'superseded'))
+                AND NEW.wrapped_key IS NOT NULL AND NEW.wrap_key_id IS NOT NULL AND NEW.erasure_id IS NULL)
+            OR (NEW.state = 'erased' AND NEW.wrapped_key IS NULL
+                AND NEW.wrap_key_id IS NOT DISTINCT FROM OLD.wrap_key_id
+                AND OLD.erasure_id IS NULL AND NEW.erasure_id IS NOT NULL)))
+    EXECUTE FUNCTION audit_log_keys_refuse();
+CREATE TRIGGER audit_log_subject_keys_no_delete BEFORE DELETE ON audit_log_subject_keys
+    FOR EACH ROW EXECUTE FUNCTION audit_log_keys_refuse();
+CREATE TRIGGER audit_log_subject_keys_no_truncate BEFORE TRUNCATE ON audit_log_subject_keys
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_keys_refuse();
+
+CREATE TRIGGER audit_log_owner_erasures_no_update BEFORE UPDATE ON audit_log_owner_erasures
+    FOR EACH ROW EXECUTE FUNCTION audit_log_keys_refuse();
+CREATE TRIGGER audit_log_owner_erasures_no_delete BEFORE DELETE ON audit_log_owner_erasures
+    FOR EACH ROW EXECUTE FUNCTION audit_log_keys_refuse();
+CREATE TRIGGER audit_log_owner_erasures_no_truncate BEFORE TRUNCATE ON audit_log_owner_erasures
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_keys_refuse();
+
+CREATE TRIGGER audit_log_key_uses_no_update BEFORE UPDATE ON audit_log_key_uses
+    FOR EACH ROW EXECUTE FUNCTION audit_log_keys_refuse();
+CREATE TRIGGER audit_log_key_uses_no_delete BEFORE DELETE ON audit_log_key_uses
+    FOR EACH ROW EXECUTE FUNCTION audit_log_keys_refuse();
+CREATE TRIGGER audit_log_key_uses_no_truncate BEFORE TRUNCATE ON audit_log_key_uses
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_keys_refuse();
+```
+
 ### SQLite
 
 <!-- sql: sqlite-triggers -->
@@ -680,6 +892,56 @@ BEGIN
 END;
 ```
 
+<!-- sql: keys-triggers:sqlite -->
+
+```sql
+CREATE TRIGGER audit_log_subject_keys_no_update BEFORE UPDATE ON audit_log_subject_keys
+WHEN OLD.state NOT IN ('live', 'superseded')
+    OR NOT (OLD.id IS NEW.id
+        AND OLD.owner_type IS NEW.owner_type
+        AND OLD.owner_id IS NEW.owner_id
+        AND OLD.tenant_type IS NEW.tenant_type
+        AND OLD.tenant_id IS NEW.tenant_id
+        AND OLD.category IS NEW.category
+        AND OLD.unit IS NEW.unit
+        AND OLD.generation IS NEW.generation
+        AND OLD.created_at IS NEW.created_at
+        AND OLD.key_id IS NEW.key_id
+        AND OLD.hmac IS NEW.hmac)
+    OR NOT (((NEW.state = OLD.state OR (OLD.state = 'live' AND NEW.state = 'superseded'))
+            AND NEW.wrapped_key IS NOT NULL AND NEW.wrap_key_id IS NOT NULL AND NEW.erasure_id IS NULL)
+        OR (NEW.state = 'erased' AND NEW.wrapped_key IS NULL AND NEW.wrap_key_id IS OLD.wrap_key_id
+            AND OLD.erasure_id IS NULL AND NEW.erasure_id IS NOT NULL))
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_subject_keys refuses UPDATE');
+END;
+
+CREATE TRIGGER audit_log_subject_keys_no_delete BEFORE DELETE ON audit_log_subject_keys
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_subject_keys refuses DELETE');
+END;
+
+CREATE TRIGGER audit_log_owner_erasures_no_update BEFORE UPDATE ON audit_log_owner_erasures
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_owner_erasures refuses UPDATE');
+END;
+
+CREATE TRIGGER audit_log_owner_erasures_no_delete BEFORE DELETE ON audit_log_owner_erasures
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_owner_erasures refuses DELETE');
+END;
+
+CREATE TRIGGER audit_log_key_uses_no_update BEFORE UPDATE ON audit_log_key_uses
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_key_uses refuses UPDATE');
+END;
+
+CREATE TRIGGER audit_log_key_uses_no_delete BEFORE DELETE ON audit_log_key_uses
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log_key_uses refuses DELETE');
+END;
+```
+
 <!-- sql: sqlite-prune -->
 
 ```sql
@@ -709,7 +971,6 @@ COMMIT;
 
 - `Contracts\AuditStore`, bound to `DatabaseAuditStore` by default, takes other stores; `delivery.md` has those that
   ship.
-- Erasure and the owners' keys on the maintenance connection.
 - Partitioning the entries table.
 
 ## Implementation Anchors
@@ -724,11 +985,21 @@ COMMIT;
   `database/migrations/2026_11_02_000700_create_audit_log_lifecycle_table.php`,
   `database/migrations/2026_11_02_000800_create_audit_log_holds_table.php`,
   `database/migrations/2026_11_02_000900_create_audit_log_lifecycle_lock_table.php`,
-  `database/migrations/2026_11_02_001000_create_audit_log_import_batches_table.php`.
+  `database/migrations/2026_11_02_001000_create_audit_log_import_batches_table.php`,
+  `database/migrations/2026_11_02_001100_create_audit_log_subject_keys_table.php`,
+  `database/migrations/2026_11_02_001200_create_audit_log_owner_erasures_table.php`,
+  `database/migrations/2026_11_02_001300_create_audit_log_key_uses_table.php`.
 - `src/Database/IntegrityTables.php`: `checkpointsTable()`, `membersTable()`, `stateTable()`;
   `src/Database/IntegrityProgress.php`: `put()`, `forget()`.
 - `src/Database/LifecycleTables.php`: `journalTable()`, `holdsTable()`, `lockTable()`, `importBatchesTable()`,
   `validate()`.
+- `src/Database/KeyTables.php`: `subjectKeysTable()`, `ownerErasuresTable()`, `keyUsesTable()`, `validate()`;
+  `src/Integrity/Enums/KeyState.php`, `src/Integrity/Enums/MarkerTransition.php`.
+- `src/Keys/KeySession.php`, `src/Database/DedicatedSession.php`; `src/Keys/KeyStore.php`, `src/Keys/KeyCreator.php`,
+  `src/Keys/OwnerLock.php`, `src/Keys/OwnerMarkers.php`; `src/Keys/KeyUses.php`: `rowsFor()`, `insert()`;
+  `src/Keys/KeyUseRebuilder.php`.
+- `src/Lifecycle/Eraser.php`, `src/Lifecycle/Reinstater.php`, `src/Lifecycle/Rewrapper.php`: the key updates and
+  markers on the maintenance connection.
 - `src/Database/InstallationIdentity.php`: `ensure()`, `confirm()`, `check()`, `idThrough()`, `row()`;
   `database/migrations/2026_11_02_000500_create_audit_log_integrity_state_table.php`: the seeded installation id;
   `src/Database/InstallationMismatchException.php`: `absent()`, `mismatched()`.
@@ -932,6 +1203,45 @@ COMMIT;
   `testAMissingLockRowIsAProblem`, `testAMismatchedInstallationIsAProblem`, `testProjectionDriftIsAProblemNamingTheHolds`,
   `testTheJournalIsVerifiedWithoutTheLock`, `testAMissingInstallationIdIsAProblemAndIsNeverWritten`,
   `testTheSeededInstallationIdIsOnlyRead`
+- `tests/Feature/Database/KeyTablesTest.php` `testTheDefaultsApplyWhenNothingIsSet`,
+  `testANullOrEmptySettingIsItsDefault`, `testEachTableIsItsSetting`, `testRefusesANameOutsideTheGrammarNamingTheLeaf`,
+  `testValidateNamesTheFirstBadLeaf`
+- `tests/Unit/Integrity/Enums/KeyStateTest.php` `testTheStoredValues`, `testOnlyLiveAndSupersededHoldAKey`,
+  `testOnlyLiveEncrypts`
+- `tests/Unit/Integrity/Enums/MarkerTransitionTest.php` `testTheStoredValues`
+- `tests/Integration/Migration/SubjectKeysTableSchemaTest.php` `testTheColumnsAreInOrderWithTheirTypes`,
+  `testTheUnitAndGenerationAreUnique`, `testTwoTenantlessRowsCannotShareAGeneration`,
+  `testTheOwnerAndTheErasureAreIndexed`, `testARenamedTableIsCreatedUnderItsSetting`,
+  `testAnExistingTableIsNeverReplaced`
+- `tests/Integration/Migration/OwnerErasuresTableSchemaTest.php` `testTheColumnsAreInOrderWithTheirTypes`,
+  `testTheOwnerIsIndexedWithItsSequence`, `testARenamedTableIsCreatedUnderItsSetting`,
+  `testAnExistingTableIsNeverReplaced`
+- `tests/Integration/Migration/KeyUsesTableSchemaTest.php` `testTheKeyAndEntryArePrimary`, `testTheEntryIsIndexed`,
+  `testARenamedTableIsCreatedUnderItsSetting`, `testAnExistingTableIsNeverReplaced`
+- `tests/Integration/Migration/KeyMigrationsConnectionTest.php` `testEachKeyTableIsOnTheStorageConnection`
+- `tests/Unit/Console/TableShapeTest.php` `testEveryKeyTableHasItsShape`
+- `tests/Integration/Keys/KeyTablesTriggersTest.php` `testAKeyUseRowCannotBeUpdatedOrDeleted`,
+  `testAnOwnerMarkerCannotBeUpdatedOrDeleted`, `testASubjectKeyCannotBeDeleted`,
+  `testASubjectKeysImmutableFieldsCannotChange`, `testAnErasedKeyNeverReopens`, `testAnErasedRowCannotBeChangedAtAll`,
+  `testOnlyTheAllowedTransitionsPass`, `testARotationMayRewrapInTheSameStatement`,
+  `testOnlyTheMaintenanceRoleMayChangeAKey`, `testOnSqliteTheTransitionsAreHeldWithoutRoles`
+- `tests/Integration/Keys/LeastPrivilegeKeysTest.php` `testTheWriterInsertsAndReadsKeysAndKeyUsesAndUpdatesNothing`,
+  `testTheWriterReadsMarkersAndWritesNone`, `testTheMaintenanceUserTombstonesAndRewrapsAndDeletesNothing`,
+  `testTheMaintenanceUserInsertsMarkers`, `testTheVerifierOnlyReads`, `testTheAdvisoryLocksNeedNoGrant`
+- `tests/Unit/Documentation/DocumentedSqlTest.php` `testTheRoleMatrixHasARowPerKeyTable`,
+  `testEachKeyGrantBlockIsDocumentedPerEngine`, `testEachKeyTriggerBlockIsDocumentedPerEngine`
+- `tests/Integration/Stores/DatabaseAuditStoreTest.php` `testAnEncryptedRecordWritesItsKeyUsesWithIt`,
+  `testAnEnvelopeWithoutAUuidKeyKeepsTheSingleInsert`, `testAFailedKeyUseRollsTheEntryBack`,
+  `testInsideAHostTheKeyUsesShareTheSavepoint`, `testAPrunedIdWithSurvivingKeyUsesIsAlreadyPruned`
+- `tests/Performance/EncryptedWriteBudgetTest.php` `testAnUnencryptedRecordKeepsItsSingleInsert`,
+  `testAnExistingOwnerAddsOneLookupAndOneKeyUseInsertInOneTransaction`, `testAFirstOwnerAddsTheSessionsCreation`
+- `tests/Feature/Keys/KeySessionTest.php` `testInMemorySqliteUsesTheStorageConnection`,
+  `testTheSessionIsTheWriteConfiguration`, `testSqliteInsideAHostTransactionUsesTheStorageConnection`
+- `tests/Integration/Keys/KeySessionEnginesTest.php` `testAKeySurvivesTheHostTransactionsRollback`,
+  `testTheSessionWritesOnTheWriterNotAReplica`
+- `tests/Feature/Keys/KeyUsesTest.php` `testRowsAreInsertedUnderThePlaceholderLimit`,
+  `testADuplicateRowSurfacesAsAViolation`
+- `tests/Feature/Lifecycle/ImportWriterTest.php` `testEachChunkInsertsItsKeyUses`
 
 ## Change Triggers
 
@@ -940,6 +1250,7 @@ Update this note when any of the following change:
 - a column, its type, its length or its nullability, in any of the package's tables
 - an integrity table's columns or indexes
 - a lifecycle table's columns, its indexes or its seeded row
+- a key table's columns, its indexes, the columns a key update may change, or a transition the key triggers allow
 - the lifecycle lock protocol: the lock statement, the isolation, what is read after it or what is retried
 - what a prune deletes beside an entry, on which connection, or how the SQLite delete triggers are lifted
 - how an import inserts, how many rows a statement holds, or what a tombstone check reads
@@ -955,4 +1266,5 @@ Update this note when any of the following change:
 - a grant or a trigger in the documented SQL
 - the columns written after a seal is inserted
 - how the store inserts, opens a savepoint or resolves a duplicate
+- how an entry's key uses are written with it, or where a key is created
 - a model write path, or one the query builder forwards

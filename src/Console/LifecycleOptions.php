@@ -12,15 +12,16 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
 
 /**
  * Reads the options the lifecycle commands share: the authority an operation is
- * asked for on, a reference given as `type:id`, and an instant given as an
+ * asked for on, the owner an erasure or a reinstatement names by its `type` and
+ * `id` arguments, a reference given as `type:id`, and an instant given as an
  * ISO-8601 time or a date.
  *
  * The authority is what the shell asserts, and proves nothing of who runs the
  * command: `--by-type` and `--by-id` name the operator, `--reason` a
  * machine-readable reason code and `--reference`, when given, the ticket or
- * case the operation answers to. Each option missing or malformed is refused
- * with an `InvalidArgumentException` that names the option and never the value
- * given, so a command can print it as it is.
+ * case the operation answers to. Each option or argument missing or malformed
+ * is refused with an `InvalidArgumentException` that names it and never the
+ * value given, so a command can print it as it is.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,6 +38,9 @@ final class LifecycleOptions
 
     /** @var string Why an option that names no reference is refused, by the option. */
     private const string NOT_A_REFERENCE = 'The --%s option must name a reference as `type:id`, each part 1 to 191 characters with no control characters.';
+
+    /** @var string Why arguments that name no owner are refused. */
+    private const string NOT_AN_OWNER = 'The owner must be named by its type and id, each 1 to 191 characters with no control characters.';
 
     /** @var string Why an external reference that is not one is refused, by its longest length. */
     private const string NOT_A_TICKET = 'The --reference option must be 1 to %d characters, with no control characters.';
@@ -86,6 +90,27 @@ final class LifecycleOptions
             return new Authority($operator, $reason, is_string($reference) ? $reference : null);
         } catch (\InvalidArgumentException) {
             throw new \InvalidArgumentException(sprintf(self::NOT_A_TICKET, Authority::MAX_EXTERNAL_REFERENCE_CHARACTERS));
+        }
+    }
+
+    /**
+     * The owner the command's `type` and `id` arguments name together, each
+     * given, 1 to 191 characters with no control characters.
+     *
+     * @param  \Illuminate\Console\Command  $command
+     * @return \SineMacula\Laravel\AuditLog\Records\Reference
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function owner(Command $command): Reference
+    {
+        $type = $command->argument('type');
+        $id   = $command->argument('id');
+
+        try {
+            return is_string($type) && is_string($id) ? Reference::of($type, $id) : throw new \InvalidArgumentException(self::NOT_AN_OWNER);
+        } catch (\InvalidArgumentException) {
+            throw new \InvalidArgumentException(self::NOT_AN_OWNER);
         }
     }
 

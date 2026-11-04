@@ -23,6 +23,7 @@ use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Querying\Enums\ReadRefusal;
+use SineMacula\Laravel\AuditLog\Querying\FieldDisclosure;
 use SineMacula\Laravel\AuditLog\Querying\ReadTerms;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use SineMacula\Laravel\AuditLog\Querying\Viewer;
@@ -138,10 +139,12 @@ final class AccessRecorderTest extends TestCase
         self::assertNull($records[0]['reason']);
         self::assertSame(['App\Models\User', '7'], [$records[0]['actor_type'], $records[0]['actor_id']]);
         self::assertSamePropertyKeys(
-            ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'outcome', '_audit'],
+            ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'reveal', 'fields', 'outcome', '_audit'],
             self::propertiesOf($records[0]),
         );
         self::assertSame(2, self::propertiesOf($records[0])['returned']);
+        self::assertFalse(self::propertiesOf($records[0])['reveal']);
+        self::assertSameProperties(['encrypted' => 2, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0], self::propertiesOf($records[0])['fields']);
     }
 
     /**
@@ -226,6 +229,27 @@ final class AccessRecorderTest extends TestCase
 
         self::assertIsArray($descriptor);
         self::assertSame([ArtifactKind::DISCLOSURE->value, 2], [$descriptor['kind'], $descriptor['count']]);
+    }
+
+    /**
+     * The disclosure attachment keeps the owner whose data the read's entries
+     * hold among its normalised filters, and the record's own properties hold
+     * only the keyed fingerprint of them, never the owner.
+     *
+     * @return void
+     */
+    public function testTheDisclosureAttachmentHoldsTheOwnerHoldingData(): void
+    {
+        $owner   = Reference::of('App\Models\User', 'owner_9917');
+        $filters = TrailFilters::none()->withHoldingDataOf($owner);
+
+        $finalised  = $this->recordUnder(AccessScope::all(), $filters);
+        $disclosure = $this->disclosureOf($finalised->record->id);
+
+        self::assertSame($filters->normalised(), $disclosure['filters']);
+        self::assertSame(['App\Models\User', 'owner_9917'], $disclosure['filters']['holding_data_of']);
+        self::assertSame(self::termsOf($filters, AccessScope::all())->queryFingerprint, $finalised->record->properties['query_fingerprint'] ?? null);
+        self::assertStringNotContainsString('owner_9917', json_encode($finalised->record->properties, JSON_THROW_ON_ERROR));
     }
 
     /**
@@ -594,7 +618,8 @@ final class AccessRecorderTest extends TestCase
     private function recordUnder(?AccessScope $scope, ?TrailFilters $filters = null, Outcome $outcome = Outcome::SUCCESS, ?string $reason = null): FinalisedRecord
     {
         $terms    = ReadTerms::of(app(KeyRing::class)->signingKey(), $filters ?? TrailFilters::none(), $scope);
-        $evidence = AccessEvidence::forPage($terms, ClosurePolicy::class, false, null, 50, self::RETURNED, $outcome);
+        $fields   = new FieldDisclosure($scope?->revealsEncryptedFields() ?? false, 2, 0, 0, 0);
+        $evidence = AccessEvidence::forPage($terms, ClosurePolicy::class, false, null, 50, self::RETURNED, $fields, $outcome);
 
         return app(AccessRecorder::class)->record(PackageActivity::TRAIL_READ, Viewer::of($this->viewer()), $scope, $evidence, $outcome, $reason);
     }

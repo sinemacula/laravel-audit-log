@@ -32,6 +32,14 @@ invents a record changes what the log is evidence of, so each of those limits is
   through `encryptString()` and `decryptString()`, never PHP serialisation. The row's id is the record's id, and a row
   whose envelope holds another is refused as `id_mismatch`.
 - The spill and the outbox hold personal data, and `threat-model.md` says what follows from that.
+- A record is sealed at capture, so the outbox row and the spill line hold an encrypted field's envelope, never its
+  plaintext, and every destination receives the envelope as stored. A drained or replayed record is stored through
+  the store like any other, so `DatabaseAuditStore` writes its key uses with its entry, at the drain or the replay;
+  nothing is written to the key uses while a record waits.
+- Pending deliveries and erasure: an erasure refuses while the outbox holds rows created before the erasure started,
+  failed ones included, since a failed row can still be replayed, unless it accepts them with `--pending`. A record
+  delivered after an erasure commits holds envelopes under keys already destroyed, so its owner's fields read `erased`
+  by construction, and a hold protects a record only once it is stored, never while it waits in the outbox or a spill.
 - A record captured from an event is delivered with its capture's signal, `Delivery\CaptureSignal`, and follows the
   `REPORT` rule whatever `failure.mode` says. A record with an attachment, a bulk operation's or a read's, is
   delivered as one bundle, and only to a store that keeps attachments.
@@ -398,8 +406,9 @@ else does yet. A projection is never the integrity artefact.
 - `src/Delivery/Replayer.php`: `spill()`, `outbox()`; `src/Delivery/SpillReader.php`: `lines()`, `extract()`;
   `src/Delivery/SpillLine.php`, `src/Delivery/ReplayResult.php`: `pruned()`, `src/Console/ReplayCommand.php`.
 - `src/Lifecycle/PruneTombstones.php`; `src/Delivery/DrainResult.php`: `pruned()`;
-  `src/Stores/RecordConflictException.php`: `alreadyPruned()`; `src/Lifecycle/PendingDeliveries.php`;
+  `src/Stores/RecordConflictException.php`: `alreadyPruned()`; `src/Lifecycle/PendingDeliveries.php`: `olderThan()`;
   `src/Lifecycle/AuditImporter.php`.
+- `src/Keys/KeyUses.php`, `src/Records/EnvelopeKeys.php`; `src/Lifecycle/Eraser.php`.
 - `src/Records/EnvelopeCodec.php`: `encode()`, `decode()`, `MAX_BYTES`, `MAX_ENCODED_BYTES`;
   `src/Records/EnvelopeRejectedException.php`, `src/Records/Enums/EnvelopeFailure.php`.
 - `src/Stores/FailureSpill.php`: `MARKER`, `line()`; `src/Stores/FailureSettings.php`,
@@ -578,6 +587,13 @@ else does yet. A projection is never the integrity artefact.
 - `tests/Feature/Lifecycle/PrunerTest.php` `testAPendingDeliverySurvivesAndIsCounted`,
   `testArtifactsAndReceiptsGoWithTheirEntries`, `testAFailedDeliveryKeepsItsEntryUntilReplayed`
 - `tests/Feature/Lifecycle/AuditImporterTest.php` `testImportedRowsAreNotDispatchedOrDelivered`, `testItRefusesItsOwnSource`
+- `tests/Feature/Keys/KeyUsesPathsTest.php` `testTheOutboxDrainWritesKeyUses`, `testSpillReplayWritesKeyUses`
+- `tests/Performance/EncryptedWriteBudgetTest.php` `testTheOutboxPathEncryptsAtCaptureAndWritesKeyUsesAtTheDrain`
+- `tests/Feature/Privacy/EncryptionProofsTest.php` `testASpillLineHoldsOnlyTheEnvelope`,
+  `testTheOutboxHoldsOnlyTheEnvelope`
+- `tests/Feature/Lifecycle/PendingDeliveriesTest.php` `testOlderThanCountsFailedRowsToo`
+- `tests/Feature/Lifecycle/EraserTest.php` `testAnOutboxRowOlderThanTheErasureRefusesIt`,
+  `testPendingAcceptsItAndTheDeliveredRecordIsErased`, `testAHoldProtectsARecordOnlyOnceStored`
 
 ## Change Triggers
 
@@ -595,3 +611,4 @@ Update this note when any of the following change:
 - the bundle's keys or version, what the attachment holds, or who is asked whether it keeps one
 - the pinned OCSF version, the base attributes, the fallback, or the CEF header or extension
 - what a package write guarantees, what acknowledges it, or what accepted and delivered mean
+- where a delivered record's key uses are written, or what an erasure does with the rows the outbox holds

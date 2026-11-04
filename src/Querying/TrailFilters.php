@@ -14,8 +14,8 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 /**
  * What a caller narrows a read of the trail to, validated as it is given: who
  * acted, on what, for whom and in which tenant, which codes or which codes
- * under a prefix, which categories and outcomes, when, and under which
- * correlation id.
+ * under a prefix, which categories and outcomes, when, under which correlation
+ * id, and which owner holds an encrypted fragment in each entry.
  *
  * Each dimension is replaced, never merged, by its own `with...()` method, and
  * the exact codes and a prefix are one dimension, so either replaces the other.
@@ -67,6 +67,7 @@ final readonly class TrailFilters
      * @param  ?string  $from
      * @param  ?string  $to
      * @param  ?string  $correlationId
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $holding
      */
     private function __construct(
 
@@ -102,6 +103,9 @@ final readonly class TrailFilters
 
         /** The correlation id the entries carry, or `null` for any. */
         public ?string $correlationId = null,
+
+        /** The owner whose key sealed a fragment of each entry, or `null` for any. */
+        public ?Reference $holding = null,
     ) {}
 
     /**
@@ -275,14 +279,28 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters' normalised form, its keys sorted: each reference as its type
-     * and id or `null`, each list sorted, each time an instant or `null`.
+     * The filters with the entries narrowed to those holding a fragment sealed
+     * under one of the owner's keys, whatever its tenant, category or
+     * generation, erased or not, replacing any earlier owner.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @return self
+     */
+    public function withHoldingDataOf(#[\SensitiveParameter] Reference $owner): self
+    {
+        return new self(...[...$this->fields(), 'holding' => $owner]);
+    }
+
+    /**
+     * The filters' normalised form, its keys sorted: each reference, the owner
+     * holding data included, as its type and id or `null`, each list sorted,
+     * each time an instant or `null`.
      *
      * @formatter:off
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{actor: ?array{0: string, 1: string}, categories: list<string>, correlation_id: ?string, event_prefix: ?string, events: list<string>, from: ?string, outcomes: list<string>, principal: ?array{0: string, 1: string}, subject: ?array{0: string, 1: string}, tenant: ?array{0: string, 1: string}, to: ?string}
+     * @return array{actor: ?array{0: string, 1: string}, categories: list<string>, correlation_id: ?string, event_prefix: ?string, events: list<string>, from: ?string, holding_data_of: ?array{0: string, 1: string}, outcomes: list<string>, principal: ?array{0: string, 1: string}, subject: ?array{0: string, 1: string}, tenant: ?array{0: string, 1: string}, to: ?string}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -291,17 +309,18 @@ final readonly class TrailFilters
     public function normalised(): array
     {
         return [
-            'actor'          => self::pair($this->actor),
-            'categories'     => $this->categories,
-            'correlation_id' => $this->correlationId,
-            'event_prefix'   => $this->eventPrefix,
-            'events'         => $this->events,
-            'from'           => $this->from,
-            'outcomes'       => $this->outcomes,
-            'principal'      => self::pair($this->principal),
-            'subject'        => self::pair($this->subject),
-            'tenant'         => self::pair($this->tenant),
-            'to'             => $this->to,
+            'actor'           => self::pair($this->actor),
+            'categories'      => $this->categories,
+            'correlation_id'  => $this->correlationId,
+            'event_prefix'    => $this->eventPrefix,
+            'events'          => $this->events,
+            'from'            => $this->from,
+            'holding_data_of' => self::pair($this->holding),
+            'outcomes'        => $this->outcomes,
+            'principal'       => self::pair($this->principal),
+            'subject'         => self::pair($this->subject),
+            'tenant'          => self::pair($this->tenant),
+            'to'              => $this->to,
         ];
     }
 
@@ -313,7 +332,7 @@ final readonly class TrailFilters
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{actor: ?\SineMacula\Laravel\AuditLog\Records\Reference, subject: ?\SineMacula\Laravel\AuditLog\Records\Reference, principal: ?\SineMacula\Laravel\AuditLog\Records\Reference, tenant: ?\SineMacula\Laravel\AuditLog\Records\Reference, events: list<string>, eventPrefix: ?string, categories: list<string>, outcomes: list<string>, from: ?string, to: ?string, correlationId: ?string}
+     * @return array{actor: ?\SineMacula\Laravel\AuditLog\Records\Reference, subject: ?\SineMacula\Laravel\AuditLog\Records\Reference, principal: ?\SineMacula\Laravel\AuditLog\Records\Reference, tenant: ?\SineMacula\Laravel\AuditLog\Records\Reference, events: list<string>, eventPrefix: ?string, categories: list<string>, outcomes: list<string>, from: ?string, to: ?string, correlationId: ?string, holding: ?\SineMacula\Laravel\AuditLog\Records\Reference}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -333,6 +352,7 @@ final readonly class TrailFilters
             'from'          => $this->from,
             'to'            => $this->to,
             'correlationId' => $this->correlationId,
+            'holding'       => $this->holding,
         ];
     }
 

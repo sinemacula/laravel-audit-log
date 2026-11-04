@@ -10,7 +10,6 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Ramsey\Uuid\Rfc4122\FieldsInterface;
 use Ramsey\Uuid\Uuid;
 use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
@@ -335,44 +334,83 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * With real UUIDs the id is a UUID version 7 whose leading 48 bits are the
-     * instant the activity happened, in Unix milliseconds.
+     * A captured record keeps the id it is given, the one the pipeline minted
+     * before minimising, whatever the instant, so the entry it is stored as is
+     * the entry its values were sealed for.
      *
      * @return void
      */
-    public function testTheIdIsAUuidVersion7(): void
+    public function testFromPendingKeepsTheMintedId(): void
     {
-        Str::createUuidsNormally();
+        $id     = '01932b4e-8a40-7000-8000-0000000000ff';
+        $record = AuditRecord::fromPending(self::minimalBuilder(), RecordFactory::minimisedOf(self::minimalBuilder(), null, $id), $id, 1, 'general', self::instant(), 'app-eu-1');
 
-        $id     = self::build(self::minimalBuilder())->id;
-        $fields = Uuid::fromString($id)->getFields();
-
-        self::assertInstanceOf(FieldsInterface::class, $fields);
-        self::assertSame(7, $fields->getVersion());
-        self::assertSame((int) self::instant()->format('Uv'), hexdec(substr(str_replace('-', '', $id), 0, 12)));
+        self::assertSame($id, $record->id);
+        self::assertSame($id, $record->toArray()['id']);
     }
 
     /**
-     * Fifty records captured at one frozen instant have distinct ids that sort,
-     * as strings, in the order they were captured.
+     * A builder the package gave its own id keeps it, and any other id is
+     * refused, since its values were sealed for the entry its own id names.
      *
      * @return void
      */
-    public function testRecordsCapturedInOneMillisecondSortInCaptureOrder(): void
+    public function testFromPendingRefusesAnIdOtherThanTheSnapshotsOwn(): void
     {
-        Str::createUuidsNormally();
+        $own       = '01932b4e-8a40-7000-8000-0000000000aa';
+        $minimised = RecordFactory::minimisedOf(self::minimalBuilder());
 
-        $ids = [];
+        self::assertSame($own, AuditRecord::fromPending(self::minimalBuilder()->identifiedAs($own), $minimised, $own, 1, 'general', self::instant(), 'app-eu-1')->id);
 
-        for ($i = 0; $i < 50; $i++) {
-            $ids[] = self::build(self::minimalBuilder())->id;
+        $pending = self::minimalBuilder()->identifiedAs($own);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('A record keeps the id the package gave its pending record, the one its values were sealed for.');
+
+        AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), self::ID, 1, 'general', self::instant(), 'app-eu-1');
+    }
+
+    /**
+     * Rows of `[id]`: ids that are not a lower-case UUID.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideMalformedIds(): iterable
+    {
+        yield from [
+            'empty'       => [''],
+            'upper case'  => [strtoupper(self::ID)],
+            'no hyphens'  => [str_replace('-', '', self::ID)],
+            'a byte over' => [self::ID . '0'],
+            'a newline'   => [self::ID . "\n"],
+            'not hex'     => ['01932b4e-8a40-7000-8000-00000000000g'],
+        ];
+    }
+
+    /**
+     * An id that is not a lower-case UUID is refused, captured or imported.
+     *
+     * @param  string  $id
+     * @return void
+     */
+    #[DataProvider('provideMalformedIds')]
+    public function testAMalformedIdIsRefused(string $id): void
+    {
+        $nothing = new Minimised(null, null, null);
+        $source  = RecordFactory::source();
+        $builds  = [
+            'captured' => static fn (): AuditRecord => AuditRecord::fromPending(self::minimalBuilder(), $nothing, $id, 1, 'general', self::instant(), 'app-eu-1'),
+            'imported' => static fn (): AuditRecord => AuditRecord::fromImport(self::importBuilder(), $nothing, 1, 'general', self::SOURCE_OCCURRED_AT, null, $source, $id),
+        ];
+
+        foreach ($builds as $label => $build) {
+            try {
+                $build();
+                self::fail(sprintf('Expected the %s record to refuse the id.', $label));
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('A record\'s id must be a lower-case UUID.', $exception->getMessage(), $label);
+            }
         }
-
-        $sorted = $ids;
-        sort($sorted, SORT_STRING);
-
-        self::assertSame($ids, $sorted);
-        self::assertCount(50, array_unique($ids));
     }
 
     /**
@@ -410,7 +448,7 @@ final class AuditRecordTest extends TestCase
     public function testTheEventVersionAndCategoryAreTheCallers(): void
     {
         $pending = self::minimalBuilder();
-        $record  = AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 7, 'finance', self::instant(), 'app-eu-1');
+        $record  = AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), self::ID, 7, 'finance', self::instant(), 'app-eu-1');
 
         self::assertSame(7, $record->eventVersion);
         self::assertSame('finance', $record->category);
@@ -460,7 +498,7 @@ final class AuditRecordTest extends TestCase
     {
         $pending = self::importBuilder();
         $source  = RecordFactory::source('legacy-0042', str_repeat('c0', 32));
-        $record  = AuditRecord::fromImport($pending, RecordFactory::minimisedOf($pending), 3, 'finance', self::SOURCE_OCCURRED_AT, 'queue', $source, self::importedAt());
+        $record  = AuditRecord::fromImport($pending, RecordFactory::minimisedOf($pending), 3, 'finance', self::SOURCE_OCCURRED_AT, 'queue', $source, self::ID);
 
         self::assertSame('imported', $record->provenance);
         self::assertSame(RecordVersion::CURRENT, $record->recordVersion);
@@ -505,24 +543,18 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * An imported record's id is a UUID version 7 whose leading 48 bits are the
-     * instant it was imported, never the instant its activity happened, so
-     * imported ids sort near their recording.
+     * An imported record keeps the id the import minted before minimising,
+     * never one of the time its activity happened.
      *
      * @return void
      */
-    public function testAnImportedRecordsIdIsDrawnAtImport(): void
+    public function testFromImportKeepsTheMintedId(): void
     {
-        Str::createUuidsNormally();
+        $id     = '01932b4e-8a40-7000-8000-0000000000bb';
+        $record = AuditRecord::fromImport(self::importBuilder(), new Minimised(null, null, null), 1, 'finance', self::SOURCE_OCCURRED_AT, 'http', RecordFactory::source(), $id);
 
-        $record = self::import(self::importBuilder());
-        $fields = Uuid::fromString($record->id)->getFields();
-        $millis = hexdec(substr(str_replace('-', '', $record->id), 0, 12));
-
-        self::assertInstanceOf(FieldsInterface::class, $fields);
-        self::assertSame(7, $fields->getVersion());
-        self::assertSame((int) self::importedAt()->format('Uv'), $millis);
-        self::assertNotSame((int) (new \DateTimeImmutable(self::SOURCE_OCCURRED_AT))->format('Uv'), $millis);
+        self::assertSame($id, $record->id);
+        self::assertSame(self::SOURCE_OCCURRED_AT, $record->occurredAt);
     }
 
     /**
@@ -605,7 +637,7 @@ final class AuditRecordTest extends TestCase
                 self::SOURCE_OCCURRED_AT,
                 'http',
                 RecordFactory::source(),
-                self::importedAt(),
+                self::ID,
             ),
         ];
 
@@ -829,7 +861,8 @@ final class AuditRecordTest extends TestCase
         $pending->fillClient('203.0.113.7', 'Mozilla/5.0');
         $pending->fillContext(['raw_context' => 'raw']);
 
-        $record = AuditRecord::fromPending($pending, new Minimised(['kept' => 'property'], ['kept' => 'context'], '203.0.113.0'), 1, 'general', self::instant(), 'app-eu-1');
+        $minimised = new Minimised(['kept' => 'property'], ['kept' => 'context'], '203.0.113.0');
+        $record    = AuditRecord::fromPending($pending, $minimised, self::ID, 1, 'general', self::instant(), 'app-eu-1');
 
         self::assertSame('203.0.113.0', $record->ip);
         self::assertSame(['kept' => 'context'], $record->context);
@@ -850,7 +883,7 @@ final class AuditRecordTest extends TestCase
         $pending->fillClient('203.0.113.7', 'Mozilla/5.0');
         $pending->fillContext(['raw_context' => 'raw']);
 
-        $record = AuditRecord::fromPending($pending, new Minimised(null, null, null), 1, 'general', self::instant(), 'app-eu-1');
+        $record = AuditRecord::fromPending($pending, new Minimised(null, null, null), self::ID, 1, 'general', self::instant(), 'app-eu-1');
 
         self::assertNull($record->ip);
         self::assertNull($record->context);
@@ -1045,7 +1078,7 @@ final class AuditRecordTest extends TestCase
 
         $pending = self::minimalBuilder();
 
-        AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 1, 'general', self::instant(), $sourceId, $sourceRegion);
+        AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), self::ID, 1, 'general', self::instant(), $sourceId, $sourceRegion);
     }
 
     /**
@@ -1060,9 +1093,9 @@ final class AuditRecordTest extends TestCase
     {
         $minimised = RecordFactory::minimisedOf(self::minimalBuilder());
 
-        $withRegion    = AuditRecord::fromPending(self::minimalBuilder(), $minimised, 1, 'general', self::instant(), 'app-eu-1', 'eu-west-2');
-        $withoutRegion = AuditRecord::fromPending(self::minimalBuilder(), $minimised, 1, 'general', self::instant(), 'app-eu-1');
-        $longest       = AuditRecord::fromPending(self::minimalBuilder(), $minimised, 1, 'general', self::instant(), str_repeat('é', 64), str_repeat('é', 32));
+        $withRegion    = AuditRecord::fromPending(self::minimalBuilder(), $minimised, self::ID, 1, 'general', self::instant(), 'app-eu-1', 'eu-west-2');
+        $withoutRegion = AuditRecord::fromPending(self::minimalBuilder(), $minimised, self::ID, 1, 'general', self::instant(), 'app-eu-1');
+        $longest       = AuditRecord::fromPending(self::minimalBuilder(), $minimised, self::ID, 1, 'general', self::instant(), str_repeat('é', 64), str_repeat('é', 32));
 
         self::assertSame(['app-eu-1', 'eu-west-2'], [$withRegion->sourceId, $withRegion->sourceRegion]);
         self::assertSame(['app-eu-1', null], [$withoutRegion->sourceId, $withoutRegion->sourceRegion]);
@@ -1253,7 +1286,7 @@ final class AuditRecordTest extends TestCase
 
         foreach ($minimisations as $label => $minimised) {
             try {
-                AuditRecord::fromPending(self::minimalBuilder()->withManifest($manifest), $minimised, 1, 'finance', self::instant(), 'app-eu-1', null, $attachment);
+                AuditRecord::fromPending(self::minimalBuilder()->withManifest($manifest), $minimised, self::ID, 1, 'finance', self::instant(), 'app-eu-1', null, $attachment);
                 self::fail("Expected a record with {$label} to be refused.");
             } catch (\LogicException $exception) {
                 self::assertSame(self::UNBOUND, $exception->getMessage(), $label);
@@ -1561,7 +1594,8 @@ final class AuditRecordTest extends TestCase
 
     /**
      * The imported record of the builder, of the occurrence time and origin
-     * given, from the factory's source, imported at the import time.
+     * given, from the factory's source, under an id drawn at the import time,
+     * as the import builder mints it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  string  $occurredAt
@@ -1570,7 +1604,9 @@ final class AuditRecordTest extends TestCase
      */
     private static function import(PendingRecord $pending, string $occurredAt = self::SOURCE_OCCURRED_AT, ?string $origin = 'http'): AuditRecord
     {
-        return AuditRecord::fromImport($pending, RecordFactory::minimisedOf($pending), 1, 'finance', $occurredAt, $origin, RecordFactory::source(), self::importedAt());
+        $id = Str::uuid7(self::importedAt())->toString();
+
+        return AuditRecord::fromImport($pending, RecordFactory::minimisedOf($pending, null, $id), 1, 'finance', $occurredAt, $origin, RecordFactory::source(), $id);
     }
 
     /**
@@ -1585,7 +1621,8 @@ final class AuditRecordTest extends TestCase
 
     /**
      * The captured record of the builder, as the golden record is built, with
-     * the attachment given.
+     * the attachment given, under the id the pipeline would mint: the builder's
+     * own, or a UUID version 7 of the instant.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\DateTimeInterface  $occurredAt
@@ -1594,7 +1631,10 @@ final class AuditRecordTest extends TestCase
      */
     private static function build(PendingRecord $pending, ?\DateTimeInterface $occurredAt = null, ?Attachment $attachment = null): AuditRecord
     {
-        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 2, 'finance', $occurredAt ?? self::instant(), 'app-eu-1', 'eu-west-2', $attachment);
+        $occurredAt ??= self::instant();
+        $id = $pending->snapshot()->id ?? Str::uuid7($occurredAt)->toString();
+
+        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending, null, $id), $id, 2, 'finance', $occurredAt, 'app-eu-1', 'eu-west-2', $attachment);
     }
 
     /**

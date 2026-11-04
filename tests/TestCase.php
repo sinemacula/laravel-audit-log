@@ -14,6 +14,7 @@ use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
@@ -58,6 +59,9 @@ abstract class TestCase extends OrchestraTestCase
         'audit-log.lifecycle.holds_table'          => LifecycleTables::DEFAULT_HOLDS,
         'audit-log.lifecycle.lock_table'           => LifecycleTables::DEFAULT_LOCK,
         'audit-log.import.batches_table'           => LifecycleTables::DEFAULT_IMPORT_BATCHES,
+        'audit-log.privacy.subject_keys_table'     => KeyTables::DEFAULT_SUBJECT_KEYS,
+        'audit-log.privacy.owner_erasures_table'   => KeyTables::DEFAULT_OWNER_ERASURES,
+        'audit-log.privacy.key_uses_table'         => KeyTables::DEFAULT_KEY_USES,
     ];
 
     /** @var array<string, true> Worker databases this process has created. */
@@ -138,23 +142,24 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migrations so the eleven tables, the entries,
+     * Run the package's shipped migrations so the fourteen tables, the entries,
      * artifacts, outbox, deliveries, checkpoints, checkpoint members, integrity
-     * state, lifecycle journal, holds, lifecycle lock and import batches, exist
-     * for tests that use them, each on the connection its settings name when
-     * they run.
+     * state, lifecycle journal, holds, lifecycle lock, import batches, subject
+     * keys, owner erasures and key uses, exist for tests that use them, each on
+     * the connection its settings name when they run.
      *
      * A test may point the storage settings elsewhere once the tables exist;
      * `tearDown()` puts them back before the migrations are rolled back. On a
      * persistent database (MySQL, PostgreSQL) creating and dropping the tables
-     * costs more than most tests themselves, so while all eleven are on the
+     * costs more than most tests themselves, so while all fourteen are on the
      * worker's connection they are kept from one test to the next. Each test
      * starts by comparing their schema and migration records with what the
      * migrations left: when they match it deletes their rows, otherwise it
      * migrates them afresh. The rows the migrations seed are the exception: the
      * lifecycle lock's one row and the installation id are put back, as a fresh
-     * migration would leave them. When any table is on another connection, all
-     * eleven are migrated for the test and dropped when it ends.
+     * migration would leave them; the key tables seed none. When any table is
+     * on another connection, all fourteen are migrated for the test and dropped
+     * when it ends.
      *
      * @return void
      */
@@ -270,6 +275,9 @@ abstract class TestCase extends OrchestraTestCase
             [$storage, LifecycleTables::holdsTable()],
             [$storage, LifecycleTables::lockTable()],
             [$storage, LifecycleTables::importBatchesTable()],
+            [$storage, KeyTables::subjectKeysTable()],
+            [$storage, KeyTables::ownerErasuresTable()],
+            [$storage, KeyTables::keyUsesTable()],
         ];
     }
 

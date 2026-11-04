@@ -146,8 +146,8 @@ trait SearchesForSecrets
             $value instanceof \Throwable => self::partsOfThrowable($value),
             $value instanceof \ArrayObject,
             $value instanceof \SplObjectStorage,
-            $value instanceof \WeakMap => [iterator_to_array(self::entriesOf($value), false), self::propertiesOf($value)],
-            default                    => self::propertiesOf($value),
+            $value instanceof \WeakMap => [iterator_to_array(self::entriesOf($value), false), self::objectPropertiesOf($value)],
+            default                    => self::objectPropertiesOf($value),
         };
     }
 
@@ -187,7 +187,7 @@ trait SearchesForSecrets
             }
         }
 
-        return [$throwable->getMessage(), $throwable->getTraceAsString(), $throwable->getPrevious(), $arguments, self::propertiesOf($throwable)];
+        return [$throwable->getMessage(), $throwable->getTraceAsString(), $throwable->getPrevious(), $arguments, self::objectPropertiesOf($throwable)];
     }
 
     /**
@@ -216,7 +216,7 @@ trait SearchesForSecrets
      * @param  object  $value
      * @return list<mixed>
      */
-    private static function propertiesOf(object $value): array
+    private static function objectPropertiesOf(object $value): array
     {
         $properties = [];
 

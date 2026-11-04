@@ -1,0 +1,275 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace SineMacula\Laravel\AuditLog\Keys;
+
+use Illuminate\Database\Connection;
+use Illuminate\Database\QueryException;
+use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
+use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
+use SineMacula\Laravel\AuditLog\Records\Reference;
+
+/**
+ * The lock that makes a key creation and an erasure or a reinstatement of the
+ * same owner exclude each other, so a key is never created for an owner while
+ * that owner is being erased: an advisory lock, never a row lock, since an
+ * owner's first key has no row to lock and a row lock would need privileges the
+ * writer never holds.
+ *
+ * PostgreSQL takes `pg_advisory_xact_lock()` inside a transaction, which holds
+ * it until the transaction ends; asking outside one is refused. Its wait is
+ * bounded only when asked, by `set local lock_timeout` before it, since that
+ * setting bounds every later lock of the transaction too: the key creator's few
+ * statements are bounded, and an erasure's are not. MySQL takes `get_lock()` on
+ * the session, waiting at most its wait whoever asks, and releases it with
+ * `release_lock()` once the transaction has committed or rolled back. SQLite
+ * takes nothing: its one writer already serialises the transactions, which is
+ * why a key creation reads and inserts in one. A lock not granted within its
+ * wait is an `OwnerLockTimeoutException`, which names neither the owner nor the
+ * lock.
+ *
+ * Order is always the lifecycle lock first, then the owner's. The lock's key is
+ * the signed 64-bit integer of the first 8 bytes of the SHA-256 of the owner's
+ * canonical encoding, and its name `audit_log_owner_` and the first 32 hex
+ * characters of the same digest, 48 characters, within MySQL's 64.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+final readonly class OwnerLock
+{
+    /** @var int Longest wait for an owner's lock, in seconds. */
+    public const int WAIT_SECONDS = 10;
+
+    /** @var string What every lock's name starts with. */
+    public const string NAME_PREFIX = 'audit_log_owner_';
+
+    /** @var int The hex characters of the digest a lock's name keeps. */
+    private const int NAME_DIGEST_CHARACTERS = 32;
+
+    /** @var int The bytes of the digest a lock's key is read from. */
+    private const int KEY_BYTES = 8;
+
+    /** @var int Most `release_lock()` calls one release makes, one per level a retried transaction may have taken. */
+    private const int MAX_RELEASES = 5;
+
+    /**
+     * Constructor.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Database\FailureClassifier  $classifier
+     * @param  int  $waitSeconds
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function __construct(
+
+        /** Tells PostgreSQL's lock timeout from any other failure. */
+        private FailureClassifier $classifier,
+
+        /** How long a bounded wait lasts, in seconds, from 1 to `WAIT_SECONDS`. */
+        private int $waitSeconds = self::WAIT_SECONDS,
+    ) {
+        if ($waitSeconds < 1 || $waitSeconds > self::WAIT_SECONDS) {
+            throw new \InvalidArgumentException(sprintf('An owner\'s lock waits from 1 to %d seconds.', self::WAIT_SECONDS));
+        }
+    }
+
+    /**
+     * The key of an owner's lock: the signed 64-bit integer of the first 8
+     * bytes of the SHA-256 of the owner's canonical encoding.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @return int
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function key(#[\SensitiveParameter] Reference $owner): int
+    {
+        $unpacked = unpack('J', substr(self::digest($owner, true), 0, self::KEY_BYTES));
+
+        if (!is_array($unpacked) || !is_int($unpacked[1] ?? null)) {
+            throw new \UnexpectedValueException('An owner\'s lock key could not be read.');
+        }
+
+        return $unpacked[1];
+    }
+
+    /**
+     * The name of an owner's lock: `audit_log_owner_` and the first 32 hex
+     * characters of the SHA-256 of the owner's canonical encoding.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @return string
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function name(#[\SensitiveParameter] Reference $owner): string
+    {
+        return self::NAME_PREFIX . substr(self::digest($owner, false), 0, self::NAME_DIGEST_CHARACTERS);
+    }
+
+    /**
+     * Take the owner's lock on the connection, waiting for whoever holds it:
+     * inside the connection's transaction on PostgreSQL, bounded only when
+     * asked; on the session on MySQL, bounded always; and not at all on SQLite.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @param  bool  $bounded
+     * @return void
+     *
+     * @throws \LogicException
+     * @throws \SineMacula\Laravel\AuditLog\Keys\OwnerLockTimeoutException
+     */
+    public function acquire(Connection $connection, #[\SensitiveParameter] Reference $owner, bool $bounded = false): void
+    {
+        match ($connection->getDriverName()) {
+            'pgsql'  => $this->acquireOnPostgres($connection, $owner, $bounded),
+            'mysql'  => $this->acquireOnMysql($connection, $owner),
+            'sqlite' => null,
+            default  => self::refuseTheEngine($connection),
+        };
+    }
+
+    /**
+     * Release the owner's lock on MySQL, once the transaction that took it has
+     * ended, as often as the session holds it, so every attempt of a retried
+     * transaction is released; elsewhere the transaction's end released it.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @return void
+     *
+     * @throws \UnexpectedValueException
+     */
+    public function release(Connection $connection, #[\SensitiveParameter] Reference $owner): void
+    {
+        if ($connection->getDriverName() !== 'mysql') {
+            return;
+        }
+
+        $name = self::name($owner);
+
+        for ($release = 0; $release < self::MAX_RELEASES; $release++) {
+            if (self::answer($connection->selectOne('select release_lock(?) as answer', [$name], false)) !== 1) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * Take the advisory lock of the transaction, its wait bounded by a local
+     * lock timeout when asked; a wait past the timeout is refused naming
+     * neither the owner nor the lock, and any other failure is thrown without
+     * its bindings.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @param  bool  $bounded
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    private function acquireOnPostgres(Connection $connection, #[\SensitiveParameter] Reference $owner, bool $bounded): void
+    {
+        if ($connection->transactionLevel() === 0) {
+            throw new \LogicException('On PostgreSQL an owner\'s lock is held by a transaction, and is taken only inside one.');
+        }
+
+        try {
+            if ($bounded) {
+                $connection->statement(sprintf('set local lock_timeout = \'%ds\'', $this->waitSeconds));
+            }
+
+            $connection->select('select pg_advisory_xact_lock(?)', [self::key($owner)], false);
+        } catch (QueryException $failure) { // @phpstan-ignore catch.neverThrown
+            $this->refuseTheFailure($failure);
+        }
+    }
+
+    /**
+     * Refuse a failed wait for PostgreSQL's lock: past its timeout, naming
+     * neither the owner nor the lock, and otherwise as the failure was, without
+     * its bindings.
+     *
+     * @param  \Illuminate\Database\QueryException  $failure
+     * @return never
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Keys\OwnerLockTimeoutException
+     */
+    private function refuseTheFailure(QueryException $failure): never
+    {
+        if ($this->classifier->isLockTimeout($failure)) {
+            throw OwnerLockTimeoutException::after($this->waitSeconds);
+        }
+
+        FailureClassifier::rethrowMasked($failure);
+    }
+
+    /**
+     * Take the session's named lock, refusing an answer other than granted: `0`
+     * when the wait ran out and `null` when the server could not take it.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Keys\OwnerLockTimeoutException
+     */
+    private function acquireOnMysql(Connection $connection, #[\SensitiveParameter] Reference $owner): void
+    {
+        if (self::answer($connection->selectOne('select get_lock(?, ?) as answer', [self::name($owner), $this->waitSeconds], false)) !== 1) {
+            throw OwnerLockTimeoutException::after($this->waitSeconds);
+        }
+    }
+
+    /**
+     * Refuse an engine the owner's lock is not taken on.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return never
+     *
+     * @throws \LogicException
+     */
+    private static function refuseTheEngine(Connection $connection): never
+    {
+        throw new \LogicException(sprintf('An owner\'s lock is taken on MySQL, PostgreSQL or SQLite, and the connection is %s.', $connection->getDriverName()));
+    }
+
+    /**
+     * The SHA-256 of the owner's canonical encoding, raw or in lower-case hex.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @param  bool  $raw
+     * @return string
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function digest(#[\SensitiveParameter] Reference $owner, bool $raw): string
+    {
+        return hash('sha256', CanonicalEncoder::encode([$owner->type, $owner->id]), $raw);
+    }
+
+    /**
+     * The integer a lock function answered in the row, as an integer or its
+     * decimal string, or `null` for anything else, such as SQL's `NULL`.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $row
+     * @return ?int
+     */
+    private static function answer(#[\SensitiveParameter] mixed $row): ?int
+    {
+        $answer = is_object($row) ? (get_object_vars($row)['answer'] ?? null) : null;
+
+        return match (true) {
+            is_int($answer)                            => $answer,
+            is_string($answer) && ctype_digit($answer) => (int) $answer,
+            default                                    => null,
+        };
+    }
+}

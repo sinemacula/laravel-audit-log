@@ -162,7 +162,7 @@ final class JournalReplayTest extends TestCase
             'an edited column'  => [static fn (self $test) => $test->tamperJournal(2, ['reason' => 'other.reason']), Finding::JOURNAL_SIGNATURE, 2],
             'an edited digest'  => [static fn (self $test) => $test->tamperJournal(2, ['payload_digest' => str_repeat('c', 64)]), Finding::JOURNAL_SIGNATURE, 2],
             'an unknown key'    => [static fn (self $test) => $test->tamperJournal(2, ['key_id' => 'retired']), Finding::JOURNAL_KEY, 2],
-            'an unreadable row' => [static fn (self $test) => $test->tamperJournal(2, ['kind' => 'erasure']), Finding::JOURNAL_MALFORMED, 2],
+            'an unreadable row' => [static fn (self $test) => $test->tamperJournal(2, ['kind' => 'no_such_kind']), Finding::JOURNAL_MALFORMED, 2],
             'an edited hold'    => [static fn (self $test) => $test->tamperJournal(3, ['hold_id' => self::OTHER_HOLD]), Finding::JOURNAL_SIGNATURE, 3],
         ];
     }

@@ -7,12 +7,16 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Console\EraseCommand;
 use SineMacula\Laravel\AuditLog\Console\HoldCommand;
 use SineMacula\Laravel\AuditLog\Console\HoldsCommand;
 use SineMacula\Laravel\AuditLog\Console\ImportCommand;
+use SineMacula\Laravel\AuditLog\Console\KeysCommand;
 use SineMacula\Laravel\AuditLog\Console\PruneCommand;
 use SineMacula\Laravel\AuditLog\Console\ReconcileCommand;
+use SineMacula\Laravel\AuditLog\Console\ReinstateCommand;
 use SineMacula\Laravel\AuditLog\Console\ReleaseCommand;
+use SineMacula\Laravel\AuditLog\Console\RewrapCommand;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
@@ -25,7 +29,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
  * lifecycle's rules depend on, names each value of the lifecycle's enums in the
  * section that describes it and the seams it leaves, and never claims that a
  * hold, a prune or the journal stops destruction; the operations guide has a
- * row for every lifecycle command naming every option the command declares.
+ * row for every lifecycle command, the privacy commands among them, naming
+ * every option the command declares.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -61,7 +66,7 @@ final class LifecycleDocumentationTest extends TestCase
     ];
 
     /** @var list<string> What the note's seams name, each the start of a bullet of its section. */
-    private const array SEAMS = ['Erasure and the owners\' keys', 'Key destruction checked against preservation'];
+    private const array SEAMS = ['External verification of an imported bundle'];
 
     /** @var string The two guarantees, stated apart: what credentials can do, and what the evidence makes detectable. */
     private const string GUARANTEES = 'Database credentials can still destroy rows; '
@@ -136,6 +141,14 @@ final class LifecycleDocumentationTest extends TestCase
             'no savepoint'                 => ['no savepoint is ever opened'],
             'the hold first'               => ['the hold is on the batch before its first entry'],
             'a dry run creates no key'     => ['it creates no key'],
+            'the privacy codes'            => ['`audit_log.subject_erased`, `audit_log.keys_reinstated` and `audit_log.keys_rewrapped` are written after'],
+            'refusals and failures'        => ['with `journal_broken`, `erasure_failed` or `rewrap_failed`, a code and never the failure\'s message'],
+            'the erasure payload'          => ['`erasure` holds `owner_fingerprint`, `fingerprint_key`, `generation_floor`, `partial`, `pending_accepted`'],
+            'the reinstate payload'        => ['`reinstate` holds `owner_fingerprint`, `fingerprint_key` and `generation_floor`'],
+            'the rewrap payload'           => ['`rewrap` holds `run_id`, `rotate`, `keys`'],
+            'the reconciliation payload'   => ['`restore_reconciled` holds `file_sha256`, `owners`, `erased`, `already_erased`, `anchored_sequence` and `anchored_digest`'],
+            'a rewrap run reconciled once' => ['so `audit-log:reconcile` records the run once, summing the batches it finds in its window'],
+            'the reapply'                  => ['once every owner ended `complete` or `already_erased` and every line named an owner'],
         ];
     }
 
@@ -192,8 +205,8 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The note's seams name what the lifecycle leaves for later: erasure with
-     * the owners' keys, and key destruction held to preservation.
+     * The note's seams name what the lifecycle leaves for later: the external
+     * verification of an imported bundle.
      *
      * @return void
      */
@@ -255,7 +268,20 @@ final class LifecycleDocumentationTest extends TestCase
      */
     public static function provideLifecycleCommands(): iterable
     {
-        foreach ([new PruneCommand, new HoldCommand, new ReleaseCommand, new HoldsCommand, new ImportCommand, new ReconcileCommand] as $command) {
+        $commands = [
+            new PruneCommand,
+            new HoldCommand,
+            new ReleaseCommand,
+            new HoldsCommand,
+            new ImportCommand,
+            new ReconcileCommand,
+            new EraseCommand,
+            new ReinstateCommand,
+            new RewrapCommand,
+            new KeysCommand,
+        ];
+
+        foreach ($commands as $command) {
 
             $name    = (string) $command->getName();
             $options = array_map(static fn (string $option): string => '`--' . $option . '`', array_keys($command->getDefinition()->getOptions()));
@@ -285,7 +311,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The commands' rows are read from what the commands declare, all six and
+     * The commands' rows are read from what the commands declare, all ten and
      * every option, so the check above is not empty by construction.
      *
      * @return void
@@ -294,9 +320,24 @@ final class LifecycleDocumentationTest extends TestCase
     {
         $rows = iterator_to_array(self::provideLifecycleCommands());
 
-        self::assertSame(['audit-log:prune', 'audit-log:hold', 'audit-log:release', 'audit-log:holds', 'audit-log:import', 'audit-log:reconcile'], array_keys($rows));
+        self::assertSame([
+            'audit-log:prune',
+            'audit-log:hold',
+            'audit-log:release',
+            'audit-log:holds',
+            'audit-log:import',
+            'audit-log:reconcile',
+            'audit-log:erase',
+            'audit-log:reinstate',
+            'audit-log:rewrap',
+            'audit-log:keys',
+        ], array_keys($rows));
         self::assertSame(['`--dry-run`', '`--max-seconds`', '`--json`'], $rows['audit-log:prune'][1]);
-        self::assertSame(37, array_sum(array_map(static fn (array $row): int => count($row[1]), $rows)));
+        self::assertSame(
+            ['`--by-type`', '`--by-id`', '`--reason`', '`--reference`', '`--partial`', '`--pending`', '`--reapply`'],
+            $rows['audit-log:erase'][1],
+        );
+        self::assertSame(56, array_sum(array_map(static fn (array $row): int => count($row[1]), $rows)));
     }
 
     /**

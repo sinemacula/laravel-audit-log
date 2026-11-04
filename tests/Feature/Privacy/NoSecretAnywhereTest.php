@@ -869,8 +869,9 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A note with an owner the default encrypter cannot seal for is dropped,
-     * and its text is in no record or row.
+     * A note with an owner is sealed under the owner's key by the default
+     * encrypter, so the record and the row hold its envelope, and its text is
+     * in neither.
      *
      * @return void
      */
@@ -879,7 +880,8 @@ final class NoSecretAnywhereTest extends TestCase
         $record = AuditLog::event(self::CODE)->withNote(self::SECRET, Reference::of('user', '1'))->record();
         $row    = $this->storageConnection()->table(EntrySettings::table())->where('id', $record->id)->first();
 
-        self::assertSame(['_audit.note'], $record->properties['_audit']['omitted']['paths'] ?? null);
+        self::assertSame(['v', 'k', 'c'], array_keys($record->properties['_audit']['note'] ?? []));
+        self::assertArrayNotHasKey('omitted', $record->properties['_audit'] ?? []);
         self::assertHoldsNoSecret($record, 'the returned record');
         self::assertHoldsNoSecret($row, 'the stored row');
     }

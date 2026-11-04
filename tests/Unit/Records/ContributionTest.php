@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Records;
 
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -308,7 +309,8 @@ final class ContributionTest extends TestCase
     }
 
     /**
-     * The envelope of the record the builder captures.
+     * The envelope of the record the builder captures, under an id minted as
+     * the pipeline mints it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -318,7 +320,8 @@ final class ContributionTest extends TestCase
     private function captured(PendingRecord $pending): array
     {
         $occurredAt = new \DateTimeImmutable('2026-11-01 12:00:00', new \DateTimeZone('UTC'));
+        $id         = Str::uuid7($occurredAt)->toString();
 
-        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending), 1, 'finance', $occurredAt, 'app')->toArray();
+        return AuditRecord::fromPending($pending, RecordFactory::minimisedOf($pending, null, $id), $id, 1, 'finance', $occurredAt, 'app')->toArray();
     }
 }

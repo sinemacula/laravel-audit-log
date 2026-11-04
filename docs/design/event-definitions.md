@@ -17,7 +17,9 @@ application boots rather than discovered in the data.
 - Its version is from 1 to 32767 (`EventDefinition::MIN_VERSION`, `EventDefinition::MAX_VERSION`), 1 by default, and
   versions the payload contract, apart from the record's own version. Its category is a slug of 1 to 64 lower-case
   letters, digits or underscores starting with a letter, `general` by default (`EventDefinition::DEFAULT_CATEGORY`).
-- The category is stored on every row, so retention by category never consults the definitions when it prunes.
+- The category is stored on every row, so retention by category never consults the definitions when it prunes. It is
+  also part of the key unit an encrypted field is sealed under, with the owner and the record's tenant, so a hold or a
+  preservation on one category of an owner's records leaves the owner's other categories erasable.
 - A field rule (`FieldRule`) gives a path one handling (`FieldHandling`): `retain` keeps the value as key redaction left
   it, each string cut to 1024 bytes, `redact` stores it as the marker `[REDACTED]`, `pseudonymise` stores a keyed hash,
   `encrypt` stores it encrypted to its owner, and `drop` does not store it. Every handling but `retain` is terminal: it
@@ -34,8 +36,11 @@ application boots rather than discovered in the data.
 - Every `encrypt` rule names its owner: `KeyOwner::ACTOR` (`actor`), `KeyOwner::SUBJECT` (`subject`), or the path of a
   property holding a reference. An owner path names one property, without `*`, and is never the encrypted field
   itself. When the owner is absent or has no key, or a container's canonical JSON is longer than 1024 bytes, the field is
-  dropped and diagnosed, never stored in plaintext. Erasing an owner's data destroys the owner's key; the plaintext
-  references in the record (actor and subject ids) remain, and are pseudonymous rather than erased.
+  dropped and diagnosed, never stored in plaintext. Encryption needs no binding: the package's encrypter seals each
+  such field under a key of its owner's by default, and `Privacy\NoFieldEncrypter` is the explicit choice never to
+  encrypt. Erasing an owner destroys the owner's keys, so every field sealed for the owner reads `erased`; the
+  references in the record (actor, subject, principal and tenant) remain, are personal data, and are not erased, and
+  `privacy.md` lists everything else an erasure does not reach.
 - Global redaction of secret-shaped keys runs before the field rules, and `retain` never un-redacts what it redacted.
 - Two rules for one path are refused unless they are identical, which is kept once. A rule that a terminal rule with
   fewer segments may cover is unreachable and refused, in whichever order the two are added.
@@ -188,6 +193,7 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
 - `src/Definitions/EventCatalogue.php`: `define()`, `definitionFor()`, `freeze()`.
 - `src/Definitions/DefinitionSettings.php`: `requiresRegistered()`, `validate()`.
 - `src/Recorder.php`: `define()`, `accessed()`.
+- `src/Privacy/SubjectKeyEncrypter.php`, `src/Privacy/NoFieldEncrypter.php`, `src/Keys/KeyUnit.php`.
 - `src/AuditLogServiceProvider.php`: `freezeRegistrationOnceBooted()`.
 - `src/Privacy/FieldPolicy.php`: `apply()`.
 
@@ -235,6 +241,9 @@ or either is `*`. So `a.b` beneath `a` drop, `a.b.c` beneath `a.*` drop and `*.b
   `testRegistrationInAProvidersBootIsAccepted`, `testAMalformedSettingDoesNotStopBoot`
 - `tests/Integration/Octane/RegistrationRequestsTest.php` `testDefinitionsRegisteredAtBootServeEveryRequest`,
   `testDefineInARequestIsRefused`, `testRequiringRegistrationInOneRequestDoesNotReachTheNext`
+- `tests/Feature/Privacy/EncryptionProofsTest.php` `testEachOwnerFormIsEncrypted`,
+  `testNoPlaintextIsStoredForAnAbsentOrErasedOwner`
+- `tests/Feature/Lifecycle/EraserTest.php` `testAHoldOnOneCategoryLeavesAnotherUnitErasable`
 
 ## Change Triggers
 
@@ -249,3 +258,4 @@ Update this note when any of the following change:
 - when definitions may be registered, or what a conflict is
 - when `definitions.require_registered` is read, or what a malformed value does
 - what a disclosure's definition must retain
+- what an encrypted field is sealed under by default, or what an erasure leaves of a record

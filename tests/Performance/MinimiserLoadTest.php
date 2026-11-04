@@ -56,6 +56,9 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     /** @var string The code every payload is recorded under. */
     private const string CODE = 'invoice.approved';
 
+    /** @var string The id of the entry every capture here is minimised as. */
+    private const string ENTRY_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
+
     /** @var string The memory limit the tests run under. */
     private const string MEMORY_LIMIT = '512M';
 
@@ -509,7 +512,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
         $before  = memory_get_usage();
         $started = self::cpuNanoseconds();
 
-        $minimised = $minimiser->minimise($snapshot, $definition);
+        $minimised = $minimiser->minimise($snapshot, $definition, self::ENTRY_ID);
 
         $elapsed = self::cpuNanoseconds()  - $started;
         $growth  = memory_get_peak_usage() - $before;

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Access;
 
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Querying\Position;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -19,7 +20,10 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * AND the cursor, each a grouped condition of its own, so no `or` within one
  * can reach past it and a caller's filter can never widen the scope. A
  * reference matches as its type and id together; the entries of no tenant are
- * those whose tenant type and tenant id are both `null`. Column names,
+ * those whose tenant type and tenant id are both `null`. The entries holding an
+ * owner's data are those with a key use of one of the owner's keys, an `exists`
+ * over the key uses joined to the subject keys and correlated on the entry's
+ * id, so the scope still narrows them like any other filter. Column names,
  * operators and the `like` escape character are the compiler's own, and every
  * value is bound, so nothing a caller gives becomes SQL text. Times are bound
  * in UTC with six fractional digits, and no collation is ever applied, so ids
@@ -86,8 +90,8 @@ final readonly class ScopeCompiler
     /**
      * The query narrowed to the scope, then to the filters, each a grouped
      * condition of its own in that order: tenant, category, about, then the
-     * caller's filters. A denied scope is never compiled; a caller checks
-     * `isEmpty()` first.
+     * caller's filters, the owner whose data the entries hold last. A denied
+     * scope is never compiled; a caller checks `isEmpty()` first.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
@@ -107,6 +111,7 @@ final readonly class ScopeCompiler
         self::about($query, $scope);
         self::references($query, $filters);
         self::refinements($query, $filters);
+        self::holding($query, $filters);
 
         return $query;
     }
@@ -341,6 +346,62 @@ final readonly class ScopeCompiler
         }
 
         $query->where('correlation_id', '=', $filters->correlationId);
+    }
+
+    /**
+     * Narrow the query to the entries holding a fragment sealed under one of
+     * the owner's keys the filters name: an `exists` over the key uses of the
+     * entry's id joined to the subject keys of the owner, by its type and id,
+     * every key of every unit and generation, erased or not. Every column is
+     * qualified by its table, the entries by the name the query reads them
+     * under, so no column of one table is read as another's.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    private static function holding(Builder $query, TrailFilters $filters): void
+    {
+        $owner = $filters->holding;
+
+        if ($owner === null) {
+            return;
+        }
+
+        $entries = self::nameOf($query);
+        $uses    = KeyTables::keyUsesTable();
+        $keys    = KeyTables::subjectKeysTable();
+
+        $query->whereExists(static fn (Builder $exists): Builder => $exists
+            ->selectRaw('1')
+            ->from($uses)
+            ->join($keys, $keys . '.id', '=', $uses . '.key_id')
+            ->whereColumn($uses . '.entry_id', '=', $entries . '.id')
+            ->where($keys . '.owner_type', '=', $owner->type)
+            ->where($keys . '.owner_id', '=', $owner->id));
+    }
+
+    /**
+     * The name the query reads its table under: its alias when it has one,
+     * otherwise the table's own name.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @return string
+     *
+     * @throws \LogicException
+     */
+    private static function nameOf(Builder $query): string
+    {
+        if (!is_string($query->from) || $query->from === '') {
+            throw new \LogicException('An owner\'s entries are found from a query of the entries table, named as a table.');
+        }
+
+        $alias = stripos($query->from, ' as ');
+
+        return $alias === false ? $query->from : trim(substr($query->from, $alias + 4));
     }
 
     /**

@@ -10,8 +10,8 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 
 /**
  * Unit tests for the journal kind enum: its cases and their stored values, the
- * label each signs under, the kinds that carry an authority, and the kinds
- * whose payloads the pruner replays.
+ * label each signs under, the kinds that carry an authority, the privacy kinds
+ * among them, and the kinds whose payloads the pruner replays.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,6 +21,9 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 #[CoversClass(JournalKind::class)]
 final class JournalKindTest extends TestCase
 {
+    /** @var list<\SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind> The kinds an owner's keys journal. */
+    private const array PRIVACY_KINDS = [JournalKind::ERASURE, JournalKind::REINSTATE, JournalKind::REWRAP, JournalKind::RESTORE_RECONCILED];
+
     /**
      * The cases, in order, with the values the journal stores, so a renamed,
      * reordered or added case fails.
@@ -30,13 +33,17 @@ final class JournalKindTest extends TestCase
     public function testTheStoredValues(): void
     {
         self::assertSame([
-            'POLICY'          => 'policy',
-            'PRUNE_RUN'       => 'prune_run',
-            'PRUNE'           => 'prune',
-            'HOLD'            => 'hold',
-            'RELEASE'         => 'release',
-            'IMPORT_STARTED'  => 'import_started',
-            'IMPORT_FINISHED' => 'import_finished',
+            'POLICY'             => 'policy',
+            'PRUNE_RUN'          => 'prune_run',
+            'PRUNE'              => 'prune',
+            'HOLD'               => 'hold',
+            'RELEASE'            => 'release',
+            'IMPORT_STARTED'     => 'import_started',
+            'IMPORT_FINISHED'    => 'import_finished',
+            'ERASURE'            => 'erasure',
+            'REINSTATE'          => 'reinstate',
+            'REWRAP'             => 'rewrap',
+            'RESTORE_RECONCILED' => 'restore_reconciled',
         ], array_combine(
             array_map(static fn (JournalKind $kind): string => $kind->name, JournalKind::cases()),
             array_map(static fn (JournalKind $kind): string => $kind->value, JournalKind::cases()),
@@ -64,8 +71,35 @@ final class JournalKindTest extends TestCase
     }
 
     /**
-     * A hold, a release, and an import's start and finish carry the authority
-     * that asked for them; a policy, a prune run and a prune chunk carry none.
+     * The privacy kinds, each signing under a label of its own that names it,
+     * so an erasure row never verifies as a reinstatement, a rewrap or a
+     * reconciled restore, nor as any earlier kind.
+     *
+     * @return void
+     */
+    public function testEachKindSignsUnderItsOwnLabel(): void
+    {
+        self::assertSame([
+            'erasure'            => "audit-log:lifecycle:erasure:v1\n",
+            'reinstate'          => "audit-log:lifecycle:reinstate:v1\n",
+            'rewrap'             => "audit-log:lifecycle:rewrap:v1\n",
+            'restore_reconciled' => "audit-log:lifecycle:restore_reconciled:v1\n",
+        ], array_combine(
+            array_map(static fn (JournalKind $kind): string => $kind->value, self::PRIVACY_KINDS),
+            array_map(static fn (JournalKind $kind): string => $kind->label(), self::PRIVACY_KINDS),
+        ));
+
+        foreach (JournalKind::cases() as $other) {
+            foreach (self::PRIVACY_KINDS as $kind) {
+                self::assertSame($other === $kind, $other->label() === $kind->label(), $kind->value . ' and ' . $other->value);
+            }
+        }
+    }
+
+    /**
+     * A hold, a release, an import's start and finish, and each privacy kind
+     * carry the authority that asked for them; a policy, a prune run and a
+     * prune chunk carry none.
      *
      * @return void
      */
@@ -73,7 +107,37 @@ final class JournalKindTest extends TestCase
     {
         $carrying = array_values(array_filter(JournalKind::cases(), static fn (JournalKind $kind): bool => $kind->carriesAuthority()));
 
-        self::assertSame([JournalKind::HOLD, JournalKind::RELEASE, JournalKind::IMPORT_STARTED, JournalKind::IMPORT_FINISHED], $carrying);
+        self::assertSame([
+            JournalKind::HOLD, JournalKind::RELEASE, JournalKind::IMPORT_STARTED, JournalKind::IMPORT_FINISHED, JournalKind::ERASURE,
+            JournalKind::REINSTATE, JournalKind::REWRAP, JournalKind::RESTORE_RECONCILED,
+        ], $carrying);
+    }
+
+    /**
+     * An erasure, a reinstatement, a rewrap batch and a reconciled restore are
+     * each asked for by an operator, so each carries the authority that asked.
+     *
+     * @return void
+     */
+    public function testThePrivacyKindsCarryAnAuthority(): void
+    {
+        foreach (self::PRIVACY_KINDS as $kind) {
+            self::assertTrue($kind->carriesAuthority(), $kind->value);
+        }
+    }
+
+    /**
+     * The pruner never replays a privacy kind's payload: an erasure, a
+     * reinstatement, a rewrap and a reconciled restore decide nothing a prune
+     * keeps.
+     *
+     * @return void
+     */
+    public function testNoPrivacyKindIsReplayedForItsPayload(): void
+    {
+        foreach (self::PRIVACY_KINDS as $kind) {
+            self::assertFalse($kind->readsPayloadToReplay(), $kind->value);
+        }
     }
 
     /**

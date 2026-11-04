@@ -21,6 +21,8 @@ use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\OmissionLog;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
+use SineMacula\Laravel\AuditLog\Privacy\SealingScope;
+use SineMacula\Laravel\AuditLog\Privacy\TypedPlaintext;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Privacy\MalformedFieldEncrypter;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -48,6 +50,12 @@ final class FieldPolicyTest extends TestCase
 
     /** @var string The value that must reach no diagnostic. */
     private const string PLANTED = 's3cr3t';
+
+    /** @var string The id of the entry every value here is sealed for. */
+    private const string ENTRY_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
+
+    /** @var string The id of the log every value here is sealed for. */
+    private const string LOG_ID = 'app-eu-1';
 
     /** @var string A value's shape once pseudonymised: a fingerprint and an HMAC. */
     private const string PSEUDONYM_SHAPE = '/\A[0-9a-f]{16}:[0-9a-f]{64}\z/';
@@ -141,7 +149,7 @@ final class FieldPolicyTest extends TestCase
             FieldHandling::RETAIN       => ['field' => $value],
             FieldHandling::REDACT       => ['field' => Redactor::MARKER],
             FieldHandling::PSEUDONYMISE => ['field' => self::hasher()->field($value)],
-            FieldHandling::ENCRYPT      => ['field' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode(is_string($value) ? $value : CanonicalEncoder::encode($value))]],
+            FieldHandling::ENCRYPT      => ['field' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode(CanonicalEncoder::encode($value))]],
             FieldHandling::DROP         => [],
         };
 
@@ -653,8 +661,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * A string is cut to the cap before the encrypter sees it, without
-     * splitting a character.
+     * A string is cut to the cap before the encrypter sees it, its encoding
+     * counted, without splitting a character.
      *
      * @return void
      */
@@ -666,15 +674,39 @@ final class FieldPolicyTest extends TestCase
         $this->apply(['field' => str_repeat('a', 2000), 'wide' => 'a' . str_repeat('é', 1000)], $definition, actor: self::actor(), encrypter: $encrypter);
 
         self::assertSame(
-            [str_repeat('a', 1024), 'a' . str_repeat('é', 511)],
+            ['"' . str_repeat('a', 1022) . '"', '"a' . str_repeat('é', 510) . '"'],
             array_map(static fn (array $call): string => $call[1], $encrypter->calls()),
         );
     }
 
     /**
-     * Rows of `[list element bytes]`: a list whose canonical encoding is one
-     * byte short of the cap, and exactly the cap, the brackets and quotes being
-     * the four bytes more than its one string.
+     * A string is cut before the encrypter sees it to the longest prefix whose
+     * encoding fits 1024 bytes, quotes and escapes counted, without splitting a
+     * character, and the field is kept rather than diagnosed.
+     *
+     * @return void
+     */
+    public function testAStringIsCutSoItsEncodingFits(): void
+    {
+        $encrypter  = new RecordingFieldEncrypter;
+        $definition = EventDefinition::for('a.b')->encrypt('quoted', KeyOwner::ACTOR)->encrypt('exact', KeyOwner::ACTOR)->encrypt('over', KeyOwner::ACTOR);
+        $values     = ['quoted' => str_repeat('"', 600), 'exact' => str_repeat('b', 1022), 'over' => str_repeat('c', 1023)];
+
+        $result = $this->apply($values, $definition, actor: self::actor(), encrypter: $encrypter);
+
+        self::assertSame(
+            ['"' . str_repeat('\"', 511) . '"', '"' . str_repeat('b', 1022) . '"', '"' . str_repeat('c', 1022) . '"'],
+            array_map(static fn (array $call): string => $call[1], $encrypter->calls()),
+        );
+        self::assertSame(['quoted', 'exact', 'over'], array_keys($result));
+        self::assertNull($this->omissions->toArray());
+    }
+
+    /**
+     * Rows of `[list element bytes]`: a list whose typed plaintext, its
+     * canonical encoding, is one byte short of the limit, and exactly the
+     * limit, the brackets and quotes being the four bytes more than its one
+     * string.
      *
      * @return iterable<string, array{0: int}>
      */
@@ -687,8 +719,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * A container whose canonical encoding fits the cap reaches the encrypter
-     * whole, and nothing is omitted.
+     * A container whose encoding fits the limit reaches the encrypter whole, as
+     * its canonical encoding, and nothing is omitted.
      *
      * @param  int  $bytes
      * @return void
@@ -708,8 +740,9 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: containers whose canonical encoding is past the cap,
-     * one by a single byte and one by much more, measured in bytes.
+     * Rows of `[value]`: containers whose encoding passes the limit, one by a
+     * single byte and one by much more, measured in bytes after encoding, an
+     * escaped character costing what its escape does.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -722,13 +755,14 @@ final class FieldPolicyTest extends TestCase
             'far past the cap'      => [[str_repeat('x', 2000)]],
             'a map past the cap'    => [['a' => str_repeat('x', 2000), 'b' => 1]],
             'past it only in bytes' => [[str_repeat('é', 511)]],
+            'past it once escaped'  => [[str_repeat('"', 511)]],
         ];
     }
 
     /**
-     * A container whose canonical encoding is past the cap is removed and
-     * logged under its rule's path, rather than sealed as JSON that could never
-     * be decoded, and the encrypter never sees it.
+     * A value whose encoding passes the limit is removed and logged under its
+     * rule's path, rather than sealed as JSON that could never be decoded, and
+     * the encrypter never sees it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -747,6 +781,27 @@ final class FieldPolicyTest extends TestCase
         self::assertSame(['kept' => 'x'], $result);
         self::assertSame([], $encrypter->calls());
         self::assertSame(['count' => 1, 'paths' => ['tree']], $this->omissions->toArray());
+    }
+
+    /**
+     * A value whose encoding passes the limit only once escaped is removed
+     * without reaching the encrypter, while one whose encoding just fits is
+     * sealed, so the limit is the encoding's and never the value's.
+     *
+     * @return void
+     */
+    public function testAValueWhoseEncodingPassesTheLimitIsDroppedWithoutTheEncrypter(): void
+    {
+        $encrypter  = new RecordingFieldEncrypter;
+        $definition = EventDefinition::for('a.b')->encrypt('over', KeyOwner::ACTOR)->encrypt('fits', KeyOwner::ACTOR);
+        $fits       = [str_repeat('\\', 510)];
+
+        $result = $this->apply(['over' => ['a' => str_repeat("\t", 600)], 'fits' => $fits], $definition, actor: self::actor(), encrypter: $encrypter);
+
+        self::assertSame(['fits'], array_keys($result));
+        self::assertSame([CanonicalEncoder::encode($fits)], array_map(static fn (array $call): string => $call[1], $encrypter->calls()));
+        self::assertSame(1024, strlen($encrypter->calls()[0][1]));
+        self::assertSame(['count' => 1, 'paths' => ['over']], $this->omissions->toArray());
     }
 
     /**
@@ -779,37 +834,45 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * Rows of `[value, plaintext]`: a scalar other than a string is encoded the
-     * way a container is, and a string is sealed as it is, with no quotes.
+     * Rows of `[value, plaintext]`: every type is sealed as its canonical
+     * encoding, a string as a JSON string with its quotes, so the string
+     * `"true"` and the boolean `true` are sealed apart.
      *
      * @return iterable<string, array{0: bool|int|string|null, 1: string}>
      */
     public static function provideScalarPlaintexts(): iterable
     {
         yield from [
-            'a string'  => ['Alice', 'Alice'],
-            'an empty'  => ['', ''],
-            'an int'    => [42, '42'],
-            'a boolean' => [true, 'true'],
-            'null'      => [null, 'null'],
+            'a string'         => ['Alice', '"Alice"'],
+            'an empty string'  => ['', '""'],
+            'a string of true' => ['true', '"true"'],
+            'a string of null' => ['null', '"null"'],
+            'a string of 42'   => ['42', '"42"'],
+            'an int'           => [42, '42'],
+            'true'             => [true, 'true'],
+            'false'            => [false, 'false'],
+            'null'             => [null, 'null'],
+            'an escape'        => ['a"b\c/é', '"a\"b\\\c/é"'],
         ];
     }
 
     /**
-     * What each scalar is sealed as.
+     * What each value is sealed as: its typed plaintext, which decodes back to
+     * the value with its type.
      *
      * @param  bool|int|string|null  $value
      * @param  string  $plaintext
      * @return void
      */
     #[DataProvider('provideScalarPlaintexts')]
-    public function testAScalarIsSealedAsItsPlaintext(bool|int|string|null $value, string $plaintext): void
+    public function testThePlaintextIsTyped(bool|int|string|null $value, string $plaintext): void
     {
         $encrypter = new RecordingFieldEncrypter;
 
         $this->apply(['field' => $value], EventDefinition::for('a.b')->encrypt('field', KeyOwner::ACTOR), actor: self::actor(), encrypter: $encrypter);
 
         self::assertSame($plaintext, $encrypter->calls()[0][1] ?? null);
+        self::assertSame($value, TypedPlaintext::decode($plaintext));
     }
 
     /**
@@ -951,7 +1014,7 @@ final class FieldPolicyTest extends TestCase
 
         $result = $this->apply(['holder' => ['owner' => $held], 'field' => 'x'], $definition, encrypter: $encrypter);
 
-        self::assertSame(['v' => 1, 'k' => 'key_9', 'c' => base64_encode('x')], $result['field'] ?? null);
+        self::assertSame(['v' => 1, 'k' => 'key_9', 'c' => base64_encode('"x"')], $result['field'] ?? null);
 
         $owner = $encrypter->calls()[0][0] ?? null;
 
@@ -973,7 +1036,7 @@ final class FieldPolicyTest extends TestCase
         $first  = $this->apply(['owner' => $owner, 'field' => 'x'], $definition, encrypter: $encrypter);
         $second = $this->apply(['field' => 'x', 'owner' => $owner], $definition, encrypter: $encrypter);
 
-        self::assertSame(['field' => ['v' => 1, 'k' => 'key_9', 'c' => base64_encode('x')]], $first);
+        self::assertSame(['field' => ['v' => 1, 'k' => 'key_9', 'c' => base64_encode('"x"')]], $first);
         self::assertSame($first, $second);
     }
 
@@ -1052,7 +1115,7 @@ final class FieldPolicyTest extends TestCase
         $this->apply($values, $definition, self::actor(), self::subject(), $encrypter);
 
         self::assertSame(
-            [[self::actor()->id, '1'], [self::subject()->id, '2'], ['7', '3']],
+            [[self::actor()->id, '"1"'], [self::subject()->id, '"2"'], ['7', '"3"']],
             array_map(static fn (array $call): array => [$call[0]->id, $call[1]], $encrypter->calls()),
         );
     }
@@ -1072,8 +1135,151 @@ final class FieldPolicyTest extends TestCase
         $result = $this->apply($values, $definition, encrypter: $encrypter);
 
         self::assertSame(['9', '9', '9'], array_map(static fn (array $call): string => $call[0]->id, $encrypter->calls()));
-        self::assertSame(['a', 'b', 'c'], array_map(static fn (array $call): string => $call[1], $encrypter->calls()));
-        self::assertSame(['v' => 1, 'k' => 'key_9', 'c' => base64_encode('c')], $result['items'][2]['email'] ?? null);
+        self::assertSame(['"a"', '"b"', '"c"'], array_map(static fn (array $call): string => $call[1], $encrypter->calls()));
+        self::assertSame(['v' => 1, 'k' => 'key_9', 'c' => base64_encode('"c"')], $result['items'][2]['email'] ?? null);
+    }
+
+    /**
+     * An encrypted field is sealed for its path in the stored entry, under
+     * `properties`, with the scope's entry, log, tenant, category and every
+     * owner of the record.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeIsSealedWithItsPath(): void
+    {
+        $encrypter  = new RecordingFieldEncrypter;
+        $definition = EventDefinition::for('a.b')->retain('card')->encrypt('card.last4', KeyOwner::ACTOR)->encrypt('note', KeyOwner::SUBJECT);
+
+        $this->apply(['card' => ['last4' => '4242', 'brand' => 'visa'], 'note' => 'x'], $definition, self::actor(), self::subject(), $encrypter);
+
+        $context = $encrypter->contexts()[0];
+
+        self::assertSame([['properties', 'card', 'last4'], ['properties', 'note']], $encrypter->paths());
+        self::assertSame(self::ENTRY_ID, $context->entryId);
+        self::assertSame(self::LOG_ID, $context->logId);
+        self::assertSame(['organisation', 'org_01'], [$context->tenant?->type, $context->tenant?->id]);
+        self::assertSame('finance', $context->category);
+        self::assertSame(['invoice:2', 'user:1'], array_map(static fn (Reference $owner): string => $owner->type . ':' . $owner->id, $context->owners));
+    }
+
+    /**
+     * An element of a list is sealed at the index it is stored at once the
+     * elements removed before it are gone, whether removed by a rule or left
+     * empty, so its envelope opens after the list reindexes.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeInAListIsBoundToItsStoredIndex(): void
+    {
+        $encrypter  = new RecordingFieldEncrypter;
+        $definition = EventDefinition::for('a.b')->encrypt('items.*.iban', KeyOwner::ACTOR);
+
+        $result = $this->apply(['items' => ['loose', 'other', ['iban' => 'GB00']]], $definition, actor: self::actor(), encrypter: $encrypter);
+
+        self::assertSame([['properties', 'items', 0, 'iban']], $encrypter->paths());
+        self::assertSame(['items' => [['iban' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode('"GB00"')]]]], $result);
+
+        $emptied    = new RecordingFieldEncrypter;
+        $structural = EventDefinition::for('a.b')->drop('items.*.secret')->encrypt('items.*.iban', KeyOwner::ACTOR);
+
+        $kept = $this->apply(['items' => [['secret' => 'x'], ['iban' => 'GB01'], ['secret' => 'y'], ['iban' => 'GB02']]], $structural, actor: self::actor(), encrypter: $emptied);
+
+        self::assertSame([['properties', 'items', 0, 'iban'], ['properties', 'items', 1, 'iban']], $emptied->paths());
+        self::assertSame(['v' => 1, 'k' => 'key_1', 'c' => base64_encode('"GB02"')], $kept['items'][1]['iban'] ?? null);
+    }
+
+    /**
+     * A whole element of a list encrypted by a wildcard is sealed at its stored
+     * index, the elements a rule removed before it not counted.
+     *
+     * @return void
+     */
+    public function testAWholeListElementIsSealedAtItsStoredIndex(): void
+    {
+        $encrypter  = new RecordingFieldEncrypter;
+        $definition = EventDefinition::for('a.b')->retain('items')->drop('items.1')->encrypt('items.*', KeyOwner::ACTOR);
+
+        $this->apply(['items' => ['a', 'b', 'c']], $definition, actor: self::actor(), encrypter: $encrypter);
+
+        self::assertSame([['properties', 'items', 0], ['properties', 'items', 1]], $encrypter->paths());
+        self::assertSame(['"a"', '"c"'], array_map(static fn (array $call): string => $call[1], $encrypter->calls()));
+    }
+
+    /**
+     * A member is named by its key as PHP keys it, whatever its container's
+     * shape: a list index and a map key PHP holds as an integer from 0 are
+     * integer segments, and any other map key, a negative or zero-padded number
+     * included, a string. A map key and a list index never name the same place,
+     * since one container is never both.
+     *
+     * @return void
+     */
+    public function testSegmentsAreTheMembersKeysAsPhpKeysThem(): void
+    {
+        $encrypter  = new RecordingFieldEncrypter;
+        $definition = EventDefinition::for('a.b')->encrypt('7', KeyOwner::ACTOR)->encrypt('people.*.card', KeyOwner::ACTOR)->encrypt('rows.*.card', KeyOwner::ACTOR);
+        $values     = ['7' => 'top', 'people' => [5 => ['card' => 'x'], 'bob' => ['card' => 'y'], -1 => ['card' => 'w'], '05' => ['card' => 'v']], 'rows' => [['card' => 'z']]];
+
+        $this->apply($values, $definition, actor: self::actor(), encrypter: $encrypter);
+
+        self::assertSame(
+            [
+                ['properties', 7],
+                ['properties', 'people', 5, 'card'],
+                ['properties', 'people', 'bob', 'card'],
+                ['properties', 'people', '-1', 'card'],
+                ['properties', 'people', '05', 'card'],
+                ['properties', 'rows', 0, 'card'],
+            ],
+            $encrypter->paths(),
+        );
+    }
+
+    /**
+     * A map that loses every key but 0 to n - 1 is stored as a list, and its
+     * members were sealed at the integer segments a reader of that list gives
+     * them.
+     *
+     * @return void
+     */
+    public function testAMapLeftAsAListKeepsTheSegmentsItsReaderGives(): void
+    {
+        $encrypter  = new RecordingFieldEncrypter;
+        $definition = EventDefinition::for('a.b')->encrypt('items.0', KeyOwner::ACTOR)->encrypt('items.1', KeyOwner::ACTOR);
+
+        $kept = $this->apply(['items' => [0 => 'a', 'discard' => 'x', 1 => 'b']], $definition, actor: self::actor(), encrypter: $encrypter);
+
+        self::assertSame([['properties', 'items', 0], ['properties', 'items', 1]], $encrypter->paths());
+        self::assertTrue(array_is_list($kept['items'] ?? null));
+    }
+
+    /**
+     * The owners of a definition's encrypted rules are listed each once, in the
+     * order their rules are defined; a rule whose owner is absent, and a rule
+     * that does not encrypt, name none.
+     *
+     * @return void
+     */
+    public function testOwnersOfListsEveryEncryptedRulesOwnerOnce(): void
+    {
+        $definition = EventDefinition::for('a.b')
+            ->encrypt('a', KeyOwner::SUBJECT)
+            ->encrypt('b', KeyOwner::ACTOR)
+            ->encrypt('c', 'holder')
+            ->encrypt('d', 'absent')
+            ->encrypt('e', KeyOwner::ACTOR)
+            ->retain('holder')
+            ->pseudonymise('f');
+        $values = ['holder' => ['type' => 'user', 'id' => '1'], 'other' => ['type' => 'customer', 'id' => '9']];
+
+        $owners = FieldPolicy::ownersOf($values, $definition, self::actor(), self::subject());
+
+        $named = static fn (Reference $owner): string => $owner->type . ':' . $owner->id;
+
+        self::assertSame(['invoice:2', 'user:1'], array_map($named, $owners));
+        self::assertSame([], FieldPolicy::ownersOf([], $definition, null, null));
+        self::assertSame(['customer:9'], array_map($named, FieldPolicy::ownersOf($values, EventDefinition::for('a.b')->encrypt('x', 'other'), null, null)));
     }
 
     /**
@@ -1103,7 +1309,7 @@ final class FieldPolicyTest extends TestCase
 
         $result = $this->apply(['before' => 1, 'field' => 'x', 'after' => 2], $definition, actor: self::actor(), encrypter: $encrypter);
 
-        self::assertSame(['before' => 1, 'field' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode('x')], 'after' => 2], $result);
+        self::assertSame(['before' => 1, 'field' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode('"x"')], 'after' => 2], $result);
         self::assertNull($this->omissions->toArray());
     }
 
@@ -1302,7 +1508,7 @@ final class FieldPolicyTest extends TestCase
         $definition = EventDefinition::for('a.b')->pseudonymise('people.*');
 
         try {
-            FieldPolicy::apply(['people' => [self::DYNAMIC_KEY => 'x']], $definition, null, null, $hasher, $sealer, $this->omissions);
+            FieldPolicy::apply(['people' => [self::DYNAMIC_KEY => 'x']], $definition, null, null, $hasher, $sealer, $this->omissions, self::scope());
         } catch (\InvalidArgumentException $exception) {
             return $exception;
         }
@@ -1345,7 +1551,7 @@ final class FieldPolicyTest extends TestCase
     {
         $sealer = new EnvelopeSealer($encrypter ?? new NoFieldEncrypter, $this->handler);
 
-        return FieldPolicy::apply($values, $definition, $actor, $subject, self::hasher(), $sealer, $this->omissions);
+        return FieldPolicy::apply($values, $definition, $actor, $subject, self::hasher(), $sealer, $this->omissions, self::scope());
     }
 
     /**
@@ -1361,6 +1567,19 @@ final class FieldPolicyTest extends TestCase
         sort($names);
 
         return $names;
+    }
+
+    /**
+     * The scope every value here is sealed in: an entry of an organisation's,
+     * encrypting for the actor and the subject.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Privacy\SealingScope
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function scope(): SealingScope
+    {
+        return new SealingScope(self::ENTRY_ID, self::LOG_ID, Reference::of('organisation', 'org_01'), 'finance', [self::actor(), self::subject()]);
     }
 
     /**

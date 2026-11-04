@@ -17,6 +17,11 @@ And it records what the access policy that guards the trail does not promise. Th
 the package shows and every such read is recorded, but it is PHP: it cannot see a query that never passes through the
 package. How the trail is read is in `reading.md`.
 
+And it records what erasure does not promise. An erasure destroys an owner's keys in the live store, so every field
+sealed under them reads `erased`; it does not reach a copy outside that store, a key someone restores, a value already
+shown, or anything stored outside a sealed field. How keys, reading and erasure work, and what each store holds, is in
+`privacy.md`.
+
 ## Invariants
 
 - Minimising happens at capture, so nothing raw rests in a deferred callback, event or row. A record written after
@@ -50,7 +55,8 @@ package. How the trail is read is in `reading.md`.
 2. `definitions.require_registered` makes a code with no definition a programming error, so none is missed.
 3. `redaction.key` holds a dedicated key, kept apart from `app.key` and, where it matters, `redaction.ip` is set to
    something less than `full`, which is the default.
-4. An encrypted field names its owner, and the application binds a `Contracts\FieldEncrypter` holding the owners' keys.
+4. An encrypted field names its owner, and the package's `Contracts\FieldEncrypter` seals it under a key of that
+   owner's, which an erasure destroys.
 5. `php artisan audit-log:check` reports a malformed setting before a deploy.
 
 ## Failure / Edge Cases
@@ -59,9 +65,10 @@ package. How the trail is read is in `reading.md`.
   and the row. Recording works with no set-up, and that is its cost.
 - An encrypter that throws or returns something malformed loses the value and keeps the record, and the report names
   only its class. The value's loss is visible in `omitted`, so a gap in the row can be told from an empty field.
-- A leak of the database alone gives references, retained values, any address stored in `full`, hashes and envelopes,
-  but neither keys nor plaintext of what was hashed or sealed. A leak of the database with the key gives what the next
-  section says.
+- A leak of the database alone gives references, retained values, any address stored in `full`, hashes, envelopes and
+  the owners' wrapped keys, but neither a wrapping key, a hashing key nor plaintext of what was hashed or sealed. A
+  leak of the database with the keys gives what the next section says, and every sealed field whose key is not
+  erased.
 - Reading the queue's storage gives the identifiers and the actor's reference, as `context-resolution.md` says, and no
   property, because a record's payload never travels in the job's hidden Context.
 - A writer of the database without the integrity key can still change or delete rows. A change to a sealed entry, a seal
@@ -113,6 +120,8 @@ key stays secret.
 - A pseudonym never equals an identifier hash or an IP hash, because an identifier, a field and an address are hashed
   under three domain keys, so the same value gives three unrelated hashes. Within the field domain the same value does
   give the same hash in any field of any code, so a field needing no linkage should use `drop` or `encrypt`.
+- An owner fingerprint, which names an erased or reinstated owner in the journal and in the activity record, is a keyed
+  hash of the owner's type and id, so it falls to brute force like any identifier once the integrity key leaks.
 - A key change is visible through the fingerprint at the start of every hash. Earlier rows keep their hashes and are not
   rewritten, so they no longer correlate with new ones, and the differing fingerprint says why. This includes a rotated
   `app.key` when no `redaction.key` is set, since `app.previous_keys` is not read.
@@ -121,9 +130,10 @@ key stays secret.
 
 The spill and the outbox hold personal data. Each holds a whole record as it was minimised, its references, its address
 and its properties included, so each is a personal data store of its own, with its own readers and its own retention,
-and neither is reached by anything that later prunes or erases a row. Log files and database backups are often shipped
-off the server, to a log aggregator, a backup provider or a support bundle, so the question is who can read those, and
-not only who can read this server.
+and neither is reached by anything that later prunes a row. An erasure reaches only the sealed fields they hold, which
+open under no key once the owner's keys are destroyed, never their references or retained values. Log files and
+database backups are often shipped off the server, to a log aggregator, a backup provider or a support bundle, so the
+question is who can read those, and not only who can read this server.
 
 - A spill line is not encrypted. It is the record in canonical JSON, on purpose: it has to be readable when the store is
   down and the key ring may be what failed. The documented channel is a dedicated file at `0600`, and any other channel
@@ -218,6 +228,37 @@ limit below holds however the policy is written.
 - **The record.** A read is refused when its record cannot be written, so every read the trail answers is recorded.
   What a viewer does with what it was shown, once it has left the package, is beyond any record.
 
+## Limits Of Erasure
+
+An erasure destroys an owner's keys in the live store, journalled, and nothing more. Each limit below holds however
+erasure is configured.
+
+- **Two guarantees, for keys.** Database credentials can still destroy keys, key uses and markers; the package's
+  cryptographic evidence makes unauthorised destruction, substitution or restoration detectable, never impossible.
+  Whoever holds the maintenance credentials can update a key, and whoever can drop the key triggers can delete one, a
+  key use or a marker; `audit-log:verify` then reports the key `key_destroyed_unjournalled`, `key_substituted`,
+  `key_missing` or `key_restored`, or the envelope `key_use_missing`. An erasure, a hold and a trigger decide what the
+  package does, and stop no one holding those credentials.
+- **The derived wrapping key.** A wrapping key derived from `app.key` gives domain separation, not independence from
+  `app.key`: a leaked `app.key` gives up every data key wrapped under the keys derived from it, and with them every
+  field still sealed under a live key. A dedicated ring in `privacy.keys`, or a `Contracts\KeyWrapper` over an
+  external key service, keeps the wrapping keys apart from it.
+- **Recall.** A decryption already returned cannot be recalled. A page read under the reveal grant before an erasure
+  commits has shown what it showed, and a copy the viewer kept is beyond any record.
+- **Restores.** A restore from before an erasure brings the erased keys back, wrapped, and under the local wrapper the
+  wrapping keys are in the application's configuration, beside the database. Verification finds a restored key, and
+  `audit-log:check` finds a full restore only through an anchor that discovers; without one, a full restore cannot be
+  found, and erasing again from the operator's own records is the only remedy.
+- **Revoked, not complete.** An erasure revokes the owner's fields in the live store. Backups, replicas, binlogs and
+  WAL, exports, logs, error trackers and every destination's own store hold their copies until the operator's
+  procedure reaches them, and a record pending in the outbox is erased with the key only when the erasure accepts it.
+- **What stays.** The references in the columns, retained and hashed values, a note without an owner, the members of
+  manifests and the key rows themselves are not erased, and remain personal data while linkable. No store is claimed
+  to hold no personal data: `privacy.md` lists each with what it holds and why.
+- **The reveal grant.** The grant reveals every encrypted field of every entry a scope sees, whoever owns it. A scope
+  narrowed to one person's entries still reveals the other owners' fragments those entries hold, so what a viewer is
+  shown under it is reviewed before it is disclosed to anyone else.
+
 ## Implementation Anchors
 
 - `src/Stores/FailureSpill.php`: `line()`; `src/Delivery/OutboxWriter.php`: `write()`; `src/Delivery/SpillReader.php`;
@@ -237,6 +278,8 @@ limit below holds however the policy is written.
   `src/Integrity/PruneCoverage.php`: `of()`; `src/Lifecycle/AuditImporter.php`; `src/Lifecycle/SourceDigest.php`.
 - `src/Contracts/AuditAccessPolicy.php`: `scope()`; `src/Access/ScopeCompiler.php`: `isEmpty()`;
   `src/Querying/AccessRecorder.php`: `record()`; `src/Models/AuditEntry.php`.
+- `src/Lifecycle/Eraser.php`, `src/Integrity/KeyStoreVerifier.php`, `src/Keys/WrappingRing.php`,
+  `src/Contracts/KeyWrapper.php`, `src/Privacy/SubjectKeyFieldReader.php`, `src/Integrity/OwnerFingerprint.php`.
 
 ## Authoritative Tests
 
@@ -291,6 +334,13 @@ limit below holds however the policy is written.
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheThreatModelStatesTheLimitsOfAPhpPolicy`
 - `tests/Feature/Querying/AccessControlTest.php` `testAGuessedTenantGivesTheSameEmptyResultAsAnUnknownOne`
 - `tests/Feature/Querying/TrailReaderTest.php` `testADeniedScopeMakesNoQuery`
+- `tests/Unit/Documentation/DocumentationTest.php` `testTheThreatModelStatesTheLimitsOfErasure`
+- `tests/Feature/Integrity/KeyStoreTamperingTest.php` `testADeletedKeyUseIsFoundByVerify`,
+  `testAnUnjournalledDestructionIsFoundAndReadsUnreadable`, `testARestoredKeyIsFoundByVerify`,
+  `testAKeyRowCopiedOverAnotherIsSubstituted`
+- `tests/Unit/Keys/WrappingRingTest.php` `testARotatedAppKeyKeepsThePreviousForUnwrapping`,
+  `testTheDerivationIsSeparateFromTheIntegrityRing`
+- `tests/Integration/Privacy/ConcurrentRevealTest.php` `testAReadBeforeTheErasureCommitsStillReveals`
 
 ## Change Triggers
 
@@ -308,3 +358,5 @@ Update this note when any of the following change:
 - what the maintenance credentials can do, what the journal makes detectable, or what an authority proves
 - what an imported row asserts, or what binds it to its source
 - what the access policy can see, what bypasses it, or what a read's timing can tell
+- what an erasure reaches, what can destroy or restore a key unseen, where the wrapping keys come from, or what the
+  reveal grant shows

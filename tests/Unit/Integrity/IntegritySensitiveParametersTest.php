@@ -22,9 +22,12 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityKey;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
+use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\KeyStoreVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
 use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 use SineMacula\Laravel\AuditLog\Integrity\PruneCoverage;
 use SineMacula\Laravel\AuditLog\Integrity\PruneCoverageResult;
@@ -37,9 +40,13 @@ use SineMacula\Laravel\AuditLog\Integrity\Sealer;
 use SineMacula\Laravel\AuditLog\Integrity\SealFailedException;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
+use SineMacula\Laravel\AuditLog\Integrity\SegmentRows;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
+use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
+use SineMacula\Laravel\AuditLog\Integrity\SubjectKeySigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Records\RecordFactory;
@@ -48,17 +55,20 @@ use Tests\Fixtures\Records\RecordFactory;
  * Holds the integrity classes, the seal command and the integrity progress to
  * the rule that keeps key material and entries out of a stack trace: with
  * `zend.exception_ignore_args` off every frame keeps its arguments, so a
- * parameter that holds a secret, an entry row or a failure is marked
+ * parameter that holds a secret, a data key, a wrapped key, an entry row, a
+ * stored row, an owner's key row, an owner or a failure is marked
  * `#[\SensitiveParameter]` on every method it passes through, private helpers
  * and closures included, and a closure's parameters, which reflection of a
  * class cannot reach, are read from the source.
  *
  * Each scan must find what it expects, so it cannot pass by finding nothing,
- * and is shown to flag what it should. A stored seal row is no personal data,
- * and because the scan reads names it goes by `$stored` or `$seal`, never by
- * `$row`. A source scan shows that nothing chains a failure or reads its text,
- * and real throws of verification and of signing show what the marking leaves
- * in a frame.
+ * and is shown to flag what it should. A seal goes by `$stored` or `$seal`,
+ * never by `$row`, and an owner's key row by neither `$row` nor `$rows`. The
+ * reading of a stored seal, which holds ids, digests, counts and times and
+ * never an owner or a value, is the one exemption from the rule on `$stored`,
+ * listed parameter by parameter. A source scan shows that nothing chains a
+ * failure or reads its text, and real throws of verification and of signing
+ * show what the marking leaves in a frame.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -82,14 +92,14 @@ final class IntegritySensitiveParametersTest extends TestCase
     /** @var list<string> The further files under `src` the rule holds. */
     private const array FILES = ['Console/IntegrityAlarm.php', 'Console/SealCommand.php', 'Database/IntegrityProgress.php'];
 
-    /** @var list<string> The names a parameter holding key material, an entry row or a failure goes by. */
-    private const array HELD_NAMES = ['secret', 'sealKey', 'applicationKey', 'row', 'rows', 'entry', 'failure', 'exception'];
+    /** @var list<string> The names a parameter holding key material, an entry row, a stored row, an owner or a failure goes by. */
+    private const array HELD_NAMES = ['secret', 'sealKey', 'applicationKey', 'row', 'rows', 'entry', 'failure', 'exception', 'dataKey', 'wrapped', 'owner', 'stored'];
 
-    /** @var list<class-string> The types a parameter holding key material goes by; any class of throwable is one too. */
-    private const array HELD_TYPES = [IntegrityKey::class];
+    /** @var list<class-string> The types a parameter holding key material, an owner's key row or a reference goes by; any class of throwable is one too. */
+    private const array HELD_TYPES = [IntegrityKey::class, SubjectKeyRow::class, Reference::class];
 
     /** @var string What a closure's held parameter is typed as, read from the source, where no type can be resolved. */
-    private const string HELD_TYPE_IN_SOURCE = '/\b(?:IntegrityKey|Throwable|\w*Exception)\b/';
+    private const string HELD_TYPE_IN_SOURCE = '/\b(?:IntegrityKey|SubjectKeyRow|Reference|Throwable|\w*Exception)\b/';
 
     /** @var list<class-string> The classes the scan must find a held parameter in. */
     private const array MUST_HOLD_ONE = [
@@ -99,11 +109,15 @@ final class IntegritySensitiveParametersTest extends TestCase
         IntegrityKey::class,
         IntegritySettings::class,
         KeyRing::class,
+        KeyStoreVerifier::class,
         ManifestVerifier::class,
+        OwnerFingerprint::class,
         RecordSigner::class,
         SealSigner::class,
         Sealer::class,
         SegmentVerifier::class,
+        SubjectKeyRow::class,
+        SubjectKeySigner::class,
     ];
 
     /** @var list<string> The parameters the scan must find, as `class::method.parameter`: the seal key's secret, the verifier's entry row and the sealer's failure among them. */
@@ -117,6 +131,33 @@ final class IntegritySensitiveParametersTest extends TestCase
         Anchorer::class . '::classOf.failure',
         IntegrityAlarm::class . '::report.exception',
         CheckpointWriter::class . '::sealable.rows',
+        SubjectKeyRow::class . '::draft.owner',
+        SubjectKeyRow::class . '::draft.tenant',
+        SubjectKeyRow::class . '::draft.wrapped',
+        SubjectKeyRow::class . '::fromRow.stored',
+        SubjectKeySigner::class . '::verifies.signed',
+        SubjectKeySigner::class . '::hmac.keyRow',
+        OwnerFingerprint::class . '::of.owner',
+        OwnerFingerprint::class . '::under.owner',
+        JournalRow::class . '::fromRow.stored',
+        KeyStoreVerifier::class . '::believed.stored',
+        KeyStoreVerifier::class . '::findingsOf.stored',
+        KeyStoreVerifier::class . '::isDestroyed.stored',
+        KeyStoreVerifier::class . '::signatureFinding.keyRow',
+        KeyStoreVerifier::class . '::wrapFinding.keyRow',
+        KeyStoreVerifier::class . '::fingerprintUnder.owner',
+    ];
+
+    /** @var list<string> The parameters named `$stored` that read a stored seal's own columns, as `class::method.parameter`; each holds ids, digests, counts and times, never an owner or a value. */
+    private const array SEAL_READING = [
+        CheckpointWriter::class . '::timeOf.stored',
+        SealEnvelope::class . '::fromRow.stored',
+        SealEnvelope::class . '::storedColumn.stored',
+        SealEnvelope::class . '::storedInteger.stored',
+        SealEnvelope::class . '::storedOptionalText.stored',
+        SealEnvelope::class . '::storedText.stored',
+        SealEnvelope::class . '::storedTime.stored',
+        SegmentRows::class . '::receiptOf.stored',
     ];
 
     /** @var list<string> The closures' held parameters the scan must find, as `file:parameter`. */
@@ -216,7 +257,7 @@ final class IntegritySensitiveParametersTest extends TestCase
 
         foreach (self::scanned() as $class) {
             foreach (self::heldParametersOf($class) as $parameter) {
-                if ($parameter->getAttributes(\SensitiveParameter::class) !== []) {
+                if ($parameter->getAttributes(\SensitiveParameter::class) !== [] || in_array(self::named($parameter), self::SEAL_READING, true)) {
                     continue;
                 }
 
@@ -225,6 +266,58 @@ final class IntegritySensitiveParametersTest extends TestCase
         }
 
         self::assertSame([], $unmarked);
+    }
+
+    /**
+     * Each exemption names a parameter that exists, goes by `$stored` and is
+     * not marked, in a class that reads seals, so an entry left behind by a
+     * rename or a marking fails instead of silently excusing nothing, and no
+     * owner's key row or journal row is ever exempt.
+     *
+     * @return void
+     */
+    public function testEverySealExemptionNamesAnUnmarkedStoredSeal(): void
+    {
+        foreach (self::SEAL_READING as $exemption) {
+            [$class, $member]     = explode('::', $exemption);
+            [$method, $parameter] = explode('.', $member);
+
+            $reflected = new \ReflectionParameter([$class, $method], $parameter);
+
+            self::assertSame('stored', $reflected->getName(), $exemption);
+            self::assertSame([], $reflected->getAttributes(\SensitiveParameter::class), $exemption);
+            self::assertContains($class, [CheckpointWriter::class, SealEnvelope::class, SegmentRows::class], $exemption);
+        }
+    }
+
+    /**
+     * No parameter that holds an owner's key row goes by `$row` or `$rows`,
+     * which name entry rows here: a key row is a `$draft`, a `$signed`, a
+     * `$keyRow` or, stored, `$stored`.
+     *
+     * @return void
+     */
+    public function testAKeyRowIsNeverNamedRow(): void
+    {
+        $keyRows = [];
+
+        foreach (self::scanned() as $class) {
+            foreach (self::heldParametersOf($class) as $parameter) {
+                $type = $parameter->getType();
+
+                if (!($type instanceof \ReflectionNamedType) || $type->getName() !== SubjectKeyRow::class) {
+                    continue;
+                }
+
+                $keyRows[] = $parameter->getName();
+            }
+        }
+
+        self::assertNotSame([], $keyRows);
+        self::assertSame([], array_values(array_intersect($keyRows, ['row', 'rows'])));
+        $fromRow = (new \ReflectionMethod(SubjectKeyRow::class, 'fromRow'))->getParameters();
+
+        self::assertSame(['stored'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->getName(), $fromRow));
     }
 
     /**
@@ -283,8 +376,14 @@ final class IntegritySensitiveParametersTest extends TestCase
             'an array named `entry`'          => ['entry', true],
             'a mixed `failure`'               => ['failure', true],
             'a string named `exception`'      => ['exception', true],
-            'a stored seal'                   => ['stored', false],
+            'an array named `stored`'         => ['stored', true],
+            'a string named `dataKey`'        => ['dataKey', true],
+            'a string named `wrapped`'        => ['wrapped', true],
+            'a mixed `owner`'                 => ['owner', true],
+            'a key row by its type'           => ['typedKeyRow', true],
+            'an owner by its type'            => ['typedOwner', true],
             'a seal'                          => ['seal', false],
+            'a unit digest'                   => ['unit', false],
             'a key id'                        => ['keyId', false],
             'a digest'                        => ['digest', false],
         ];
@@ -322,9 +421,15 @@ final class IntegritySensitiveParametersTest extends TestCase
              * @param  mixed  $failure
              * @param  string  $exception
              * @param  array<string, string>  $stored
+             * @param  string  $dataKey
+             * @param  string  $wrapped
+             * @param  mixed  $owner
+             * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $typedKeyRow
+             * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $typedOwner
              * @param  array<string, string>  $seal
              * @param  string  $keyId
              * @param  string  $digest
+             * @param  string  $unit
              * @return void
              */
             public function everyKind(
@@ -354,10 +459,22 @@ final class IntegritySensitiveParametersTest extends TestCase
                 mixed $failure,
                 #[\SensitiveParameter]
                 string $exception,
+                #[\SensitiveParameter]
                 array $stored,
+                #[\SensitiveParameter]
+                string $dataKey,
+                #[\SensitiveParameter]
+                string $wrapped,
+                #[\SensitiveParameter]
+                mixed $owner,
+                #[\SensitiveParameter]
+                SubjectKeyRow $typedKeyRow,
+                #[\SensitiveParameter]
+                ?Reference $typedOwner,
                 array $seal,
                 string $keyId,
                 string $digest,
+                string $unit,
             ): void {}
         };
 
@@ -445,7 +562,10 @@ final class IntegritySensitiveParametersTest extends TestCase
             'a marked failure'  => [['#[\SensitiveParameter] \Throwable $thing'], []],
             'a secret'          => [['string $secret'], ['secret']],
             'a seal and an id'  => [['array $seal', 'string $id'], []],
-            'a stored seal'     => [['mixed $stored'], []],
+            'a stored row'      => [['mixed $stored'], ['stored']],
+            'a key row'         => [['SubjectKeyRow $keyRow'], ['keyRow']],
+            'an owner'          => [['?Reference $tenant'], ['tenant']],
+            'a data key'        => [['string $dataKey'], ['dataKey']],
             'one of two marked' => [['#[\SensitiveParameter] array $row', 'string $secret'], ['secret']],
             'two marked'        => [['#[\SensitiveParameter] array $row', '#[\SensitiveParameter] string $secret'], []],
         ];
@@ -880,16 +1000,16 @@ final class IntegritySensitiveParametersTest extends TestCase
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier  $verifier
      * @param  array<string, int|string|null>  $entry
-     * @return \Closure(): ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
+     * @return \Closure(): array{0: ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: list<string>}
      */
     private static function memberFindingOf(SegmentVerifier $verifier, array $entry): \Closure
     {
         // Bound into the verifier's scope, where `self` names the verifier, so
         // the HMAC the member row records is captured instead
         $hmac = self::DIGEST;
-        $find = \Closure::bind(fn (#[\SensitiveParameter] array $entry): ?Finding => $this->memberFinding($entry, $hmac), $verifier, SegmentVerifier::class);
+        $find = \Closure::bind(fn (#[\SensitiveParameter] array $entry): array => $this->memberFinding($entry, $hmac), $verifier, SegmentVerifier::class);
 
-        return static fn (): ?Finding => $find($entry);
+        return static fn (): array => $find($entry);
     }
 
     /**

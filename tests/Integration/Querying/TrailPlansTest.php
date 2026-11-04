@@ -15,6 +15,7 @@ use Random\Randomizer;
 use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Console\TableShape;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -28,7 +29,8 @@ use Tests\TestCase;
  * both descending, and sorts nothing, the first page and a page after a cursor
  * alike, which reads the index from the cursor's time; a read that combines
  * conditions uses an index of the table and filters the rest of its conditions
- * row by row.
+ * row by row. A read of the entries holding an owner's data seeks the key uses
+ * through one of their indexes and never reads them whole.
  *
  * Each plan is of the very statement the trail runs: a page of 50 is read
  * through `AuditTrail` for a viewer the policy gives the scope, after a page
@@ -83,6 +85,18 @@ final class TrailPlansTest extends TestCase
     /** @var int How many codes the rows are spread over; each code's category is its number modulo ten. */
     private const int CODES = 30;
 
+    /** @var int How many owners hold data in the rows, each with one key; each row holds the data of two of them. */
+    private const int OWNERS = 1000;
+
+    /** @var int The owner whose entries the read of an owner's data finds. */
+    private const int OWNER = 7;
+
+    /** @var list<int> The numbers of the owner's rows modulo the owners: the first of each owner's two, and the one seven times which plus three is the owner's. */
+    private const array OWNER_ROWS = [6, 429];
+
+    /** @var list<string> The accesses of a table MySQL's plan names that seek it by a key value or a range of its index. */
+    private const array MYSQL_SEEKS = ['const', 'eq_ref', 'ref', 'ref_or_null', 'range', 'unique_subquery', 'index_subquery'];
+
     /**
      * Bind the read path, store the rows and analyse the table.
      *
@@ -106,7 +120,7 @@ final class TrailPlansTest extends TestCase
             self::entries()->insert($chunk);
         }
 
-        self::analyse(self::connection());
+        self::analyse(self::connection(), EntrySettings::table());
     }
 
     /**
@@ -278,6 +292,37 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
+     * A page of the entries holding one owner's data seeks the key uses through
+     * one of their indexes, by the entry when the engine reads the entries in
+     * the page's order and probes each, or by the key when it starts from the
+     * owner's keys, and never reads them whole; the page holds exactly the
+     * owner's entries, newest first.
+     *
+     * The key uses hold two rows for each of the 5,000 entries, over a thousand
+     * owners, so the owner's ten entries are a sliver of them and a scan of the
+     * table costs every engine far more than a seek.
+     *
+     * @return void
+     */
+    public function testHoldingDataOfSeeksTheKeyUsesByEntry(): void
+    {
+        self::holdData();
+
+        $owner     = Reference::of('user', (string) self::OWNER);
+        $statement = $this->page(AccessScope::all(), static fn (AuditTrail $trail): AuditTrail => $trail->holdingDataOf($owner));
+        $access    = self::accessOf($statement, self::connection()->getTablePrefix() . KeyTables::keyUsesTable());
+
+        self::assertTrue($access['sought'], $access['text']);
+        self::assertFalse($access['scanned'], $access['text']);
+
+        $owned    = array_filter(range(self::ROWS - 1, 0), static fn (int $number): bool => in_array($number % self::OWNERS, self::OWNER_ROWS, true));
+        $expected = array_values(array_map(self::id(...), $owned));
+
+        self::assertCount(10, $expected);
+        self::assertSame($expected, array_column(self::rowsOf($statement), 'id'));
+    }
+
+    /**
      * The one select of the entries table the trail runs for a page of 50, as
      * the engine ran it with its bindings: read for a viewer the policy gives
      * the scope, narrowed as given, and, when asked, after the cursor of a
@@ -351,14 +396,7 @@ final class TrailPlansTest extends TestCase
             return self::sqlitePlan(array_map(static fn (object $row): string => (string) ((array) $row)['detail'], $rows));
         }
 
-        $explain = $driver === 'mysql' ? 'EXPLAIN FORMAT=JSON ' : 'EXPLAIN (FORMAT JSON) ';
-        $text    = array_values((array) $connection->selectOne($explain . $statement['sql'], $statement['bindings']))[0] ?? null;
-
-        self::assertIsString($text);
-
-        $tree = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
-
-        self::assertIsArray($tree, $text);
+        [$tree, $text] = self::jsonExplain($connection, $statement);
 
         return self::jsonPlan($driver, $tree, $text);
     }
@@ -446,14 +484,152 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
+     * How the statement's plan reads the table: whether a step seeks it through
+     * an index, by SQLite's `SEARCH`, a MySQL access of one key value or range,
+     * or a PostgreSQL index scan with a condition or bitmap scan; whether a
+     * step reads it whole, by SQLite's `SCAN`, MySQL's `ALL` or `index` access,
+     * or a PostgreSQL sequential scan or index scan with no condition; and the
+     * plan as the engine gave it, for a failure's message.
+     *
+     * @param  array{sql: string, bindings: array<array-key, scalar|null>}  $statement
+     * @param  string  $table
+     * @return array{sought: bool, scanned: bool, text: string}
+     *
+     * @throws \JsonException
+     */
+    private static function accessOf(array $statement, string $table): array
+    {
+        $connection = self::connection();
+
+        if ($connection->getDriverName() === 'sqlite') {
+            $rows    = $connection->select('EXPLAIN QUERY PLAN ' . $statement['sql'], $statement['bindings']);
+            $details = array_map(static fn (object $row): string => (string) ((array) $row)['detail'], $rows);
+            $reads   = preg_grep('/^(?:SEARCH|SCAN) ' . preg_quote($table, '/') . '(?: |$)/', $details) ?: [];
+
+            return ['sought' => preg_grep('/^SEARCH /', $reads) !== [], 'scanned' => preg_grep('/^SCAN /', $reads) !== [], 'text' => implode("\n", $details)];
+        }
+
+        [$tree, $text] = self::jsonExplain($connection, $statement);
+
+        $access = ['sought' => false, 'scanned' => false, 'text' => $text];
+
+        foreach (new \RecursiveIteratorIterator(new \RecursiveArrayIterator($tree), \RecursiveIteratorIterator::SELF_FIRST) as $node) {
+            if (!is_array($node) || !in_array($table, [$node['table_name'] ?? null, $node['Relation Name'] ?? null], true)) {
+                continue;
+            }
+
+            $access['sought']  = $access['sought']  || self::seeks($node);
+            $access['scanned'] = $access['scanned'] || !self::seeks($node);
+        }
+
+        return $access;
+    }
+
+    /**
+     * Whether the node of a MySQL or PostgreSQL plan that reads a table seeks
+     * it: a MySQL access of a key value or a range, or a PostgreSQL bitmap scan
+     * or index scan with a condition.
+     *
+     * @param  array<array-key, array<array-key, bool|float|int|string|null>|bool|float|int|string|null>  $node
+     * @return bool
+     */
+    private static function seeks(array $node): bool
+    {
+        if (array_key_exists('access_type', $node)) {
+            return in_array($node['access_type'], self::MYSQL_SEEKS, true);
+        }
+
+        $type = $node['Node Type'] ?? null;
+
+        return $type === 'Bitmap Heap Scan' || (in_array($type, ['Index Scan', 'Index Only Scan'], true) && isset($node['Index Cond']));
+    }
+
+    /**
+     * The JSON plan MySQL or PostgreSQL gives for the statement, decoded, and
+     * as the engine gave it.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  array{sql: string, bindings: array<array-key, scalar|null>}  $statement
+     * @return array{0: array<array-key, mixed>, 1: string}
+     *
+     * @throws \JsonException
+     */
+    private static function jsonExplain(Connection $connection, array $statement): array
+    {
+        $explain = $connection->getDriverName() === 'mysql' ? 'EXPLAIN FORMAT=JSON ' : 'EXPLAIN (FORMAT JSON) ';
+        $text    = array_values((array) $connection->selectOne($explain . $statement['sql'], $statement['bindings']))[0] ?? null;
+
+        self::assertIsString($text);
+
+        $tree = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($tree, $text);
+
+        return [$tree, $text];
+    }
+
+    /**
+     * Store a key for each owner and two key uses for each row, of the owners
+     * its number gives modulo the owners and seven times it plus three modulo
+     * the owners, which are never the same owner, then analyse both tables.
+     *
+     * @return void
+     */
+    private static function holdData(): void
+    {
+        $connection = self::connection();
+        $keys       = [];
+        $uses       = [];
+
+        for ($owner = 1; $owner <= self::OWNERS; $owner++) {
+            $keys[] = [
+                'id'          => self::keyId($owner),
+                'owner_type'  => 'user',
+                'owner_id'    => (string) $owner,
+                'tenant_type' => null,
+                'tenant_id'   => null,
+                'category'    => 'area_0',
+                'unit'        => hash('sha256', (string) $owner),
+                'generation'  => 1,
+                'state'       => 'live',
+                'wrapped_key' => 'wrapped',
+                'wrap_key_id' => 'd-1',
+                'created_at'  => self::storedTime(0),
+                'erasure_id'  => null,
+                'key_id'      => 'k1',
+                'hmac'        => str_repeat('0', 64),
+            ];
+        }
+
+        for ($number = 0; $number < self::ROWS; $number++) {
+            $uses[] = ['key_id' => self::keyId($number % self::OWNERS + 1), 'entry_id' => self::id($number)];
+            $uses[] = ['key_id' => self::keyId(($number * 7 + 3) % self::OWNERS + 1), 'entry_id' => self::id($number)];
+        }
+
+        foreach (array_chunk($keys, 200) as $chunk) {
+            $connection->table(KeyTables::subjectKeysTable())->insert($chunk);
+        }
+
+        foreach (array_chunk($uses, 500) as $chunk) {
+            $connection->table(KeyTables::keyUsesTable())->insert($chunk);
+        }
+
+        self::analyse($connection, KeyTables::subjectKeysTable());
+        self::analyse($connection, KeyTables::keyUsesTable());
+    }
+
+    /**
      * Analyse the table, so the planner chooses from the rows just stored.
      *
      * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
      * @return void
      */
-    private static function analyse(Connection $connection): void
+    private static function analyse(Connection $connection, string $table): void
     {
-        $table = $connection->getQueryGrammar()->wrapTable(EntrySettings::table());
+        $table = $connection->getQueryGrammar()->wrapTable($table);
 
         match ($connection->getDriverName()) {
             'mysql' => $connection->select('ANALYZE TABLE ' . $table),
@@ -513,6 +689,17 @@ final class TrailPlansTest extends TestCase
     private static function id(int $number): string
     {
         return sprintf('0195f4a2-7b1c-7000-8000-%012x', $number + 1);
+    }
+
+    /**
+     * The id of the key of the owner of the number, a lower-case UUID.
+     *
+     * @param  int  $owner
+     * @return string
+     */
+    private static function keyId(int $owner): string
+    {
+        return sprintf('0195f4a2-7b1c-7000-9000-%012x', $owner);
     }
 
     /**

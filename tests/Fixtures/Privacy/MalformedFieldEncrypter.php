@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Fixtures\Privacy;
 
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
@@ -39,10 +40,11 @@ final class MalformedFieldEncrypter implements FieldEncrypter
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  string  $plaintext
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\FieldContext  $context
      * @return array{v: int, k: string, c: string}
      */
     #[\Override]
-    public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext): array
+    public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext, FieldContext $context): array
     {
         $this->calls++;
 

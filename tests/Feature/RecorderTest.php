@@ -1162,9 +1162,10 @@ final class RecorderTest extends TestCase
 
         self::assertSame(['api_key' => Redactor::MARKER, 'plan' => 'pro'], array_intersect_key($record->context ?? [], ['api_key' => true, 'plan' => true]));
         self::assertSame(SecretFillingContributor::ACTOR_TYPE, $record->actorType);
-        self::assertSame(['card' => ['v' => 1, 'k' => 'key_' . SecretFillingContributor::ACTOR_ID, 'c' => base64_encode('4242')]], $record->properties);
+        self::assertSame(['card' => ['v' => 1, 'k' => 'key_' . SecretFillingContributor::ACTOR_ID, 'c' => base64_encode('"4242"')]], $record->properties);
         self::assertCount(1, $encrypter->calls());
         self::assertSame(SecretFillingContributor::ACTOR_ID, $encrypter->calls()[0][0]->id);
+        self::assertSame($record->id, $encrypter->contexts()[0]->entryId);
         self::assertStringNotContainsString(SecretFillingContributor::SECRET, (string) json_encode($record->toArray()));
     }
 
@@ -1301,7 +1302,7 @@ final class RecorderTest extends TestCase
 
         $record = $recorder->event(self::CODE)->withNote('Erasable.', Reference::of('user', '1'))->record();
 
-        self::assertSame(['_audit' => ['note' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode('Erasable.')]]], $record->properties);
+        self::assertSame(['_audit' => ['note' => ['v' => 1, 'k' => 'key_1', 'c' => base64_encode('"Erasable."')]]], $record->properties);
         self::assertCount(1, $late->calls());
     }
 

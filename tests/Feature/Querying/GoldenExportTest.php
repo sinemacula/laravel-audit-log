@@ -6,11 +6,13 @@ namespace Tests\Feature\Querying;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\ExportFile;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerifier;
+use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Fixtures\Export\GoldenExport;
@@ -37,9 +39,9 @@ final class GoldenExportTest extends TestCase
 
     /** @var array<string, string> The SHA-256 of each golden file, by its name. */
     private const array DIGESTS = [
-        'export.ndjson'               => '8c02a6133aebc6a630fedbfee4bdcda4d3d3ba679a237d2bbbcfd4efc10254a7',
-        'export.ndjson.manifest.json' => '5d1e870420edeb0bc48f0092890ff76e97b5438508c751380f107f8543c58560',
-        'journal.json'                => 'ccb536080839d57eab39bc61ffb9161b0b5315998d19916cf1c3c51032a90f97',
+        'export.ndjson'               => '3cbabe53fa05731a956034f9d31d6d1c3bb67186606993de35c15d05effe0eb2',
+        'export.ndjson.manifest.json' => '84c49790cba5baf903ccc9b23aa19c43c62d4ee3c3f604ab6a95d770f124cd45',
+        'journal.json'                => '3c15632c5432ab22b118b222c44fc1b0d2acfd05df8c0650fee6df6787584f0c',
     ];
 
     /**
@@ -120,6 +122,28 @@ final class GoldenExportTest extends TestCase
         self::assertSame($journal, $verification->entryId);
         self::assertSame(3, $verification->lines);
         self::assertSame('verified', self::propertiesOf($this->readRecords('audit_log.export_verified')[0])['verdict']);
+    }
+
+    /**
+     * The golden export's manifest names the scope it was made under by the
+     * keyed fingerprint of that scope's normalised form, the grant to reveal
+     * the encrypted fields included: an auditor who sees every entry and
+     * reveals nothing.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheManifestNamesTheScopeWithItsGrant(): void
+    {
+        $bundle   = json_decode((string) file_get_contents(self::DIRECTORY . '/' . GoldenExport::FILE . ExportFile::MANIFEST_SUFFIX), true, 512, JSON_THROW_ON_ERROR);
+        $terms    = self::termsOf(TrailFilters::none(), AccessScope::all());
+        $revealed = self::termsOf(TrailFilters::none(), AccessScope::all()->revealingEncryptedFields());
+
+        self::assertIsArray($bundle);
+        self::assertIsArray($bundle['entry']['properties'] ?? null);
+        self::assertSame($terms->scopeFingerprint, $bundle['entry']['properties']['scope_fingerprint'] ?? null);
+        self::assertNotSame($revealed->scopeFingerprint, $bundle['entry']['properties']['scope_fingerprint']);
     }
 
     /**

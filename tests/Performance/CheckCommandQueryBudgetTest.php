@@ -15,20 +15,26 @@ use SineMacula\Laravel\AuditLog\Console\DeliveryChecks;
 use SineMacula\Laravel\AuditLog\Console\EngineChecks;
 use SineMacula\Laravel\AuditLog\Console\IntegrityChecks;
 use SineMacula\Laravel\AuditLog\Console\LifecycleChecks;
+use SineMacula\Laravel\AuditLog\Console\PrivacyChecks;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
 use SineMacula\Laravel\AuditLog\Console\TableShape;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Integrity\KeyStoreVerifier;
+use SineMacula\Laravel\AuditLog\Keys\KeyUnit;
+use SineMacula\Laravel\AuditLog\Keys\LocalKeyWrapper;
 use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldKeeper;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\SealsEntries;
-use Tests\Concerns\WritesTheJournal;
 
 /**
  * Statement-budget contract for `audit-log:check`: a run makes a few reads of
@@ -38,10 +44,11 @@ use Tests\Concerns\WritesTheJournal;
  * read configuration alone, so a run reads what the engine and schema checks of
  * the entries table, the schema checks of the artifacts table, the integrity
  * checks of the checkpoints, checkpoint members and integrity state tables, and
- * the lifecycle checks and notes read; in outbox mode they read the outbox and
- * deliveries tables' schema too, and still write nothing more. The lifecycle
- * subject's statements are fixed whatever the journal holds, beyond the pages
- * of its rows it reads.
+ * the lifecycle and privacy checks and notes read; in outbox mode they read the
+ * outbox and deliveries tables' schema too, and still write nothing more. The
+ * lifecycle subject's statements are fixed whatever the journal holds, beyond
+ * the pages of its rows it reads, and the privacy subject's whatever the key
+ * store holds, beyond the pages of its keys it reads.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,12 +59,16 @@ use Tests\Concerns\WritesTheJournal;
 #[CoversClass(DeliveryChecks::class)]
 #[CoversClass(IntegrityChecks::class)]
 #[CoversClass(LifecycleChecks::class)]
+#[CoversClass(PrivacyChecks::class)]
 final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 {
-    use SealsEntries, WritesTheJournal;
+    use MakesSubjectKeys, SealsEntries;
 
-    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for each of the nine tables, the lock row, the installation id, the latest seal, the seal of the highest journal commitment, a page of the journal and the holds projection, and the two notes. */
-    private const int MAX_STATEMENTS = 44;
+    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for each of the twelve tables, the lock row, the installation id, the latest seal, the seal of the highest journal commitment, a page of the journal and the holds projection, the two notes, and a page each of the journal's erasures, the keys and the keys named by a key use and no key row, and the distinct wrapping key ids of the keys that hold one. */
+    private const int MAX_STATEMENTS = 60;
+
+    /** @var string The data key of every key a test stores by hand: thirty-two bytes. */
+    private const string DATA_KEY = 'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk';
 
     /** @var string The table the installation id is kept in. */
     private const string STATE = 'audit_log_integrity_state';
@@ -83,13 +94,14 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
         $kernel->registerCommand(new CheckCommand);
 
-        // The policy the package binds by default, whether or not the provider
-        // has bound it yet
+        // The policy and the key wrapper the package binds by default, whether
+        // or not the provider has bound them yet
         app()->bindIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
+        app()->bindIf(KeyWrapper::class, LocalKeyWrapper::class);
     }
 
     /**
-     * A passing run makes at most forty-four statements and writes nothing,
+     * A passing run makes at most fifty-nine statements and writes nothing,
      * reading the installation id the migrations seed; it begins no savepoint
      * and makes no rollback, on every engine.
      *
@@ -190,6 +202,41 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * The privacy subject's statements are the same with an erased key and a
+     * live one as with three hundred keys, and a key store of more keys than a
+     * page is read in one statement more: the keys are read a page at a time,
+     * and the erasure rows a page's erased keys name in one statement, so
+     * nothing is read per key, and nothing is written.
+     *
+     * @return void
+     */
+    public function testThePrivacyStatementsReadTheKeyStoreInPages(): void
+    {
+        $privacy = app(PrivacyChecks::class);
+
+        $this->makeSubjectKey(Reference::of('App\Models\User', '0'));
+        $this->eraseByHand(Reference::of('App\Models\User', '0'));
+        $this->storeKeys(1, 1);
+
+        self::assertSame([], $this->capture(static fn (): array => [...$privacy->problems(), ...$privacy->notes()]));
+
+        $one = $this->capturedStatements();
+
+        $this->storeKeys(2, 298);
+
+        self::assertSame(300, DB::table(KeyTables::subjectKeysTable())->count());
+        self::assertSame([], $this->capture(static fn (): array => [...$privacy->problems(), ...$privacy->notes()]));
+        self::assertSame($one, $this->capturedStatements());
+
+        $this->storeKeys(300, KeyStoreVerifier::PAGE + 1 - 300);
+
+        self::assertSame(KeyStoreVerifier::PAGE + 1, DB::table(KeyTables::subjectKeysTable())->count());
+        self::assertSame([], $this->capture(static fn (): array => [...$privacy->problems(), ...$privacy->notes()]));
+        self::assertCount(count($one) + 1, $this->capturedStatements());
+        self::assertSame([], $this->capturedWrites());
+    }
+
+    /**
      * The integrity checks write nothing, begin no savepoint and make no
      * rollback, whatever the integrity tables hold, and a run leaves every
      * seal, member and state row as it was.
@@ -223,8 +270,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     /**
      * A sync run reads exactly what the engine and schema checks of the entries
      * table, the schema checks of the artifacts table, the integrity checks and
-     * the lifecycle checks and notes read on their own, so the delivery checks
-     * add no statement, and the bound still holds.
+     * the lifecycle and privacy checks and notes read on their own, so the
+     * delivery checks add no statement, and the bound still holds.
      *
      * @return void
      */
@@ -236,14 +283,17 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
         $integrity = app(IntegrityChecks::class);
         $lifecycle = app(LifecycleChecks::class);
+        $privacy   = app(PrivacyChecks::class);
 
-        $this->capture(static function () use ($database, $integrity, $lifecycle): void {
+        $this->capture(static function () use ($database, $integrity, $lifecycle, $privacy): void {
             (new EngineChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
             (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
             (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_artifacts', TableShape::artifacts());
             $integrity->problems();
             $lifecycle->problems();
+            $privacy->problems();
             $lifecycle->notes();
+            $privacy->notes();
         });
 
         $baseline = $this->capturedStatements();
@@ -316,6 +366,28 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         assert($kernel instanceof Kernel);
 
         return $kernel->call('audit-log:check');
+    }
+
+    /**
+     * Store the number of live keys, each of its own owner numbered from the
+     * first given, signed and wrapped as the package makes them, fifty rows to
+     * a statement.
+     *
+     * @param  int  $first
+     * @param  int  $count
+     * @return void
+     */
+    private function storeKeys(int $first, int $count): void
+    {
+        $rows = [];
+
+        foreach (range($first, $first + $count - 1) as $owner) {
+            $rows[] = $this->signedSubjectKey(new KeyUnit(Reference::of('App\Models\User', (string) $owner), null, self::KEY_CATEGORY), 1, self::DATA_KEY)->toRow();
+        }
+
+        foreach (array_chunk($rows, 50) as $chunk) {
+            DB::table(KeyTables::subjectKeysTable())->insert($chunk);
+        }
     }
 
     /**

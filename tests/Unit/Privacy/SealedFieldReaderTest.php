@@ -8,11 +8,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Privacy\EncryptedField;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
+use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
 
 /**
  * Unit tests for the field reader the package binds: it answers `encrypted` for
- * every field, and its answer holds nothing of the field it was given.
+ * every field of a page, one reading for each, in order, and its answer holds
+ * nothing of the fields it was given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,22 +28,35 @@ final class SealedFieldReaderTest extends TestCase
     private const string ENTRY_ID = '01932b4e-8a40-7000-8000-000000000001';
 
     /**
-     * An IP address, an owned note and a nested property are each answered
-     * `encrypted`, with no value, and shown as its marker.
+     * An IP address, an owned note and a nested property of a page are each
+     * answered `encrypted`, with no value, shown as its marker, one reading for
+     * each field.
      *
      * @return void
      */
     public function testItAlwaysAnswersEncrypted(): void
     {
-        $reader = new SealedFieldReader;
+        $fields   = [self::field(['ip']), self::field(['properties', '_audit', 'note']), self::field(['properties', 'cards', 0, 'number'])];
+        $readings = (new SealedFieldReader)->readAll($fields);
 
-        foreach (['ip', 'properties._audit.note', 'properties.cards.0.number'] as $path) {
-            $reading = $reader->read(new EncryptedField(self::ENTRY_ID, $path, 1, 'key_42', 'Y2lwaGVy'));
+        self::assertSame([0, 1, 2], array_keys($readings));
 
-            self::assertSame(FieldState::ENCRYPTED, $reading->state, $path);
-            self::assertNull($reading->value, $path);
-            self::assertSame('[ENCRYPTED]', $reading->display(), $path);
+        foreach ($readings as $index => $reading) {
+            self::assertInstanceOf(FieldReading::class, $reading);
+            self::assertSame(FieldState::ENCRYPTED, $reading->state, (string) $index);
+            self::assertNull($reading->value, (string) $index);
+            self::assertSame('[ENCRYPTED]', $reading->display(), (string) $index);
         }
+    }
+
+    /**
+     * A page with no field is answered with no reading.
+     *
+     * @return void
+     */
+    public function testAnEmptyPageHasNoReading(): void
+    {
+        self::assertSame([], (new SealedFieldReader)->readAll([]));
     }
 
     /**
@@ -52,17 +67,36 @@ final class SealedFieldReaderTest extends TestCase
      */
     public function testItReadsNothingOfTheField(): void
     {
-        $reader = new SealedFieldReader;
+        $first  = self::field(['ip'], self::ENTRY_ID, 1, 'key_42', 'Zmlyc3QgY2lwaGVydGV4dA');
+        $second = self::field(['properties', 'card'], '01932b4e-8a40-7000-8000-000000000002', 7, 'key_43', 'c2Vjb25kIGNpcGhlcnRleHQ');
 
-        $first  = $reader->read(new EncryptedField(self::ENTRY_ID, 'ip', 1, 'key_42', 'Zmlyc3QgY2lwaGVydGV4dA'));
-        $second = $reader->read(new EncryptedField('01932b4e-8a40-7000-8000-000000000002', 'properties.card', 7, 'key_43', 'c2Vjb25kIGNpcGhlcnRleHQ'));
+        [$firstReading, $secondReading] = (new SealedFieldReader)->readAll([$first, $second]);
 
-        self::assertEquals($first, $second);
+        self::assertEquals($firstReading, $secondReading);
 
-        $answered = serialize($second);
+        $answered = serialize($secondReading);
 
-        foreach (['01932b4e-8a40-7000-8000-000000000002', 'properties.card', 'key_43', 'c2Vjb25kIGNpcGhlcnRleHQ'] as $part) {
+        foreach (['01932b4e-8a40-7000-8000-000000000002', 'properties', 'card', 'key_43', 'c2Vjb25kIGNpcGhlcnRleHQ'] as $part) {
             self::assertStringNotContainsString($part, $answered);
         }
+    }
+
+    /**
+     * The field at the segments, of the envelope given.
+     *
+     * @param  non-empty-list<int|string>  $segments
+     * @param  string  $entryId
+     * @param  int  $version
+     * @param  string  $key
+     * @param  string  $ciphertext
+     * @return \SineMacula\Laravel\AuditLog\Privacy\EncryptedField
+     */
+    private static function field(array $segments, string $entryId = self::ENTRY_ID, int $version = 1, string $key = 'key_42', string $ciphertext = 'Y2lwaGVy'): EncryptedField
+    {
+        $field = EncryptedField::fromEnvelope($entryId, $segments, ['v' => $version, 'k' => $key, 'c' => $ciphertext]);
+
+        self::assertInstanceOf(EncryptedField::class, $field);
+
+        return $field;
     }
 }

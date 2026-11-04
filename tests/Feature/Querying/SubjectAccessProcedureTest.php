@@ -4,36 +4,57 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Querying;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
+use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
+use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
+use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
+use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyFieldReader;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\Describer;
 use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
-use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
+use SineMacula\Laravel\AuditLog\Querying\ExportResult;
+use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Querying\Procedure\SubjectAccessPolicy;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
  * The reading guide's procedure for answering a subject access request: its
- * three blocks are in the guide as this test holds them, and run as written,
+ * four blocks are in the guide as this test holds them, and run as written,
  * with nothing evaluated, they select the subject's entries as the actor and as
- * the subject, export and verify them, and give a copy holding no other
- * person's reference.
+ * the subject, and the entries holding a fragment sealed under the subject's
+ * keys whoever they are about, with every encrypted field revealed; export and
+ * verify each selection; give a copy holding no other person's reference and no
+ * fragment; and erase the subject's keys, leaving every other owner's fragment
+ * and every export as it was.
  *
  * The policy block's class is the fixture `SubjectAccessPolicy`, whose text
- * from its class declaration on is the block's. The selection and the review
- * blocks are the bodies of this test's `select()` and `review()`, their last
- * line, which hands back what the block left, aside, and each class a block
- * imports is imported here, the policy as the fixture. The investigator and the
- * subject are users under the morph alias `user`, as the seeded entries name
- * them: the subject is user 42, who acts on the seeded invoice, and another
- * person, user 99, acts on the subject.
+ * from its class declaration on is the block's. The selection, the review and
+ * the erasure blocks are the bodies of this test's `select()`, `review()` and
+ * `erase()`, their last line, which hands back what the block left, aside, and
+ * each class a block imports is imported here, the policy as the fixture. The
+ * investigator and the subject are users under the morph alias `user`, as the
+ * seeded entries name them: the subject is user 42, who acts on the seeded
+ * invoice and has a card charged, and another person, user 99, acts on the
+ * subject, and logs the subject's call to support, which holds the subject's
+ * phone number and the agent's own summary. The package's own encrypter and
+ * reader are bound here, as the provider binds them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,9 +63,10 @@ use Tests\Unit\Stubs\StubAuthUser;
  */
 #[CoversClass(AccessScope::class)]
 #[CoversClass(AuditTrail::class)]
+#[CoversClass(AuditLifecycle::class)]
 final class SubjectAccessProcedureTest extends TestCase
 {
-    use ReadsTheTrail;
+    use MakesSubjectKeys, ReadsTheTrail;
 
     /** @var string The guide the procedure is in. */
     private const string GUIDE = '/docs/guides/reading.md';
@@ -80,6 +102,7 @@ final class SubjectAccessProcedureTest extends TestCase
              *
              * @param  \Illuminate\Contracts\Auth\Authenticatable  $investigator
              * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $subject
+             * @param  bool  $fragments
              */
             public function __construct(
 
@@ -89,13 +112,17 @@ final class SubjectAccessProcedureTest extends TestCase
 
                 /** The person the request is about. */
                 private Reference $subject,
+
+                /** Whether the investigator is finding the entries that hold the subject's fragments. */
+                private bool $fragments = false,
             ) {}
 
             /**
-             * The subject's activity, as the actor or the subject of an entry, for the
-             * investigator to read, count and export; the audit category, where the
-             * export is journalled, for the investigator to verify the export; and
-             * nothing for anyone else.
+             * For the investigator, the audit category, where an export is journalled,
+             * to verify an export; otherwise, with the encrypted fields revealed, the
+             * subject's activity, as the actor or the subject of an entry, or every
+             * entry while finding the subject's fragments, which can be in an entry
+             * about anyone. Nothing for anyone else.
              *
              * @param  \Illuminate\Contracts\Auth\Authenticatable|\SineMacula\Laravel\AuditLog\Records\Reference  $viewer
              * @param  \SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose  $purpose
@@ -108,10 +135,13 @@ final class SubjectAccessProcedureTest extends TestCase
                     return AccessScope::none();
                 }
 
-                return match ($purpose) {
-                    ReadPurpose::VERIFY => AccessScope::all()->onlyCategories('audit'),
-                    default             => AccessScope::all()->onlyAbout($this->subject),
-                };
+                if ($purpose === ReadPurpose::VERIFY) {
+                    return AccessScope::all()->onlyCategories('audit');
+                }
+
+                $scope = $this->fragments ? AccessScope::all() : AccessScope::all()->onlyAbout($this->subject);
+
+                return $scope->revealingEncryptedFields();
             }
         }
         ```
@@ -127,22 +157,31 @@ final class SubjectAccessProcedureTest extends TestCase
         use SineMacula\Laravel\AuditLog\Facades\AuditLog;
         use SineMacula\Laravel\AuditLog\Records\Reference;
 
-        app()->instance(AuditAccessPolicy::class, new SubjectAccessPolicy($investigator, Reference::to($subject)));
-
-        $trail   = AuditLog::trail()->visibleTo($investigator);
+        $you     = Reference::to($subject);
         $entries = [];
-        $cursor  = null;
+        $exports = [];
 
-        do {
-            $page    = $trail->cursorPaginate(100, $cursor);
-            $entries = [...$entries, ...$page->entries];
-            $cursor  = $page->nextCursor;
-        } while ($cursor !== null);
+        foreach (['activity' => false, 'fragments' => true] as $selection => $fragments) {
+            app()->instance(AuditAccessPolicy::class, new SubjectAccessPolicy($investigator, $you, $fragments));
 
-        $export = $trail->export($path);
+            $trail  = AuditLog::trail()->visibleTo($investigator);
+            $trail  = $fragments ? $trail->holdingDataOf($you) : $trail;
+            $cursor = null;
 
-        if (!$trail->verifyExport($export->path)->isVerified()) {
-            throw new \RuntimeException('The evidence export does not verify.');
+            do {
+                $page   = $trail->cursorPaginate(100, $cursor);
+                $cursor = $page->nextCursor;
+
+                foreach ($page->entries as $entry) {
+                    $entries[$entry->id] ??= $entry;
+                }
+            } while ($cursor !== null);
+
+            $exports[$selection] = $trail->export("{$directory}/{$selection}.ndjson");
+
+            if (!$trail->verifyExport($exports[$selection]->path)->isVerified()) {
+                throw new \RuntimeException('The evidence export does not verify.');
+            }
         }
         ```
         MD;
@@ -155,7 +194,6 @@ final class SubjectAccessProcedureTest extends TestCase
         use SineMacula\Laravel\AuditLog\Querying\Describer;
 
         $describer = app(Describer::class);
-        $you       = Reference::to($subject);
         $copy      = [];
 
         foreach ($entries as $entry) {
@@ -167,6 +205,18 @@ final class SubjectAccessProcedureTest extends TestCase
                 'about_you' => (bool) $entry->subject?->equals($you),
             ];
         }
+        ```
+        MD;
+
+    /** @var string The erasure block, as the guide shows it. */
+    private const string ERASE_BLOCK = <<<'MD'
+        <!-- procedure:erase -->
+
+        ```php
+        use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
+
+        $authority = new Authority(Reference::to($investigator), 'gdpr.article_17', $case);
+        $erasure   = AuditLog::lifecycle()->erase($you, $authority);
         ```
         MD;
 
@@ -185,12 +235,40 @@ final class SubjectAccessProcedureTest extends TestCase
     /** @var string When another person acted with the subject as the principal. */
     private const string PRINCIPAL_AT = '2026-11-01T12:00:03.000000Z';
 
-    /** @var list<string> The files the procedure exported, removed when the test ends. */
-    private array $files = [];
+    /** @var string When the subject's card was charged. */
+    private const string CHARGED_AT = '2026-11-01T13:00:00.000000Z';
+
+    /** @var string When another person logged the subject's call. */
+    private const string CALLED_AT = '2026-11-01T13:00:01.000000Z';
+
+    /** @var string The code a card charge is recorded under, its card sealed under the actor's key. */
+    private const string CHARGE = 'billing.card_charged';
+
+    /** @var string The code a support call is recorded under, the caller's phone sealed under the caller's key and the summary under the agent's. */
+    private const string CALL = 'support.call_logged';
+
+    /** @var string The subject's card, sealed under the subject's key. */
+    private const string CARD = '4242';
+
+    /** @var string The subject's phone number, sealed under the subject's key in an entry about someone else. */
+    private const string PHONE = '+44 20 7946 0018';
+
+    /** @var string The agent's summary of the call, another owner's fragment in the same entry. */
+    private const string SUMMARY = 'Refund agreed after a long call';
+
+    /** @var string The request's reference in the investigator's own records. */
+    private const string CASE = 'dpo:case-2026-118';
+
+    /** @var string What a fragment shows once its owner's key was destroyed. */
+    private const string ERASED = '[ERASED]';
+
+    /** @var ?string The directory the procedure exported to, removed when the test ends. */
+    private ?string $directory = null;
 
     /**
-     * Bind the read path, and store users under the alias the seeded entries
-     * name them by.
+     * Bind the package's key wrapper, encrypter and reader, as the provider
+     * binds them, and the read path; store users under the alias the seeded
+     * entries name them by; and define the charge and the call.
      *
      * @return void
      */
@@ -199,13 +277,24 @@ final class SubjectAccessProcedureTest extends TestCase
     {
         parent::setUp();
 
+        $this->keyWrapper();
+
+        app()->bind(FieldEncrypter::class, SubjectKeyEncrypter::class);
+        app()->bind(FieldReader::class, SubjectKeyFieldReader::class);
+
         $this->bindReading();
 
         Relation::morphMap([self::USER => StubAuthUser::class]);
+
+        self::define(
+            EventDefinition::for(self::CHARGE)->category('billing')->retain('amount')->encrypt('card', KeyOwner::ACTOR),
+            EventDefinition::for(self::CALL)->category('support')->retain('caller')->encrypt('phone', 'caller')->encrypt('summary', KeyOwner::ACTOR),
+        );
     }
 
     /**
-     * Forget the alias and remove the files the procedure exported.
+     * Forget the alias, put the clock back and remove what the procedure
+     * exported.
      *
      * @return void
      */
@@ -213,13 +302,14 @@ final class SubjectAccessProcedureTest extends TestCase
     protected function tearDown(): void
     {
         Relation::morphMap([], false);
+        CarbonImmutable::setTestNow();
 
-        foreach ($this->files as $file) {
-            if (!is_file($file)) {
-                continue;
+        if ($this->directory !== null) {
+            foreach (glob($this->directory . '/*') ?: [] as $file) {
+                unlink($file);
             }
 
-            unlink($file);
+            rmdir($this->directory);
         }
 
         parent::tearDown();
@@ -228,8 +318,8 @@ final class SubjectAccessProcedureTest extends TestCase
     /**
      * Each block is in the guide exactly as this test holds it, and is what
      * this test runs: the policy fixture's class is the policy block's, the
-     * bodies of `select()` and `review()` are the other blocks' code, and each
-     * class a block imports is imported here.
+     * bodies of `select()`, `review()` and `erase()` are the other blocks'
+     * code, and each class a block imports is imported here.
      *
      * @return void
      */
@@ -238,13 +328,13 @@ final class SubjectAccessProcedureTest extends TestCase
         $guide  = self::read(self::GUIDE);
         $source = self::read('/tests/Feature/Querying/SubjectAccessProcedureTest.php');
 
-        foreach ([self::POLICY_BLOCK, self::SELECT_BLOCK, self::REVIEW_BLOCK] as $block) {
+        foreach ([self::POLICY_BLOCK, self::SELECT_BLOCK, self::REVIEW_BLOCK, self::ERASE_BLOCK] as $block) {
             self::assertStringContainsString($block, $guide);
         }
 
         self::assertSame(self::classOf(self::codeOf(self::POLICY_BLOCK)), self::classOf(self::read(self::POLICY_FIXTURE)));
 
-        foreach (['select' => self::SELECT_BLOCK, 'review' => self::REVIEW_BLOCK] as $method => $block) {
+        foreach (['select' => self::SELECT_BLOCK, 'review' => self::REVIEW_BLOCK, 'erase' => self::ERASE_BLOCK] as $method => $block) {
             [$imports, $code] = self::splitImports(self::codeOf($block));
 
             self::assertSame($code, self::bodyOf($method), sprintf('%s() is not the block\'s code.', $method));
@@ -256,37 +346,146 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The procedure, run as written, selects the subject's entries as the actor
-     * and as the subject, newest first, and none other; exports exactly those
-     * and verifies the export; and gives a copy that holds the subject's own
-     * activity and no other person's reference.
+     * The procedure, run as written, selects the subject's activity, newest
+     * first, then the entry holding the subject's fragment that is about
+     * someone else, keeping an entry both find once; exports and verifies each
+     * selection; gives a copy of the subject's own activity holding no other
+     * person's reference and no fragment; and erases the subject's two keys,
+     * one for each category that sealed a fragment of theirs.
      *
      * @return void
      */
     public function testTheDocumentedProcedureRuns(): void
     {
-        [$actedOn, $acted] = $this->seedTheTrail();
+        [$actedOn, $acted]  = $this->seedTheTrail();
+        [$charged, $called] = $this->seedTheFragments();
 
-        [$entries, $lines] = $this->select(self::user(7), self::user(42), $this->exportPath());
+        [$entries, $exports] = $this->select(self::user(7), self::user(42), $this->directory());
 
-        self::assertSame([$actedOn, $acted], array_map(static fn (TrailEntry $entry): string => $entry->id, $entries));
-        self::assertSame(2, $lines);
+        self::assertSame([$charged, $actedOn, $acted, $called], array_keys($entries));
+        self::assertSame(['activity' => 3, 'fragments' => 2], array_map(static fn (ExportResult $export): int => $export->lines, $exports));
 
-        $copy = $this->review(self::user(42), $entries);
+        $copy = $this->review(Reference::to(self::user(42)), $entries);
 
         self::assertSame([
+            ['when' => self::CHARGED_AT, 'what' => self::CHARGE, 'outcome' => 'success', 'by_you' => true, 'about_you' => false],
             ['when' => self::ACTED_ON_AT, 'what' => 'invoice.approved', 'outcome' => 'success', 'by_you' => false, 'about_you' => true],
             ['when' => self::SUBJECT_ACTED_AT, 'what' => 'invoice.approved', 'outcome' => 'success', 'by_you' => true, 'about_you' => false],
+            ['when' => self::CALLED_AT, 'what' => self::CALL, 'outcome' => 'success', 'by_you' => false, 'about_you' => false],
         ], $copy);
 
-        self::assertStringNotContainsString('99', (string) json_encode($copy));
-        self::assertStringNotContainsString(self::USER, (string) json_encode($copy));
+        foreach (['99', self::USER, self::CARD, self::PHONE, self::SUMMARY] as $withheld) {
+            self::assertStringNotContainsString($withheld, (string) json_encode($copy));
+        }
+
+        [$erasure] = $this->erase(self::user(7), Reference::to(self::user(42)), self::CASE);
+
+        self::assertSame([ErasureStatus::COMPLETE, 2, 0, 2, true], [$erasure->status, $erasure->keysDestroyed, $erasure->keysKept, $erasure->entriesAffected, $erasure->recorded]);
     }
 
     /**
-     * The canonical export the procedure keeps as evidence holds what the copy
-     * leaves out, the other person who acted on the subject included, which is
-     * why it is not a copy for the subject.
+     * The entry holding the subject's fragment though neither its actor nor its
+     * subject is the subject is found by `holdingDataOf()` alone: the selection
+     * of the subject's activity does not hold it, the selection of their
+     * fragments does, with the other entry holding one.
+     *
+     * @return void
+     */
+    public function testOwnedFragmentsAreFoundWithHoldingDataOf(): void
+    {
+        [$actedOn, $acted]  = $this->seedTheTrail();
+        [$charged, $called] = $this->seedTheFragments();
+
+        [$entries, $exports] = $this->select(self::user(7), self::user(42), $this->directory());
+
+        $you = Reference::to(self::user(42));
+
+        self::assertFalse((bool) $entries[$called]->actor?->equals($you));
+        self::assertFalse((bool) $entries[$called]->subject?->equals($you));
+        self::assertSame([$acted, $actedOn, $charged], self::idsOf($exports['activity']->path));
+        self::assertSame([$charged, $called], self::idsOf($exports['fragments']->path));
+    }
+
+    /**
+     * The grant reveals every encrypted field of the entries selected, whoever
+     * owns it: the call shows the subject's phone and, beside it, the agent's
+     * own summary, another owner's fragment, which the copy leaves out with
+     * everything else the properties hold.
+     *
+     * @return void
+     */
+    public function testAnotherOwnersFragmentsAreRevealedForReview(): void
+    {
+        [$charged, $called] = $this->seedTheFragments();
+
+        [$entries] = $this->select(self::user(7), self::user(42), $this->directory());
+
+        self::assertSame(self::PHONE, $entries[$called]->properties['phone'] ?? null);
+        self::assertSame(self::SUMMARY, $entries[$called]->properties['summary'] ?? null);
+        self::assertSame(self::CARD, $entries[$charged]->properties['card'] ?? null);
+
+        $copy = (string) json_encode($this->review(Reference::to(self::user(42)), $entries));
+
+        self::assertStringNotContainsString(self::SUMMARY, $copy);
+        self::assertStringNotContainsString(self::PHONE, $copy);
+    }
+
+    /**
+     * Once the erasure step has run, every fragment sealed under the subject's
+     * keys reads erased in the entries the selection found, which the policy
+     * the procedure left bound still finds, while the agent's summary in the
+     * same entry is revealed as before, and both evidence exports still verify.
+     *
+     * @return void
+     */
+    public function testTheErasureStepLeavesTheSubjectsFragmentsErased(): void
+    {
+        [$charged, $called] = $this->seedTheFragments();
+
+        $investigator = self::user(7);
+
+        [, $exports] = $this->select($investigator, self::user(42), $this->directory());
+
+        $this->erase($investigator, Reference::to(self::user(42)), self::CASE);
+
+        $trail   = AuditLog::trail()->visibleTo($investigator);
+        $entries = [];
+
+        foreach ($trail->holdingDataOf(Reference::to(self::user(42)))->cursorPaginate(100)->entries as $entry) {
+            $entries[$entry->id] = $entry;
+        }
+
+        self::assertSame([$called, $charged], array_keys($entries));
+        self::assertSame([self::ERASED, self::SUMMARY], [$entries[$called]->properties['phone'] ?? null, $entries[$called]->properties['summary'] ?? null]);
+        self::assertSame(self::ERASED, $entries[$charged]->properties['card'] ?? null);
+
+        foreach ($exports as $export) {
+            self::assertTrue($trail->verifyExport($export->path)->isVerified());
+        }
+    }
+
+    /**
+     * Running the erasure step again for a subject already erased writes
+     * nothing more: it is a no-op recorded as `already_erased`.
+     *
+     * @return void
+     */
+    public function testRunningTheErasureStepAgainChangesNothing(): void
+    {
+        $this->seedTheFragments();
+        $this->select(self::user(7), self::user(42), $this->directory());
+
+        [$first]  = $this->erase(self::user(7), Reference::to(self::user(42)), self::CASE);
+        [$second] = $this->erase(self::user(7), Reference::to(self::user(42)), self::CASE);
+
+        self::assertSame(ErasureStatus::COMPLETE, $first->status);
+        self::assertSame([ErasureStatus::ALREADY_ERASED, null, 0, 0], [$second->status, $second->erasureId, $second->keysDestroyed, $second->entriesAffected]);
+    }
+
+    /**
+     * The canonical export the procedure keeps as evidence of the subject's
+     * activity holds what the copy leaves out, the other person who acted on
+     * the subject included, which is why it is not a copy for the subject.
      *
      * @return void
      */
@@ -294,27 +493,53 @@ final class SubjectAccessProcedureTest extends TestCase
     {
         $this->seedTheTrail();
 
-        $path = $this->exportPath();
-
-        $this->select(self::user(7), self::user(42), $path);
+        [, $exports] = $this->select(self::user(7), self::user(42), $this->directory());
 
         $actors = [];
 
-        foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
-            $row = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
-
-            self::assertIsArray($row);
-
+        foreach (self::linesOf($exports['activity']->path) as $row) {
             $actors[] = [$row['actor_type'] ?? null, $row['actor_id'] ?? null];
         }
 
         self::assertSame([[self::USER, '42'], [self::USER, '99']], $actors);
+        self::assertSame(0, $exports['fragments']->lines);
+    }
+
+    /**
+     * The evidence exports never decrypt, whatever the scope grants: the
+     * fragments the pages revealed are in the exports as the envelopes they
+     * were stored as.
+     *
+     * @return void
+     */
+    public function testTheEvidenceExportsKeepTheFragmentsSealed(): void
+    {
+        [, $called] = $this->seedTheFragments();
+
+        [, $exports] = $this->select(self::user(7), self::user(42), $this->directory());
+
+        foreach ($exports as $export) {
+            $file = file_get_contents($export->path);
+
+            self::assertIsString($file);
+
+            foreach ([self::CARD, self::PHONE, self::SUMMARY] as $plaintext) {
+                self::assertStringNotContainsString($plaintext, $file);
+            }
+        }
+
+        $call = array_values(array_filter(self::linesOf($exports['fragments']->path), static fn (array $row): bool => ($row['id'] ?? null) === $called));
+
+        self::assertCount(1, $call);
+        self::assertSame(['c', 'k', 'v'], self::sortedKeys($call[0]['properties']['phone'] ?? null));
+        self::assertSame(['c', 'k', 'v'], self::sortedKeys($call[0]['properties']['summary'] ?? null));
     }
 
     /**
      * An entry whose principal is the subject, though neither its actor nor its
-     * subject is, is not selected: `onlyAbout()` matches the actor and the
-     * subject alone, as the guide says.
+     * subject is, and which holds no fragment of theirs, is not selected:
+     * `onlyAbout()` matches the actor and the subject alone, and
+     * `holdingDataOf()` the fragments, as the guide says.
      *
      * @return void
      */
@@ -324,90 +549,135 @@ final class SubjectAccessProcedureTest extends TestCase
 
         $principal = $this->seedEntry(['actor_id' => '99', 'principal_type' => self::USER, 'principal_id' => '42'], self::PRINCIPAL_AT);
 
-        [$entries] = $this->select(self::user(7), self::user(42), $this->exportPath());
+        [$entries] = $this->select(self::user(7), self::user(42), $this->directory());
 
-        $ids = array_map(static fn (TrailEntry $entry): string => $entry->id, $entries);
-
-        self::assertSame([$actedOn, $acted], $ids);
-        self::assertNotContains($principal, $ids);
+        self::assertSame([$actedOn, $acted], array_keys($entries));
+        self::assertArrayNotHasKey($principal, $entries);
     }
 
     /**
-     * The policy lets no one but the investigator see anything: another user
-     * the application authenticated reads an empty trail, and cannot find the
-     * investigator's export to verify it.
+     * The policy lets no one but the investigator see anything, even bound as
+     * it is left once the investigator has found the fragments: another user
+     * the application authenticated reads an empty trail, and cannot find
+     * either of the investigator's exports to verify it.
      *
      * @return void
      */
     public function testNoOneButTheInvestigatorSeesAnything(): void
     {
         $this->seedTheTrail();
+        $this->seedTheFragments();
 
-        $path = $this->exportPath();
-
-        $this->select(self::user(7), self::user(42), $path);
+        [, $exports] = $this->select(self::user(7), self::user(42), $this->directory());
 
         $other = AuditLog::trail()->visibleTo(self::user(99));
 
         self::assertSame([], $other->cursorPaginate()->entries);
+        self::assertSame([], $other->holdingDataOf(Reference::to(self::user(42)))->cursorPaginate()->entries);
         self::assertSame(0, $other->count());
-        self::assertContains(ExportFinding::ENTRY_MISSING, $other->verifyExport($path)->findings);
+
+        foreach ($exports as $export) {
+            self::assertContains(ExportFinding::ENTRY_MISSING, $other->verifyExport($export->path)->findings);
+        }
     }
 
     /**
-     * Each read the procedure makes is recorded under the investigator: one
-     * page, the export, and its verification.
+     * Each read the procedure makes is recorded under the investigator: for
+     * each selection, one page, which records that it revealed encrypted
+     * fields, the export, and its verification; and the erasure is recorded
+     * under the investigator too, as the authority's operator, with the
+     * authority's reason.
      *
      * @return void
      */
-    public function testEachReadOfTheProcedureIsRecordedUnderTheInvestigator(): void
+    public function testEachStepOfTheProcedureIsRecordedUnderTheInvestigator(): void
     {
         $this->seedTheTrail();
 
-        $this->select(self::user(7), self::user(42), $this->exportPath());
+        $this->select(self::user(7), self::user(42), $this->directory());
+
+        [, $authority] = $this->erase(self::user(7), Reference::to(self::user(42)), self::CASE);
 
         $records = array_map(static fn (array $record): array => [$record['event'] ?? null, $record['actor_type'] ?? null, $record['actor_id'] ?? null], $this->readRecords());
+        $reads   = array_map(static fn (array $record): bool => (self::propertiesOf($record)['reveal'] ?? null) === true, $this->readRecords('audit_log.trail_read'));
 
         self::assertSame([
             ['audit_log.trail_read', self::USER, '7'],
             ['audit_log.trail_exported', self::USER, '7'],
             ['audit_log.export_verified', self::USER, '7'],
+            ['audit_log.trail_read', self::USER, '7'],
+            ['audit_log.trail_exported', self::USER, '7'],
+            ['audit_log.export_verified', self::USER, '7'],
+            ['audit_log.subject_erased', self::USER, '7'],
         ], $records);
+        self::assertSame([true, true], $reads);
+        $erasures = array_map(static fn (array $record): mixed => self::propertiesOf($record)['authority_reason'] ?? null, $this->readRecords('audit_log.subject_erased'));
+
+        self::assertSame([$authority->reason], $erasures);
+    }
+
+    /**
+     * While a field encrypter other than the package's is bound, the selection
+     * of the subject's fragments is refused with a `\LogicException` naming
+     * that encrypter, as the guide says, once the subject's activity has been
+     * selected.
+     *
+     * @return void
+     */
+    public function testAnotherEncrypterRefusesTheFragmentsSelection(): void
+    {
+        $this->seedTheTrail();
+
+        app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(RecordingFieldEncrypter::class);
+
+        $this->select(self::user(7), self::user(42), $this->directory());
     }
 
     /**
      * The selection block, run as written for the investigator and the subject,
-     * exporting to the path; the entries it selected and the lines it exported
-     * are handed back.
+     * exporting each selection into the directory; the entries it selected, by
+     * id, and its exports, by selection, are handed back.
      *
      * @param  \Tests\Unit\Stubs\StubAuthUser  $investigator
      * @param  \Tests\Unit\Stubs\StubAuthUser  $subject
-     * @param  string  $path
-     * @return array{0: list<\SineMacula\Laravel\AuditLog\Querying\TrailEntry>, 1: int}
+     * @param  string  $directory
+     * @return array{0: array<string, \SineMacula\Laravel\AuditLog\Querying\TrailEntry>, 1: array<string, \SineMacula\Laravel\AuditLog\Querying\ExportResult>}
      *
      * @throws \RuntimeException
      */
-    private function select(StubAuthUser $investigator, StubAuthUser $subject, string $path): array
+    private function select(StubAuthUser $investigator, StubAuthUser $subject, string $directory): array
     {
-        app()->instance(AuditAccessPolicy::class, new SubjectAccessPolicy($investigator, Reference::to($subject)));
-
-        $trail   = AuditLog::trail()->visibleTo($investigator);
+        $you     = Reference::to($subject);
         $entries = [];
-        $cursor  = null;
+        $exports = [];
 
-        do {
-            $page    = $trail->cursorPaginate(100, $cursor);
-            $entries = [...$entries, ...$page->entries];
-            $cursor  = $page->nextCursor;
-        } while ($cursor !== null);
+        foreach (['activity' => false, 'fragments' => true] as $selection => $fragments) {
+            app()->instance(AuditAccessPolicy::class, new SubjectAccessPolicy($investigator, $you, $fragments));
 
-        $export = $trail->export($path);
+            $trail  = AuditLog::trail()->visibleTo($investigator);
+            $trail  = $fragments ? $trail->holdingDataOf($you) : $trail;
+            $cursor = null;
 
-        if (!$trail->verifyExport($export->path)->isVerified()) {
-            throw new \RuntimeException('The evidence export does not verify.');
+            do {
+                $page   = $trail->cursorPaginate(100, $cursor);
+                $cursor = $page->nextCursor;
+
+                foreach ($page->entries as $entry) {
+                    $entries[$entry->id] ??= $entry;
+                }
+            } while ($cursor !== null);
+
+            $exports[$selection] = $trail->export("{$directory}/{$selection}.ndjson");
+
+            if (!$trail->verifyExport($exports[$selection]->path)->isVerified()) {
+                throw new \RuntimeException('The evidence export does not verify.');
+            }
         }
 
-        return [$entries, $export->lines];
+        return [$entries, $exports];
     }
 
     /**
@@ -416,14 +686,13 @@ final class SubjectAccessProcedureTest extends TestCase
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @param  \Tests\Unit\Stubs\StubAuthUser  $subject
-     * @param  list<\SineMacula\Laravel\AuditLog\Querying\TrailEntry>  $entries
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $you
+     * @param  array<string, \SineMacula\Laravel\AuditLog\Querying\TrailEntry>  $entries
      * @return list<array{when: array<array-key, mixed>|int|string|null, what: string, outcome: string, by_you: bool, about_you: bool}>
      */
-    private function review(StubAuthUser $subject, array $entries): array
+    private function review(Reference $you, array $entries): array
     {
         $describer = app(Describer::class);
-        $you       = Reference::to($subject);
         $copy      = [];
 
         foreach ($entries as $entry) {
@@ -437,6 +706,26 @@ final class SubjectAccessProcedureTest extends TestCase
         }
 
         return $copy;
+    }
+
+    /**
+     * The erasure block, run as written for the investigator and the subject on
+     * the request's case; the erasure's result and the authority it was made on
+     * are handed back.
+     *
+     * @param  \Tests\Unit\Stubs\StubAuthUser  $investigator
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $you
+     * @param  string  $case
+     * @return array{0: \SineMacula\Laravel\AuditLog\Lifecycle\ErasureResult, 1: \SineMacula\Laravel\AuditLog\Lifecycle\Authority}
+     *
+     * @throws \Throwable
+     */
+    private function erase(StubAuthUser $investigator, Reference $you, string $case): array
+    {
+        $authority = new Authority(Reference::to($investigator), 'gdpr.article_17', $case);
+        $erasure   = AuditLog::lifecycle()->erase($you, $authority);
+
+        return [$erasure, $authority];
     }
 
     /**
@@ -458,18 +747,71 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * A path of the test's own for an export, removed with its bundle when the
-     * test ends.
+     * Record the subject's card charged, the card sealed under the subject's
+     * key, and then another person logging the subject's call to support about
+     * a ticket, the subject's phone sealed under the subject's key and the
+     * agent's summary under the agent's; the ids of the charge and the call are
+     * returned, in that order.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function seedTheFragments(): array
+    {
+        $subject = Reference::of(self::USER, '42');
+
+        CarbonImmutable::setTestNow(new CarbonImmutable(self::CHARGED_AT));
+
+        $charged = AuditLog::event(self::CHARGE)->by($subject)->withProperties(['amount' => '12.00', 'card' => self::CARD])->record();
+
+        CarbonImmutable::setTestNow(new CarbonImmutable(self::CALLED_AT));
+
+        $called = AuditLog::event(self::CALL)
+            ->by(Reference::of(self::USER, '99'))
+            ->on(Reference::of('ticket', 't_1001'))
+            ->withProperties(['caller' => ['type' => self::USER, 'id' => '42'], 'phone' => self::PHONE, 'summary' => self::SUMMARY])
+            ->record();
+
+        CarbonImmutable::setTestNow();
+
+        return [$charged->id, $called->id];
+    }
+
+    /**
+     * A directory of the test's own for the exports, removed with what it holds
+     * when the test ends.
      *
      * @return string
      */
-    private function exportPath(): string
+    private function directory(): string
     {
-        $path = sys_get_temp_dir() . '/' . uniqid('audit-subject-access-', true) . '.ndjson';
+        $this->directory = sys_get_temp_dir() . '/' . uniqid('audit-subject-access-', true);
 
-        array_push($this->files, $path, $path . '.manifest.json');
+        self::assertTrue(mkdir($this->directory, 0700));
 
-        return $path;
+        return $this->directory;
+    }
+
+    /**
+     * Make the definitions the only ones the facade's recorder and the
+     * container know, as an application registers them while it boots.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  ...$definitions
+     * @return void
+     */
+    private static function define(EventDefinition ...$definitions): void
+    {
+        $catalogue = new EventCatalogue;
+
+        foreach ($definitions as $definition) {
+            $catalogue->define($definition);
+        }
+
+        $recorder = new Recorder($catalogue, new ContributorRegistry);
+
+        app()->instance(EventCatalogue::class, $catalogue);
+        app()->instance(Recorder::class, $recorder);
+
+        AuditLog::swap($recorder);
     }
 
     /**
@@ -481,6 +823,59 @@ final class SubjectAccessProcedureTest extends TestCase
     private static function user(int $id): StubAuthUser
     {
         return (new StubAuthUser)->forceFill(['id' => $id]);
+    }
+
+    /**
+     * Each line of an NDJSON export, decoded.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  string  $path
+     * @return list<array<array-key, mixed>>
+     */
+    private static function linesOf(string $path): array
+    {
+        $rows = [];
+
+        foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+            $row = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+
+            self::assertIsArray($row);
+
+            $rows[] = $row;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The id of each line of an NDJSON export, in file order.
+     *
+     * @param  string  $path
+     * @return list<?string>
+     */
+    private static function idsOf(string $path): array
+    {
+        return array_map(static fn (array $row): ?string => is_string($row['id'] ?? null) ? $row['id'] : null, self::linesOf($path));
+    }
+
+    /**
+     * The keys of a map, sorted, or the test fails when the value is no map.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $value
+     * @return list<array-key>
+     */
+    private static function sortedKeys(mixed $value): array
+    {
+        self::assertIsArray($value);
+
+        $keys = array_keys($value);
+
+        sort($keys);
+
+        return $keys;
     }
 
     /**

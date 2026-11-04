@@ -13,7 +13,9 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
+use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher;
 use SineMacula\Laravel\AuditLog\Privacy\IpMinimiser;
@@ -52,6 +54,12 @@ final class RecordMinimiserTest extends TestCase
 
     /** @var string The code every record here is of. */
     private const string CODE = 'invoice.approved';
+
+    /** @var string The id of the entry every record here is minimised as. */
+    private const string ENTRY_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
+
+    /** @var string The id of the log every record here is signed into. */
+    private const string LOG_ID = 'app-eu-1';
 
     /** @var string The root key every hash here is made under. */
     private const string ROOT_KEY = '0123456789abcdef0123456789abcdef';
@@ -287,6 +295,31 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
+     * A value the record is given that is exactly an encryption envelope, in
+     * the properties or the context, at any depth, is removed and diagnosed
+     * before anything is sealed, so a record stores no envelope its own sealer
+     * did not make; a map with a member beyond the three, and the rest of each
+     * container, are kept, and a list stays a list.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeTheRecordIsGivenIsRemovedAndDiagnosed(): void
+    {
+        $envelope = ['v' => 1, 'k' => '01932b4e-e000-7000-8000-000000000001', 'c' => 'Y2FyZA'];
+        $pending  = self::contextOf(['headers' => ['copied' => $envelope, 'host' => 'example.test']])
+            ->withProperties(['copied' => $envelope, 'rows' => [$envelope, 'kept'], 'near' => [...$envelope, 'x' => 1]]);
+
+        $minimised = $this->minimise($pending, EventDefinition::for(self::CODE)->retain('copied')->retain('rows')->retain('near'));
+
+        self::assertSame(['headers' => ['host' => 'example.test']], $minimised->context);
+        self::assertSame([
+            'rows'   => ['kept'],
+            'near'   => [...$envelope, 'x' => 1],
+            '_audit' => ['omitted' => ['count' => 3, 'paths' => ['context.*.*', 'copied', 'rows.*']]],
+        ], $minimised->properties);
+    }
+
+    /**
      * A colliding context key is masked with the context's own rule, under its
      * prefix, literal only for a fixed package name, and counted.
      *
@@ -465,10 +498,10 @@ final class RecordMinimiserTest extends TestCase
         $encrypter  = new RecordingFieldEncrypter;
         $properties = $this->minimise(self::parties()->withNote(self::NOTE, $owner), encrypter: $encrypter)->properties;
 
-        self::assertSame(['_audit' => ['note' => ['v' => 1, 'k' => 'key_' . $id, 'c' => base64_encode(self::NOTE)]]], $properties);
+        self::assertSame(['_audit' => ['note' => ['v' => 1, 'k' => 'key_' . $id, 'c' => base64_encode('"' . self::NOTE . '"')]]], $properties);
         self::assertCount(1, $encrypter->calls());
         self::assertSame($id, $encrypter->calls()[0][0]->id);
-        self::assertSame(self::NOTE, $encrypter->calls()[0][1]);
+        self::assertSame('"' . self::NOTE . '"', $encrypter->calls()[0][1]);
     }
 
     /**
@@ -524,7 +557,189 @@ final class RecordMinimiserTest extends TestCase
 
         $this->minimise($pending, EventDefinition::for(self::CODE)->encrypt('card', KeyOwner::ACTOR), ['ip' => 'encrypt'], $encrypter);
 
-        self::assertSame([self::ADDRESS, self::NOTE, '4242'], array_map(static fn (array $call): string => $call[1], $encrypter->calls()));
+        self::assertSame(['"' . self::ADDRESS . '"', '"' . self::NOTE . '"', '"4242"'], array_map(static fn (array $call): string => $call[1], $encrypter->calls()));
+        self::assertSame([['ip'], ['properties', '_audit', 'note'], ['properties', 'card']], $encrypter->paths());
+    }
+
+    /**
+     * Every value of a record is sealed with the same list of owners: the
+     * owners of the encrypted fields, the note's owner and, under the `encrypt`
+     * IP mode, the actor, each once and sorted, so the first value sealed
+     * already names every key the record needs.
+     *
+     * @return void
+     */
+    public function testEveryOwnerOfTheRecordIsInEachContext(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+        $pending   = self::parties()->withNote(self::NOTE, Reference::of('team', 'team-1'));
+
+        $pending->withProperties(['card' => '4242', 'holder' => ['type' => 'customer', 'id' => 'c-9'], 'iban' => 'GB00']);
+
+        $pending->fillClient(self::ADDRESS, null);
+
+        $definition = EventDefinition::for(self::CODE)->encrypt('card', KeyOwner::ACTOR)->encrypt('iban', 'holder')->retain('holder')->encrypt('absent', KeyOwner::SUBJECT);
+
+        $this->minimise($pending, $definition, ['ip' => 'encrypt'], $encrypter);
+
+        $expected = ['customer:c-9', 'invoice:subject-1', 'team:team-1', 'user:actor-1'];
+
+        self::assertCount(4, $encrypter->contexts());
+
+        foreach ($encrypter->contexts() as $context) {
+            self::assertSame($expected, self::ownersOf($context), implode('.', $context->path));
+        }
+    }
+
+    /**
+     * The actor is an owner of the record only while the address is encrypted,
+     * and a note without an owner adds none.
+     *
+     * @return void
+     */
+    public function testTheActorOwnsTheRecordOnlyUnderTheEncryptMode(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+        $pending   = self::parties()->withNote(self::NOTE)->withProperties(['iban' => 'GB00']);
+
+        $pending->fillClient(self::ADDRESS, null);
+
+        $this->minimise($pending, EventDefinition::for(self::CODE)->encrypt('iban', KeyOwner::SUBJECT), ['ip' => 'truncate'], $encrypter);
+
+        self::assertSame([['properties', 'iban']], $encrypter->paths());
+        self::assertSame(['invoice:subject-1'], self::ownersOf($encrypter->contexts()[0]));
+    }
+
+    /**
+     * An owned note is sealed at its place in the metadata, the path
+     * `["properties","_audit","note"]`, which a reader names the same way.
+     *
+     * @return void
+     */
+    public function testTheNoteIsSealedAtItsMetadataPath(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+
+        $this->minimise(self::parties()->withNote(self::NOTE, KeyOwner::ACTOR), encrypter: $encrypter);
+
+        self::assertSame([['properties', '_audit', 'note']], $encrypter->paths());
+        self::assertSame(['user:actor-1'], self::ownersOf($encrypter->contexts()[0]));
+    }
+
+    /**
+     * The entry id the caller minted and the configured log id reach every
+     * value of the record, the address, the note and each field alike.
+     *
+     * @return void
+     */
+    public function testTheEntryIdAndLogIdReachEveryField(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+        $pending   = self::parties()->withNote(self::NOTE, KeyOwner::ACTOR)->withProperties(['card' => '4242']);
+
+        $pending->fillClient(self::ADDRESS, null);
+
+        $this->minimise($pending, EventDefinition::for(self::CODE)->encrypt('card', KeyOwner::SUBJECT), ['ip' => 'encrypt'], $encrypter, 'ledger.eu-1');
+
+        self::assertCount(3, $encrypter->contexts());
+
+        foreach ($encrypter->contexts() as $context) {
+            self::assertSame(self::ENTRY_ID, $context->entryId);
+            self::assertSame('ledger.eu-1', $context->logId);
+        }
+    }
+
+    /**
+     * The record's tenant and its definition's category reach every value, so
+     * each is sealed under the key unit of the entry as it is stored.
+     *
+     * @return void
+     */
+    public function testTheTenantAndCategoryReachEveryField(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+        $pending   = self::parties()->forTenant(Reference::of('organisation', 'org_01'))->withNote(self::NOTE, KeyOwner::ACTOR)->withProperties(['card' => '4242']);
+
+        $pending->fillClient(self::ADDRESS, null);
+
+        $this->minimise($pending, EventDefinition::for(self::CODE)->category('billing')->encrypt('card', KeyOwner::SUBJECT), ['ip' => 'encrypt'], $encrypter);
+
+        self::assertCount(3, $encrypter->contexts());
+
+        foreach ($encrypter->contexts() as $context) {
+            self::assertSame(['organisation', 'org_01'], [$context->tenant?->type, $context->tenant?->id]);
+            self::assertSame('billing', $context->category);
+        }
+
+        $tenantless = new RecordingFieldEncrypter;
+
+        $this->minimise(self::parties()->withNote(self::NOTE, KeyOwner::ACTOR), encrypter: $tenantless);
+
+        self::assertNull($tenantless->contexts()[0]->tenant);
+        self::assertSame('general', $tenantless->contexts()[0]->category);
+    }
+
+    /**
+     * A malformed log id fails the capture of a record with an owner to seal
+     * for, before anything is sealed.
+     *
+     * @return void
+     */
+    public function testAMalformedLogIdFailsBeforeAnythingIsSealed(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+
+        try {
+            $this->minimise(self::parties()->withNote(self::NOTE, KeyOwner::ACTOR), encrypter: $encrypter, logId: '../escape');
+
+            self::fail('Expected the log id to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringStartsWith('`audit-log.integrity.log_id` must be 1 to 64 letters, digits, dots, underscores or hyphens', $exception->getMessage());
+            self::assertSame([], $encrypter->calls());
+        }
+    }
+
+    /**
+     * A record with no owner seals nothing, so the log id is never read, and a
+     * source id that could not name a log costs such a record nothing.
+     *
+     * @return void
+     */
+    public function testARecordWithNoOwnerNeverReadsTheLogId(): void
+    {
+        $pending = self::parties()->withNote(self::NOTE)->withProperties(['card' => '4242']);
+
+        $pending->fillClient(self::ADDRESS, null);
+
+        $minimised = $this->minimise($pending, EventDefinition::for(self::CODE)->retain('card'), ['ip' => 'truncate'], new RecordingFieldEncrypter, '../escape');
+
+        self::assertSame(['card' => '4242', '_audit' => ['note' => self::NOTE]], $minimised->properties);
+        self::assertSame('203.0.113.0', $minimised->ip);
+    }
+
+    /**
+     * An entry id that is not a lower-case UUID fails the capture before
+     * anything is sealed.
+     *
+     * @return void
+     */
+    public function testAMalformedEntryIdFailsBeforeAnythingIsSealed(): void
+    {
+        $settings  = new RedactionSettings(new Repository(['app' => ['key' => self::ROOT_KEY]]));
+        $hasher    = new IdentifierHasher($settings);
+        $encrypter = new RecordingFieldEncrypter;
+        $sealer    = new EnvelopeSealer($encrypter, $this->handler);
+        $seals     = new SealSettings(new Repository(['audit-log' => ['integrity' => ['log_id' => self::LOG_ID]]]));
+        $minimiser = new RecordMinimiser($settings, new Redactor($settings), new IpMinimiser($settings, $hasher), $hasher, $sealer, $seals);
+
+        try {
+            $minimiser->minimise(self::parties()->withNote(self::NOTE, KeyOwner::ACTOR)->snapshot(), EventDefinition::for(self::CODE), strtoupper(self::ENTRY_ID));
+
+            self::fail('Expected the entry id to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('A field context\'s entry id must be a lower-case UUID.', $exception->getMessage());
+            self::assertSame([], $encrypter->calls());
+        }
     }
 
     /**
@@ -544,10 +759,10 @@ final class RecordMinimiserTest extends TestCase
         $minimised  = $this->minimise($pending, $definition, ['ip' => 'encrypt'], $encrypter);
 
         self::assertSame([
-            'card' => ['v' => 1, 'k' => 'key_actor-1', 'c' => base64_encode('4242')],
-            'iban' => ['v' => 1, 'k' => 'key_subject-1', 'c' => base64_encode('GB00')],
+            'card' => ['v' => 1, 'k' => 'key_actor-1', 'c' => base64_encode('"4242"')],
+            'iban' => ['v' => 1, 'k' => 'key_subject-1', 'c' => base64_encode('"GB00"')],
         ], $minimised->properties);
-        self::assertSame(CanonicalEncoder::encode(['v' => 1, 'k' => 'key_actor-1', 'c' => base64_encode(self::ADDRESS)]), $minimised->ip);
+        self::assertSame(CanonicalEncoder::encode(['v' => 1, 'k' => 'key_actor-1', 'c' => base64_encode('"' . self::ADDRESS . '"')]), $minimised->ip);
     }
 
     /**
@@ -972,7 +1187,7 @@ final class RecordMinimiserTest extends TestCase
      */
     public function testTheSnapshotParameterIsSensitive(): void
     {
-        foreach (['minimise', 'logCollisions', 'storableNote', 'noteOwner'] as $method) {
+        foreach (['minimise', 'ownersOf', 'logCollisions', 'storableNote', 'noteOwner'] as $method) {
             $parameter = (new \ReflectionMethod(RecordMinimiser::class, $method))->getParameters()[0];
 
             self::assertSame('snapshot', $parameter->getName(), $method);
@@ -990,17 +1205,35 @@ final class RecordMinimiserTest extends TestCase
      * @param  ?\SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
      * @param  array<string, mixed>  $redaction
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter  $encrypter
+     * @param  string  $logId
      * @return \SineMacula\Laravel\AuditLog\Privacy\Minimised
      */
-    public function minimise(PendingRecord $pending, ?EventDefinition $definition = null, array $redaction = [], ?FieldEncrypter $encrypter = null): Minimised
-    {
-        $settings = new RedactionSettings(new Repository(['app' => ['key' => self::ROOT_KEY], 'audit-log' => ['redaction' => $redaction]]));
+    public function minimise(
+        PendingRecord $pending,
+        ?EventDefinition $definition = null,
+        array $redaction = [],
+        ?FieldEncrypter $encrypter = null,
+        string $logId = self::LOG_ID,
+    ): Minimised {
+        $config   = new Repository(['app' => ['key' => self::ROOT_KEY], 'audit-log' => ['redaction' => $redaction, 'integrity' => ['log_id' => $logId]]]);
+        $settings = new RedactionSettings($config);
         $hasher   = new IdentifierHasher($settings);
         $sealer   = new EnvelopeSealer($encrypter ?? new NoFieldEncrypter, $this->handler);
 
-        $minimiser = new RecordMinimiser($settings, new Redactor($settings), new IpMinimiser($settings, $hasher), $hasher, $sealer);
+        $minimiser = new RecordMinimiser($settings, new Redactor($settings), new IpMinimiser($settings, $hasher), $hasher, $sealer, new SealSettings($config));
 
-        return $minimiser->minimise($pending->snapshot(), $definition ?? EventDefinition::permissive(EventCode::of(self::CODE)));
+        return $minimiser->minimise($pending->snapshot(), $definition ?? EventDefinition::permissive(EventCode::of(self::CODE)), self::ENTRY_ID);
+    }
+
+    /**
+     * The context's owners as `type:id`, in its order.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\FieldContext  $context
+     * @return list<string>
+     */
+    private static function ownersOf(FieldContext $context): array
+    {
+        return array_map(static fn (Reference $owner): string => $owner->type . ':' . $owner->id, $context->owners);
     }
 
     /**

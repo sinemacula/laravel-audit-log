@@ -141,8 +141,11 @@ final class TrailReadingTest extends TestCase
 
     /**
      * A field whose owner's keys were destroyed reads as `[ERASED]` through the
-     * field reader the application binds, a property and an address alike, each
-     * read at its own path.
+     * field reader the application binds, under a scope that reveals the
+     * encrypted fields, from the row the store signed: a property and an
+     * address alike, each read at its own path in the page's one call; without
+     * the grant the same entry reads `[ENCRYPTED]` and the reader is never
+     * asked.
      *
      * @return void
      */
@@ -154,10 +157,18 @@ final class TrailReadingTest extends TestCase
 
         $this->recordEncrypted();
 
+        $sealed = $this->trail()->forEvent('invoice.approved')->cursorPaginate()->entries[0];
+
+        self::assertSame(['[ENCRYPTED]', '[ENCRYPTED]'], [$sealed->properties['card'], $sealed->ip]);
+        self::assertSame(0, $reader->calls());
+
+        $this->revealEverything();
+
         $entry = $this->trail()->forEvent('invoice.approved')->cursorPaginate()->entries[0];
 
         self::assertSame(['[ERASED]', '[ERASED]'], [$entry->properties['card'], $entry->ip]);
         self::assertSame(['properties.card', 'ip'], $reader->paths());
+        self::assertSame(1, $reader->calls());
     }
 
     /**

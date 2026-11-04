@@ -102,6 +102,31 @@ final class ReadTermsTest extends TestCase
     }
 
     /**
+     * The owner holding data in the entries is part of the normalised filters
+     * the query is fingerprinted from: reads of two owners have two
+     * fingerprints, a read of none a third, and a read of the same owner given
+     * again the same one.
+     *
+     * @return void
+     */
+    public function testTheOwnerHoldingDataIsFingerprinted(): void
+    {
+        $key     = new IntegrityKey('ring-1', self::SECRET);
+        $owner   = self::filters()->withHoldingDataOf(Reference::of('App\Models\User', '42'));
+        $other   = self::filters()->withHoldingDataOf(Reference::of('App\Models\User', '43'));
+        $again   = self::filters()->withHoldingDataOf(Reference::of('App\Models\User', '41'))->withHoldingDataOf(Reference::of('App\Models\User', '42'));
+        $derived = hash_hkdf('sha256', self::SECRET, 32, ReadTerms::DERIVATION_INFO, '');
+        $terms   = ReadTerms::of($key, $owner, self::scope());
+
+        self::assertSame(['App\Models\User', '42'], $owner->normalised()['holding_data_of']);
+        self::assertSame(hash_hmac('sha256', CanonicalEncoder::encode(['filters' => $owner->normalised()]), $derived), $terms->queryFingerprint);
+        self::assertNotSame($terms->queryFingerprint, ReadTerms::of($key, $other, self::scope())->queryFingerprint);
+        self::assertNotSame($terms->queryFingerprint, ReadTerms::of($key, self::filters(), self::scope())->queryFingerprint);
+        self::assertSame($terms->queryFingerprint, ReadTerms::of($key, $again, self::scope())->queryFingerprint);
+        self::assertSame($terms->scopeFingerprint, ReadTerms::of($key, self::filters(), self::scope())->scopeFingerprint);
+    }
+
+    /**
      * The key is a sensitive parameter.
      *
      * @return void

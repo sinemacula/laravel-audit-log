@@ -126,7 +126,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
             self::createLogin($root, $this->names[$placeholder]);
         }
 
-        self::runDocumentedSql($root, $root->getDriverName() . '-grants', $this->names);
+        self::runDocumentedGrants($root, $this->names);
 
         foreach ([self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {
             self::connectAs($placeholder, self::CONNECTION, $this->names[$placeholder]);
@@ -245,9 +245,9 @@ final class LeastPrivilegeLifecycleTest extends TestCase
 
     /**
      * After the maintenance user prunes, the verifier, which reads the entries,
-     * the seals, the members, the journal and the holds and writes only the
-     * progress of verification, verifies the whole log, the seal `pruned`, and
-     * can change none of the evidence.
+     * the seals, the members, the journal, the holds and the key tables and
+     * writes only the progress of verification, verifies the whole log, the
+     * seal `pruned`, and can change none of the evidence.
      *
      * @return void
      */
@@ -482,7 +482,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     {
         $root = $this->root();
 
-        self::runDocumentedSql($root, $root->getDriverName() . '-triggers', $this->names);
+        self::runDocumentedTriggers($root, $this->names);
 
         $this->triggers = true;
     }

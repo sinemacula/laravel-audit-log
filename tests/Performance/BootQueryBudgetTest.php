@@ -21,11 +21,16 @@ use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Keys\KeyCreator;
+use SineMacula\Laravel\AuditLog\Keys\KeyStore;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\Describer;
 use SineMacula\Laravel\AuditLog\Recorder;
@@ -43,7 +48,8 @@ use Tests\TestCase;
  * Performance contract for booting the package: registering it adds no query to
  * a request that records nothing, booting with capture wired issues none, and
  * resolving the store, what finalises a record, the recorder and what it works
- * with, or the trail and what reads it issues none and opens no connection.
+ * with, the trail and what reads it, or the owners' keys and what erases them
+ * issues none and opens no connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -187,6 +193,32 @@ final class BootQueryBudgetTest extends TestCase
         }
 
         self::assertIsObject(app(Recorder::class)->trail());
+        self::assertSame([], DB::getQueryLog());
+        self::assertArrayNotHasKey('audit_unopened', DB::getConnections());
+    }
+
+    /**
+     * Resolving the field encrypter, the key wrapper, the key store, what
+     * creates a key and the lifecycle that erases one issues no statement and
+     * opens no connection, and neither does naming the current wrapping key: a
+     * key is looked up only when a value is sealed.
+     *
+     * @return void
+     */
+    public function testResolvingTheKeyPathIssuesNoQueries(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
+        $config->set('audit-log.storage.connection', 'audit_unopened');
+
+        DB::enableQueryLog();
+
+        foreach ([FieldEncrypter::class, KeyWrapper::class, KeyStore::class, KeyCreator::class, AuditLifecycle::class] as $abstract) {
+            self::assertIsObject(app($abstract));
+        }
+
+        self::assertStringStartsWith('d-', app(KeyWrapper::class)->currentKeyId());
         self::assertSame([], DB::getQueryLog());
         self::assertArrayNotHasKey('audit_unopened', DB::getConnections());
     }

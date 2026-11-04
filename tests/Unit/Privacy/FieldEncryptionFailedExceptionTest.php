@@ -7,6 +7,7 @@ namespace Tests\Unit\Privacy;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -50,10 +51,11 @@ final class FieldEncryptionFailedExceptionTest extends TestCase
              *
              * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
              * @param  string  $plaintext
+             * @param  \SineMacula\Laravel\AuditLog\Privacy\FieldContext  $context
              * @return null
              */
             #[\Override]
-            public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext): null
+            public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext, FieldContext $context): null
             {
                 return null;
             }
