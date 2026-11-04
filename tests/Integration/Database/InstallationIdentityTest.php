@@ -152,7 +152,7 @@ final class InstallationIdentityTest extends TestCase
             DB::connection(self::SAME)->table(IntegrityTables::stateTable())->insert([
                 'name'       => InstallationIdentity::NAME,
                 'value'      => json_encode(['id' => $winner]),
-                'updated_at' => '2026-11-01 00:00:00.000000',
+                'updated_at' => '2026-11-01 00:00:00.123456',
             ]);
         });
 
@@ -160,7 +160,7 @@ final class InstallationIdentityTest extends TestCase
         self::assertFalse($racing);
         self::assertSame($winner, $this->identityOn(self::SAME)->ensure(self::at()));
         self::assertSame(1, $this->state()->where('name', InstallationIdentity::NAME)->count());
-        self::assertSame('2026-11-01 00:00:00.000000', $this->state()->where('name', InstallationIdentity::NAME)->value('updated_at'));
+        self::assertSame('2026-11-01 00:00:00.123456', $this->state()->where('name', InstallationIdentity::NAME)->value('updated_at'));
     }
 
     /**

@@ -589,8 +589,8 @@ final class LifecycleTriggersTest extends TestCase
             'conflicts'    => 1,
             'rejected'     => 1,
             'conflict_ids' => '["r4"]',
-            'updated_at'   => '2026-11-01 12:05:00.000000',
-            'finished_at'  => '2026-11-01 12:05:00.000000',
+            'updated_at'   => '2026-11-01 12:05:00.123456',
+            'finished_at'  => '2026-11-01 12:05:00.123456',
         ];
     }
 

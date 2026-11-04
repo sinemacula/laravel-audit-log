@@ -80,6 +80,9 @@ final class PruneEnginesTest extends TestCase
     /** @var string The connection the maintenance user's login uses. */
     private const string MAINTENANCE = 'audit_maintenance';
 
+    /** @var string The verifier's placeholder, whose login the documented grants name. */
+    private const string VERIFIER = 'audit_verifier';
+
     /** @var array<string, string> The names this worker gives the placeholders, once its logins exist. */
     private array $names = [];
 
@@ -121,7 +124,7 @@ final class PruneEnginesTest extends TestCase
             self::dropDocumentedTriggers($root);
         }
 
-        foreach ($this->names === [] ? [] : [self::WRITER, self::MAINTENANCE] as $placeholder) {
+        foreach ($this->names === [] ? [] : [self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {
             DB::purge($placeholder);
 
             self::dropLogin($root, $this->names[$placeholder]);
@@ -278,7 +281,7 @@ final class PruneEnginesTest extends TestCase
 
         $this->names = self::documentedNames($root);
 
-        foreach ([self::WRITER, self::MAINTENANCE] as $placeholder) {
+        foreach ([self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {
             self::createLogin($root, $this->names[$placeholder]);
         }
 

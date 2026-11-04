@@ -140,7 +140,9 @@ trait InteractsWithAuditStore
 
     /**
      * Create the probe table on the storage connection and make it the entries
-     * table, so the store's next insert fails on its `NOT NULL` column.
+     * table, so the store's next insert fails on its `NOT NULL` column. Its
+     * `id` is a UUID, as the entries table's is, so a statement joining it to
+     * another table's entry id runs on PostgreSQL too.
      *
      * @return void
      */
@@ -152,7 +154,7 @@ trait InteractsWithAuditStore
 
         $schema->create(self::PROBE_TABLE, static function (Blueprint $table): void {
             foreach (array_keys(RowCodec::COLUMNS) as $column) {
-                $table->text($column)->nullable();
+                $column === 'id' ? $table->uuid($column)->nullable() : $table->text($column)->nullable();
             }
 
             $table->string('probe', 16);

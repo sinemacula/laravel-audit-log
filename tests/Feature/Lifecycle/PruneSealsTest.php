@@ -117,7 +117,7 @@ final class PruneSealsTest extends TestCase
             'an unknown key'        => [static fn (self $test) => $test->rekeySeal('k1999')],
             'an algorithm version'  => [static fn (self $test) => $test->changeSeal(['algorithm_version' => 9])],
             'a signer'              => [static fn (self $test) => $test->changeSeal(['signer' => 'other'])],
-            'a malformed column'    => [static fn (self $test) => $test->changeSeal(['sealed_at' => 'yesterday'])],
+            'a malformed column'    => [static fn (self $test) => $test->changeSeal(['members_digest' => 'not a digest'])],
         ];
     }
 
