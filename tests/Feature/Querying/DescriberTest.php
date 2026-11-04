@@ -9,6 +9,7 @@ use Illuminate\Translation\ArrayLoader;
 use Illuminate\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
 use SineMacula\Laravel\AuditLog\Querying\Describer;
 use SineMacula\Laravel\AuditLog\Querying\Description;
@@ -512,7 +513,7 @@ final class DescriberTest extends TestCase
      */
     private static function project(StoredEntry $stored): TrailEntry
     {
-        return (new EntryProjector(new SealedFieldReader, new RecordingExceptionHandler))->project([$stored])[0];
+        return (new EntryProjector(new SealedFieldReader, new RecordingExceptionHandler, app(RecordSigner::class)))->project([$stored], false)->entries[0];
     }
 
     /**

@@ -34,10 +34,15 @@ is in `threat-model.md`.
 - An identifier or a pseudonymised string is cleaned and trimmed, then lower-cased when it is email-shaped: one `@`,
   with no whitespace and something on each side. Anything else that is pseudonymised is hashed as its canonical
   encoding, with the strings inside it left as they are. An address is hashed in its canonical form, exactly.
-- An encrypted value goes through `Contracts\FieldEncrypter`. The package binds `Privacy\NoFieldEncrypter`, which holds
-  no key for anyone, so until an application binds its own every encrypted field, owned note and encrypted address is
-  dropped and diagnosed. An envelope is exactly `{v, k, c}`, whatever order they come in, and stored in that order: `v`
-  an integer of at least 1, and `k` and `c` non-empty clean strings. The encrypter is resolved for each capture.
+- An encrypted value goes through `Contracts\FieldEncrypter`. The package binds `Privacy\SubjectKeyEncrypter`, the
+  default encrypter, which seals each value under a key of its owner's unit (the owner, the record's tenant and the
+  definition's category) with AES-256-GCM, bound to the entry, the value's path and the log, so an owner's values can
+  be erased by destroying the owner's keys; `privacy.md` has the keys and the envelope. `Privacy\NoFieldEncrypter`,
+  which holds no key for anyone, is the explicit choice never to encrypt: bound, it drops and diagnoses every encrypted
+  field, owned note and encrypted address. Each value is given a `Privacy\FieldContext` naming the entry id, the path,
+  the log id, the tenant, the category and every owner the record seals for. An envelope is exactly `{v, k, c}`,
+  whatever order they come in, and stored in that order: `v` an integer of at least 1, and `k` and `c` non-empty clean
+  strings. The encrypter is resolved for each capture.
 - The settings are read from configuration during each capture, never at boot, and a malformed one fails closed with an
   `\InvalidArgumentException` naming the key and never the value. `audit-log:check` reports each by its full path:
   `redaction.keys`, `redaction.identifiers`, `redaction.ip`, `redaction.key`, `redaction.max_bytes` and
@@ -74,9 +79,10 @@ is in `threat-model.md`.
        ->record();
    ```
 
-2. With the default encrypter, the record's properties are these. `api_key` is the marker in spite of its `retain`; the
-   email is a hash of `ada@example.test`; `card_holder` has no key, so it is removed under its rule's path; and `phone`,
-   `memo` and `lines` no rule names, so they are removed under masked paths:
+2. With `Privacy\NoFieldEncrypter` bound, the record's properties are these. `api_key` is the marker in spite of its
+   `retain`; the email is a hash of `ada@example.test`; `card_holder` has no key, so it is removed under its rule's
+   path; and `phone`, `memo` and `lines` no rule names, so they are removed under masked paths. With the default
+   encrypter `card_holder` is instead an envelope under the invoice's key, and the omission counts 3:
 
    ```json
    {
@@ -101,7 +107,8 @@ is in `threat-model.md`.
   key is no owner, and neither is one with the marker in it. A rule on the owner's own path does not hide it, because
   owners are read before any field is handled.
 - A key absent: an encrypter returning `null` is not a failure. The value is removed and diagnosed, nothing is reported,
-  and the next value is still offered to the encrypter.
+  and the next value is still offered to the encrypter. The diagnostic is the path and the count, never a reason, so an
+  owner with no key, an absent owner and an erased owner read alike, and no later record discloses an erasure.
 - Malformed output: an encrypter returning anything but a valid envelope has failed.
 - A throwing encrypter has failed too, for an `\Error` as for an exception. A failure is contained, so the value is
   removed and diagnosed and the record is written. `Privacy\FieldEncryptionFailedException`, which names only the
@@ -198,12 +205,15 @@ so:
 | `retain`       | the value as key matching left it, each string cut to 1024 bytes | walked                                 |
 | `redact`       | `[REDACTED]`                                                     | one marker for the whole branch        |
 | `pseudonymise` | the hash of the complete value, in the field domain, never cut   | one hash of its canonical encoding     |
-| `encrypt`      | an envelope of the string, cut to 1024 bytes, under its owner    | one envelope of its canonical encoding |
+| `encrypt`      | an envelope of its typed plaintext, at most 1024 bytes           | one envelope of its canonical encoding |
 | `drop`         | nothing, and the removal is counted                              | the whole branch is one removal        |
 
-`TextSanitizer::cut()` makes the cut, on a character boundary. Plaintext is the string, cut before it is sealed, or the
-canonical JSON of anything else. A container whose canonical JSON is longer than 1024 bytes is dropped and diagnosed and
-never reaches the encrypter, because a cut encoding could never be decoded. Pseudonymising hashes the complete value, so
+`TextSanitizer::cut()` makes the cut, on a character boundary. Plaintext is typed (`Privacy\TypedPlaintext`): the
+canonical JSON of the value for every type, a string included, so the string `"true"` and the boolean `true` seal
+apart, and it is measured after encoding, at most `TypedPlaintext::MAX_BYTES` (1024) bytes. A string is cut to the
+longest prefix whose encoding fits. A container whose canonical JSON is longer than 1024 bytes is dropped and diagnosed
+and never reaches the encrypter, as is any other value whose encoding is, because a cut encoding could never be
+decoded. Pseudonymising hashes the complete value, so
 long values sharing a prefix never collide. A marker, a pseudonym and an envelope are generated values, and are never
 cut.
 
@@ -285,6 +295,8 @@ its IPv4 address, in every mode including `full`, so one client has one form, on
   `HASH`, `DROP`.
 - `src/Contracts/FieldEncrypter.php`: `encrypt()`; `src/Privacy/NoFieldEncrypter.php`; `src/Privacy/EnvelopeSealer.php`:
   `seal()`; `src/Privacy/FieldEncryptionFailedException.php`: `for()`.
+- `src/Privacy/SubjectKeyEncrypter.php`, `src/Privacy/FieldContext.php`, `src/Privacy/SealingScope.php`,
+  `src/Privacy/TypedPlaintext.php`: `encode()`, `MAX_BYTES`.
 - `src/Privacy/RedactionSettings.php`: `keys()`, `explicitKey()`, `rootKey()`, `identifierMode()`, `ipMode()`,
   `maxBytes()`, `maxContextBytes()`, `validate()`; `src/Config/SecretSetting.php`: `decode()`; `config/audit-log.php`:
   `redaction`.
@@ -382,8 +394,8 @@ its IPv4 address, in every mode including `full`, so one client has one form, on
 - `tests/Feature/Privacy/CaptureMinimisationTest.php` `testTheHandlingTableEndToEnd`,
   `testNothingUnminimisedIsStoredWhenMinimisingFails`, `testAnIpModeAppliesToARealRequest`,
   `testAGarbageIpStoresTheRecordWithNoAddress`, `testAContributorsGarbageIpDoesNotFailTheWrite`,
-  `testAHostileSpellingOfAKeyHidesNoSecret`, `testAnOwnedNoteIsCountedWithTheDefaultEncrypter`,
-  `testAContributedContextIsRedacted`
+  `testAHostileSpellingOfAKeyHidesNoSecret`, `testAnOwnedNoteIsSealedWithTheDefaultEncrypter`,
+  `testAnOwnedNoteIsCountedWhenNothingIsEncrypted`, `testAContributedContextIsRedacted`
 - `tests/Feature/Privacy/NoSecretAnywhereTest.php` `testTheStoredRowHoldsNoSecret`, `testNoReportHoldsASecret`,
   `testAThrowingEncrypterHoldsNoSecret`, `testAContainedFailureHasNoPrevious`
 - `tests/Integration/Stores/MinimisedEntryRoundTripTest.php` `testARedactedRecordStoresAndVerifies`,
@@ -396,6 +408,15 @@ its IPv4 address, in every mode including `full`, so one client has one form, on
   `testAThousandLevelsOfNesting`, `testAHundredThousandKeyWideMap`,
   `testAWildcardEncryptWithAThrowingEncrypterReportsOnce`
 - `tests/Performance/RecorderQueryBudgetTest.php` `testMinimisingAddsNoQuery`
+- `tests/Unit/Privacy/TypedPlaintextTest.php` `testEveryTypeEncodesAsItsCanonicalJson`,
+  `testAStringTrueIsNotTheBooleanTrue`, `testAStringIsCutSoItsEncodingFits`, `testACutNeverSplitsACharacter`,
+  `testAnyOtherValueOverTheLimitIsNull`
+- `tests/Unit/Privacy/FieldPolicyTest.php` `testThePlaintextIsTyped`, `testAStringIsCutSoItsEncodingFits`,
+  `testAnEnvelopeIsSealedWithItsPath`, `testAnEnvelopeInAListIsBoundToItsStoredIndex`
+- `tests/Unit/Privacy/RecordMinimiserTest.php` `testTheAddressThenTheNoteThenTheFieldsAreSealed`,
+  `testEveryOwnerOfTheRecordIsInEachContext`, `testTheEntryIdAndLogIdReachEveryField`
+- `tests/Feature/Privacy/SubjectKeyEncrypterTest.php` `testOneLookupServesEveryOwnerOfTheRecord`,
+  `testAnErasedOwnersFieldIsDropped`, `testAnAbsentOwnersFieldIsDropped`
 
 ## Change Triggers
 
@@ -406,6 +427,7 @@ Update this note when any of the following change:
 - how the walker selects a rule, or what a handling stores
 - a domain's info string, how a root secret or domain key is derived, or the format of a hash
 - what an envelope must hold, what counts as a failure, or how one is reported
+- the bound encrypter, what a field's context carries, or how plaintext is typed and measured
 - a budget's default, minimum or maximum, how it is measured, or the order of omission
 - what `omitted` holds, its bounds or how a path is masked
 - an IP mode, the canonical form or the column an encrypted address must fit

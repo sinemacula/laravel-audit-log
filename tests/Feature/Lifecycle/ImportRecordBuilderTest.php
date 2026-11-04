@@ -221,7 +221,40 @@ final class ImportRecordBuilderTest extends TestCase
 
         self::assertInstanceOf(AuditRecord::class, $built);
         self::assertCount(1, $encrypter->calls());
-        self::assertSame(['v' => 1, 'k' => 'key_inv_0042', 'c' => base64_encode('GB00 0000')], $built->properties['iban'] ?? null);
+        self::assertSame(['v' => 1, 'k' => 'key_inv_0042', 'c' => base64_encode('"GB00 0000"')], $built->properties['iban'] ?? null);
+    }
+
+    /**
+     * The imported record's id is drawn at the import's time before the line is
+     * minimised, so every value sealed for it is sealed for the entry the
+     * record is stored as, with the line's tenant and the definition's
+     * category; it is a UUID version 7 of the import's time, never of the time
+     * the activity happened.
+     *
+     * @return void
+     */
+    public function testTheImportedIdIsMintedBeforeMinimising(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+
+        app()->instance(FieldEncrypter::class, $encrypter);
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'encrypt');
+
+        $this->catalogue->define(EventDefinition::for(self::CODE)->category('billing')->retain('amount')->encrypt('iban', KeyOwner::SUBJECT));
+
+        $record = $this->built(self::line(properties: ['amount' => '1200.00', 'iban' => 'GB00 0000']));
+
+        self::assertInstanceOf(AuditRecord::class, $record);
+        self::assertSame([['ip'], ['properties', 'iban']], $encrypter->paths());
+
+        foreach ($encrypter->contexts() as $context) {
+            self::assertSame($record->id, $context->entryId);
+            self::assertSame(['organisation', 'org_01'], [$context->tenant?->type, $context->tenant?->id]);
+            self::assertSame('billing', $context->category);
+        }
+
+        self::assertSame('7', $record->id[14]);
+        self::assertSame((int) (new CarbonImmutable(self::IMPORTED_AT, 'UTC'))->format('Uv'), hexdec(substr(str_replace('-', '', $record->id), 0, 12)));
     }
 
     /**

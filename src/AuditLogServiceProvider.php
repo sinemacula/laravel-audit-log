@@ -36,15 +36,19 @@ use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
+use SineMacula\Laravel\AuditLog\Console\EraseCommand;
 use SineMacula\Laravel\AuditLog\Console\ExportCommand;
 use SineMacula\Laravel\AuditLog\Console\HoldCommand;
 use SineMacula\Laravel\AuditLog\Console\HoldsCommand;
 use SineMacula\Laravel\AuditLog\Console\ImportCommand;
 use SineMacula\Laravel\AuditLog\Console\IntegritySchedule;
+use SineMacula\Laravel\AuditLog\Console\KeysCommand;
 use SineMacula\Laravel\AuditLog\Console\PruneCommand;
 use SineMacula\Laravel\AuditLog\Console\ReconcileCommand;
+use SineMacula\Laravel\AuditLog\Console\ReinstateCommand;
 use SineMacula\Laravel\AuditLog\Console\ReleaseCommand;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
+use SineMacula\Laravel\AuditLog\Console\RewrapCommand;
 use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
@@ -53,6 +57,7 @@ use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
@@ -62,6 +67,7 @@ use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorFactory;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Keys\LocalKeyWrapper;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
@@ -69,8 +75,8 @@ use SineMacula\Laravel\AuditLog\Listeners\RecordGateDenial;
 use SineMacula\Laravel\AuditLog\Listeners\RecordLaravelAuthEvent;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
-use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
-use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyFieldReader;
 use SineMacula\Laravel\AuditLog\Querying\Describer;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReadGuard;
@@ -82,22 +88,24 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
 
 /**
  * Package service provider: registers the package's configuration, its clock,
- * integrity settings, key ring, store and field encrypter, the anchor seals are
- * kept in, the retention policy and the prune ledger, the recorder with its
- * catalogue, contributors, event mappers and model watcher, the access policy
- * that denies every viewer until the application binds its own, the field
- * reader that shows an encrypted value as sealed, the scoped runtime and
- * capture state with the read guard among it, the listeners that track
- * execution frames and carry context into jobs, the listeners that capture
- * Laravel's authentication events and Gate denials, the package's own event
- * codes, the global middleware that enters an HTTP frame, the package's
- * translations under the `audit-log` namespace, its publishing tags (the
- * configuration, the migrations, the artifacts and lifecycle tables' among
- * them, which it never loads itself, and the translations) and the
- * `audit-log:check`, `audit-log:drain`, `audit-log:export`, `audit-log:hold`,
- * `audit-log:holds`, `audit-log:import`, `audit-log:prune`,
- * `audit-log:reconcile`, `audit-log:release`, `audit-log:replay`,
- * `audit-log:seal` and `audit-log:verify` console commands. It adds no route.
+ * integrity settings, key ring, store, field encrypter and key wrapper, the
+ * anchor seals are kept in, the retention policy and the prune ledger, the
+ * recorder with its catalogue, contributors, event mappers and model watcher,
+ * the access policy that denies every viewer until the application binds its
+ * own, the field reader that opens what the encrypter sealed for a scope that
+ * reveals it, the scoped runtime and capture state with the read guard among
+ * it, the listeners that track execution frames and carry context into jobs,
+ * the listeners that capture Laravel's authentication events and Gate denials,
+ * the package's own event codes, the global middleware that enters an HTTP
+ * frame, the package's translations under the `audit-log` namespace, its
+ * publishing tags (the configuration, the migrations, the artifacts, lifecycle
+ * and owners' key tables' among them, which it never loads itself, and the
+ * translations) and the `audit-log:check`, `audit-log:drain`,
+ * `audit-log:erase`, `audit-log:export`, `audit-log:hold`, `audit-log:holds`,
+ * `audit-log:import`, `audit-log:keys`, `audit-log:prune`,
+ * `audit-log:reconcile`, `audit-log:reinstate`, `audit-log:release`,
+ * `audit-log:replay`, `audit-log:rewrap`, `audit-log:seal` and
+ * `audit-log:verify` console commands. It adds no route.
  *
  * In the console it schedules sealing, the sweep, a strict verification and,
  * when retention can delete anything, the prune, each of which its schedule
@@ -109,7 +117,11 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
  * capture, so none outlives a request. The anchor is made from the settings on
  * each resolution, so a changed setting takes effect without a restart. The
  * trail, the describer and the classes that read the trail are autowired and
- * never shared, so each read resolves what it reads with afresh.
+ * never shared, so each read resolves what it reads with afresh. The field
+ * encrypter and the field reader are made afresh on every resolution too, so
+ * the data keys one holds live for one record's minimisation or one page, and
+ * the key wrapper, which is shared, reads its wrapping keys on every call and
+ * holds none.
  *
  * The package's own codes are defined while it boots, so an application or an
  * integration that defines one of them differently is refused at boot; the
@@ -146,6 +158,9 @@ final class AuditLogServiceProvider extends ServiceProvider
         '2026_11_02_000800_create_audit_log_holds_table.php',
         '2026_11_02_000900_create_audit_log_lifecycle_lock_table.php',
         '2026_11_02_001000_create_audit_log_import_batches_table.php',
+        '2026_11_02_001100_create_audit_log_subject_keys_table.php',
+        '2026_11_02_001200_create_audit_log_owner_erasures_table.php',
+        '2026_11_02_001300_create_audit_log_key_uses_table.php',
     ];
 
     /**
@@ -155,11 +170,13 @@ final class AuditLogServiceProvider extends ServiceProvider
      * made before this provider registers is kept, so a store, a clock or an
      * encrypter bound earlier is never replaced by the package's (an
      * `AuditStore` by `DatabaseAuditStore`, a `Clock` by `SystemClock`, a
-     * `FieldEncrypter` by `NoFieldEncrypter`, a `RetentionPolicy` by
-     * `ConfiguredRetentionPolicy`, a `PruneLedger` by `JournalPruneLedger`, an
-     * `AuditAccessPolicy` by `DenyAllPolicy`, a `FieldReader` by
-     * `SealedFieldReader`, a `CheckpointAnchor` by the configured anchor), and
-     * one made after replaces the default, as any later binding does.
+     * `FieldEncrypter` by `SubjectKeyEncrypter`, a `KeyWrapper` by
+     * `LocalKeyWrapper`, a `RetentionPolicy` by `ConfiguredRetentionPolicy`, a
+     * `PruneLedger` by `JournalPruneLedger`, an `AuditAccessPolicy` by
+     * `DenyAllPolicy`, a `FieldReader` by `SubjectKeyFieldReader`, a
+     * `CheckpointAnchor` by the configured anchor), and one made after replaces
+     * the default, as any later binding does. Binding `NoFieldEncrypter` is the
+     * choice never to encrypt a field.
      *
      * @return void
      */
@@ -175,11 +192,12 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->singletonIf(IntegritySettings::class);
         $this->app->singletonIf(KeyRing::class);
         $this->app->singletonIf(AuditStore::class, DatabaseAuditStore::class);
-        $this->app->singletonIf(FieldEncrypter::class, NoFieldEncrypter::class);
+        $this->app->bindIf(FieldEncrypter::class, SubjectKeyEncrypter::class);
+        $this->app->singletonIf(KeyWrapper::class, LocalKeyWrapper::class);
         $this->app->singletonIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
         $this->app->singletonIf(PruneLedger::class, JournalPruneLedger::class);
         $this->app->singletonIf(AuditAccessPolicy::class, DenyAllPolicy::class);
-        $this->app->singletonIf(FieldReader::class, SealedFieldReader::class);
+        $this->app->bindIf(FieldReader::class, SubjectKeyFieldReader::class);
         $this->app->bindIf(CheckpointAnchor::class, static fn (Application $app): CheckpointAnchor => $app->make(AnchorFactory::class)->make());
         $this->app->singletonIf(EventCatalogue::class);
         $this->app->singletonIf(ContributorRegistry::class);
@@ -271,14 +289,18 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->commands([
             CheckCommand::class,
             DrainCommand::class,
+            EraseCommand::class,
             ExportCommand::class,
             HoldCommand::class,
             HoldsCommand::class,
             ImportCommand::class,
+            KeysCommand::class,
             PruneCommand::class,
             ReconcileCommand::class,
+            ReinstateCommand::class,
             ReleaseCommand::class,
             ReplayCommand::class,
+            RewrapCommand::class,
             SealCommand::class,
             VerifyCommand::class,
         ]);

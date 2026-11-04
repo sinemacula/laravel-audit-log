@@ -10,11 +10,14 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Definitions\FieldPath;
 use SineMacula\Laravel\AuditLog\Privacy\ByteBudget;
 use SineMacula\Laravel\AuditLog\Privacy\EncryptedField;
 use SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer;
+use SineMacula\Laravel\AuditLog\Privacy\FieldCipher;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\FieldPolicy;
 use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
@@ -28,6 +31,8 @@ use SineMacula\Laravel\AuditLog\Privacy\PathMasker;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
+use SineMacula\Laravel\AuditLog\Privacy\SealingScope;
+use SineMacula\Laravel\AuditLog\Privacy\TypedPlaintext;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
@@ -76,12 +81,18 @@ final class SensitiveParametersTest extends TestCase
         'segments',
         'decisions',
         'candidates',
+        'dataKey',
+        'fieldKey',
+        'wrapped',
+        'envelope',
+        'ciphertext',
     ];
 
     /** @var list<string> The parameters that go by a raw name and hold only what the package or its configuration composed, as `class::method.parameter`. */
     private const array COMPOSED_BY_THE_PACKAGE = [
         FieldEncryptionFailedException::class . '::__construct.message',
         FieldPolicy::class . '::referenceAt.segments',
+        SealingScope::class . '::refuse.message',
     ];
 
     /** @var list<class-string> The classes the scan must find a raw parameter in. */
@@ -100,6 +111,9 @@ final class SensitiveParametersTest extends TestCase
         PathMasker::class,
         EncryptedField::class,
         FieldReading::class,
+        TypedPlaintext::class,
+        FieldContext::class,
+        FieldCipher::class,
     ];
 
     /**
@@ -164,14 +178,25 @@ final class SensitiveParametersTest extends TestCase
             'the attachment a record is built on' => [AuditRecord::class, 'fromPending', 'attachment'],
             'the attachment a record is read on'  => [AuditRecord::class, 'fromEnvelope', 'attachment'],
             'the attachment a record holds'       => [AuditRecord::class, '__construct', 'attachment'],
-            'the path of an encrypted field'      => [EncryptedField::class, '__construct', 'path'],
+            'the segments of an encrypted field'  => [EncryptedField::class, '__construct', 'segments'],
             'the ciphertext a field holds'        => [EncryptedField::class, '__construct', 'ciphertext'],
-            'the path a field is read at'         => [EncryptedField::class, 'fromEnvelope', 'path'],
+            'the segments a field is read at'     => [EncryptedField::class, 'fromEnvelope', 'segments'],
             'the envelope a field is read from'   => [EncryptedField::class, 'fromEnvelope', 'envelope'],
             'the value a reader reveals'          => [FieldReading::class, 'revealed', 'value'],
             'the value a reading holds'           => [FieldReading::class, '__construct', 'value'],
-            'the field a reader is given'         => [FieldReader::class, 'read', 'field'],
-            'the field the sealed reader reads'   => [SealedFieldReader::class, 'read', 'field'],
+            'the fields a reader is given'        => [FieldReader::class, 'readAll', 'fields'],
+            'the fields the sealed reader reads'  => [SealedFieldReader::class, 'readAll', 'fields'],
+            'the value made typed plaintext'      => [TypedPlaintext::class, 'encode', 'value'],
+            'the typed plaintext decoded'         => [TypedPlaintext::class, 'decode', 'plaintext'],
+            'the path of a field context'         => [FieldContext::class, '__construct', 'path'],
+            'the owners of a field context'       => [FieldContext::class, '__construct', 'owners'],
+            'the data key a field is sealed with' => [FieldCipher::class, 'seal', 'dataKey'],
+            'the plaintext a field cipher seals'  => [FieldCipher::class, 'seal', 'plaintext'],
+            'the data key a field is opened with' => [FieldCipher::class, 'open', 'dataKey'],
+            'the ciphertext a field cipher opens' => [FieldCipher::class, 'open', 'ciphertext'],
+            'the data key a field key comes from' => [FieldCipher::class, 'fieldKey', 'dataKey'],
+            'the data key a wrapper wraps'        => [KeyWrapper::class, 'wrap', 'dataKey'],
+            'the wrapped key a wrapper unwraps'   => [KeyWrapper::class, 'unwrap', 'wrapped'],
         ];
     }
 
@@ -268,6 +293,23 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
+     * The message a sealing scope refuses with is let go because the method is
+     * private and every call passes it a literal the package wrote, so nothing
+     * else can pass it a raw value.
+     *
+     * @return void
+     */
+    public function testTheScopesRefusalHoldsNoRawValue(): void
+    {
+        $refuse = new \ReflectionMethod(SealingScope::class, 'refuse');
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/src/Privacy/SealingScope.php');
+
+        self::assertTrue($refuse->isPrivate());
+        self::assertSame(2, preg_match_all('/self::refuse\(/', $source));
+        self::assertSame(2, preg_match_all('/self::refuse\(\'[^\'$]+\'\);/', $source));
+    }
+
+    /**
      * Each exemption names a parameter that exists and goes by a raw name, so
      * an entry left behind by a rename fails instead of silently excusing
      * nothing.
@@ -288,27 +330,34 @@ final class SensitiveParametersTest extends TestCase
     /**
      * The scan holds a concrete path to the rule through every helper that
      * walks one, so a raw dynamic key cannot be left in a frame of the walker
-     * by adding one more of them, and through the encrypted field that carries
-     * one to a field reader.
+     * by adding one more of them, through the encrypted field that carries one
+     * to a field reader as its segments, and through the context and the cipher
+     * that bind an envelope to one. Each is found, whatever else holds a path.
      *
      * @return void
      */
     public function testTheScanReachesTheWalkersPaths(): void
     {
-        $paths = array_values(array_filter(self::rawParameters(), static fn (array $row): bool => $row[2]->getName() === 'path'));
+        $paths = array_values(array_filter(self::rawParameters(), static fn (array $row): bool => in_array($row[2]->getName(), ['path', 'segments'], true)));
 
-        self::assertSame(
-            [
-                [EncryptedField::class, '__construct'],
-                [EncryptedField::class, 'fromEnvelope'],
-                [FieldPolicy::class, 'retained'],
-                [FieldPolicy::class, 'selected'],
-                [FieldPolicy::class, 'walk'],
-                [PathMasker::class, 'context'],
-                [PathMasker::class, 'property'],
-            ],
-            self::sortedClassesAndMethods($paths),
-        );
+        $expected = [
+            [EncryptedField::class, '__construct'],
+            [EncryptedField::class, 'fromEnvelope'],
+            [FieldCipher::class, 'additionalData'],
+            [FieldCipher::class, 'open'],
+            [FieldCipher::class, 'seal'],
+            [FieldContext::class, '__construct'],
+            [FieldContext::class, 'checkedPath'],
+            [FieldPolicy::class, 'retained'],
+            [FieldPolicy::class, 'selected'],
+            [FieldPolicy::class, 'walk'],
+            [PathMasker::class, 'context'],
+            [PathMasker::class, 'property'],
+        ];
+
+        $found = self::sortedClassesAndMethods($paths);
+
+        self::assertSame([], array_values(array_filter($expected, static fn (array $method): bool => !in_array($method, $found, true))));
     }
 
     /**

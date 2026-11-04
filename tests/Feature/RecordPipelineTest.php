@@ -9,15 +9,19 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Encryption\EncryptException;
 use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\PackageWrite;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\RecordPipeline;
@@ -33,13 +37,16 @@ use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Stores\CallbackStore;
+use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
  * Feature tests for the record pipeline every write runs, explicit or captured:
- * the definition, the timing's checks, the contributors, minimising,
+ * the definition, the timing's checks, the contributors, the entry id minted
+ * from the clock before minimising and kept, minimising for that entry,
  * sealing a manifest, and delivery; the default timing of each kind of record;
  * the refusals that leave the builder usable, a write while a mapper runs among
  * them; the definitions and contributors it was made with; and the package
@@ -126,6 +133,116 @@ final class RecordPipelineTest extends TestCase
         self::assertArrayNotHasKey('note', $record->properties ?? []);
         self::assertTrue($pending->isConsumed());
         self::assertSame([$record], $this->fake->recorded());
+    }
+
+    /**
+     * The entry id is minted before minimising: every value the record seals is
+     * sealed for the id the record is then built and stored with.
+     *
+     * @return void
+     */
+    public function testTheEntryIdIsMintedBeforeMinimisingAndKept(): void
+    {
+        $encrypter = $this->encrypting();
+        $pending   = (new PendingRecord)->event(InvoiceActivity::REFUND_FAILED)->by(Reference::of('user', '7'))->on(Reference::of('invoice', 'inv_1'));
+
+        $pending->withProperties(['card_holder' => 'Alice'])->fillClient('203.0.113.7', null);
+
+        $record = self::pipeline()->write($pending->immediately());
+
+        self::assertCount(2, $encrypter->contexts());
+
+        foreach ($encrypter->contexts() as $context) {
+            self::assertSame($record->id, $context->entryId, implode('.', $context->path));
+        }
+
+        self::assertSame([['ip'], ['properties', 'card_holder']], $encrypter->paths());
+        self::assertSame($record->id, $this->fake->recorded()[0]->id);
+    }
+
+    /**
+     * The id is a UUID version 7 of the clock's time, read once, so the id and
+     * `occurred_at` name the same instant.
+     *
+     * @return void
+     */
+    public function testTheIdIsAUuidVersion7(): void
+    {
+        $this->app?->instance(Clock::class, FrozenClock::at('2026-11-01T12:34:56.789012Z'));
+
+        $record = self::pipeline()->write((new PendingRecord)->event(self::CODE)->immediately());
+
+        self::assertSame('7', $record->id[14]);
+        self::assertSame((int) (new \DateTimeImmutable('2026-11-01T12:34:56.789Z'))->format('Uv'), hexdec(substr(str_replace('-', '', $record->id), 0, 12)));
+        self::assertSame('2026-11-01T12:34:56.789012Z', $record->occurredAt);
+    }
+
+    /**
+     * Fifty records written at one frozen instant have distinct ids that sort,
+     * as strings, in the order they were written.
+     *
+     * @return void
+     */
+    public function testRecordsCapturedInOneMillisecondSortInCaptureOrder(): void
+    {
+        Str::createUuidsNormally();
+
+        $this->app?->instance(Clock::class, FrozenClock::at('2026-11-01T12:00:00.000000Z'));
+
+        $ids = [];
+
+        for ($i = 0; $i < 50; $i++) {
+            $ids[] = self::pipeline()->write((new PendingRecord)->event(self::CODE)->immediately())->id;
+        }
+
+        $sorted = $ids;
+        sort($sorted, SORT_STRING);
+
+        self::assertSame($ids, $sorted);
+        self::assertCount(50, array_unique($ids));
+    }
+
+    /**
+     * A record the package gave its own id is minimised for that id, so its
+     * values are sealed for the entry it is stored as.
+     *
+     * @return void
+     */
+    public function testAPackageRecordsOwnIdIsTheOneEncryptedFor(): void
+    {
+        $encrypter = $this->encrypting();
+        $own       = '01932b4e-8a40-7000-8000-0000000000cc';
+        $pending   = (new PendingRecord)->forPackage(PackageActivity::PRUNED)->identifiedAs($own)->by(Reference::of('user', '7'))->immediately()->failClosed();
+
+        $pending->fillClient('203.0.113.7', null);
+
+        $record = self::pipeline()->write($pending, null, new PackageWrite(static function (): void {}, static function (): void {}));
+
+        self::assertSame($own, $record->id);
+        self::assertSame([$own], array_map(static fn (FieldContext $context): string => $context->entryId, $encrypter->contexts()));
+    }
+
+    /**
+     * The tenant and category every value is sealed for are the stored entry's:
+     * the tenant a contributor filled after the first snapshot, and the
+     * category of the code's definition, so the key unit a value is sealed
+     * under is the unit erasure and `holdingDataOf()` read from the row.
+     *
+     * @return void
+     */
+    public function testTheContextsTenantAndCategoryAreTheStoredEntrys(): void
+    {
+        $encrypter = $this->encrypting();
+        $pending   = (new PendingRecord)->event(InvoiceActivity::REFUND_FAILED)->on(Reference::of('invoice', 'inv_1'))->withProperties(['card_holder' => 'Alice']);
+
+        $record  = self::pipeline(TenantContributor::class)->write($pending->immediately());
+        $context = $encrypter->contexts()[0];
+
+        self::assertSame([$record->tenantType, $record->tenantId], [$context->tenant?->type, $context->tenant?->id]);
+        self::assertSame(TenantContributor::ID, $context->tenant?->id);
+        self::assertSame($record->category, $context->category);
+        self::assertSame('finance', $context->category);
+        self::assertSame(['invoice:inv_1'], array_map(static fn (Reference $owner): string => $owner->type . ':' . $owner->id, $context->owners));
     }
 
     /**
@@ -696,6 +813,23 @@ final class RecordPipelineTest extends TestCase
         parent::defineEnvironment($app);
 
         app()->scopedIf(CapturedEvents::class);
+    }
+
+    /**
+     * Bind an encrypter that records what it seals for, encrypting the address
+     * too, and return it.
+     *
+     * @return \Tests\Fixtures\Privacy\RecordingFieldEncrypter
+     */
+    private function encrypting(): RecordingFieldEncrypter
+    {
+        $encrypter = new RecordingFieldEncrypter;
+
+        $this->app?->instance(FieldEncrypter::class, $encrypter);
+
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'encrypt');
+
+        return $encrypter;
     }
 
     /**

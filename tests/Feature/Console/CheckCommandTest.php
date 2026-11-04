@@ -21,27 +21,36 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
+use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Keys\LocalKeyWrapper;
 use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldKeeper;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Database\VersionReportingPdo;
+use Tests\Fixtures\Integrity\RecordingAnchor;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
  * Feature tests for `audit-log:check`: it reads the settings, the connections
- * and guards they name, the entries and artifacts tables, the integrity keys
- * and the delivery, lists every problem it finds as `[<subject>] <message>` and
- * every subject without one as `[<subject>] OK`, ends with a `[spill]` note
- * that is never a problem, exits `1` when there is a problem and `0` when there
- * is none, covers every leaf of the shipped configuration and of the failure
- * and delivery settings, lists `app.key` once whichever settings read it, and
- * prints no secret, setting's value, statement or binding.
+ * and guards they name, the entries and artifacts tables, the integrity keys,
+ * the delivery, the lifecycle and privacy, lists every problem it finds as
+ * `[<subject>] <message>` and every subject without one as `[<subject>] OK`,
+ * ends with a `[spill]` note that is never a problem, exits `1` when there is a
+ * problem and `0` when there is none, covers every leaf of the shipped
+ * configuration and of the failure, delivery and owners' key settings, lists
+ * `app.key` once whichever settings read it, and prints no secret, setting's
+ * value, statement or binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,14 +60,16 @@ use Tests\TestCase;
 #[CoversClass(CheckCommand::class)]
 final class CheckCommandTest extends TestCase
 {
-    use MockeryPHPUnitIntegration;
+    use MockeryPHPUnitIntegration, WritesTheJournal;
 
     /** @var string The note on the default channel of a default install, which is not the documented spill channel. */
     private const string SPILL_NOTE = '[spill] The channel [stack] is not the documented file format, so replaying what it holds is unverified,'
         . ' and whole records in plaintext go to it and to everything it feeds.';
 
     /** @var list<string> What a run prints when nothing has a problem, the note on the default channel last. */
-    private const array EVERY_SUBJECT_OK = ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE];
+    private const array EVERY_SUBJECT_OK = [
+        '[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', '[privacy] OK', self::SPILL_NOTE,
+    ];
 
     /** @var list<string> Absolute paths to the shipped migration files of the tables the schema subject checks, in the order they run. */
     private const array MIGRATION_PATHS = [
@@ -103,6 +114,30 @@ final class CheckCommandTest extends TestCase
         'audit-log.lifecycle.holds_table'   => 'audit_custom_holds',
         'audit-log.lifecycle.lock_table'    => 'audit_custom_lock',
         'audit-log.import.batches_table'    => 'audit_custom_batches',
+    ];
+
+    /** @var list<string> Absolute paths to the shipped owners' key migration files, in the order they run. */
+    private const array KEY_MIGRATION_PATHS = [
+        __DIR__ . '/../../../database/migrations/2026_11_02_001100_create_audit_log_subject_keys_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_001200_create_audit_log_owner_erasures_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_001300_create_audit_log_key_uses_table.php',
+    ];
+
+    /** @var array<string, string> The owners' key tables a test migrates under names of their own, by the setting that names each; PostgreSQL's index names would clash with the defaults'. */
+    private const array CUSTOM_KEY_TABLES = [
+        'audit-log.privacy.subject_keys_table'   => 'audit_custom_subject_keys',
+        'audit-log.privacy.owner_erasures_table' => 'audit_custom_owner_erasures',
+        'audit-log.privacy.key_uses_table'       => 'audit_custom_key_uses',
+    ];
+
+    /** @var string What the wrapping keys derived from a missing or malformed application key are refused with. */
+    private const string MALFORMED_WRAPPING_APPLICATION_KEY = '[config] `app.key` and each of `app.previous_keys` must be at least 32 bytes, or `base64:`'
+        . ' followed by the encoding of at least 32 bytes, to derive the wrapping keys when `audit-log.privacy.keys` is empty.';
+
+    /** @var array<string, array<string, string>|string> An explicit wrapping ring whose settings all pass, so none of them reads `app.key`. */
+    private const array WRAPPING_RING = [
+        'audit-log.privacy.keys'    => ['w1' => 'a-wrapping-secret-of-32-bytes-ok'],
+        'audit-log.privacy.current' => 'w1',
     ];
 
     /** @var string What a missing table is asked to be created by, after its name and connection. */
@@ -194,6 +229,12 @@ final class CheckCommandTest extends TestCase
         'import.chunk'                              => 99,
         'import.max_skew_seconds'                   => 86401,
         'import.max_line_bytes'                     => 1023,
+        'privacy.keys'                              => 'x',
+        'privacy.current'                           => 'w1',
+        'privacy.subject_keys_table'                => 'Keys',
+        'privacy.owner_erasures_table'              => 'owner-erasures',
+        'privacy.key_uses_table'                    => '1uses',
+        'privacy.rewrap_batch'                      => 99,
     ];
 
     /** @var array<string, array<string, string>|string> An explicit ring whose settings all pass, so none of them reads `app.key`. */
@@ -303,9 +344,10 @@ final class CheckCommandTest extends TestCase
         // says, so the note on it is the same in every run
         app(ConfigRepository::class)->set('logging.default', 'stack');
 
-        // The policy the package binds by default, whether or not the provider
-        // has bound it yet
+        // The policy and the key wrapper the package binds by default, whether
+        // or not the provider has bound them yet
         app()->bindIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
+        app()->bindIf(KeyWrapper::class, LocalKeyWrapper::class);
     }
 
     /**
@@ -321,7 +363,7 @@ final class CheckCommandTest extends TestCase
             Schema::connection('custom')->dropIfExists(self::CUSTOM_TABLE);
             Schema::connection('custom')->dropIfExists(self::CUSTOM_ARTIFACTS_TABLE);
 
-            foreach ([...self::CUSTOM_INTEGRITY_TABLES, ...self::CUSTOM_LIFECYCLE_TABLES] as $table) {
+            foreach ([...self::CUSTOM_INTEGRITY_TABLES, ...self::CUSTOM_LIFECYCLE_TABLES, ...self::CUSTOM_KEY_TABLES] as $table) {
                 Schema::connection('custom')->dropIfExists($table);
             }
         }
@@ -359,7 +401,7 @@ final class CheckCommandTest extends TestCase
     /**
      * A table of another name on a connection of its own, with a table prefix
      * and an explicit key ring, passes once the migrations have run there, the
-     * integrity and lifecycle tables' included.
+     * integrity, lifecycle and owners' key tables' included.
      *
      * @return void
      */
@@ -376,6 +418,7 @@ final class CheckCommandTest extends TestCase
         $config->set('audit-log.integrity.current', 'k1');
         $config->set(self::CUSTOM_INTEGRITY_TABLES);
         $config->set(self::CUSTOM_LIFECYCLE_TABLES);
+        $config->set(self::CUSTOM_KEY_TABLES);
 
         $this->migrate();
 
@@ -383,11 +426,13 @@ final class CheckCommandTest extends TestCase
 
         $this->migrateIntegrityTables();
         $this->migrateLifecycleTables();
+        $this->migrateKeyTables();
 
         [$code, $output] = $this->check();
 
         self::assertContains('[integrity] The checkpoints table `audit_custom_checkpoints` does not exist on connection [custom]' . self::PUBLISH, $before);
         self::assertContains('[lifecycle] The lifecycle journal table `audit_custom_journal` does not exist on connection [custom]' . self::PUBLISH, $before);
+        self::assertContains('[privacy] The subject keys table `audit_custom_subject_keys` does not exist on connection [custom]' . self::PUBLISH, $before);
         self::assertTrue(Schema::connection('custom')->hasTable(self::CUSTOM_TABLE));
         self::assertTrue(Schema::connection('custom')->hasTable(self::CUSTOM_ARTIFACTS_TABLE));
         self::assertSame(0, $code);
@@ -644,6 +689,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -760,6 +806,9 @@ final class CheckCommandTest extends TestCase
             '[lifecycle] The holds table `audit_log_holds` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The lifecycle lock table `audit_log_lifecycle_lock` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The import batches table `audit_log_import_batches` does not exist on connection [fake]' . self::PUBLISH,
+            '[privacy] The subject keys table `audit_log_subject_keys` does not exist on connection [fake]' . self::PUBLISH,
+            '[privacy] The owner erasures table `audit_log_owner_erasures` does not exist on connection [fake]' . self::PUBLISH,
+            '[privacy] The key uses table `audit_log_key_uses` does not exist on connection [fake]' . self::PUBLISH,
         ], self::problemsIn($output));
     }
 
@@ -784,6 +833,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -809,6 +859,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -966,6 +1017,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
         self::assertStringNotContainsString($path, implode("\n", $output));
@@ -992,6 +1044,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1035,6 +1088,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1234,6 +1288,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1369,9 +1424,10 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An explicit redaction key is the root secret, so beside a ring nothing
-     * reads `app.key` and a bad one passes; without a ring only the integrity
-     * settings read it, and it is theirs to report.
+     * An explicit redaction key is the root secret, so beside a ring only the
+     * wrapping keys derived from `app.key` read it: a bad one is their one
+     * line, and passes beside a wrapping ring of its own; without a ring only
+     * the integrity settings read it, and it is theirs to report.
      *
      * @return void
      */
@@ -1380,6 +1436,10 @@ final class CheckCommandTest extends TestCase
         $config = app(ConfigRepository::class);
 
         $config->set([...self::RING, 'audit-log.redaction.key' => str_repeat('k', 32), 'app.key' => '']);
+
+        self::assertSame([self::MALFORMED_WRAPPING_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set(self::WRAPPING_RING);
 
         self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
 
@@ -1391,14 +1451,22 @@ final class CheckCommandTest extends TestCase
 
     /**
      * A malformed explicit redaction key never falls back to `app.key`, so
-     * beside a ring and a bad application key the one line names the redaction
-     * key, though two checks read it.
+     * beside a ring and a bad application key the redaction line names the
+     * redaction key, though two checks read it, and the wrapping keys derived
+     * from `app.key` name it; beside a wrapping ring of its own, only the
+     * redaction key is named.
      *
      * @return void
      */
     public function testAMalformedRedactionKeyHidesTheApplicationKeyBesideARing(): void
     {
-        app(ConfigRepository::class)->set([...self::RING, 'audit-log.redaction.key' => 'short', 'app.key' => '']);
+        $config = app(ConfigRepository::class);
+
+        $config->set([...self::RING, 'audit-log.redaction.key' => 'short', 'app.key' => '']);
+
+        self::assertSame([self::MALFORMED_REDACTION_KEY, self::MALFORMED_WRAPPING_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set(self::WRAPPING_RING);
 
         self::assertSame([self::MALFORMED_REDACTION_KEY], self::problemsIn($this->check()[1]));
     }
@@ -1501,6 +1569,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1525,20 +1594,23 @@ final class CheckCommandTest extends TestCase
             '[integrity] The checkpoint members table `audit_absent_members` does not exist on connection [testing]' . self::PUBLISH,
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
 
     /**
      * With the `disk` driver an anchor disk that is not configured is an
-     * integrity problem, which is gone once the disk is configured, and the
-     * disk is never resolved.
+     * integrity problem, and the disk is never resolved, not even for the
+     * anchor's head; once the disk is configured the problem is gone, and the
+     * privacy subject reads the anchor's head from it.
      *
      * @return void
      */
     public function testAnUnconfiguredAnchorDiskIsAProblem(): void
     {
-        $spy = \Mockery::mock(Factory::class);
+        $filesystems = app('filesystem');
+        $spy         = \Mockery::mock(Factory::class);
 
         $spy->shouldReceive('disk')->never();
 
@@ -1549,11 +1621,26 @@ final class CheckCommandTest extends TestCase
 
         $config->set(['audit-log.integrity.anchor.driver' => 'disk', 'audit-log.integrity.anchor.disk' => 'anchors']);
 
-        self::assertSame([1, ['[config] OK', '[connections] OK', '[schema] OK', self::UNCONFIGURED_DISK, '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE]], $this->check());
+        $unconfigured = ['[config] OK', '[connections] OK', '[schema] OK', self::UNCONFIGURED_DISK, '[delivery] OK', '[lifecycle] OK', '[privacy] OK', self::SPILL_NOTE];
 
-        $config->set('filesystems.disks.anchors', ['driver' => 'local', 'root' => sys_get_temp_dir() . '/audit-log-anchors']);
+        self::assertSame([1, $unconfigured], $this->check());
+
+        // A root of its own, which no other run anchors to, so the head read is
+        // no other log's
+        $root = sys_get_temp_dir() . '/audit-log-anchors-' . getmypid() . '-' . hrtime(true);
+
+        $config->set('filesystems.disks.anchors', ['driver' => 'local', 'root' => $root]);
+
+        $this->app?->instance(Factory::class, $filesystems);
+        $this->app?->instance('filesystem', $filesystems);
 
         self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        if (!is_dir($root)) {
+            return;
+        }
+
+        rmdir($root);
     }
 
     /**
@@ -1595,6 +1682,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1887,7 +1975,10 @@ final class CheckCommandTest extends TestCase
      */
     public function testTheCheckWritesNothing(): void
     {
-        $tables = ['audit_log_entries', 'audit_log_lifecycle', 'audit_log_holds', 'audit_log_import_batches', 'audit_log_checkpoints'];
+        $tables = [
+            'audit_log_entries', 'audit_log_lifecycle', 'audit_log_holds', 'audit_log_import_batches', 'audit_log_checkpoints',
+            'audit_log_subject_keys', 'audit_log_owner_erasures', 'audit_log_key_uses',
+        ];
         $counts = static fn (): array => array_map(static fn (string $table): int => DB::table($table)->count(), $tables);
         $before = $counts();
         $state  = DB::table('audit_log_integrity_state')->get()->all();
@@ -1897,7 +1988,7 @@ final class CheckCommandTest extends TestCase
         $this->check();
         $this->check();
 
-        self::assertSame([0, 0, 0, 0, 0], $before);
+        self::assertSame([0, 0, 0, 0, 0, 0, 0, 0], $before);
         self::assertSame($before, $counts());
         self::assertEquals($state, DB::table('audit_log_integrity_state')->get()->all());
         $rows = DB::table('audit_log_lifecycle_lock')->get()->all();
@@ -1974,6 +2065,94 @@ final class CheckCommandTest extends TestCase
 
         self::assertSame(1, $code);
         self::assertContains('[lifecycle] OK', $output);
+    }
+
+    /**
+     * The privacy subject is listed after `lifecycle`, `[privacy] OK` on a good
+     * install, and a privacy problem fails the run under it: here the key uses
+     * table it names is missing. A malformed owners' key setting is a `config`
+     * problem and leaves the subject out, since it reads the tables by it.
+     *
+     * @return void
+     */
+    public function testThePrivacySubjectIsChecked(): void
+    {
+        $missing = '[privacy] The key uses table `audit_absent_key_uses` does not exist on connection [testing]' . self::PUBLISH;
+        $config  = app(ConfigRepository::class);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(0, $code);
+        self::assertSame(['[lifecycle] OK', '[privacy] OK'], array_slice($output, 5, 2));
+
+        $config->set('audit-log.privacy.key_uses_table', 'audit_absent_key_uses');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([$missing], self::problemsIn($output));
+        self::assertSame($missing, $output[6]);
+
+        $config->set('audit-log.privacy.rewrap_batch', 99);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame(['[config] `audit-log.privacy.rewrap_batch` must be an integer from 100 to 10000.'], self::problemsIn($output));
+        self::assertSame([], array_values(array_filter($output, static fn (string $line): bool => str_starts_with($line, '[privacy]'))));
+    }
+
+    /**
+     * A database that does not hold the seal its anchor holds at the head's
+     * sequence was restored behind it: a `[privacy]` problem that fails the
+     * run, until a verified reconciliation naming that head is journalled.
+     *
+     * @return void
+     */
+    public function testARestoredDatabaseExitsNonZero(): void
+    {
+        $digest = str_repeat('d', 64);
+
+        $this->app?->instance(CheckpointAnchor::class, (new RecordingAnchor)->holdInstead(3, $digest));
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[privacy] The database does not hold the seal its anchor holds at sequence 3, so it was restored from a backup or rewritten; re-apply every'
+                . ' erasure since with `audit-log:erase --reapply=<file>`, which reconciles the restore, and run `audit-log:verify`.',
+        ], self::problemsIn($output));
+
+        $this->journalRow(JournalKind::RESTORE_RECONCILED, [
+            'file_sha256'       => str_repeat('f', 64),
+            'owners'            => 1,
+            'erased'            => 1,
+            'already_erased'    => 0,
+            'anchored_sequence' => 3,
+            'anchored_digest'   => $digest,
+        ]);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * A bound field encrypter that is not the package's is a `[privacy] note:`
+     * after the spill note, naming its class, and the run still exits `0`.
+     *
+     * @return void
+     */
+    public function testACustomEncrypterIsAPrivacyNote(): void
+    {
+        $this->app?->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(0, $code);
+        self::assertSame([
+            self::SPILL_NOTE,
+            '[privacy] note: The bound field encrypter `' . RecordingFieldEncrypter::class . '` keeps its keys where the package cannot see them, so'
+                . ' `audit-log:erase` refuses, `holdingDataOf()` throws, and the key store is neither checked nor verified.',
+        ], array_slice($output, -2));
     }
 
     /**
@@ -2121,6 +2300,78 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
+     * Rows of `[the setting, the bad value, the text in it]` for the owners'
+     * key settings, with the value in each shape a setting refuses it in.
+     *
+     * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
+     */
+    public static function providePrivacyValuesThatMustNotBePrinted(): iterable
+    {
+        yield from [
+            'a wrapping ring that is a string' => ['audit-log.privacy.keys', self::SENTINEL, self::SENTINEL],
+            'a wrapping secret too short'      => ['audit-log.privacy.keys', ['w1' => self::SENTINEL], self::SENTINEL],
+            'a wrapping key id of no grammar'  => ['audit-log.privacy.keys', [self::SENTINEL . '!' => str_repeat('w', 32)], self::SENTINEL],
+            'a current key in no ring'         => ['audit-log.privacy.current', self::SENTINEL, self::SENTINEL],
+            'a subject keys table'             => ['audit-log.privacy.subject_keys_table', self::SENTINEL . '!', self::SENTINEL],
+            'an owner erasures table'          => ['audit-log.privacy.owner_erasures_table', [self::SENTINEL], self::SENTINEL],
+            'a key uses table'                 => ['audit-log.privacy.key_uses_table', self::SENTINEL . '-', self::SENTINEL],
+            'a rewrap batch'                   => ['audit-log.privacy.rewrap_batch', self::SENTINEL, self::SENTINEL],
+        ];
+    }
+
+    /**
+     * A bad owners' key setting fails the run with one problem and never
+     * appears in its output, which names the setting by its key in backticks.
+     *
+     * @param  string  $setting
+     * @param  array<array-key, string>|string  $value
+     * @param  string  $sentinel
+     * @return void
+     */
+    #[DataProvider('providePrivacyValuesThatMustNotBePrinted')]
+    public function testThePrintedOutputHoldsNoValueOfAPrivacySetting(string $setting, array|string $value, string $sentinel): void
+    {
+        app(ConfigRepository::class)->set($setting, $value);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertCount(1, self::problemsIn($output));
+        self::assertStringContainsString("`{$setting}", implode("\n", $output));
+        self::assertStringNotContainsString($sentinel, implode("\n", $output));
+    }
+
+    /**
+     * Beside an integrity ring the wrapping keys are what read the application
+     * keys when no wrapping ring is set: malformed previous keys, which nothing
+     * else reads there, are their one line, as is an empty `app.key` beside an
+     * explicit redaction key; an empty `app.key` the redaction key falls back
+     * to is the redaction settings' line alone.
+     *
+     * @return void
+     */
+    public function testTheWrappingKeysDerivedFromTheApplicationKeysAreChecked(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set([...self::RING, 'app.key' => str_repeat('k', 32), 'app.previous_keys' => [self::SHORT_SECRET]]);
+
+        self::assertSame([self::MALFORMED_WRAPPING_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set(['app.previous_keys' => [], 'app.key' => '']);
+
+        self::assertSame([self::MISSING_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set('audit-log.redaction.key', str_repeat('r', 32));
+
+        self::assertSame([self::MALFORMED_WRAPPING_APPLICATION_KEY], self::problemsIn($this->check()[1]));
+
+        $config->set(self::WRAPPING_RING);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
      * A delivery problem fails the run, listed under `delivery` after every
      * other subject and before the note on the spill channel.
      *
@@ -2140,6 +2391,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] The channel [missing] that `audit-log.failure.log_channel` names is not configured in `logging.channels`.',
             '[lifecycle] OK',
+            '[privacy] OK',
             '[spill] The channel [missing] is not the documented file format, so replaying what it holds is unverified,'
                 . ' and whole records in plaintext go to it and to everything it feeds.',
         ], $output);
@@ -2206,7 +2458,9 @@ final class CheckCommandTest extends TestCase
         $config->set('logging.channels.audit_spill', DocumentedSpillChannel::config(sys_get_temp_dir() . '/audit-log-spill-' . getmypid() . '.log'));
         $config->set('audit-log.failure.log_channel', 'audit_spill');
 
-        self::assertSame([0, ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', '[spill] OK']], $this->check());
+        $passing = ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', '[privacy] OK', '[spill] OK'];
+
+        self::assertSame([0, $passing], $this->check());
     }
 
     /**
@@ -2222,12 +2476,14 @@ final class CheckCommandTest extends TestCase
 
         $config->set('audit-log.delivery.mode', 'queue');
 
-        self::assertSame([1, [self::MALFORMED_DELIVERY_MODE, '[connections] OK', '[schema] OK', '[integrity] OK', '[lifecycle] OK', self::SPILL_NOTE]], $this->check());
+        $subjects = ['[connections] OK', '[schema] OK', '[integrity] OK', '[lifecycle] OK', '[privacy] OK'];
+
+        self::assertSame([1, [self::MALFORMED_DELIVERY_MODE, ...$subjects, self::SPILL_NOTE]], $this->check());
 
         $config->set('audit-log.delivery.mode', 'sync');
         $config->set('audit-log.failure.log_channel', 42);
 
-        self::assertSame([1, [self::MALFORMED_LOG_CHANNEL, '[connections] OK', '[schema] OK', '[integrity] OK', '[lifecycle] OK']], $this->check());
+        self::assertSame([1, [self::MALFORMED_LOG_CHANNEL, ...$subjects]], $this->check());
     }
 
     /**
@@ -2333,6 +2589,7 @@ final class CheckCommandTest extends TestCase
             '[integrity] OK',
             '[delivery] OK',
             '[lifecycle] OK',
+            '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -2453,7 +2710,7 @@ final class CheckCommandTest extends TestCase
         [$code, $output] = $this->check();
 
         self::assertSame(1, $code);
-        self::assertSame([...$capture, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE], $output);
+        self::assertSame([...$capture, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', '[privacy] OK', self::SPILL_NOTE], $output);
 
         $config->set('audit-log.delivery.outbox.connection', 42);
 
@@ -2540,7 +2797,7 @@ final class CheckCommandTest extends TestCase
         [$code, $output] = $this->check();
 
         self::assertSame(1, $code);
-        self::assertSame([...$read, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE], $output);
+        self::assertSame([...$read, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', '[privacy] OK', self::SPILL_NOTE], $output);
 
         $config->set('audit-log.capture.bulk.max_members', 0);
 
@@ -2791,6 +3048,29 @@ final class CheckCommandTest extends TestCase
 
             if (!$migration instanceof Migration) {
                 self::fail('A lifecycle migration file did not return a Migration instance.');
+            }
+
+            $migration->up(); // @phpstan-ignore method.notFound
+        }
+    }
+
+    /**
+     * Run the shipped owners' key migrations with the settings as the test has
+     * them.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateKeyTables(): void
+    {
+        foreach (self::KEY_MIGRATION_PATHS as $path) {
+
+            $migration = include $path;
+
+            if (!$migration instanceof Migration) {
+                self::fail('An owners\' key migration file did not return a Migration instance.');
             }
 
             $migration->up(); // @phpstan-ignore method.notFound

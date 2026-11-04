@@ -46,12 +46,12 @@ final class CursorBindingTest extends TestCase
     public function testTheMacInputIsCanonical(): void
     {
         $expected = '{"filters":{"actor":null,"categories":[],"correlation_id":null,"event_prefix":null,"events":["invoice.approved"],"from":null,'
-            . '"outcomes":[],"principal":null,"subject":null,"tenant":null,"to":null},"k":"k2026","log":["testing","audit_log_entries"],'
+            . '"holding_data_of":null,"outcomes":[],"principal":null,"subject":null,"tenant":null,"to":null},"k":"k2026","log":["testing","audit_log_entries"],'
             . '"order":"occurred_at_desc","payload":"eyJwb3MiOltdfQ","per_page":25,"purpose":"read",'
-            . '"scope":"771ba27828b7a815a92a4d3454d3984cee3dcec4fdbfe8e531bc5e63c77895b4","v":1,"viewer":["user","7"]}';
+            . '"scope":"f00ef3d7575461ed53035dc498d702efd3af332da77706d71c3fce147cca048e","v":1,"viewer":["user","7"]}';
 
         self::assertSame($expected, self::binding()->macInput(self::KEY_ID, self::PAYLOAD));
-        self::assertSame('771ba27828b7a815a92a4d3454d3984cee3dcec4fdbfe8e531bc5e63c77895b4', self::scope()->fingerprint());
+        self::assertSame('f00ef3d7575461ed53035dc498d702efd3af332da77706d71c3fce147cca048e', self::scope()->fingerprint());
     }
 
     /**

@@ -449,6 +449,51 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Privacy
+    |---------------------------------------------------------------------------
+    |
+    | Each value a definition marks for encryption is sealed under a key of its
+    | owner's, one key per owner, tenant and category, kept in
+    | `subject_keys_table` (`audit_log_subject_keys` by default), so erasing an
+    | owner destroys its keys and leaves its values unreadable.
+    | `owner_erasures_table` (`audit_log_owner_erasures`) marks each erasure and
+    | reinstatement of an owner, and `key_uses_table` (`audit_log_key_uses`)
+    | records which key sealed a field of which entry. All three are on the
+    | storage connection, with the entries table's grammar; set them before
+    | migrating, since changing one later moves no table.
+    |
+    | Every owner's key is wrapped under a wrapping key. With no `keys` the
+    | wrapping key is derived from `app.key`, separated from every other key
+    | `app.key` gives but not independent of it, and the keys derived from
+    | `app.previous_keys` still unwrap what they wrapped before a rotation. To
+    | manage the wrapping keys instead, map each id (1 to 32 letters, digits,
+    | dots, underscores or hyphens, starting with a letter or a digit) to a
+    | secret of at least 32 bytes, or `base64:` followed by the encoding of one,
+    | and name the wrapping key in `current`: both or neither. A malformed ring
+    | fails closed, never falling back to `app.key`, and `audit-log:check`
+    | reports it. Keep every wrapping key until `audit-log:rewrap` has moved
+    | every owner's key off it. Read each secret from its own env var:
+    |
+    |     'keys' => ['w2026' => env('AUDIT_LOG_PRIVACY_KEY_W2026')],
+    |
+    | `rewrap_batch` is the most keys one transaction of `audit-log:rewrap`
+    | changes, from 100 to 10000 and 500 by default, and may change on any
+    | deploy. A malformed value fails closed when it is read, and
+    | `audit-log:check` reports it.
+    |
+    */
+
+    'privacy' => [
+        'keys'                 => [],
+        'current'              => env('AUDIT_LOG_PRIVACY_CURRENT'),
+        'subject_keys_table'   => env('AUDIT_LOG_PRIVACY_SUBJECT_KEYS_TABLE', 'audit_log_subject_keys'),
+        'owner_erasures_table' => env('AUDIT_LOG_PRIVACY_OWNER_ERASURES_TABLE', 'audit_log_owner_erasures'),
+        'key_uses_table'       => env('AUDIT_LOG_PRIVACY_KEY_USES_TABLE', 'audit_log_key_uses'),
+        'rewrap_batch'         => env('AUDIT_LOG_PRIVACY_REWRAP_BATCH', 500),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
     | Failure
     |---------------------------------------------------------------------------
     |

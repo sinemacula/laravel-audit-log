@@ -114,6 +114,26 @@ enum Finding: string
     // release of a hold that is not active or a hold placed twice
     case JOURNAL_TRANSITION = 'journal_transition';
 
+    // A verified entry holds an envelope whose key has no key use of the entry
+    case KEY_USE_MISSING = 'key_use_missing';
+
+    // A key use names a key with no row
+    case KEY_MISSING = 'key_missing';
+
+    // A key row's signature does not verify, its wrapped key does not unwrap
+    // under the context it was wrapped in, or its state or wrapping is not what
+    // its latest journalled rewrap left
+    case KEY_SUBSTITUTED = 'key_substituted';
+
+    // A key is erased, or holds no wrapped key, with no verified erasure row
+    // listing it as destroyed
+    case KEY_DESTROYED_UNJOURNALLED = 'key_destroyed_unjournalled';
+
+    // A key is live or superseded though its owner's latest verified erasure
+    // did not keep it, or though it is at or below a reinstated owner's floor
+    // and the erasure before the reinstatement did not keep it
+    case KEY_RESTORED = 'key_restored';
+
     // A prune record is signed under a key the ring does not hold
     case PRUNE_KEY = 'prune_key';
 
@@ -131,6 +151,10 @@ enum Finding: string
 
     // A journal row cannot be read as a journal row
     case JOURNAL_MALFORMED = 'journal_malformed';
+
+    // A key row is signed under a key the ring does not hold, or wrapped under
+    // a wrapping key the wrapper does not hold
+    case KEY_UNVERIFIABLE = 'key_unverifiable';
 
     // A sealed entry is missing, with no prune record to account for it
     case MISSING_ENTRY = 'missing_entry';
@@ -165,7 +189,8 @@ enum Finding: string
             self::ENTRY_KEY,
             self::MANIFEST_UNREADABLE,
             self::JOURNAL_KEY,
-            self::JOURNAL_MALFORMED => IntegrityStatus::UNVERIFIABLE,
+            self::JOURNAL_MALFORMED,
+            self::KEY_UNVERIFIABLE => IntegrityStatus::UNVERIFIABLE,
             self::MISSING_ENTRY,
             self::OVERDUE_UNSEALED,
             self::FUTURE_UNSEALED,

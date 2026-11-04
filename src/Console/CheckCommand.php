@@ -25,11 +25,11 @@ use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
  * `audit-log:check`: reads every setting the package stores entries, captures
- * records, seals, anchors, delivers, reads and exports them with, the
+ * records, seals, anchors, delivers, reads, exports and encrypts them with, the
  * connections, guards, log channels and disks they name, the entries and
- * artifacts tables, the integrity keys and tables and, in outbox mode, the
- * outbox and deliveries tables, and exits non-zero on a problem, for deploy
- * pipelines and readiness probes.
+ * artifacts tables, the integrity keys and tables, the lifecycle and owners'
+ * key tables and, in outbox mode, the outbox and deliveries tables, and exits
+ * non-zero on a problem, for deploy pipelines and readiness probes.
  *
  * Every check runs, so one run lists every problem, each as
  * `[<subject>] <message>`, and a subject without one as `[<subject>] OK`, in
@@ -60,31 +60,39 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * `IntegrityChecks`, skipped when the integrity key settings are malformed) and
  * `[delivery]` (the spill channel, the store when a failure is thrown, and in
  * outbox mode the outbox and deliveries tables; see `DeliveryChecks`, skipped
- * when the storage connection or a failure or delivery setting is malformed)
- * and `[lifecycle]` (the journal, holds, lifecycle lock and import batches
- * tables' shapes, the lock's row, the bound retention policy's version, the
- * installation's identity through both connections, the journal's
- * verification and the holds projection's drift; see `LifecycleChecks`,
- * skipped when the storage connection is malformed or not configured, or a
- * lifecycle table's name or an integrity setting the journal is read with is
- * malformed). The lifecycle, retention and import settings are read under
- * `[config]` too, after the read and export settings. A malformed context,
- * source, definition, redaction, capture, read, export, retention or import
- * setting, or artifacts table's name, skips nothing, since no later subject
- * reads it. After every subject, `[spill] OK` says the spill channel is the one
- * the documentation gives, or a `[spill]` warning says replaying what it holds
- * is unverified; that is a note, not a problem, and leaves the exit code as it
- * is, and it is left out while the channel setting is malformed. Each
- * lifecycle note follows it as `[lifecycle] note: …`, a hold past its review
- * date or an import that stopped moving, which leaves the exit code as it is
- * too. It does not warn about a storage connection shared with the
- * application, which every default install would trip. The command writes
- * nothing, reading the installation id the migrations seed, and prints no
- * secret, statement or binding: a malformed setting is named by its key and
- * never its value, only the name of a connection, guard, log channel or disk
- * and the id of a journal row, a hold or an import batch is printed, and a
- * connection that cannot be opened or read, or a store or a policy that cannot
- * be resolved, is named with the class of what was thrown, never its message.
+ * when the storage connection or a failure or delivery setting is malformed),
+ * `[lifecycle]` (the journal, holds, lifecycle lock and import batches tables'
+ * shapes, the lock's row, the bound retention policy's version, the
+ * installation's identity through both connections, the journal's verification
+ * and the holds projection's drift; see `LifecycleChecks`, skipped when the
+ * storage connection is malformed or not configured, or a lifecycle table's
+ * name or an integrity setting the journal is read with is malformed) and
+ * `[privacy]` (the subject keys, owner erasures and key uses tables' shapes,
+ * keys restored or destroyed without a journalled erasure, and a database
+ * restored behind its anchor until its erasures are re-applied; see
+ * `PrivacyChecks`, skipped when the storage connection is malformed or not
+ * configured, or an owners' key setting, an integrity key setting, the log id
+ * or a table's name it is read with is malformed). The lifecycle, retention,
+ * import and owners' key settings are read under `[config]` too, after the read
+ * and export settings. A malformed context, source, definition, redaction,
+ * capture, read, export, retention or import setting, or artifacts table's
+ * name, skips nothing, since no later subject reads it. After every subject,
+ * `[spill] OK` says the spill channel is the one the documentation
+ * gives, or a `[spill]` warning says replaying what it holds is unverified;
+ * that is a note, not a problem, and leaves the exit code as it is, and it is
+ * left out while the channel setting is malformed. Each lifecycle note follows
+ * it as `[lifecycle] note: …`, a hold past its review date or an import that
+ * stopped moving, then each privacy note as `[privacy] note: …`, a field
+ * encrypter that is not the package's, which leave the exit code as it is too.
+ * It does not warn about a storage connection shared with the application,
+ * which every default install would trip. The command writes nothing, reading
+ * the installation id the migrations seed, and prints no secret, statement or
+ * binding: a malformed setting is named by its key and never its value, only
+ * the name of a connection, guard, log channel or disk, the id of a journal
+ * row, a hold, an import batch or a key and the sequence of a seal is printed,
+ * and a connection that cannot be opened or read, or a store, a policy, a key
+ * store or an anchor that cannot be resolved or read, is named with the class
+ * of what was thrown, never its message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -98,24 +106,31 @@ final class CheckCommand extends Command
     protected $signature = 'audit-log:check';
 
     /** @var string The console command description. */
-    protected $description = 'Check the audit log settings, connections, schema, integrity keys, tables and anchor, delivery, and lifecycle';
+    protected $description = 'Check the audit log settings, connections, schema, integrity keys, tables and anchor, delivery, lifecycle and privacy';
 
     /**
      * Run every check, then report each problem, or that a subject has none,
-     * and last the notes on the spill channel and the lifecycle.
+     * and last the notes on the spill channel, the lifecycle and privacy.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityChecks  $integrity
      * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
+     * @param  \SineMacula\Laravel\AuditLog\Console\PrivacyChecks  $privacy
      * @return int
      */
-    public function handle(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery, IntegrityChecks $integrity, LifecycleChecks $lifecycle): int
-    {
+    public function handle(
+        ConfigRepository $config,
+        DatabaseManager $database,
+        DeliveryChecks $delivery,
+        IntegrityChecks $integrity,
+        LifecycleChecks $lifecycle,
+        PrivacyChecks $privacy,
+    ): int {
         $found = [];
 
-        foreach ($this->checks($config, $database, $delivery, $integrity, $lifecycle) as $subject => $checks) {
+        foreach ($this->checks($config, $database, $delivery, $integrity, $lifecycle, $privacy) as $subject => $checks) {
 
             $problems = [];
 
@@ -137,7 +152,7 @@ final class CheckCommand extends Command
             }
         }
 
-        $this->notes($delivery, $lifecycle);
+        $this->notes($delivery, $lifecycle, $privacy);
 
         return array_merge(...array_values($found)) === [] ? self::SUCCESS : self::FAILURE;
     }
@@ -151,10 +166,17 @@ final class CheckCommand extends Command
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityChecks  $integrity
      * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
+     * @param  \SineMacula\Laravel\AuditLog\Console\PrivacyChecks  $privacy
      * @return array<string, list<\Closure(): list<string>>>
      */
-    private function checks(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery, IntegrityChecks $integrity, LifecycleChecks $lifecycle): array
-    {
+    private function checks(
+        ConfigRepository $config,
+        DatabaseManager $database,
+        DeliveryChecks $delivery,
+        IntegrityChecks $integrity,
+        LifecycleChecks $lifecycle,
+        PrivacyChecks $privacy,
+    ): array {
         [$storageCheck, $maintenanceCheck, $tableCheck, $integrityCheck, $deliveryCheck, $sealCheck, $lifecycleCheck] = self::settingChecks($config);
 
         $checks  = ['config' => [$storageCheck, $maintenanceCheck, $tableCheck, ...self::integritySettingChecks($config), ...self::captureSettingChecks($config)]];
@@ -187,7 +209,9 @@ final class CheckCommand extends Command
             $checks['lifecycle'] = [$lifecycle->problems(...)];
         }
 
-        return $checks;
+        // The privacy subject is listed only once every setting it reads the
+        // key tables, the integrity keys, the journal and the seals with passes
+        return [...$checks, ...$privacy->subject()];
     }
 
     /**
@@ -316,10 +340,11 @@ final class CheckCommand extends Command
      * delivery settings, the delivery tables' names and the outbox connection,
      * then the capture settings, the artifacts table's name and the guards the
      * automatic capture skips, then the read and export settings, then the
-     * lifecycle tables' names and the retention and import settings. Only the
-     * delivery subject depends on any of them: the failure and delivery
-     * settings, the delivery tables' names and the outbox connection; the
-     * lifecycle subject's tables are read by a setting check of its own.
+     * lifecycle tables' names and the retention and import settings, then the
+     * owners' key settings. Only the delivery subject depends on any of them:
+     * the failure and delivery settings, the delivery tables' names and the
+     * outbox connection; the lifecycle and privacy subjects' tables are read by
+     * setting checks of their own.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -354,6 +379,7 @@ final class CheckCommand extends Command
             static fn (): array => CaptureChecks::guardProblems($config),
             ...array_map(self::reading(...), ReadChecks::readers($config)),
             ...array_map(self::reading(...), LifecycleChecks::readers($config)),
+            ...array_map(self::reading(...), PrivacyChecks::readers($config)),
         ];
     }
 
@@ -493,13 +519,15 @@ final class CheckCommand extends Command
      * Say whether the spill channel is the one the documentation gives, by
      * `info()`, or that replaying what it holds is unverified, by `warn()`,
      * saying nothing of it while the channel setting is malformed, which
-     * `config` reports; then give each lifecycle note by `warn()`.
+     * `config` reports; then give each lifecycle note, and each privacy note,
+     * by `warn()`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
+     * @param  \SineMacula\Laravel\AuditLog\Console\PrivacyChecks  $privacy
      * @return void
      */
-    private function notes(DeliveryChecks $delivery, LifecycleChecks $lifecycle): void
+    private function notes(DeliveryChecks $delivery, LifecycleChecks $lifecycle, PrivacyChecks $privacy): void
     {
         try {
             $note = $delivery->spillNote();
@@ -512,6 +540,10 @@ final class CheckCommand extends Command
 
         foreach ($lifecycle->notes() as $lifecycleNote) {
             $this->warn("[lifecycle] note: {$lifecycleNote}");
+        }
+
+        foreach ($privacy->notes() as $privacyNote) {
+            $this->warn("[privacy] note: {$privacyNote}");
         }
     }
 

@@ -14,9 +14,10 @@ use Symfony\Component\Console\Input\ArrayInput;
 
 /**
  * Unit tests for the options the lifecycle commands share: the authority they
- * assert, a reference split on its first colon, an instant given as an ISO-8601
- * time or a date, and a hold's basis, each form accepted and each refused,
- * every refusal naming the option and never the value.
+ * assert, the owner two arguments name, a reference split on its first colon,
+ * an instant given as an ISO-8601 time or a date, and a hold's basis, each form
+ * accepted and each refused, every refusal naming the option and never the
+ * value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,6 +35,9 @@ final class LifecycleOptionsTest extends TestCase
 
     /** @var string The refusal of a reason that is not a reason code. */
     private const string REASON = 'The --reason option must be 1 to 64 lower-case letters, digits, `_`, `.`, `:` or `-`, starting with a letter or a digit.';
+
+    /** @var string The refusal of an owner that is not one. */
+    private const string OWNER = 'The owner must be named by its type and id, each 1 to 191 characters with no control characters.';
 
     /** @var string The refusal of an external reference that is not one. */
     private const string REFERENCE = 'The --reference option must be 1 to 191 characters, with no control characters.';
@@ -272,6 +276,58 @@ final class LifecycleOptionsTest extends TestCase
     }
 
     /**
+     * The owner is the reference the two arguments name together, its id kept
+     * exactly as given.
+     *
+     * @return void
+     */
+    public function testOwnerReadsTheTwoArguments(): void
+    {
+        $owner = LifecycleOptions::owner(self::command(['type' => 'App\Models\User', 'id' => '007']));
+
+        self::assertSame(['type' => 'App\Models\User', 'id' => '007'], $owner->toArray());
+    }
+
+    /**
+     * Rows of `[arguments]`: an owner missing either part, or a part a
+     * reference refuses.
+     *
+     * @return iterable<string, array{0: array<string, string>}>
+     */
+    public static function provideMalformedOwners(): iterable
+    {
+        yield from [
+            'no arguments'       => [[]],
+            'no id'              => [['type' => 'App\Models\User']],
+            'no type'            => [['id' => '42']],
+            'an empty id'        => [['type' => 'App\Models\User', 'id' => '']],
+            'an empty type'      => [['type' => '', 'id' => '42']],
+            'a control in an id' => [['type' => 'App\Models\User', 'id' => "secret-4\n2"]],
+            'an id too long'     => [['type' => 'App\Models\User', 'id' => str_repeat('s', 192)]],
+        ];
+    }
+
+    /**
+     * An owner missing either part, or naming a part a reference refuses, is
+     * refused with one message that names the arguments and never the value.
+     *
+     * @param  array<string, string>  $arguments
+     * @return void
+     */
+    #[DataProvider('provideMalformedOwners')]
+    public function testAMalformedOwnerIsInvalid(array $arguments): void
+    {
+        try {
+            LifecycleOptions::owner(self::command($arguments));
+
+            self::fail('Expected the owner to be refused.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertSame(self::OWNER, $refusal->getMessage());
+            self::assertStringNotContainsString('secret', $refusal->getMessage());
+        }
+    }
+
+    /**
      * `LifecycleOptions` is a utility container, not to be instantiated: its
      * constructor is private. Reflection invokes it so the line is covered
      * while still documenting the access modifier.
@@ -295,7 +351,8 @@ final class LifecycleOptionsTest extends TestCase
     }
 
     /**
-     * A command of the authority's options, given the options' values.
+     * A command of the authority's options and the owner's arguments, given
+     * their values.
      *
      * @param  array<string, string>  $options
      * @return \Illuminate\Console\Command
@@ -304,7 +361,7 @@ final class LifecycleOptionsTest extends TestCase
     {
         $command = new class extends Command {
             /** @var string The name and signature of the console command. */
-            protected $signature = 'lifecycle-options:probe {--by-type=} {--by-id=} {--reason=} {--reference=}';
+            protected $signature = 'lifecycle-options:probe {type?} {id?} {--by-type=} {--by-id=} {--reason=} {--reference=}';
         };
 
         $command->setInput(new ArrayInput($options, $command->getDefinition()));

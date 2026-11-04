@@ -4,10 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Querying;
 
+use Illuminate\Config\Repository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
+use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
 use SineMacula\Laravel\AuditLog\Querying\EntryProjector;
 use SineMacula\Laravel\AuditLog\Querying\StoredEntry;
@@ -117,7 +121,9 @@ final class TrailPageTest extends TestCase
         $record = RecordFactory::finalisedBundle(1);
         $stored = StoredEntry::fromRow((new RowCodec)->encode($record), new RowCodec);
 
-        return (new EntryProjector(new SealedFieldReader, self::handler()))->project([$stored])[0];
+        $signer = new RecordSigner(new KeyRing(new IntegritySettings(new Repository(['app' => ['key' => str_repeat('k', 32)]]))));
+
+        return (new EntryProjector(new SealedFieldReader, self::handler(), $signer))->project([$stored], false)->entries[0];
     }
 
     /**

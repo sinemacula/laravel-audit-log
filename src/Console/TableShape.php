@@ -12,11 +12,11 @@ namespace SineMacula\Laravel\AuditLog\Console;
  * its name's suffix, the primary key's columns, and the sentence that describes
  * a column the package does not write.
  *
- * There is one shape for each of eleven tables: the entries, the artifacts, the
- * outbox, the deliveries, the checkpoints, the checkpoint members, the
- * integrity state, the lifecycle journal, the holds, the lifecycle lock and the
- * import batches. Each is built by its named constructor, and none can be built
- * otherwise.
+ * There is one shape for each of fourteen tables: the entries, the artifacts,
+ * the outbox, the deliveries, the checkpoints, the checkpoint members, the
+ * integrity state, the lifecycle journal, the holds, the lifecycle lock, the
+ * import batches, the subject keys, the owner erasures and the key uses. Each
+ * is built by its named constructor, and none can be built otherwise.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -249,13 +249,61 @@ final readonly class TableShape
         'finished_at'         => ['datetime', 6, true],
     ];
 
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each subject keys column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array SUBJECT_KEYS_COLUMNS = [
+        'id'          => ['uuid', 36, false],
+        'owner_type'  => ['string', 191, false],
+        'owner_id'    => ['string', 191, false],
+        'tenant_type' => ['string', 191, true],
+        'tenant_id'   => ['string', 191, true],
+        'category'    => ['string', 64, false],
+        'unit'        => ['string', 64, false],
+        'generation'  => ['integer', null, false],
+        'state'       => ['string', 16, false],
+        'wrapped_key' => ['text', null, true],
+        'wrap_key_id' => ['string', 191, true],
+        'created_at'  => ['datetime', 6, false],
+        'erasure_id'  => ['uuid', 36, true],
+        'key_id'      => ['string', 32, false],
+        'hmac'        => ['string', 64, false],
+    ];
+
+    /** @var array<string, array{0: non-empty-list<string>, 1: bool}> Each index the subject keys migration creates, by its name's suffix, with its columns and uniqueness. */
+    private const array SUBJECT_KEYS_INDEXES = [
+        '_unit_unique'   => [['unit', 'generation'], true],
+        '_owner_index'   => [['owner_type', 'owner_id'], false],
+        '_erasure_index' => [['erasure_id'], false],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each owner erasures column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array OWNER_ERASURES_COLUMNS = [
+        'id'               => ['uuid', 36, false],
+        'owner_type'       => ['string', 191, false],
+        'owner_id'         => ['string', 191, false],
+        'transition'       => ['string', 16, false],
+        'generation_floor' => ['integer', null, false],
+        'journal_sequence' => ['bigint', null, false],
+        'created_at'       => ['datetime', 6, false],
+    ];
+
+    /** @var array<string, array{0: non-empty-list<string>, 1: bool}> Each index the owner erasures migration creates, by its name's suffix, with its columns and uniqueness. */
+    private const array OWNER_ERASURES_INDEXES = [
+        '_owner_index' => [['owner_type', 'owner_id', 'journal_sequence'], false],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each key uses column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array KEY_USES_COLUMNS = [
+        'key_id'   => ['uuid', 36, false],
+        'entry_id' => ['uuid', 36, false],
+    ];
+
     /** @var string How a column of an entries table the package does not write is described. */
     private const string UNKNOWN_ENTRIES_COLUMN = 'Column `%s` is not one the package writes, so no entry\'s HMAC covers it.';
 
     /** @var string How a column of a checkpoints or checkpoint members table the package does not write is described. */
     private const string UNKNOWN_SEAL_COLUMN = 'Column `%s` is not one the package writes, so no seal covers it.';
 
-    /** @var string How a column of an artifacts, outbox, deliveries or integrity state table the package does not write is described. */
+    /** @var string How a column of any other table the package does not write is described. */
     private const string UNKNOWN_DELIVERY_COLUMN = 'Column `%s` is not one the package writes.';
 
     /** @var string How a column of a lifecycle journal table the package does not write is described. */
@@ -272,7 +320,7 @@ final readonly class TableShape
      */
     private function __construct(
 
-        /** What the table is called in a problem: `entries`, `artifacts`, `outbox`, `deliveries`, `checkpoints`, `checkpoint members`, `integrity state`, `lifecycle journal`, `holds`, `lifecycle lock` or `import batches`. */
+        /** What the table is called in a problem: `entries`, `artifacts`, `outbox`, `deliveries`, `checkpoints`, `checkpoint members`, `integrity state`, `lifecycle journal`, `holds`, `lifecycle lock`, `import batches`, `subject keys`, `owner erasures` or `key uses`. */
         public string $label,
 
         /** Each column the package writes, in order, with its type family, its length or precision, and its nullability. */
@@ -408,5 +456,39 @@ final readonly class TableShape
     public static function importBatches(): self
     {
         return new self('import batches', self::IMPORT_BATCHES_COLUMNS, ['_status_index' => [['status', 'updated_at'], false]], ['id'], self::UNKNOWN_DELIVERY_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the subject keys table: keyed by
+     * the key's id, one key per unit and generation, and its keys found by
+     * owner and by the erasure that destroyed them.
+     *
+     * @return self
+     */
+    public static function subjectKeys(): self
+    {
+        return new self('subject keys', self::SUBJECT_KEYS_COLUMNS, self::SUBJECT_KEYS_INDEXES, ['id'], self::UNKNOWN_DELIVERY_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the owner erasures table: keyed by
+     * its journal row's id, and an owner's markers found in journal order.
+     *
+     * @return self
+     */
+    public static function ownerErasures(): self
+    {
+        return new self('owner erasures', self::OWNER_ERASURES_COLUMNS, self::OWNER_ERASURES_INDEXES, ['id'], self::UNKNOWN_DELIVERY_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the key uses table: keyed by the
+     * key and the entry, and an entry's keys found by the entry alone.
+     *
+     * @return self
+     */
+    public static function keyUses(): self
+    {
+        return new self('key uses', self::KEY_USES_COLUMNS, ['_entry_index' => [['entry_id'], false]], ['key_id', 'entry_id'], self::UNKNOWN_DELIVERY_COLUMN);
     }
 }

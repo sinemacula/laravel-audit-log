@@ -15,6 +15,7 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
@@ -42,7 +43,10 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  * signs a manifest has its artifact checked by the manifest verifier, in
  * batches, never one statement per entry. An entry pruned under a verified
  * prune record is missing, so it has no descriptor to check, and its artifact
- * goes with it.
+ * goes with it. Every key an entry that verified names in an envelope must have
+ * its key use, which is how an erasure finds the entry: the key uses of the
+ * segment's entries are read together by one key-use check, none for a segment
+ * with no envelope, and an entry short of one is `key_use_missing`.
  *
  * The prune ledger is asked for every segment, after its members and entries
  * were read, even when none is missing, so a seal whose pruned members were all
@@ -138,8 +142,8 @@ final readonly class SegmentVerifier
      */
     public function verify(array $seal, int $expected, ?SegmentReport $previous, VerificationContext $context): SegmentReport
     {
-        $sequence                       = self::sequenceOf($seal);
-        $gap                            = $sequence === $expected ? [] : [[Finding::SEQUENCE_GAP, self::textOf($seal['id'] ?? null)]];
+        $sequence                       = SegmentRows::sequenceOf($seal);
+        $gap                            = $sequence === $expected ? [] : [[Finding::SEQUENCE_GAP, SegmentRows::textOf($seal['id'] ?? null)]];
         [$envelope, $digest, $findings] = $this->own($seal);
 
         if ($envelope === null || $digest === null) {
@@ -150,7 +154,7 @@ final readonly class SegmentVerifier
         [$anchoring, $awaiting, $anchorFindings]                             = $this->anchoring($seal, $envelope, $digest, $context);
 
         [$pruneFindings, $pruned]           = $this->coverage($envelope, $digest, $sorted, $missing, $present, $authentic);
-        $all                                = [...$gap, ...$findings, ...self::chain($envelope, $previous), ...$memberFindings, ...$pruneFindings, ...$anchorFindings];
+        $all                                = [...$gap, ...$findings, ...SegmentRows::chain($envelope, $previous), ...$memberFindings, ...$pruneFindings, ...$anchorFindings];
         [$integrity, $finding, $firstBadId] = SegmentReport::verdict($all, $pruned);
 
         return new SegmentReport($envelope->sequence, $envelope->id, $integrity, $anchoring, $members, $finding, $firstBadId, $digest, $awaiting);
@@ -177,8 +181,9 @@ final readonly class SegmentVerifier
     {
         [, $digest, $findings]              = $this->own($seal);
         [$integrity, $finding, $firstBadId] = SegmentReport::verdict([...$also, ...$findings], false);
+        $sealId                             = SegmentRows::textOf($seal['id'] ?? null) ?? '';
 
-        return new SegmentReport(self::sequenceOf($seal), self::textOf($seal['id'] ?? null) ?? '', $integrity, AnchorStatus::UNANCHORED, 0, $finding, $firstBadId, $digest);
+        return new SegmentReport(SegmentRows::sequenceOf($seal), $sealId, $integrity, AnchorStatus::UNANCHORED, 0, $finding, $firstBadId, $digest);
     }
 
     /**
@@ -204,7 +209,7 @@ final readonly class SegmentVerifier
      */
     private function own(array $seal): array
     {
-        $sealId  = self::textOf($seal['id'] ?? null);
+        $sealId  = SegmentRows::textOf($seal['id'] ?? null);
         $version = IntegerSetting::parse($seal['algorithm_version'] ?? null);
         $signer  = $seal['signer'] ?? null;
 
@@ -222,11 +227,11 @@ final readonly class SegmentVerifier
         $checks = [
             Finding::LOG_MISMATCH->value => $envelope->logId               !== $this->settings->logId(),
             Finding::SEAL_DIGEST->value  => ($seal['seal_digest'] ?? null) !== $digest,
-            Finding::GENESIS->value      => self::breaksGenesis($envelope),
+            Finding::GENESIS->value      => SegmentRows::breaksGenesis($envelope),
         ];
 
         $failed = array_map(Finding::from(...), array_keys(array_filter($checks)));
-        $signed = $this->signatureFinding($envelope, self::textOf($seal['signature'] ?? null) ?? '');
+        $signed = $this->signatureFinding($envelope, SegmentRows::textOf($seal['signature'] ?? null) ?? '');
         $found  = array_map(static fn (Finding $finding): array => [$finding, $envelope->id], $signed === null ? $failed : [...$failed, $signed]);
 
         return [$envelope, $digest, $found];
@@ -262,11 +267,13 @@ final readonly class SegmentVerifier
      * rows costs no more memory than its own; such a seal is never authentic,
      * so nothing it leaves out could be found pruned.
      *
-     * Only an entry that verified is trusted for its manifest descriptor, and
-     * the manifests are checked together, in batches, never one statement per
-     * entry; a segment with no bundle costs no statement more. A missing entry
-     * has no descriptor to check, so a pruned entry's artifact, which goes with
-     * it, is never asked for.
+     * Only an entry that verified is trusted for its manifest descriptor and
+     * the keys its envelopes name, the manifests are checked together, in
+     * batches, never one statement per entry, and the key uses of the entries
+     * that name a key are read together, in batches by entry; a segment with no
+     * bundle and no envelope costs no statement more. A missing entry has no
+     * descriptor to check and no envelope, so a pruned entry's artifact, which
+     * goes with it, is never asked for.
      *
      * @formatter:off
      *
@@ -287,13 +294,14 @@ final readonly class SegmentVerifier
         $pairs     = [];
         $first     = [];
         $manifests = [];
+        $keys      = [];
         $kept      = [Finding::MISSING_ENTRY->value => [], self::PRESENT => []];
 
         foreach ($this->memberRows($seal->id) as $row) {
-            $entry   = (array) $row;
-            $member  = self::textOf($entry['member_entry_id'] ?? null) ?? '';
-            $hmac    = self::textOf($entry['member_hmac'] ?? null)     ?? '';
-            $finding = $this->memberFinding($entry, $hmac);
+            $entry              = (array) $row;
+            $member             = SegmentRows::textOf($entry['member_entry_id'] ?? null) ?? '';
+            $hmac               = SegmentRows::textOf($entry['member_hmac'] ?? null)     ?? '';
+            [$finding, $keyIds] = $this->memberFinding($entry, $hmac);
 
             if (++$count <= $seal->memberCount) {
                 $pairs[]                           = [$member, $hmac];
@@ -302,23 +310,25 @@ final readonly class SegmentVerifier
 
             if ($finding === null) {
                 $manifests[$member] = $this->manifests->descriptorOf($entry);
+                $keys[$member]      = $keyIds;
 
                 continue;
             }
 
-            $first[$finding->value] = self::earliest($first[$finding->value] ?? null, $member);
+            $first[$finding->value] = SegmentRows::earliest($first[$finding->value] ?? null, $member);
         }
 
         unset($first[Finding::MISSING_ENTRY->value]);
 
         $found      = array_map(static fn (string $finding, string $id): array => [Finding::from($finding), $id], array_keys($first), $first);
         $manifests  = $this->manifests->findings(array_filter($manifests, is_array(...)));
-        $membership = self::membership($seal, $count, $pairs);
+        $keyUses    = $this->keyUseFindings(array_filter($keys));
+        $membership = SegmentRows::membership($seal, $count, $pairs);
         $sorted     = array_column($pairs, 0);
 
         usort($sorted, strcmp(...));
 
-        return [$count, [...$found, ...$manifests, ...$membership], $sorted, $kept[Finding::MISSING_ENTRY->value], $kept[self::PRESENT], $membership === []];
+        return [$count, [...$found, ...$manifests, ...$keyUses, ...$membership], $sorted, $kept[Finding::MISSING_ENTRY->value], $kept[self::PRESENT], $membership === []];
     }
 
     /**
@@ -345,43 +355,72 @@ final readonly class SegmentVerifier
 
     /**
      * The finding of one member row and its entry, or `null` when the entry
-     * exists, holds the HMAC the seal recorded and verifies under its own key.
-     * A missing entry is `missing_entry`, which the prune ledger may account
-     * for.
+     * exists, holds the HMAC the seal recorded and verifies under its own key,
+     * with the keys its envelopes name when it does. A missing entry is
+     * `missing_entry`, which the prune ledger may account for.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<array-key, mixed>  $entry
      * @param  string  $memberHmac
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
+     * @return array{0: ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: list<string>}
      */
-    private function memberFinding(#[\SensitiveParameter] array $entry, string $memberHmac): ?Finding
+    private function memberFinding(#[\SensitiveParameter] array $entry, string $memberHmac): array
     {
         if (($entry['id'] ?? null) === null) {
-            return Finding::MISSING_ENTRY;
+            return [Finding::MISSING_ENTRY, []];
         }
 
-        return ($entry['hmac'] ?? null) === $memberHmac ? $this->entryFinding($entry) : Finding::MEMBER_HMAC;
+        return ($entry['hmac'] ?? null) === $memberHmac ? $this->entryFinding($entry) : [Finding::MEMBER_HMAC, []];
     }
 
     /**
      * The finding of a present entry's own signature, or `null` when it
-     * verifies under the key it names.
+     * verifies under the key it names, with the keys its envelopes name when it
+     * does: only an entry that verified says what it holds.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<array-key, mixed>  $entry
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
+     * @return array{0: ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: list<string>}
      */
-    private function entryFinding(#[\SensitiveParameter] array $entry): ?Finding
+    private function entryFinding(#[\SensitiveParameter] array $entry): array
     {
         try {
-            return $this->records->verifies($this->codec->decode($entry)) ? null : Finding::ENTRY_HMAC;
+            $decoded = $this->codec->decode($entry);
+            $finding = $this->records->verifies($decoded) ? null : Finding::ENTRY_HMAC;
         } catch (UnknownKeyException) {
-            return Finding::ENTRY_KEY;
+            $finding = Finding::ENTRY_KEY;
         } catch (\UnexpectedValueException) {
-            return Finding::ENTRY_MALFORMED;
+            $finding = Finding::ENTRY_MALFORMED;
         }
+
+        if ($finding !== null) {
+            return [$finding, []];
+        }
+
+        $ip = $decoded['ip'] ?? null;
+
+        return [null, EnvelopeKeys::of($decoded['properties'] ?? null, $decoded['context'] ?? null, is_string($ip) ? $ip : null)];
+    }
+
+    /**
+     * The `key_use_missing` finding at each verified entry one of whose keys
+     * has no key use naming it, the entries' key uses read by one key-use check
+     * for the segment, and none when no entry names a key.
+     *
+     * @param  array<string, list<string>>  $keys
+     * @return list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function keyUseFindings(array $keys): array
+    {
+        if ($keys === []) {
+            return [];
+        }
+
+        return array_map(static fn (string $entryId): array => [Finding::KEY_USE_MISSING, $entryId], (new KeyUseCheck($this->database))->missing($keys));
     }
 
     /**
@@ -506,7 +545,7 @@ final readonly class SegmentVerifier
      */
     private function ask(array $seal, SealEnvelope $envelope, string $digest): AnchorStatus
     {
-        $receipt = self::receiptOf($seal['anchor_receipt'] ?? null);
+        $receipt = SegmentRows::receiptOf($seal['anchor_receipt'] ?? null);
 
         try {
             $confirmed = $receipt !== null
@@ -517,128 +556,5 @@ final readonly class SegmentVerifier
         }
 
         return $confirmed ? AnchorStatus::ANCHORED : AnchorStatus::UNANCHORED;
-    }
-
-    /**
-     * The findings of the set of members: the rows must be as many as the seal
-     * counts, and their pairs must give the members digest. A seal with more or
-     * fewer rows fails both, since a set of another size never gives the digest
-     * the seal recorded.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
-     * @param  int  $count
-     * @param  list<array{0: string, 1: string}>  $pairs
-     * @return list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>
-     */
-    private static function membership(SealEnvelope $seal, int $count, array $pairs): array
-    {
-        if ($count !== $seal->memberCount) {
-            return [[Finding::MEMBER_COUNT, $seal->id], [Finding::MEMBERS_DIGEST, $seal->id]];
-        }
-
-        try {
-            $matches = SealEnvelope::membersDigest($pairs) === $seal->membersDigest;
-        } catch (\InvalidArgumentException) {
-            $matches = false;
-        }
-
-        return $matches ? [] : [[Finding::MEMBERS_DIGEST, $seal->id]];
-    }
-
-    /**
-     * The finding of the seal's link to the seal before, when the run has one:
-     * the link must name its id and its recomputed digest, so a link to a seal
-     * that cannot be read, which has none, is broken.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
-     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SegmentReport  $previous
-     * @return list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>
-     */
-    private static function chain(SealEnvelope $seal, ?SegmentReport $previous): array
-    {
-        if ($previous === null) {
-            return [];
-        }
-
-        $broken = $seal->previousId !== $previous->sealId
-            || $previous->digest === null
-            || $seal->previousDigest !== $previous->digest;
-
-        return $broken ? [[Finding::CHAIN_BROKEN, $seal->id]] : [];
-    }
-
-    /**
-     * Whether the seal breaks the genesis rule: the first seal links to none,
-     * and every later one links to the seal before by both its id and its
-     * digest.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
-     * @return bool
-     */
-    private static function breaksGenesis(SealEnvelope $seal): bool
-    {
-        if ($seal->sequence === 1) {
-            return $seal->previousId !== null || $seal->previousDigest !== null;
-        }
-
-        return $seal->previousId === null || $seal->previousDigest === null;
-    }
-
-    /**
-     * The receipt kept beside the seal, or `null` when there is none or it is
-     * not a JSON object of string keys and scalars or `null`.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $stored
-     * @return ?array<string, scalar|null>
-     */
-    private static function receiptOf(mixed $stored): ?array
-    {
-        $decoded = is_string($stored) ? json_decode($stored) : null;
-        $fields  = $decoded instanceof \stdClass ? get_object_vars($decoded) : [];
-        $receipt = array_filter($fields, static fn (mixed $value, int|string $key): bool => is_string($key) && ($value === null || is_scalar($value)), ARRAY_FILTER_USE_BOTH);
-
-        /** @var array<string, scalar|null> $receipt */
-        return $decoded instanceof \stdClass && count($receipt) === count($fields) ? $receipt : null;
-    }
-
-    /**
-     * The stored seal's sequence, read from an integer or its decimal string,
-     * or 0 when it is neither.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<array-key, mixed>  $seal
-     * @return int
-     */
-    private static function sequenceOf(array $seal): int
-    {
-        return IntegerSetting::parse($seal['sequence'] ?? null) ?? 0;
-    }
-
-    /**
-     * The earlier, bytewise, of the id kept so far and the id given.
-     *
-     * @param  ?string  $kept
-     * @param  string  $id
-     * @return string
-     */
-    private static function earliest(?string $kept, string $id): string
-    {
-        return $kept === null || strcmp($id, $kept) < 0 ? $id : $kept;
-    }
-
-    /**
-     * The stored value when it is a string, and `null` otherwise.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $value
-     * @return ?string
-     */
-    private static function textOf(mixed $value): ?string
-    {
-        return is_string($value) ? $value : null;
     }
 }

@@ -21,7 +21,7 @@ use PHPUnit\Framework\TestCase;
  * access recorder reach the record pipeline, so nothing a mapper or a listener
  * runs can write a record of its own. The read path names neither the console
  * nor the stores' writers, and access control names nothing of the package but
- * the values it compiles.
+ * the values it compiles and the key tables an owner's filter reads.
  *
  * The same scanner holds the package to the framework: `FRAMEWORK_RULES` are
  * read the same way, with `forbids` and `allows` relative to the framework, so
@@ -111,7 +111,7 @@ final class NamespaceDependenciesTest extends TestCase
             'allows'  => ['Records\EventCode'],
         ],
         'contracts name nothing of the package but contracts, the definitions, access scopes and field readings they return, the records, '
-        . 'references, pending records, read purposes, encrypted fields and seal values they take and the conflict they raise' => [
+        . 'references, pending records, read purposes, encrypted fields, field contexts and seal values they take and the conflict they raise' => [
             'from'    => ['Contracts'],
             'except'  => [],
             'forbids' => ['*'],
@@ -125,6 +125,7 @@ final class NamespaceDependenciesTest extends TestCase
                 'Records\Reference',
                 'Records\PendingRecord',
                 'Privacy\EncryptedField',
+                'Privacy\FieldContext',
                 'Privacy\FieldReading',
                 'Stores\RecordConflictException',
                 'Integrity\SealSummary',
@@ -152,7 +153,7 @@ final class NamespaceDependenciesTest extends TestCase
             'allows'  => [],
         ],
         'the integrity layer names of the database helpers and the stores only the storage connection, the entries settings, '
-        . 'the integrity tables and progress, the lifecycle tables, the installation identity, the failure classifier and the row codec' => [
+        . 'the integrity tables and progress, the lifecycle tables, the key tables, the installation identity, the failure classifier and the row codec' => [
             'from'    => ['Integrity'],
             'except'  => [],
             'forbids' => ['Database', 'Stores'],
@@ -162,6 +163,7 @@ final class NamespaceDependenciesTest extends TestCase
                 'Database\IntegrityTables',
                 'Database\IntegrityProgress',
                 'Database\LifecycleTables',
+                'Database\KeyTables',
                 'Database\InstallationIdentity',
                 'Database\FailureClassifier',
                 'Stores\RowCodec',
@@ -315,8 +317,8 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Console', 'Models', 'Casts', 'Testing', 'Facades'],
             'allows'  => [],
         ],
-        'access control names nothing of the package but references, the read path\'s filters and positions, the definitions\' grammar '
-        . 'and the canonical encoder' => [
+        'access control names nothing of the package but references, the read path\'s filters and positions, the definitions\' grammar, '
+        . 'the canonical encoder and the key tables' => [
             'from'    => ['Access'],
             'except'  => [],
             'forbids' => ['*'],
@@ -329,6 +331,7 @@ final class NamespaceDependenciesTest extends TestCase
                 'Definitions\EventDefinition',
                 'Integrity\CanonicalEncoder',
                 'Support\StoredTime',
+                'Database\KeyTables',
             ],
         ],
         'the records name nothing of the read path or access control but the package\'s own codes' => [
@@ -336,6 +339,13 @@ final class NamespaceDependenciesTest extends TestCase
             'except'  => [],
             'forbids' => ['Querying', 'Access'],
             'allows'  => ['Querying\Enums\PackageActivity'],
+        ],
+        'the key store names nothing of the stores but the row codec, the read path, access control, the delivery, the lifecycle but the key-use '
+        . 'rebuild\'s result, the console, the read model, the recorder, the facade or the testing helpers' => [
+            'from'    => ['Keys'],
+            'except'  => [],
+            'forbids' => ['Stores', 'Querying', 'Access', 'Delivery', 'Lifecycle', 'Console', 'Models', 'Casts', 'Recorder', 'Facades', 'Testing'],
+            'allows'  => ['Stores\RowCodec', 'Lifecycle\KeyUseRebuildResult'],
         ],
         'the read enums name nothing of the package but other enums, the definitions, event codes and the defining contract' => [
             'from'    => ['Querying\Enums'],
@@ -379,11 +389,11 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Auth', 'Contracts\Auth', 'Support\Facades\Auth'],
             'allows'  => ['Contracts\Auth\Authenticatable'],
         ],
-        'the domain uses no facade and no application container' => [
-            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores', 'Contributors', 'Runtime', 'Events', 'Privacy', 'Access'],
+        'the domain uses no facade and no application container, naming at most the failure to resolve a connection' => [
+            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores', 'Contributors', 'Runtime', 'Events', 'Privacy', 'Access', 'Keys'],
             'except'  => [],
             'forbids' => ['Support\Facades', 'Foundation', 'Container', 'Contracts\Foundation', 'Contracts\Container'],
-            'allows'  => [],
+            'allows'  => ['Contracts\Container\BindingResolutionException'],
         ],
     ];
 

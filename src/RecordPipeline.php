@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\AuditLog;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Encryption\StringEncrypter;
+use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
@@ -27,9 +28,14 @@ use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 /**
  * The pipeline a recorded activity runs, whether the application records it or
  * it is captured from an event: its definition is found, its timing is checked,
- * the contributors fill its gaps in order, what they leave is minimised, a bulk
- * operation's manifest is sealed, the record is built from that with the
- * clock's time and the configured source, and it is delivered.
+ * the contributors fill its gaps in order, the clock is read and the entry's id
+ * minted, what they leave is minimised for that entry, a bulk operation's
+ * manifest is sealed, the record is built from that with the clock's time, the
+ * minted id and the configured source, and it is delivered.
+ *
+ * The id is minted before minimising because every encrypted value is sealed
+ * for the entry it belongs to: a package record keeps the id the package gave
+ * it, and any other takes a UUID version 7 of the clock's time, read once.
  *
  * Nothing is consumed until the definition and the timing have been accepted,
  * the record minimised and any manifest sealed, so a refusal of any of them, a
@@ -100,11 +106,12 @@ final readonly class RecordPipeline
      * Write the builder's record and return it. Minimising takes a snapshot
      * of its own, because the first predates what the contributors filled;
      * that first one stays for the definition, the timing, the connection and
-     * the manifest, which they cannot change. An explicit record without a
-     * timing is written after commit, and a captured one immediately. An
-     * explicit record is refused while an event mapper runs; a captured one,
-     * which its signal tells apart, is not. A reserved code is written only
-     * with a package write, whose check runs on the built record before it is
+     * the manifest, which they cannot change. The entry's id is minted before
+     * minimising, from the clock read once. An explicit record without a timing
+     * is written after commit, and a captured one immediately. An explicit
+     * record is refused while an event mapper runs; a captured one, which its
+     * signal tells apart, is not. A reserved code is written only with a
+     * package write, whose check runs on the built record before it is
      * delivered.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
@@ -152,11 +159,13 @@ final readonly class RecordPipeline
             $container->make($contributor)->contribute($contribution);
         }
 
-        $minimised  = $container->make(RecordMinimiser::class)->minimise($pending->snapshot(), $definition);
+        $filled     = $pending->snapshot();
+        $occurredAt = $container->make(Clock::class)->now();
+        $id         = $filled->id ?? Str::uuid7($occurredAt)->toString();
+        $minimised  = $container->make(RecordMinimiser::class)->minimise($filled, $definition, $id);
         $attachment = $snapshot->manifest === null ? null : Attachment::sealed($snapshot->manifest, $container->make(StringEncrypter::class));
         $source     = $container->make(SourceSettings::class);
-        $occurredAt = $container->make(Clock::class)->now();
-        $record     = AuditRecord::fromPending($pending, $minimised, $definition->version, $definition->category, $occurredAt, $source->id(), $source->region(), $attachment);
+        $record     = AuditRecord::fromPending($pending, $minimised, $id, $definition->version, $definition->category, $occurredAt, $source->id(), $source->region(), $attachment);
 
         $package?->check($record);
 

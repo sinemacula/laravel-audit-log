@@ -8,19 +8,13 @@ use Illuminate\Console\Command;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
-use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
-use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException;
-use SineMacula\Laravel\AuditLog\Integrity\JournalSummary;
-use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationRange;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
 use SineMacula\Laravel\AuditLog\Integrity\Verifier;
-use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use Symfony\Component\Console\Attribute\AsCommand;
-use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
@@ -29,13 +23,13 @@ use Symfony\Component\Console\Output\OutputInterface;
  * line for each finding of the run as a whole, then the summary: the exact
  * range checked, the head observed and the anchor's, the seals in each
  * integrity and anchoring status, those awaiting their first anchoring, the
- * lifecycle journal's section, and, for the whole log, the unsealed entries.
- * `--json` writes each line as one JSON object, the summary last.
- * `--sweep-first` runs `audit-log:seal --sweep` before verifying, so an entry
- * inserted late since the last sweep, such as a replayed record, is sealed
- * rather than found overdue; the scheduled verification sweeps first. With
- * `--json` the sweep prints nothing, and a sweep that fails has already alarmed
- * and makes the run exit non-zero.
+ * lifecycle journal's section, and, for the whole log, the key store's section
+ * and the unsealed entries. `--json` writes each line as one JSON object, the
+ * summary last. `--sweep-first` runs `audit-log:seal --sweep` before verifying,
+ * so an entry inserted late since the last sweep, such as a replayed record, is
+ * sealed rather than found overdue; the scheduled verification sweeps first.
+ * With `--json` the sweep prints nothing, and a sweep that fails has already
+ * alarmed and makes the run exit non-zero.
  *
  * Every run, a ranged one included, verifies the whole lifecycle journal: its
  * chain, each row's signature and the transitions it makes, and each seal's
@@ -44,6 +38,13 @@ use Symfony\Component\Console\Output\OutputInterface;
  * (`journal_gap`, `journal_signature`, `journal_commitment`,
  * `journal_transition`, `journal_key` and `journal_malformed`) is a finding of
  * the run, printed and failing it as any other.
+ *
+ * A run of the whole log also verifies the owners' key store: every key row's
+ * signature and wrapping, what the journal says of its owner, and every key a
+ * key use names. Its section says how many keys it verified and how many of
+ * them were erased, and how many key findings it made, which are findings of
+ * the run like any other; or that it was skipped, naming the bound field
+ * encrypter that does not use the package's key store.
  *
  * A ranged run says it does not establish the integrity of the whole log. An
  * option that is not a sequence, a first seal after the last, an end beyond the
@@ -73,9 +74,6 @@ final class VerifyCommand extends Command
 {
     /** @var string The command the event and the exception name. */
     private const string COMMAND = 'verify';
-
-    /** @var string How an id the line has none of is written. */
-    private const string NONE = 'none';
 
     /** @var string The name and signature of the console command. */
     protected $signature = 'audit-log:verify'
@@ -174,7 +172,7 @@ final class VerifyCommand extends Command
             return;
         }
 
-        $this->line(self::segmentLine($report));
+        $this->line(VerifyLines::segmentLine($report));
     }
 
     /**
@@ -197,8 +195,8 @@ final class VerifyCommand extends Command
 
     /**
      * Print each finding of the run, then the summary as text: the coverage,
-     * the counts, the journal, the unsealed entries of a run of the whole log
-     * or the caveat of a ranged run, and the verdict.
+     * the counts, the journal, the key store and the unsealed entries of a run
+     * of the whole log or the caveat of a ranged run, and the verdict.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationSummary  $summary
      * @param  bool  $strict
@@ -209,15 +207,19 @@ final class VerifyCommand extends Command
     private function printText(VerificationSummary $summary, bool $strict): void
     {
         foreach ($summary->findings as $finding) {
-            $this->line(self::findingLine($finding));
+            $this->line(VerifyLines::findingLine($finding));
         }
 
-        $this->line(self::coverage($summary) . ' ' . self::anchorClause($summary));
-        $this->line(self::integrityLine($summary->integrity));
-        $this->line(self::anchoringLine($summary->anchoring, $summary->awaiting));
+        $this->line(VerifyLines::coverage($summary) . ' ' . VerifyLines::anchorClause($summary));
+        $this->line(VerifyLines::integrityLine($summary->integrity));
+        $this->line(VerifyLines::anchoringLine($summary->anchoring, $summary->awaiting));
 
         if ($summary->journal !== null) {
-            $this->line(self::journalLine($summary->journal));
+            $this->line(VerifyLines::journalLine($summary->journal));
+        }
+
+        if ($summary->keys !== null) {
+            $this->line(VerifyLines::keysLine($summary->keys));
         }
 
         $this->line($summary->complete
@@ -285,7 +287,7 @@ final class VerifyCommand extends Command
     /**
      * Write the line as one JSON object.
      *
-     * @param  array<string, array<string, int|null>|bool|int|string|null>  $line
+     * @param  array<string, array<string, bool|int|string|null>|bool|int|string|null>  $line
      * @return void
      *
      * @throws \JsonException
@@ -319,156 +321,6 @@ final class VerifyCommand extends Command
     private function isJson(): bool
     {
         return $this->option('json') === true;
-    }
-
-    /**
-     * The line of a verified seal: its sequence and id, its integrity and
-     * anchoring, the member rows found, whether it awaits its first anchoring,
-     * and the finding and the id it was found at, if any.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\SegmentReport  $report
-     * @return string
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function segmentLine(SegmentReport $report): string
-    {
-        $line = sprintf(
-            'seal %d %s integrity=%s anchoring=%s members=%d',
-            $report->sequence,
-            self::id($report->sealId),
-            $report->integrity->value,
-            $report->anchoring->value,
-            $report->members,
-        );
-
-        if ($report->awaitingAnchor) {
-            $line .= ' awaiting-anchor';
-        }
-
-        if ($report->finding === null) {
-            return $line;
-        }
-
-        return $line . sprintf(' finding=%s first=%s', $report->finding->value, self::id($report->firstBadId));
-    }
-
-    /**
-     * The line of a finding of the run as a whole: the check, the status it
-     * gives, how many times it was found and the first id.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\RunFinding  $finding
-     * @return string
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function findingLine(RunFinding $finding): string
-    {
-        return sprintf('finding %s integrity=%s count=%d first=%s', $finding->finding->value, $finding->status()->value, $finding->count, self::id($finding->firstBadId));
-    }
-
-    /**
-     * The id as a line of text shows it: repaired and stripped of control
-     * characters, with nothing in it read as a style, or `none` when there is
-     * no id to name, since an id read from a table that was altered may hold
-     * anything.
-     *
-     * @param  ?string  $id
-     * @return string
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function id(?string $id): string
-    {
-        return $id === null || $id === '' ? self::NONE : OutputFormatter::escape(TextSanitizer::clean($id));
-    }
-
-    /**
-     * The line of the seals in each integrity status.
-     *
-     * @param  array<string, int>  $integrity
-     * @return string
-     */
-    private static function integrityLine(array $integrity): string
-    {
-        return sprintf(
-            'Integrity: %d valid, %d pruned, %d incomplete, %d unverifiable, %d tampered.',
-            $integrity[IntegrityStatus::VALID->value],
-            $integrity[IntegrityStatus::PRUNED->value],
-            $integrity[IntegrityStatus::INCOMPLETE->value],
-            $integrity[IntegrityStatus::UNVERIFIABLE->value],
-            $integrity[IntegrityStatus::TAMPERED->value],
-        );
-    }
-
-    /**
-     * The line of the seals in each anchoring status, with those unanchored
-     * only while they await their first anchoring.
-     *
-     * @param  array<string, int>  $anchoring
-     * @param  int  $awaiting
-     * @return string
-     */
-    private static function anchoringLine(array $anchoring, int $awaiting): string
-    {
-        return sprintf(
-            'Anchoring: %d anchored, %d unanchored (%d awaiting their first anchoring), %d unavailable, %d contradicted.',
-            $anchoring[AnchorStatus::ANCHORED->value],
-            $anchoring[AnchorStatus::UNANCHORED->value],
-            $awaiting,
-            $anchoring[AnchorStatus::UNAVAILABLE->value],
-            $anchoring[AnchorStatus::CONTRADICTED->value],
-        );
-    }
-
-    /**
-     * The line of the lifecycle journal: the rows read, the sequence of the
-     * chain's head, and the sequence the latest seal commits to.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalSummary  $journal
-     * @return string
-     */
-    private static function journalLine(JournalSummary $journal): string
-    {
-        return sprintf(
-            'Journal: %d rows to sequence %s; the latest seal commits to %s.',
-            $journal->rowsRead,
-            $journal->head      ?? self::NONE,
-            $journal->committed ?? self::NONE,
-        );
-    }
-
-    /**
-     * The seals the run checked and the head it observed.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationSummary  $summary
-     * @return string
-     */
-    private static function coverage(VerificationSummary $summary): string
-    {
-        if ($summary->head === null) {
-            return 'Checked no seals: the log has none;';
-        }
-
-        return sprintf('Checked seals %d to %d of head %d;', $summary->from, $summary->to, $summary->head);
-    }
-
-    /**
-     * What the run learnt of the anchor's head.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationSummary  $summary
-     * @return string
-     */
-    private static function anchorClause(VerificationSummary $summary): string
-    {
-        return match (true) {
-            !$summary->anchorConfigured                     => 'no anchor is configured.',
-            !$summary->discovers                            => 'the anchor cannot report its head.',
-            $summary->remote === AnchorStatus::UNAVAILABLE  => 'the anchor is unavailable.',
-            $summary->remoteHead !== null                   => sprintf('the anchor\'s head is %d.', $summary->remoteHead),
-            $summary->remote === AnchorStatus::CONTRADICTED => 'the anchor holds another digest for a seal.',
-            default                                         => 'the anchor holds no seal.',
-        };
     }
 
     /**

@@ -16,9 +16,10 @@ use Tests\Unit\Stubs\Enums\StubActivity;
 
 /**
  * Unit tests for a caller's filters on a read of the trail: each dimension
- * replaces itself, codes and a prefix are one dimension, lists are validated,
- * kept once and sorted, times are UTC to the microsecond, the normalised form
- * and its fingerprint are pinned, and no refusal names the value it refused.
+ * replaces itself, codes and a prefix are one dimension, the owner holding data
+ * in the entries is a dimension of its own, lists are validated, kept once and
+ * sorted, times are UTC to the microsecond, the normalised form and its
+ * fingerprint are pinned, and no refusal names the value it refused.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,6 +52,8 @@ final class TrailFiltersTest extends TestCase
         self::assertNull($filters->from);
         self::assertNull($filters->to);
         self::assertNull($filters->correlationId);
+        self::assertNull($filters->holding);
+        self::assertNull($filters->normalised()['holding_data_of']);
     }
 
     /**
@@ -70,7 +73,8 @@ final class TrailFiltersTest extends TestCase
             ->withCategories(['billing'])
             ->withOutcomes([Outcome::SUCCESS])
             ->withWindow(new \DateTimeImmutable('2026-11-01T00:00:00Z'), new \DateTimeImmutable('2026-11-02T00:00:00Z'))
-            ->withCorrelation('app:one');
+            ->withCorrelation('app:one')
+            ->withHoldingDataOf(Reference::of('user', '1'));
 
         $second = $first
             ->withReference('actor', Reference::of('user', '2'))
@@ -81,24 +85,27 @@ final class TrailFiltersTest extends TestCase
             ->withCategories(['auth'])
             ->withOutcomes([Outcome::DENIED])
             ->withWindow(new \DateTimeImmutable('2026-12-01T00:00:00Z'), null)
-            ->withCorrelation('app:two');
+            ->withCorrelation('app:two')
+            ->withHoldingDataOf(Reference::of('user', '2'));
 
         self::assertSame([
-            'actor'          => ['user', '2'],
-            'categories'     => ['auth'],
-            'correlation_id' => 'app:two',
-            'event_prefix'   => null,
-            'events'         => ['invoice.voided'],
-            'from'           => '2026-12-01T00:00:00.000000Z',
-            'outcomes'       => ['denied'],
-            'principal'      => ['service', '2'],
-            'subject'        => ['invoice', '2'],
-            'tenant'         => ['team', '2'],
-            'to'             => null,
+            'actor'           => ['user', '2'],
+            'categories'      => ['auth'],
+            'correlation_id'  => 'app:two',
+            'event_prefix'    => null,
+            'events'          => ['invoice.voided'],
+            'from'            => '2026-12-01T00:00:00.000000Z',
+            'holding_data_of' => ['user', '2'],
+            'outcomes'        => ['denied'],
+            'principal'       => ['service', '2'],
+            'subject'         => ['invoice', '2'],
+            'tenant'          => ['team', '2'],
+            'to'              => null,
         ], $second->normalised());
 
         self::assertSame(['user', '1'], $first->normalised()['actor']);
         self::assertSame('app:one', $first->correlationId);
+        self::assertSame(['user', '1'], $first->normalised()['holding_data_of']);
 
         $actorOnly = TrailFilters::none()->withReference('actor', Reference::of('user', '1'));
 
@@ -416,12 +423,12 @@ final class TrailFiltersTest extends TestCase
      */
     public function testTheNormalisedForm(): void
     {
-        $none = '{"actor":null,"categories":[],"correlation_id":null,"event_prefix":null,"events":[],"from":null,"outcomes":[],'
+        $none = '{"actor":null,"categories":[],"correlation_id":null,"event_prefix":null,"events":[],"from":null,"holding_data_of":null,"outcomes":[],'
             . '"principal":null,"subject":null,"tenant":null,"to":null}';
 
         self::assertSame($none, CanonicalEncoder::encode(TrailFilters::none()->normalised()));
         self::assertSame(
-            ['actor', 'categories', 'correlation_id', 'event_prefix', 'events', 'from', 'outcomes', 'principal', 'subject', 'tenant', 'to'],
+            ['actor', 'categories', 'correlation_id', 'event_prefix', 'events', 'from', 'holding_data_of', 'outcomes', 'principal', 'subject', 'tenant', 'to'],
             array_keys(TrailFilters::none()->normalised()),
         );
 
@@ -429,14 +436,16 @@ final class TrailFiltersTest extends TestCase
             ->withReference('tenant', Reference::of('team', '7'))
             ->withEventPrefix('invoice.')
             ->withOutcomes([Outcome::SUCCESS, Outcome::FAILURE])
-            ->withWindow(new \DateTimeImmutable('2026-11-01T00:00:00Z'), null);
+            ->withWindow(new \DateTimeImmutable('2026-11-01T00:00:00Z'), null)
+            ->withHoldingDataOf(Reference::of('App\Models\User', '42'));
 
         $text = '{"actor":null,"categories":[],"correlation_id":null,"event_prefix":"invoice.","events":[],"from":"2026-11-01T00:00:00.000000Z",'
-            . '"outcomes":["failure","success"],"principal":null,"subject":null,"tenant":["team","7"],"to":null}';
+            . '"holding_data_of":["App\\\Models\\\User","42"],"outcomes":["failure","success"],"principal":null,"subject":null,"tenant":["team","7"],"to":null}';
 
         self::assertSame($text, CanonicalEncoder::encode($filters->normalised()));
 
         $reordered = TrailFilters::none()
+            ->withHoldingDataOf(Reference::of('App\Models\User', '42'))
             ->withWindow(new \DateTimeImmutable('2026-11-01T01:00:00+01:00'), null)
             ->withOutcomes([Outcome::FAILURE, Outcome::SUCCESS])
             ->withEventPrefix('invoice.')
@@ -444,6 +453,47 @@ final class TrailFiltersTest extends TestCase
 
         self::assertSame($filters->normalised(), $reordered->normalised());
         self::assertNotSame($filters->normalised(), $filters->withReference('tenant', Reference::of('team', '8'))->normalised());
+        self::assertNotSame($filters->normalised(), $filters->withHoldingDataOf(Reference::of('App\Models\User', '43'))->normalised());
+    }
+
+    /**
+     * The owner holding data in the entries is a dimension of its own: naming
+     * it leaves the actor and the subject alone, naming them leaves it alone,
+     * and it is not a dimension a reference filter can name.
+     *
+     * @return void
+     */
+    public function testTheOwnerHoldingDataIsADimensionOfItsOwn(): void
+    {
+        $owner   = Reference::of('App\Models\User', '42');
+        $filters = TrailFilters::none()->withReference('subject', $owner)->withHoldingDataOf($owner)->withReference('actor', $owner);
+
+        self::assertSame($owner, $filters->holding);
+        self::assertSame([['App\Models\User', '42'], ['App\Models\User', '42'], ['App\Models\User', '42']], [
+            $filters->normalised()['actor'],
+            $filters->normalised()['subject'],
+            $filters->normalised()['holding_data_of'],
+        ]);
+        self::assertNull(TrailFilters::none()->withReference('subject', $owner)->holding);
+        self::assertNull(TrailFilters::none()->withHoldingDataOf($owner)->subject);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A reference filter must be on the actor, the subject, the principal or the tenant.');
+
+        TrailFilters::none()->withReference('holding', $owner);
+    }
+
+    /**
+     * The owner is a sensitive parameter: a reference to whoever the read is
+     * about.
+     *
+     * @return void
+     */
+    public function testTheOwnerIsSensitive(): void
+    {
+        $parameter = (new \ReflectionMethod(TrailFilters::class, 'withHoldingDataOf'))->getParameters()[0];
+
+        self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class));
     }
 
     /**

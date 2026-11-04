@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
@@ -31,9 +32,10 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
  * or `general`. The line's references, outcome and reason, correlation id and
  * properties describe a builder, its IP address and context are filled as a
  * contributor would fill them, and the builder is minimised and built into an
- * imported record of the source given, whose id is drawn at the import's time.
- * Any value the builder or the record refuses makes the line `INVALID_FIELD`, a
- * property under the reserved `_audit` prefix among them.
+ * imported record of the source given. Its id is drawn at the import's time
+ * before it is minimised, since every encrypted value is sealed for the entry
+ * it belongs to. Any value the builder or the record refuses makes the line
+ * `INVALID_FIELD`, a property under the reserved `_audit` prefix among them.
  *
  * No contributor runs: an import carries no ambient context, and nothing of the
  * request, the command or the job doing the import is the record's. A dry run
@@ -85,9 +87,10 @@ final readonly class ImportRecordBuilder
             }
 
             $pending   = self::described($line, $code);
-            $minimised = $this->minimiser($dryRun)->minimise($pending->snapshot(), $definition);
+            $id        = Str::uuid7($importedAt)->toString();
+            $minimised = $this->minimiser($dryRun)->minimise($pending->snapshot(), $definition, $id);
 
-            return AuditRecord::fromImport($pending, $minimised, $definition->version, $definition->category, $line->occurredAt, $line->origin, $source, $importedAt);
+            return AuditRecord::fromImport($pending, $minimised, $definition->version, $definition->category, $line->occurredAt, $line->origin, $source, $id);
         } catch (\InvalidArgumentException) {
             return ImportRejection::INVALID_FIELD;
         }

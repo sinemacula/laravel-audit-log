@@ -20,20 +20,23 @@ use SineMacula\Laravel\AuditLog\Records\Manifest;
  * Each read names its purpose, the keyed fingerprints of its filters and of the
  * scope the policy answered (`null` when none was), the id of the key that
  * keyed them, the class of the policy, and its own outcome again; a page names
- * where it started and how many entries it showed, and its disclosure each
- * entry's id and HMAC. A page started at the newest entry is `first`, one whose
- * cursor gave no position, refused or never opened, is `cursor`, and one after
- * a position is that position only under a scope of exactly one tenant, whose
- * record is that tenant's; under any other scope it is `next`, since the record
- * is tenantless and the position could be another tenant's entry, and the
- * position itself is kept in the disclosure. A read that was denied or failed
- * showed nothing, so its evidence names no entry and counts none, whatever it
- * is given. A policy name longer than `MAX_POLICY_BYTES` would not be kept
- * exactly, so it refuses the read with `AuditReadRefusedException`. Evidence is
- * never minimised away: `assertKeptBy()` refuses a record whose properties,
- * less the package's metadata, do not encode canonically to exactly the
- * evidence's, or whose metadata is anything but the descriptor of its manifest,
- * or nothing without one.
+ * where it started, how many entries it showed, whether its scope revealed the
+ * encrypted fields and how many fragments it showed in each state, and its
+ * disclosure each entry's id and HMAC. A page started at the newest entry is
+ * `first`, one whose cursor gave no position, refused or never opened, is
+ * `cursor`, and one after a position is that position only under a scope of
+ * exactly one tenant, whose record is that tenant's; under any other scope it
+ * is `next`, since the record is tenantless and the position could be another
+ * tenant's entry, and the position itself is kept in the disclosure. A read
+ * that was denied or failed showed nothing, so its evidence names no entry and
+ * counts none, of entries or of fragments, whatever it is given; a page keeps
+ * its scope's grant all the same. A policy name longer than `MAX_POLICY_BYTES`
+ * would not be kept exactly, so it refuses the read with
+ * `AuditReadRefusedException`. Evidence is never minimised away:
+ * `assertKeptBy()` refuses a record whose properties, less the package's
+ * metadata, do not encode canonically to exactly the evidence's, or whose
+ * metadata is anything but the descriptor of its manifest, or nothing without
+ * one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,7 +72,7 @@ final readonly class AccessEvidence
     /**
      * Constructor.
      *
-     * @param  array<string, array<array-key, string>|scalar|null>  $properties
+     * @param  array<string, array<array-key, int|string>|scalar|null>  $properties
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
      */
     private function __construct(
@@ -83,9 +86,14 @@ final readonly class AccessEvidence
 
     /**
      * The evidence of a page: where it started, how many entries it was to
-     * hold, and the id and HMAC of each entry it showed, in the order shown,
-     * disclosed with the filters, the scope and the position it read after. A
-     * denied or failed page showed nothing.
+     * hold, the id and HMAC of each entry it showed, in the order shown,
+     * whether its scope revealed the encrypted fields and how many fragments it
+     * showed in each state, disclosed with the filters, the scope and the
+     * position it read after. A denied or failed page showed nothing, and keeps
+     * the grant with no fragment counted.
+     *
+     * Its parameters are the parts of the page's evidence, each from its own
+     * stage of the read, so none groups naturally with another.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
      * @param  string  $policy
@@ -93,21 +101,37 @@ final readonly class AccessEvidence
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\Position  $page
      * @param  int  $perPage
      * @param  list<array{0: string, 1: string}>  $returned
+     * @param  \SineMacula\Laravel\AuditLog\Querying\FieldDisclosure  $fields
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
      * @return self
      *
      * @throws \InvalidArgumentException
      * @throws \SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException
+     *
+     * @SuppressWarnings("php:S107")
      */
-    public static function forPage(ReadTerms $terms, string $policy, bool $cursor, ?Position $page, int $perPage, #[\SensitiveParameter] array $returned, Outcome $outcome): self
-    {
-        $members = $outcome === Outcome::SUCCESS ? $returned : [];
+    public static function forPage(
+        ReadTerms $terms,
+        string $policy,
+        bool $cursor,
+        ?Position $page,
+        int $perPage,
+        #[\SensitiveParameter]
+        array $returned,
+        FieldDisclosure $fields,
+        Outcome $outcome,
+    ): self {
+        $succeeded = $outcome === Outcome::SUCCESS;
+        $members   = $succeeded ? $returned : [];
+        $shown     = $succeeded ? $fields : FieldDisclosure::none($fields->reveal);
 
         return new self([
             ...self::read(ReadPurpose::READ, $terms, $policy),
             'page'     => self::page($terms, $cursor, $page),
             'per_page' => $perPage,
             'returned' => count($members),
+            'reveal'   => $shown->reveal,
+            'fields'   => $shown->toArray(),
             'outcome'  => $outcome->value,
         ], self::disclosure($terms, $members, $page));
     }

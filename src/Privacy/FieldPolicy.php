@@ -9,7 +9,6 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Definitions\FieldPath;
 use SineMacula\Laravel\AuditLog\Definitions\FieldRule;
-use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
@@ -25,13 +24,23 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  * container left empty stays, because it was retained. A list reindexes what
  * survives, and a map keeps its keys and their order.
  *
- * Only a retained string is cut, at 1024 bytes, and a string is cut the same
- * way before it is sealed. Anything else is sealed as its canonical encoding,
- * which cutting would leave undecodable, so one of more than 1024 bytes is
- * removed without reaching the encrypter. A pseudonym covers the complete
- * value, and no marker, pseudonym or envelope is ever cut. A value key
- * redaction replaced stays the marker under every handling but `DROP`, because
- * hashing or encrypting the marker would look like evidence of a value.
+ * Only a retained string is cut, at 1024 bytes. A sealed value's plaintext is
+ * typed, the canonical JSON of the value whatever its type, and its limit of
+ * 1024 bytes is measured after encoding: a string is cut to the longest prefix
+ * whose encoding fits, and anything else whose encoding passes the limit, which
+ * cutting would leave undecodable, is removed without reaching the encrypter. A
+ * pseudonym covers the complete value, and no marker, pseudonym or envelope is
+ * ever cut. A value key redaction replaced stays the marker under every
+ * handling but `DROP`, because hashing or encrypting the marker would look like
+ * evidence of a value.
+ *
+ * Each value is sealed for its place in the stored entry: its context's path is
+ * `properties`, then each map key as `EncryptedField::segment()` names it, an
+ * integer from 0 as an integer and any other key as a string, and each list
+ * index at the index the element is stored at once the removed elements before
+ * it are gone, so an envelope in a list opens after the list reindexes, and one
+ * in a map opens whether the map is stored as a map or, once only the keys 0 to
+ * n - 1 are left, as a list.
  *
  * The owners of encrypted fields are read before any field is handled, once per
  * rule, so a rule on the owner's own path cannot hide it. An encrypted field
@@ -46,8 +55,11 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  */
 final class FieldPolicy
 {
-    /** @var int Longest string a retained value or a plaintext keeps, in bytes. */
+    /** @var int Longest string a retained value keeps, in bytes. */
     public const int STRING_MAX_BYTES = 1024;
+
+    /** @var string The column the values are stored in, the first segment of every path they are sealed at. */
+    private const string COLUMN = 'properties';
 
     /** @var int How many keys a map holding a reference has: `type` and `id`. */
     private const int REFERENCE_PARTS = 2;
@@ -58,7 +70,12 @@ final class FieldPolicy
     private function __construct() {}
 
     /**
-     * The values with the definition's rules applied, and each removal logged.
+     * The values with the definition's rules applied, each sealed value sealed
+     * for its place in the scope's entry, and each removal logged.
+     *
+     * Its parameters are the record's parts and the collaborators of one
+     * capture, each from its own stage of the minimiser, so none groups
+     * naturally with another.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -69,11 +86,14 @@ final class FieldPolicy
      * @param  \SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher  $hasher
      * @param  \SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer  $sealer
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\SealingScope  $scope
      * @return array<array-key, mixed>
      *
      * @throws \JsonException
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
+     *
+     * @SuppressWarnings("php:S107")
      */
     public static function apply(
         #[\SensitiveParameter]
@@ -84,6 +104,7 @@ final class FieldPolicy
         IdentifierHasher $hasher,
         EnvelopeSealer $sealer,
         OmissionLog $omissions,
+        SealingScope $scope,
     ): array {
         $owners = self::owners($values, $definition, $actor, $subject);
 
@@ -92,6 +113,8 @@ final class FieldPolicy
             mixed $value,
             #[\SensitiveParameter]
             array $path,
+            #[\SensitiveParameter]
+            array $stored,
             ?FieldRule $rule,
         ) use (
             $definition,
@@ -99,9 +122,10 @@ final class FieldPolicy
             $hasher,
             $sealer,
             $omissions,
+            $scope,
         ): ?array {
             $owner = $rule === null ? null : ($owners[$rule->path] ?? null);
-            $kept  = self::handled($value, $rule->handling ?? $definition->unlisted, $owner, $hasher, $sealer);
+            $kept  = self::handled($value, $rule->handling ?? $definition->unlisted, $owner, $hasher, $sealer, $scope, $stored);
 
             if ($kept === null) {
                 $omissions->add(PathMasker::property($path, $definition));
@@ -110,7 +134,39 @@ final class FieldPolicy
             return $kept;
         };
 
-        return self::walk($values, [], $definition, $handle);
+        return self::walk($values, [], [], $definition, $handle);
+    }
+
+    /**
+     * Every owner the definition's encrypted fields name among the values, the
+     * record's actor and its subject, each once, in the order their rules are
+     * defined; a rule whose owner is absent names none.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $values
+     * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $subject
+     * @return list<\SineMacula\Laravel\AuditLog\Records\Reference>
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function ownersOf(#[\SensitiveParameter] array $values, EventDefinition $definition, ?Reference $actor, ?Reference $subject): array
+    {
+        $distinct = [];
+
+        foreach (self::owners($values, $definition, $actor, $subject) as $owner) {
+            if ($owner === null) {
+                continue;
+            }
+
+            // A reference holds no control character, so a NUL between its
+            // parts keys it unambiguously
+            $distinct[$owner->type . "\0" . $owner->id] = $owner;
+        }
+
+        return array_values($distinct);
     }
 
     /**
@@ -241,26 +297,36 @@ final class FieldPolicy
 
     /**
      * The node's survivors: a list reindexed, and a map with its keys and their
-     * order kept.
+     * order kept. Each element is walked at its path as given, which the rules
+     * and the omission log read, and at the path it is stored at, which is the
+     * map key as `EncryptedField::segment()` names it or, in a list, the count
+     * of the survivors before it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<array-key, mixed>  $node
      * @param  list<int|string>  $path
+     * @param  list<int|string>  $stored
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
-     * @param  \Closure(mixed, list<int|string>, ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule): ?array{0: mixed}  $handle
+     * @param  \Closure(mixed, list<int|string>, list<int|string>, ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule): ?array{0: mixed}  $handle
      * @return array<array-key, mixed>
      *
      * @throws \JsonException
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      */
-    private static function walk(#[\SensitiveParameter] array $node, #[\SensitiveParameter] array $path, EventDefinition $definition, \Closure $handle): array
-    {
-        $isList = array_is_list($node);
+    private static function walk(
+        #[\SensitiveParameter] array $node,
+        #[\SensitiveParameter] array $path,
+        #[\SensitiveParameter] array $stored,
+        EventDefinition $definition,
+        \Closure $handle,
+    ): array {
+        $isList    = array_is_list($node);
+        $survivors = 0;
 
         foreach ($node as $key => $value) {
-            $kept = self::selected($value, [...$path, $key], $definition, $handle);
+            $kept = self::selected($value, [...$path, $key], [...$stored, $isList ? $survivors : EncryptedField::segment($key)], $definition, $handle);
 
             if ($kept === null) {
                 unset($node[$key]);
@@ -269,6 +335,8 @@ final class FieldPolicy
             }
 
             $node[$key] = $kept[0];
+
+            $survivors++;
         }
 
         return $isList ? array_values($node) : $node;
@@ -285,29 +353,38 @@ final class FieldPolicy
      *
      * @param  mixed  $value
      * @param  list<int|string>  $path
+     * @param  list<int|string>  $stored
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
-     * @param  \Closure(mixed, list<int|string>, ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule): ?array{0: mixed}  $handle
+     * @param  \Closure(mixed, list<int|string>, list<int|string>, ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule): ?array{0: mixed}  $handle
      * @return ?array{0: mixed}
      *
      * @throws \JsonException
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      */
-    private static function selected(#[\SensitiveParameter] mixed $value, #[\SensitiveParameter] array $path, EventDefinition $definition, \Closure $handle): ?array
-    {
+    private static function selected(
+        #[\SensitiveParameter]
+        mixed $value,
+        #[\SensitiveParameter]
+        array $path,
+        #[\SensitiveParameter]
+        array $stored,
+        EventDefinition $definition,
+        \Closure $handle,
+    ): ?array {
         $rule = $definition->ruleFor($path);
 
         if ($rule !== null) {
-            return $rule->handling->isTerminal() ? $handle($value, $path, $rule) : [self::retained($value, $path, $definition, $handle)];
+            return $rule->handling->isTerminal() ? $handle($value, $path, $stored, $rule) : [self::retained($value, $path, $stored, $definition, $handle)];
         }
 
         if (is_array($value) && $value !== [] && $definition->ruleBeneath($path) !== null) {
-            $survivors = self::walk($value, $path, $definition, $handle);
+            $survivors = self::walk($value, $path, $stored, $definition, $handle);
 
             return $survivors === [] ? null : [$survivors];
         }
 
-        return $definition->unlisted === FieldHandling::RETAIN ? [self::retained($value, $path, $definition, $handle)] : $handle($value, $path, null);
+        return $definition->unlisted === FieldHandling::RETAIN ? [self::retained($value, $path, $stored, $definition, $handle)] : $handle($value, $path, $stored, null);
     }
 
     /**
@@ -318,17 +395,26 @@ final class FieldPolicy
      *
      * @param  mixed  $value
      * @param  list<int|string>  $path
+     * @param  list<int|string>  $stored
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
-     * @param  \Closure(mixed, list<int|string>, ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule): ?array{0: mixed}  $handle
+     * @param  \Closure(mixed, list<int|string>, list<int|string>, ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule): ?array{0: mixed}  $handle
      * @return mixed
      *
      * @throws \JsonException
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      */
-    private static function retained(#[\SensitiveParameter] mixed $value, #[\SensitiveParameter] array $path, EventDefinition $definition, \Closure $handle): mixed
-    {
-        return is_array($value) ? self::walk($value, $path, $definition, $handle) : self::cut($value);
+    private static function retained(
+        #[\SensitiveParameter]
+        mixed $value,
+        #[\SensitiveParameter]
+        array $path,
+        #[\SensitiveParameter]
+        array $stored,
+        EventDefinition $definition,
+        \Closure $handle,
+    ): mixed {
+        return is_array($value) ? self::walk($value, $path, $stored, $definition, $handle) : self::cut($value);
     }
 
     /**
@@ -343,6 +429,8 @@ final class FieldPolicy
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  \SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher  $hasher
      * @param  \SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer  $sealer
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\SealingScope  $scope
+     * @param  list<int|string>  $stored
      * @return ?array{0: mixed}
      *
      * @throws \InvalidArgumentException
@@ -356,6 +444,9 @@ final class FieldPolicy
         ?Reference $owner,
         IdentifierHasher $hasher,
         EnvelopeSealer $sealer,
+        SealingScope $scope,
+        #[\SensitiveParameter]
+        array $stored,
     ): ?array {
         if ($handling === FieldHandling::DROP) {
             return null;
@@ -365,7 +456,7 @@ final class FieldPolicy
             return [Redactor::MARKER];
         }
 
-        return $handling === FieldHandling::PSEUDONYMISE ? [self::pseudonym($value, $hasher)] : self::sealed($value, $owner, $sealer);
+        return $handling === FieldHandling::PSEUDONYMISE ? [self::pseudonym($value, $hasher)] : self::sealed($value, $owner, $sealer, $scope, $stored);
     }
 
     /**
@@ -411,29 +502,39 @@ final class FieldPolicy
 
     /**
      * The value's envelope, wrapped, or `null` when it has no owner or cannot
-     * be sealed. A string is cut to 1024 bytes before it reaches the encrypter.
-     * Anything else is sealed as its canonical encoding, and an encoding of
-     * more than 1024 bytes never reaches it, since a cut one could not be
-     * decoded.
+     * be sealed. Its plaintext is typed and within 1024 bytes once encoded: a
+     * string cut so its encoding fits, and anything else whose encoding passes
+     * the limit never reaches the encrypter, since a cut one could not be
+     * decoded. It is sealed for its stored path under `properties`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  mixed  $value
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  \SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer  $sealer
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\SealingScope  $scope
+     * @param  list<int|string>  $stored
      * @return ?array{0: array{v: int, k: string, c: string}}
      *
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      */
-    private static function sealed(#[\SensitiveParameter] mixed $value, #[\SensitiveParameter] ?Reference $owner, EnvelopeSealer $sealer): ?array
-    {
+    private static function sealed(
+        #[\SensitiveParameter]
+        mixed $value,
+        #[\SensitiveParameter]
+        ?Reference $owner,
+        EnvelopeSealer $sealer,
+        SealingScope $scope,
+        #[\SensitiveParameter]
+        array $stored,
+    ): ?array {
         if ($owner === null) {
             return null;
         }
 
-        $plaintext = is_string($value) ? TextSanitizer::cut($value, self::STRING_MAX_BYTES) : CanonicalEncoder::encode($value);
-        $envelope  = strlen($plaintext) > self::STRING_MAX_BYTES ? null : $sealer->seal($owner, $plaintext);
+        $plaintext = TypedPlaintext::encode($value);
+        $envelope  = $plaintext === null ? null : $sealer->seal($owner, $plaintext, $scope->at([self::COLUMN, ...$stored]));
 
         return $envelope === null ? null : [$envelope];
     }

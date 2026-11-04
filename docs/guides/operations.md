@@ -1,10 +1,11 @@
 # Operations
 
 Sealing, anchoring, verification and pruning run as commands, on Laravel's scheduler, beside the application, and
-holds, imports and reconciliation run as commands an operator starts. This guide covers what to schedule, what to
-watch, where to anchor, which keys to keep, and what sealing costs. How each step works, and what each status and
-finding means, is in [the integrity note](../design/integrity.md) and [the lifecycle note](../design/lifecycle.md);
-retention, holds and imports are in [the retention guide](retention.md) and [the import guide](import.md); what none of
+holds, imports, erasures, reinstatements, rewraps and reconciliation run as commands an operator starts. This guide
+covers what to schedule, what to watch, where to anchor, which keys to keep, and what sealing costs. How each step
+works, and what each status and finding means, is in [the integrity note](../design/integrity.md), [the lifecycle
+note](../design/lifecycle.md) and [the privacy note](../design/privacy.md); retention, holds, imports and erasure are
+in [the retention guide](retention.md), [the import guide](import.md) and [the privacy guide](privacy.md); what none of
 it promises is in [the threat model](../design/threat-model.md).
 
 ## Schedule
@@ -73,14 +74,18 @@ run time, and 2 for an argument or option it refuses, before anything runs. Each
 and `audit-log:verify` do: `--by-type` and `--by-id` assert the operator and prove nothing, `--reason` is a reason code
 and `--reference` the ticket or case, so keep the maintenance connection's credentials to those who may run them.
 
-| Command                    | Options                                                                                                                                                                       | What it does                                                                                      |
-|----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `audit-log:prune`          | `--dry-run`, `--max-seconds`, `--json`                                                                                                                                        | Prunes what retention no longer keeps; exits 1 when the run fails or skips a seal it cannot trust |
-| `audit-log:hold`           | `--all`, `--tenant`, `--tenantless`, `--about`, `--category`, `--from`, `--to`, `--import-batch`, `--basis`, `--review-by`, `--by-type`, `--by-id`, `--reason`, `--reference` | Places a hold and prints its id                                                                   |
-| `audit-log:release <hold>` | `--by-type`, `--by-id`, `--reason`, `--reference`                                                                                                                             | Releases a hold; exits 1 for a hold that is not active                                            |
-| `audit-log:holds`          | `--rebuild`, `--json`                                                                                                                                                         | Lists the active holds from the verified journal, or rebuilds their projection                    |
-| `audit-log:import [file]`  | `--source`, `--region`, `--from-export`, `--dry-run`, `--hold`, `--hold-basis`, `--close`, `--by-type`, `--by-id`, `--reason`, `--reference`, `--json`                        | Imports a file of another system's records as a batch, or closes a batch left running             |
-| `audit-log:reconcile`      | `--since`, `--json`                                                                                                                                                           | Writes the lifecycle records the journal says are missing, looking back `--since` days            |
+| Command                           | Options                                                                                                                                                                       | What it does                                                                                          |
+|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| `audit-log:prune`                 | `--dry-run`, `--max-seconds`, `--json`                                                                                                                                        | Prunes what retention no longer keeps; exits 1 when the run fails or skips a seal it cannot trust     |
+| `audit-log:hold`                  | `--all`, `--tenant`, `--tenantless`, `--about`, `--category`, `--from`, `--to`, `--import-batch`, `--basis`, `--review-by`, `--by-type`, `--by-id`, `--reason`, `--reference` | Places a hold and prints its id                                                                       |
+| `audit-log:release <hold>`        | `--by-type`, `--by-id`, `--reason`, `--reference`                                                                                                                             | Releases a hold; exits 1 for a hold that is not active                                                |
+| `audit-log:holds`                 | `--rebuild`, `--json`                                                                                                                                                         | Lists the active holds from the verified journal, or rebuilds their projection                        |
+| `audit-log:import [file]`         | `--source`, `--region`, `--from-export`, `--dry-run`, `--hold`, `--hold-basis`, `--close`, `--by-type`, `--by-id`, `--reason`, `--reference`, `--json`                        | Imports a file of another system's records as a batch, or closes a batch left running                 |
+| `audit-log:reconcile`             | `--since`, `--json`                                                                                                                                                           | Writes the lifecycle records the journal says are missing, looking back `--since` days                |
+| `audit-log:erase [type] [id]`     | `--by-type`, `--by-id`, `--reason`, `--reference`, `--partial`, `--pending`, `--reapply`                                                                                      | Erases an owner by destroying its keys, or with `--reapply` every owner a file names after a restore  |
+| `audit-log:reinstate <type> <id>` | `--by-type`, `--by-id`, `--reason`, `--reference`                                                                                                                             | Reinstates an erased owner, so keys may be created for it again above its floor                       |
+| `audit-log:rewrap`                | `--by-type`, `--by-id`, `--reason`, `--reference`, `--rotate`, `--dry-run`                                                                                                    | Rewraps every owner's key onto the current wrapping key, and with `--rotate` supersedes the live ones |
+| `audit-log:keys`                  | `--rebuild-uses`, `--dry-run`                                                                                                                                                 | Adds the key uses missing from the entries whose HMAC verifies, and never removes one                 |
 
 - `audit-log:prune --dry-run` takes no lock and writes nothing, and `--max-seconds`, from 60 to 86400, overrides
   `retention.max_seconds`. A run that stops on its time budget ends `partial` and the next resumes after it.
@@ -90,6 +95,18 @@ and `--reference` the ticket or case, so keep the maintenance connection's crede
   record could not be written. `--since` is 1 to 3650 days, 7 by default.
 - `audit-log:import --close=<batch>` brings a batch a dead import left `running` to its end, `interrupted` unless its
   finish was journalled; `audit-log:check` notes such a batch once it has not been written for an hour.
+- `audit-log:erase` is all or nothing: a key a hold or preservation blocks refuses it, unless `--partial` destroys the
+  keys nothing blocks and keeps the rest, and outbox rows older than the erasure refuse it, unless `--pending` accepts
+  that their fields are erased with the keys. It prints the owner's keyed fingerprint, never the owner, and exits 0 for
+  `complete`, `partial` and `already_erased`. `--reapply=<file>` takes no owner, `--partial` or `--pending`: after a
+  restore it erases each owner the file names in part, accepting pending deliveries, and exits 0 only once the restore
+  is journalled reconciled, which `audit-log:check` waits for.
+- `audit-log:reinstate` creates no key: the owner's next write opens the generation above the erasure's floor.
+- `audit-log:rewrap` runs in batches of `privacy.rewrap_batch`, each journalled, and the batches a failed run committed
+  stand; `--dry-run` reads and unwraps what it would rewrap and writes nothing, and `--rotate` supersedes every live key
+  so each unit opens its next generation on its next write.
+- `audit-log:keys --rebuild-uses` takes no authority and journals nothing, since key uses are derived from the signed
+  entries; `audit-log:verify` reports a key use still missing as `key_use_missing`.
 
 ## Monitor
 
@@ -225,17 +242,35 @@ AUDIT_LOG_INTEGRITY_ANCHOR_PATH=audit-log-anchors
 The integrity key ring signs every entry, and each seal is signed under a key derived from the ring key it names, so the
 ring decides for how long the log can be verified.
 
-| Key                    | Protects                                                                       | Keep it                                              |
-|------------------------|--------------------------------------------------------------------------------|------------------------------------------------------|
-| Encryption keys        | The outbox and bulk manifests (`app.key`) and encrypted fields (owners')       | Until no row needs decrypting; destroying one erases |
-| Row-HMAC keys          | Each entry's `hmac`, and an imported row's `source_digest`, under its `key_id` | As long as the entries they signed                   |
-| Seal-verification keys | Each seal's `signature`, under its `key_id`                                    | As long as the seals, which pruning keeps            |
-| Journal keys           | Each lifecycle journal row's `hmac`, under its `key_id`                        | As long as the journal, which nothing prunes         |
-| `app.key` for exports  | An export artifact's members, which `audit-log:export --verify` reads          | As long as an export's verification is promised      |
+| Key                    | Protects                                                                       | Keep it                                          |
+|------------------------|--------------------------------------------------------------------------------|--------------------------------------------------|
+| `app.key` for records  | The outbox and the members of bulk and disclosure manifests                    | Until no row needs decrypting                    |
+| Owners' data keys      | Each owner's encrypted fields, one key per unit and generation                 | Until the owner is erased; destroying one erases |
+| Wrapping keys          | Every owner's data key, wrapped (`privacy.keys`, or derived from `app.key`)    | Until `audit-log:rewrap` has rewrapped every key |
+| Row-HMAC keys          | Each entry's `hmac`, and an imported row's `source_digest`, under its `key_id` | As long as the entries they signed               |
+| Seal-verification keys | Each seal's `signature`, under its `key_id`                                    | As long as the seals, which pruning keeps        |
+| Journal keys           | Each lifecycle journal row's `hmac`, under its `key_id`                        | As long as the journal, which nothing prunes     |
+| `app.key` for exports  | An export artifact's members, which `audit-log:export --verify` reads          | As long as an export's verification is promised  |
 
 - These are separate lifetimes, though one ring key may serve as both a row-HMAC and a seal-verification key: an
   encryption key may be retired or destroyed on its own schedule, while a ring key is kept for as long as a seal names
-  it, which is as long as the log is kept.
+  it, which is as long as the log is kept. An owner's key row is signed under the ring too, so a ring key also lives as
+  long as a key row names it.
+- An owner's data keys are stored only wrapped. Erasure destroys them, so their lifetime is the owner's, and nothing
+  else rotates them but `audit-log:rewrap --rotate`, which supersedes every live key: a superseded key still opens what
+  it sealed, and the next write of its unit opens a new generation.
+- The wrapping keys are `privacy.keys`, with `privacy.current` naming the key that wraps, or without them keys derived
+  from `app.key` and each of `app.previous_keys`. A derived key gives domain separation, not independence from
+  `app.key`: a rotated `app.key` must stay in `app.previous_keys` until `audit-log:rewrap` has rewrapped every key it
+  wrapped, and a run that ends `partial` has named the keys it could not. To rotate a wrapping key, add the new one,
+  point `privacy.current` at it, run `audit-log:rewrap`, and drop the old one only once a run ends `complete`.
+- To move from the derived keys to `privacy.keys`, set both `privacy.keys` and `privacy.current`, leave `app.key` and
+  `app.previous_keys` in place, and run `audit-log:rewrap`. An explicit ring keeps the keys derived from `app.key` and
+  `app.previous_keys` to unwrap only, never to wrap, so the existing keys still open and the rewrap moves them onto
+  `privacy.current`. Once a run ends `complete`, a later rotation of `app.key` reaches none of them.
+  `audit-log:check` reports any live or superseded key wrapped under a key the ring no longer holds.
+- A wrapping key backed up with the database restores what an erasure destroyed. Keep the wrapping keys out of the
+  database's backups, or bind a `Contracts\KeyWrapper` over a key service whose keys an erasure can reach.
 - A retired `app.key` must stay in `app.previous_keys` for as long as the artifacts sealed under it are kept, or their
   manifests can no longer be read and `audit-log:verify` reports them `manifest_unreadable`, though their entries still
   verify.
@@ -266,8 +301,11 @@ triggers for each engine, as SQL that its tests run as written.
   its receipts, since pruning deletes them together and keeps every seal and member. It also inserts the lifecycle
   journal and never updates or deletes a row of it, inserts and deletes the holds projection, and updates the lock row;
   the application's user only reads the journal and the holds.
+- The application's user inserts owners' keys, on a session of its own, and key uses, and never updates a key; the
+  maintenance user updates a key's state, wrapped key, wrapping key and erasure, for an erasure or a rewrap, and
+  inserts the owner markers, all inside its journalled transactions.
 - The maintenance credentials can still delete rows outside the package, and the journal and the seals make that
-  detectable, not impossible: keep them to whoever may prune, hold and release.
+  detectable, not impossible: keep them to whoever may prune, hold, release, erase, reinstate and rewrap.
 - Run `audit-log:verify` as a user that can read the tables and write the integrity state table.
 - The triggers guard against the application's users. The tables' owner can drop them, so keep the owner's credentials
   out of the application.

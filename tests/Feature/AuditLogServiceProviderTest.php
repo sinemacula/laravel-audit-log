@@ -54,14 +54,18 @@ use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
+use SineMacula\Laravel\AuditLog\Console\EraseCommand;
 use SineMacula\Laravel\AuditLog\Console\ExportCommand;
 use SineMacula\Laravel\AuditLog\Console\HoldCommand;
 use SineMacula\Laravel\AuditLog\Console\HoldsCommand;
 use SineMacula\Laravel\AuditLog\Console\ImportCommand;
+use SineMacula\Laravel\AuditLog\Console\KeysCommand;
 use SineMacula\Laravel\AuditLog\Console\PruneCommand;
 use SineMacula\Laravel\AuditLog\Console\ReconcileCommand;
+use SineMacula\Laravel\AuditLog\Console\ReinstateCommand;
 use SineMacula\Laravel\AuditLog\Console\ReleaseCommand;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
+use SineMacula\Laravel\AuditLog\Console\RewrapCommand;
 use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
@@ -70,6 +74,7 @@ use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
+use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
@@ -81,6 +86,7 @@ use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Keys\LocalKeyWrapper;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
@@ -92,6 +98,8 @@ use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyFieldReader;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\Describer;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
@@ -156,6 +164,9 @@ final class AuditLogServiceProviderTest extends TestCase
         '2026_11_02_000800_create_audit_log_holds_table.php',
         '2026_11_02_000900_create_audit_log_lifecycle_lock_table.php',
         '2026_11_02_001000_create_audit_log_import_batches_table.php',
+        '2026_11_02_001100_create_audit_log_subject_keys_table.php',
+        '2026_11_02_001200_create_audit_log_owner_erasures_table.php',
+        '2026_11_02_001300_create_audit_log_key_uses_table.php',
     ];
 
     /** @var array<string, class-string> Each lifecycle command the provider registers, by name, with its class. */
@@ -166,6 +177,14 @@ final class AuditLogServiceProviderTest extends TestCase
         'audit-log:prune'     => PruneCommand::class,
         'audit-log:reconcile' => ReconcileCommand::class,
         'audit-log:release'   => ReleaseCommand::class,
+    ];
+
+    /** @var array<string, class-string> Each privacy command the provider registers, by name, with its class. */
+    private const array PRIVACY_COMMANDS = [
+        'audit-log:erase'     => EraseCommand::class,
+        'audit-log:keys'      => KeysCommand::class,
+        'audit-log:reinstate' => ReinstateCommand::class,
+        'audit-log:rewrap'    => RewrapCommand::class,
     ];
 
     /**
@@ -388,12 +407,39 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The package registers exactly its twelve commands, the six lifecycle ones
-     * among them, and no other under its prefix.
+     * Rows of `[name, class]`: each privacy command the provider registers.
+     *
+     * @return iterable<string, array{0: string, 1: class-string}>
+     */
+    public static function providePrivacyCommands(): iterable
+    {
+        foreach (self::PRIVACY_COMMANDS as $name => $class) {
+            yield $name => [$name, $class];
+        }
+    }
+
+    /**
+     * Running in the console, as a test does, each privacy command is there
+     * under its name, as its own class.
+     *
+     * @param  string  $name
+     * @param  class-string  $class
+     * @return void
+     */
+    #[DataProvider('providePrivacyCommands')]
+    public function testThePrivacyCommandsAreRegistered(string $name, string $class): void
+    {
+        self::assertArrayHasKey($name, Artisan::all());
+        self::assertInstanceOf($class, Artisan::all()[$name]);
+    }
+
+    /**
+     * The package registers exactly its sixteen commands, the six lifecycle
+     * ones and the four privacy ones among them, and no other under its prefix.
      *
      * @return void
      */
-    public function testThePackageRegistersExactlyItsTwelveCommands(): void
+    public function testThePackageRegistersExactlyItsSixteenCommands(): void
     {
         $names = array_values(array_filter(array_keys(Artisan::all()), static fn (string $name): bool => str_starts_with($name, 'audit-log:')));
 
@@ -402,14 +448,18 @@ final class AuditLogServiceProviderTest extends TestCase
         self::assertSame([
             'audit-log:check',
             'audit-log:drain',
+            'audit-log:erase',
             'audit-log:export',
             'audit-log:hold',
             'audit-log:holds',
             'audit-log:import',
+            'audit-log:keys',
             'audit-log:prune',
             'audit-log:reconcile',
+            'audit-log:reinstate',
             'audit-log:release',
             'audit-log:replay',
+            'audit-log:rewrap',
             'audit-log:seal',
             'audit-log:verify',
         ], $names);
@@ -437,7 +487,8 @@ final class AuditLogServiceProviderTest extends TestCase
 
     /**
      * Rows of `[abstract, the default it resolves to]`: every abstract the
-     * package's provider binds.
+     * package's provider binds once per application; the field encrypter and
+     * the field reader, made afresh on every resolution, are pinned apart.
      *
      * @return iterable<string, array{0: class-string, 1: class-string}>
      */
@@ -448,11 +499,10 @@ final class AuditLogServiceProviderTest extends TestCase
             'the integrity settings' => [IntegritySettings::class, IntegritySettings::class],
             'the key ring'           => [KeyRing::class, KeyRing::class],
             'the store'              => [AuditStore::class, DatabaseAuditStore::class],
-            'the field encrypter'    => [FieldEncrypter::class, NoFieldEncrypter::class],
+            'the key wrapper'        => [KeyWrapper::class, LocalKeyWrapper::class],
             'the retention policy'   => [RetentionPolicy::class, ConfiguredRetentionPolicy::class],
             'the prune ledger'       => [PruneLedger::class, JournalPruneLedger::class],
             'the access policy'      => [AuditAccessPolicy::class, DenyAllPolicy::class],
-            'the field reader'       => [FieldReader::class, SealedFieldReader::class],
             'the catalogue'          => [EventCatalogue::class, EventCatalogue::class],
             'the contributors'       => [ContributorRegistry::class, ContributorRegistry::class],
             'the event mappers'      => [MapperRegistry::class, MapperRegistry::class],
@@ -479,6 +529,70 @@ final class AuditLogServiceProviderTest extends TestCase
 
         self::assertInstanceOf($default, $resolved);
         self::assertSame($resolved, app($abstract));
+    }
+
+    /**
+     * The field encrypter is the package's, keyed by owner, and the field
+     * reader the one that opens what it seals; each resolution is a new one, so
+     * the data keys one holds never outlive the record or the page it serves,
+     * and neither is kept as a shared instance.
+     *
+     * @return void
+     */
+    public function testTheEncrypterAndReaderAreBoundAfreshPerResolution(): void
+    {
+        $app = $this->app;
+
+        assert($app !== null);
+
+        $encrypter = app(FieldEncrypter::class);
+        $reader    = app(FieldReader::class);
+
+        self::assertInstanceOf(SubjectKeyEncrypter::class, $encrypter);
+        self::assertInstanceOf(SubjectKeyFieldReader::class, $reader);
+        self::assertNotSame($encrypter, app(FieldEncrypter::class));
+        self::assertNotSame($reader, app(FieldReader::class));
+        self::assertFalse($app->isShared(FieldEncrypter::class));
+        self::assertFalse($app->isShared(FieldReader::class));
+    }
+
+    /**
+     * The key wrapper is the local one, over the wrapping ring, shared because
+     * it holds no key: every wrap reads the ring afresh, so a wrapping key
+     * configured after it resolves is the one the next wrap uses.
+     *
+     * @return void
+     */
+    public function testTheWrapperIsBound(): void
+    {
+        $wrapper = app(KeyWrapper::class);
+
+        self::assertInstanceOf(LocalKeyWrapper::class, $wrapper);
+        self::assertSame($wrapper, app(KeyWrapper::class));
+        self::assertTrue($this->app?->isShared(KeyWrapper::class));
+        self::assertStringStartsWith('d-', $wrapper->currentKeyId());
+
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.privacy.keys', ['w2026' => str_repeat('w', 32)]);
+        $config->set('audit-log.privacy.current', 'w2026');
+
+        self::assertSame('w2026', $wrapper->currentKeyId());
+    }
+
+    /**
+     * An application that chooses never to encrypt binds `NoFieldEncrypter`
+     * before the provider registers, and the provider keeps it.
+     *
+     * @return void
+     */
+    public function testAnEncrypterBoundEarlierIsKept(): void
+    {
+        $this->app?->bind(FieldEncrypter::class, NoFieldEncrypter::class);
+
+        (new AuditLogServiceProvider($this->app))->register();
+
+        self::assertInstanceOf(NoFieldEncrypter::class, app(FieldEncrypter::class));
     }
 
     /**

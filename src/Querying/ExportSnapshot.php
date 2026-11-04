@@ -4,13 +4,12 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Querying;
 
-use Illuminate\Container\Container;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Support\ConfigurationUrlParser;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\AuditLog\Database\DedicatedSession;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
@@ -123,7 +122,7 @@ final class ExportSnapshot
             return new self($database, $storage, null, $name, self::TESTING_TRANSACTION);
         }
 
-        if (self::isInMemory($storage)) {
+        if (DedicatedSession::isInMemory($storage)) {
             self::begin($storage, $driver);
 
             return new self($database, $storage, null, $name, self::CONSISTENCY[$driver]);
@@ -321,43 +320,9 @@ final class ExportSnapshot
      */
     private static function refuseAnyButTheTestingTransaction(string $name, Connection $storage): void
     {
-        if (!self::isTheTestingTransaction($storage)) {
+        if (!DedicatedSession::isTheTestingTransaction($storage)) {
             throw AuditReadRefusedException::inTransaction($name);
         }
-    }
-
-    /**
-     * Whether the connection's open transaction is the base one Laravel's
-     * testing manager wraps a test in: the bound manager would run the
-     * callbacks of a commit at the connection's level, as the read gate judges
-     * it.
-     *
-     * @param  \Illuminate\Database\Connection  $connection
-     * @return bool
-     *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
-     */
-    private static function isTheTestingTransaction(Connection $connection): bool
-    {
-        $container = Container::getInstance();
-        $manager   = $container->bound('db.transactions') ? $container->make('db.transactions') : null;
-
-        return $manager instanceof DatabaseTransactionsManager && $manager->afterCommitCallbacksShouldBeExecuted($connection->transactionLevel());
-    }
-
-    /**
-     * Whether the connection is an in-memory SQLite database, which no other
-     * PDO can see.
-     *
-     * @param  \Illuminate\Database\Connection  $connection
-     * @return bool
-     */
-    private static function isInMemory(Connection $connection): bool
-    {
-        $database = $connection->getDatabaseName();
-
-        return $connection->getDriverName() === 'sqlite'
-            && ($database === ':memory:' || str_contains($database, '?mode=memory') || str_contains($database, '&mode=memory'));
     }
 
     /**
@@ -366,8 +331,9 @@ final class ExportSnapshot
      * so the session reaches the very database the connection does, with its
      * `read` settings, one picked at random from a list as Laravel picks a
      * reader, each with its own `url` resolved, merged over the base, and
-     * `read`, `write` and the name removed. A connection with no configuration
-     * of its own is made from the settings it was made with.
+     * `read`, `write` and the name removed, and a handle of its own forced,
+     * never a persistent one the storage connection shares. A connection with
+     * no configuration of its own is made from the settings it was made with.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -390,6 +356,6 @@ final class ExportSnapshot
 
         unset($config['read'], $config['write'], $config['name']);
 
-        return $config;
+        return DedicatedSession::sessionOptions($config);
     }
 }

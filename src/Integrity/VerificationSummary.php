@@ -14,8 +14,9 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
  * and the head it observed, the anchor's head and how it compared, whether the
  * run covered the whole log, the segments in each integrity and anchoring
  * status, the findings of the run as a whole, the unsealed entries, what it
- * read of the lifecycle journal, and the first failure. A journal finding is a
- * finding of the run, and fails it as any other does.
+ * read of the lifecycle journal and, on a run of the whole log, of the owners'
+ * key store, and the first failure. A journal or key finding is a finding of
+ * the run, and fails it as any other does.
  *
  * A run fails on any integrity failure, of a segment or of the run. A strict
  * run with an anchor configured also fails on any segment short of `anchored`,
@@ -53,6 +54,7 @@ final readonly class VerificationSummary
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $firstFinding
      * @param  ?string  $firstBadId
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\JournalSummary  $journal
+     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary  $keys
      */
     public function __construct(
 
@@ -106,6 +108,9 @@ final readonly class VerificationSummary
 
         /** What the run read of the lifecycle journal, or `null` when it read none. */
         public ?JournalSummary $journal = null,
+
+        /** What the run established of the owners' key store, or `null` when it checked a range. */
+        public ?KeyStoreSummary $keys = null,
     ) {}
 
     /**
@@ -152,25 +157,19 @@ final readonly class VerificationSummary
      */
     public function withJournal(JournalSummary $journal): self
     {
-        return new self(
-            $this->from,
-            $this->to,
-            $this->head,
-            $this->remoteHead,
-            $this->remote,
-            $this->complete,
-            $this->anchorConfigured,
-            $this->discovers,
-            $this->integrity,
-            $this->anchoring,
-            $this->awaiting,
-            $this->findings,
-            $this->pending,
-            $this->overdue,
-            $this->firstFinding,
-            $this->firstBadId,
-            $journal,
-        );
+        return $this->with($journal, $this->keys);
+    }
+
+    /**
+     * The summary with what the run established of the owners' key store, or
+     * none for a run of a range, everything else as it is.
+     *
+     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary  $keys
+     * @return self
+     */
+    public function withKeys(?KeyStoreSummary $keys): self
+    {
+        return $this->with($this->journal, $keys);
     }
 
     /**
@@ -192,14 +191,15 @@ final readonly class VerificationSummary
     /**
      * The summary as the last line of output: the range checked and the heads
      * observed, how the anchor compared, the counts, what was read of the
-     * journal, the first failure, and whether the run passed.
+     * journal and of the key store, the first failure, and whether the run
+     * passed.
      *
      * @formatter:off
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
      * @param  bool  $strict
-     * @return array{type: 'summary', from: int, to: int, head: ?int, remote_head: ?int, remote: ?string, complete: bool, strict: bool, integrity: array<string, int>, anchoring: array<string, int>, awaiting_anchor: int, pending: int, overdue: int, journal: ?array{rows: int, head: ?int, committed: ?int}, first_finding: ?string, first_bad_id: ?string, passed: bool}
+     * @return array{type: 'summary', from: int, to: int, head: ?int, remote_head: ?int, remote: ?string, complete: bool, strict: bool, integrity: array<string, int>, anchoring: array<string, int>, awaiting_anchor: int, pending: int, overdue: int, journal: ?array{rows: int, head: ?int, committed: ?int}, keys: ?array{keys: int, erased: int, findings: int, skipped: bool, encrypter: ?string}, first_finding: ?string, first_bad_id: ?string, passed: bool}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -222,6 +222,7 @@ final readonly class VerificationSummary
             'pending'         => $this->pending,
             'overdue'         => $this->overdue,
             'journal'         => $this->journal?->toArray(),
+            'keys'            => $this->keys?->toArray(),
             'first_finding'   => $this->firstFinding?->value,
             'first_bad_id'    => $this->firstBadId,
             'passed'          => !$this->fails($strict),
@@ -241,6 +242,19 @@ final readonly class VerificationSummary
         $finding = $this->firstFinding?->value;
 
         return new IntegrityCheckFailed($command, $this->integrity, $this->anchoring, $finding, $this->firstBadId, $this->head, $this->remoteHead, $this->complete);
+    }
+
+    /**
+     * The summary with the journal's and the key store's sections given,
+     * everything else as it is.
+     *
+     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\JournalSummary  $journal
+     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary  $keys
+     * @return self
+     */
+    private function with(?JournalSummary $journal, ?KeyStoreSummary $keys): self
+    {
+        return new self(...[...get_object_vars($this), 'journal' => $journal, 'keys' => $keys]);
     }
 
     /**

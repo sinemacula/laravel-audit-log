@@ -15,21 +15,32 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\PruneCoverage;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
+use SineMacula\Laravel\AuditLog\Privacy\Minimised;
+use SineMacula\Laravel\AuditLog\Records\Attachment;
+use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
+use SineMacula\Laravel\AuditLog\Records\PendingRecord;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\RecordConflictException;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Concerns\PrunesByHand;
+use Tests\Concerns\SealsEntries;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
@@ -41,8 +52,10 @@ use Tests\TestCase;
  * conflict when it does not, and propagated when it cannot be verified or no
  * row holds the id; a record without an attachment written as before, never
  * touching the artifacts table; and a host transaction left usable by one
- * failed audit statement; and an imported record stored with its source digest,
- * on SQLite, MySQL and PostgreSQL alike.
+ * failed audit statement; and an imported record stored with its source digest;
+ * and a record holding an envelope written with its key uses in one transaction
+ * or savepoint, rolled back whole when they fail, and refused as already pruned
+ * when its key uses outlived its entry, on SQLite, MySQL and PostgreSQL alike.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,7 +65,7 @@ use Tests\TestCase;
 #[CoversClass(DatabaseAuditStore::class)]
 final class DatabaseAuditStoreTest extends TestCase
 {
-    use InteractsWithAuditStore, MockeryPHPUnitIntegration;
+    use InteractsWithAuditStore, MockeryPHPUnitIntegration, PrunesByHand, SealsEntries;
 
     /** @var string The id records are pinned to. */
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
@@ -71,6 +84,18 @@ final class DatabaseAuditStoreTest extends TestCase
 
     /** @var string The second key's secret, as its own 32 bytes. */
     private const string SECOND_SECRET = 'audit store second key secret32!';
+
+    /** @var string The key the first and third envelopes of an encrypted record name. */
+    private const string FIRST_KEY = '01932b4e-8a40-7000-8000-0000000000a1';
+
+    /** @var string The key the second envelope of an encrypted record names. */
+    private const string SECOND_KEY = '01932b4e-8a40-7000-8000-0000000000a2';
+
+    /** @var int The most bytes a bundle's manifest holds. */
+    private const int BULK_MAX_BYTES = 65536;
+
+    /** @var string A table that does not exist. */
+    private const string MISSING_TABLE = 'audit_missing_key_uses';
 
     /**
      * Create the table the host transaction writes to.
@@ -837,6 +862,216 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
+     * A record holding envelopes is written with its key uses, one for each
+     * distinct key, in one transaction of its own: its entry's insert, then its
+     * key uses' one insert, both inside the transaction, which commits.
+     *
+     * @return void
+     */
+    public function testAnEncryptedRecordWritesItsKeyUsesWithIt(): void
+    {
+        $connection = $this->storageConnection();
+        $statements = [];
+        $began      = 0;
+
+        Event::listen(TransactionBeginning::class, static function () use (&$began): void {
+            $began++;
+        });
+
+        $connection->beforeExecuting(static function (string $query, array $bindings, $connection) use (&$statements): void {
+            $statements[] = [self::tableOf($query), $connection->transactionLevel()];
+        });
+
+        $this->store()->store($this->encrypted());
+
+        self::assertSame([[EntrySettings::table(), 1], [KeyTables::keyUsesTable(), 1]], $statements);
+        self::assertSame(1, $began);
+        self::assertSame(0, $connection->transactionLevel());
+        self::assertSame(1, $this->entryCount());
+        self::assertSame([[self::FIRST_KEY, self::ID], [self::SECOND_KEY, self::ID]], $this->keyUses());
+    }
+
+    /**
+     * An envelope whose key is not a canonical lower-case UUID has no key use,
+     * so a record holding only such envelopes keeps its single insert, outside
+     * any transaction.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeWithoutAUuidKeyKeepsTheSingleInsert(): void
+    {
+        $statements = [];
+        $began      = 0;
+
+        Event::listen(TransactionBeginning::class, static function () use (&$began): void {
+            $began++;
+        });
+
+        $this->storageConnection()->beforeExecuting(static function (string $query) use (&$statements): void {
+            $statements[] = self::tableOf($query);
+        });
+
+        $this->store()->store($this->encrypted(['card' => ['v' => 1, 'k' => 'kms:card-key', 'c' => 'c2VhbGVk']]));
+
+        self::assertSame([EntrySettings::table()], $statements);
+        self::assertSame(0, $began);
+        self::assertSame([], $this->keyUses());
+    }
+
+    /**
+     * Rows of `[what fails, the failure the store throws]`: the key uses'
+     * insert refused by a missing table, and by a key use already stored for
+     * the entry, which no pruned record explains.
+     *
+     * @return iterable<string, array{0: string, 1: class-string<\Throwable>}>
+     */
+    public static function provideKeyUseFailures(): iterable
+    {
+        yield from [
+            'a missing table'        => ['missing', QueryException::class],
+            'a key use stored first' => ['stored', UniqueConstraintViolationException::class],
+        ];
+    }
+
+    /**
+     * A key use that fails rolls the entry back with it, so no entry is kept
+     * without its key uses, and the failure propagates without a binding of the
+     * record in its message.
+     *
+     * @param  string  $fault
+     * @param  class-string<\Throwable>  $thrown
+     * @return void
+     */
+    #[DataProvider('provideKeyUseFailures')]
+    public function testAFailedKeyUseRollsTheEntryBack(string $fault, string $thrown): void
+    {
+        if ($fault === 'missing') {
+            app(ConfigRepository::class)->set('audit-log.privacy.key_uses_table', self::MISSING_TABLE);
+        } else {
+            $this->storageConnection()->table(KeyTables::keyUsesTable())->insert(['key_id' => self::SECOND_KEY, 'entry_id' => self::ID]);
+        }
+
+        $exception = $this->failedStore($this->encrypted());
+
+        self::assertInstanceOf($thrown, $exception);
+        self::assertStringNotContainsString(self::ID, $exception->getMessage());
+        self::assertSame(0, $this->entryCount());
+        self::assertSame(0, $this->storageConnection()->transactionLevel());
+    }
+
+    /**
+     * Inside a host transaction the entry and its key uses are written in the
+     * one savepoint, one level deeper than the host, which is back at its own
+     * level once they succeed; the host's rollback takes both with it.
+     *
+     * @return void
+     */
+    public function testInsideAHostTheKeyUsesShareTheSavepoint(): void
+    {
+        $connection = $this->storageConnection();
+        $inserts    = [];
+        $began      = 0;
+
+        $connection->beginTransaction();
+        $connection->beginTransaction();
+
+        $this->hostWrite('before');
+
+        Event::listen(TransactionBeginning::class, static function () use (&$began): void {
+            $began++;
+        });
+
+        $connection->beforeExecuting(static function (string $query, array $bindings, $connection) use (&$inserts): void {
+            $inserts[] = [self::tableOf($query), $connection->transactionLevel()];
+        });
+
+        $this->store()->store($this->encrypted());
+
+        self::assertSame([[EntrySettings::table(), 3], [KeyTables::keyUsesTable(), 3]], $inserts);
+        self::assertSame(1, $began);
+        self::assertSame(2, $connection->transactionLevel());
+
+        $connection->rollBack();
+        $connection->rollBack();
+
+        self::assertSame(0, $this->entryCount());
+        self::assertSame([], $this->keyUses());
+        self::assertSame([], $this->hostRows());
+    }
+
+    /**
+     * The same encrypted record stored twice is one entry with its key uses
+     * once: the second's insert is refused, rolled back, and resolved to the
+     * entry already stored.
+     *
+     * @return void
+     */
+    public function testTheSameEncryptedRecordStoredTwiceIsOneRowWithItsKeyUses(): void
+    {
+        $finalised = $this->encrypted();
+
+        $this->store()->store($finalised);
+        $this->store()->store($finalised);
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame([[self::FIRST_KEY, self::ID], [self::SECOND_KEY, self::ID]], $this->keyUses());
+    }
+
+    /**
+     * A bulk record holding an envelope writes its artifact, its entry and its
+     * key uses, in that order, in one transaction.
+     *
+     * @return void
+     */
+    public function testABundleHoldingAnEnvelopeWritesItsArtifactEntryAndKeyUses(): void
+    {
+        $finalised  = $this->finaliser()->finalise(self::bundleHolding(['v' => 1, 'k' => self::FIRST_KEY, 'c' => 'c2VhbGVk']));
+        $statements = [];
+        $began      = 0;
+
+        Event::listen(TransactionBeginning::class, static function () use (&$began): void {
+            $began++;
+        });
+
+        $this->storageConnection()->beforeExecuting(static function (string $query) use (&$statements): void {
+            $statements[] = self::tableOf($query);
+        });
+
+        $this->store()->store($finalised);
+
+        self::assertSame([EntrySettings::artifactsTable(), EntrySettings::table(), KeyTables::keyUsesTable()], $statements);
+        self::assertSame(1, $began);
+        self::assertSame([[self::FIRST_KEY, $finalised->record->id]], $this->keyUses());
+    }
+
+    /**
+     * Retention leaves a pruned entry's key uses, so an encrypted record stored
+     * again once pruned violates their key: the store finds the record in a
+     * seal with its entry gone and refuses it as already pruned, storing
+     * nothing and leaving the key uses as they were.
+     *
+     * @return void
+     */
+    public function testAPrunedIdWithSurvivingKeyUsesIsAlreadyPruned(): void
+    {
+        $finalised = $this->encrypted();
+
+        $this->store()->store($finalised);
+        $this->sealAt('2026-11-01 12:30:00');
+
+        self::assertSame(1, $this->sealAll()->entries());
+
+        $this->pruneByHand(self::ID);
+
+        $exception = $this->failedStore($finalised);
+
+        self::assertInstanceOf(RecordConflictException::class, $exception);
+        self::assertSame('The record `' . self::ID . '` was pruned; it is not stored again.', $exception->getMessage());
+        self::assertSame(0, $this->entryCount());
+        self::assertSame([[self::FIRST_KEY, self::ID], [self::SECOND_KEY, self::ID]], $this->keyUses());
+    }
+
+    /**
      * The captured record of an approved invoice under the pinned id, finalised
      * on the frozen clock.
      *
@@ -865,15 +1100,77 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Make the explicit ring of the keys given, with the current key named.
+     * The captured record under the pinned id holding the envelopes given, by
+     * default three naming two keys, one of them twice, finalised on the frozen
+     * clock.
      *
-     * @param  array<string, string>  $keys
-     * @param  string  $current
-     * @return void
+     * @param  ?array<string, array{v: int, k: string, c: string}>  $envelopes
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
      */
-    private function useRing(array $keys, string $current): void
+    private function encrypted(?array $envelopes = null): FinalisedRecord
     {
-        app(ConfigRepository::class)->set('audit-log.integrity', ['keys' => $keys, 'current' => $current]);
+        $envelopes ??= [
+            'card'  => ['v' => 1, 'k' => self::FIRST_KEY, 'c' => 'c2VhbGVkLWNhcmQ'],
+            'iban'  => ['v' => 1, 'k' => self::SECOND_KEY, 'c' => 'c2VhbGVkLWliYW4'],
+            'payee' => ['v' => 1, 'k' => self::FIRST_KEY, 'c' => 'c2VhbGVkLXBheWVl'],
+        ];
+
+        return $this->finaliser()->finalise(RecordFactory::captured(['amount' => '1200.00', ...$envelopes], self::ID));
+    }
+
+    /**
+     * Every stored key use, as its key and entry, sorted.
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function keyUses(): array
+    {
+        $rows = $this->storageConnection()->table(KeyTables::keyUsesTable())->orderBy('key_id')->orderBy('entry_id')->get();
+
+        return array_values(array_map(static fn (object $row): array => [(string) $row->key_id, (string) $row->entry_id], $rows->all()));
+    }
+
+    /**
+     * A captured bulk record of three approved invoices holding the envelope as
+     * its card, carrying its manifest sealed under the test encrypter.
+     *
+     * @param  array{v: int, k: string, c: string}  $envelope
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     */
+    private static function bundleHolding(array $envelope): AuditRecord
+    {
+        $manifest = Manifest::of(RecordFactory::members(3), 3, self::BULK_MAX_BYTES);
+        $pending  = (new PendingRecord)->event('invoice.bulk_approved')->by(Reference::of('user', '42'))->withManifest($manifest);
+        $id       = Str::uuid7()->toString();
+
+        $pending->fillOrigin(Origin::HTTP);
+
+        // The envelope stands for a field the record's own sealer sealed, which
+        // minimising removes from what a record is given, so it is set on what
+        // minimising left, before the package's metadata
+        $minimised  = RecordFactory::minimisedOf($pending, null, $id);
+        $minimised  = new Minimised(['card' => $envelope, ...$minimised->properties ?? []], $minimised->context, $minimised->ip);
+        $attachment = Attachment::sealed($manifest, RecordFactory::encrypter());
+
+        return AuditRecord::fromPending($pending, $minimised, $id, 1, 'finance', new \DateTimeImmutable(RecordFactory::OCCURRED_AT), 'app-eu-1', null, $attachment);
+    }
+
+    /**
+     * The package table an insert writes to, or the statement itself when it is
+     * anything else.
+     *
+     * @param  string  $query
+     * @return string
+     */
+    private static function tableOf(string $query): string
+    {
+        foreach ([EntrySettings::artifactsTable(), KeyTables::keyUsesTable(), EntrySettings::table()] as $table) {
+            if (str_starts_with($query, 'insert into') && str_contains($query, $table)) {
+                return $table;
+            }
+        }
+
+        return $query;
     }
 
     /**

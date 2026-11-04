@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Records;
 
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Privacy\Minimised;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
@@ -66,6 +65,9 @@ final readonly class AuditRecord
 
     /** @var int Longest source region, in characters: the `source_region` column. */
     public const int SOURCE_REGION_MAX_CHARACTERS = 32;
+
+    /** @var string A lower-case UUID: a record's id. */
+    private const string ID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
     /** @var string The key the package's metadata sits under, last in the properties. */
     private const string METADATA_KEY = '_audit';
@@ -287,18 +289,22 @@ final readonly class AuditRecord
 
     /**
      * The captured record of the pending record, which this uses up: built
-     * once, with what minimising left of its IP address, context and
-     * properties, the event version and category of its code's definition, the
-     * instant the activity happened, and the source it was captured on. The
-     * origin must have been filled. A builder with a manifest gives a record
-     * that takes the attachment of that manifest, which its minimised
-     * properties describe, and any other record takes none.
+     * once, as the entry of the id the pipeline minted before minimising, with
+     * what minimising left of its IP address, context and properties, the event
+     * version and category of its code's definition, the instant the activity
+     * happened, and the source it was captured on. The id must be a lower-case
+     * UUID, and the pending record's own when the package gave it one, since
+     * every value was sealed for that entry. The origin must have been filled.
+     * A builder with a manifest gives a record that takes the attachment of
+     * that manifest, which its minimised properties describe, and any other
+     * record takes none.
      *
      * Its parameters are the record's parts, each from its own stage of the
      * pipeline, so none groups naturally with another.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
+     * @param  string  $id
      * @param  int  $eventVersion
      * @param  string  $category
      * @param  \DateTimeInterface  $occurredAt
@@ -318,6 +324,7 @@ final readonly class AuditRecord
         #[\SensitiveParameter]
         PendingRecord $pending,
         Minimised $minimised,
+        string $id,
         int $eventVersion,
         string $category,
         \DateTimeInterface $occurredAt,
@@ -331,6 +338,7 @@ final readonly class AuditRecord
 
         assert($snapshot->code instanceof EventCode);
 
+        self::checkId($snapshot, $id);
         self::checkSource($sourceId, $sourceRegion);
         self::checkAttachment($snapshot, $minimised, $attachment);
 
@@ -340,7 +348,7 @@ final readonly class AuditRecord
         [$tenantType, $tenantId]       = self::pair($snapshot->tenant);
 
         return new self(
-            id: $snapshot->id ?? Str::uuid7($occurredAt)->toString(),
+            id: $id,
             recordVersion: RecordVersion::CURRENT,
             event: $snapshot->code->value,
             eventVersion: $eventVersion,
@@ -382,12 +390,14 @@ final readonly class AuditRecord
      * once, with `imported` provenance, from the references, outcome, reason,
      * correlation id and what minimising left of the IP address, context and
      * properties of the pending record, the event version and category of its
-     * code's definition, and the source fields given. Its id is a UUID version
-     * 7 of the time it is imported; the time the activity happened is kept as
-     * given, which must be an instant in the package's form, and its origin, if
-     * the source knew it, must be one this package names. It carries no
-     * credential, guard, session, request, trace or user agent, and no
-     * artifact: a pending record with a manifest is refused.
+     * code's definition, and the source fields given. Its id is the one the
+     * import minted before minimising, a lower-case UUID version 7 of the time
+     * it is imported, since every value was sealed for that entry; the time the
+     * activity happened is kept as given, which must be an instant in the
+     * package's form, and its origin, if the source knew it, must be one this
+     * package names. It carries no credential, guard, session, request, trace
+     * or user agent, and no artifact: a pending record with a manifest is
+     * refused.
      *
      * Its parameters are the record's parts, each from its own stage of the
      * import, so none groups naturally with another.
@@ -399,7 +409,7 @@ final readonly class AuditRecord
      * @param  string  $occurredAt
      * @param  ?string  $origin
      * @param  \SineMacula\Laravel\AuditLog\Records\ImportedSource  $source
-     * @param  \DateTimeInterface  $importedAt
+     * @param  string  $id
      * @return self
      *
      * @throws \InvalidArgumentException
@@ -418,12 +428,13 @@ final readonly class AuditRecord
         string $occurredAt,
         ?string $origin,
         ImportedSource $source,
-        \DateTimeInterface $importedAt,
+        string $id,
     ): self {
         $snapshot = $pending->consume();
 
         assert($snapshot->code instanceof EventCode);
 
+        self::checkId($snapshot, $id);
         self::checkImport($snapshot, $minimised, $occurredAt, $origin);
 
         [$actorType, $actorId]         = self::pair($snapshot->actor);
@@ -432,7 +443,7 @@ final readonly class AuditRecord
         [$tenantType, $tenantId]       = self::pair($snapshot->tenant);
 
         return new self(
-            id: Str::uuid7($importedAt)->toString(),
+            id: $id,
             recordVersion: RecordVersion::CURRENT,
             event: $snapshot->code->value,
             eventVersion: $eventVersion,
@@ -539,6 +550,29 @@ final readonly class AuditRecord
     {
         if ($snapshot->manifest?->id !== $attachment?->id || !self::isBound($minimised->properties, $attachment)) {
             throw new \LogicException('A record with an artifact is built with the attachment of its own manifest, and any other record with none.');
+        }
+    }
+
+    /**
+     * Refuse an id that is not a lower-case UUID, and one other than the id the
+     * package gave the snapshot, when it gave one, since the record's values
+     * were sealed for the entry the id names.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
+     * @param  string  $id
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    private static function checkId(#[\SensitiveParameter] PendingSnapshot $snapshot, string $id): void
+    {
+        if (preg_match(self::ID_PATTERN, $id) !== 1) {
+            throw new \InvalidArgumentException('A record\'s id must be a lower-case UUID.');
+        }
+
+        if ($snapshot->id !== null && $snapshot->id !== $id) {
+            throw new \LogicException('A record keeps the id the package gave its pending record, the one its values were sealed for.');
         }
     }
 

@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
@@ -151,7 +152,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
 
         $stored    = $this->storedAndVerified($record);
         $pseudonym = app(IdentifierHasher::class)->field('alice@example.com');
-        $sealed    = base64_encode('078-05-1120');
+        $sealed    = base64_encode('"078-05-1120"');
 
         $expected = '{"_audit":{"omitted":{"count":2,"paths":["*","internal"]}},"amount":"1200.00","customer":"[REDACTED]",'
             . '"email":"' . $pseudonym . '","ssn":{"c":"' . $sealed . '","k":"key_7","v":1}}';
@@ -370,8 +371,46 @@ final class MinimisedEntryRoundTripTest extends TestCase
         $record = AuditLog::event(self::CODE)->withNote('Erasable.', Reference::of('user', '7'))->immediately()->record();
         $sealed = $this->storedAndVerified($record);
 
-        self::assertSame('{"_audit":{"note":{"c":"' . base64_encode('Erasable.') . '","k":"key_7","v":1}}}', CanonicalEncoder::encode($sealed['properties']));
+        self::assertSame('{"_audit":{"note":{"c":"' . base64_encode('"Erasable."') . '","k":"key_7","v":1}}}', CanonicalEncoder::encode($sealed['properties']));
         self::assertStringNotContainsString('Erasable.', $this->rawRow($record->id));
+    }
+
+    /**
+     * Under the package's default encrypter a field and the address sealed for
+     * the actor store and verify whatever the engine does to its JSON: each is
+     * an envelope naming the actor's one key, the entry has that key's one key
+     * use, and neither value is anywhere in the row.
+     *
+     * @return void
+     */
+    public function testTheDefaultEncryptersEnvelopesStoreAndVerify(): void
+    {
+        self::config()->set('audit-log.redaction.ip', 'encrypt');
+
+        $pending = self::underDefinition(EventDefinition::for(self::CODE)->retain('amount')->encrypt('ssn', KeyOwner::ACTOR))
+            ->by(Reference::of('user', '7'))
+            ->withProperties(['amount' => '1200.00', 'ssn' => '078-05-1120']);
+
+        $pending->fillClient(self::IP, null);
+
+        $record = $pending->immediately()->record();
+        $stored = $this->storedAndVerified($record);
+
+        $properties = json_decode(CanonicalEncoder::encode($stored['properties']), true, 8, JSON_THROW_ON_ERROR);
+        $ip         = json_decode((string) $record->ip, true, 2, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($properties);
+        self::assertIsArray($properties['ssn'] ?? null);
+        self::assertIsArray($ip);
+        self::assertSame(['c', 'k', 'v'], array_keys($properties['ssn']));
+        self::assertSame(['c', 'k', 'v'], array_keys($ip));
+        self::assertSame($ip['k'], $properties['ssn']['k']);
+
+        $uses = $this->storageConnection()->table(KeyTables::keyUsesTable())->where('entry_id', $record->id)->pluck('key_id')->all();
+
+        self::assertSame([$ip['k']], array_map(strval(...), $uses));
+        self::assertStringNotContainsString('078-05-1120', $this->rawRow($record->id));
+        self::assertStringNotContainsString(self::IP, $this->rawRow($record->id));
     }
 
     /**

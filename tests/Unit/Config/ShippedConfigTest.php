@@ -10,7 +10,9 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
+use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
+use SineMacula\Laravel\AuditLog\Keys\KeySettings;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportSettings;
 use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use SineMacula\Laravel\AuditLog\Querying\ReadSettings;
@@ -181,6 +183,24 @@ final class ShippedConfigTest extends TestCase
     /** @var string Env var holding the budget of the context. */
     private const string REDACTION_MAX_CONTEXT_BYTES_ENV = 'AUDIT_LOG_REDACTION_MAX_CONTEXT_BYTES';
 
+    /** @var string Env var naming the wrapping key that wraps. */
+    private const string PRIVACY_CURRENT_ENV = 'AUDIT_LOG_PRIVACY_CURRENT';
+
+    /** @var string Env var naming the subject keys table. */
+    private const string PRIVACY_SUBJECT_KEYS_TABLE_ENV = 'AUDIT_LOG_PRIVACY_SUBJECT_KEYS_TABLE';
+
+    /** @var string Env var naming the owner erasures table. */
+    private const string PRIVACY_OWNER_ERASURES_TABLE_ENV = 'AUDIT_LOG_PRIVACY_OWNER_ERASURES_TABLE';
+
+    /** @var string Env var naming the key uses table. */
+    private const string PRIVACY_KEY_USES_TABLE_ENV = 'AUDIT_LOG_PRIVACY_KEY_USES_TABLE';
+
+    /** @var string Env var holding the most keys one transaction of a rewrap changes. */
+    private const string PRIVACY_REWRAP_BATCH_ENV = 'AUDIT_LOG_PRIVACY_REWRAP_BATCH';
+
+    /** @var string A 32-byte application key, which the derived wrapping key needs. */
+    private const string APP_KEY = 'base64:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
+
     /** @var string Env var naming what a failed write does. */
     private const string FAILURE_MODE_ENV = 'AUDIT_LOG_FAILURE_MODE';
 
@@ -260,6 +280,11 @@ final class ShippedConfigTest extends TestCase
         self::REDACTION_IP_ENV,
         self::REDACTION_MAX_BYTES_ENV,
         self::REDACTION_MAX_CONTEXT_BYTES_ENV,
+        self::PRIVACY_CURRENT_ENV,
+        self::PRIVACY_SUBJECT_KEYS_TABLE_ENV,
+        self::PRIVACY_OWNER_ERASURES_TABLE_ENV,
+        self::PRIVACY_KEY_USES_TABLE_ENV,
+        self::PRIVACY_REWRAP_BATCH_ENV,
         self::FAILURE_MODE_ENV,
         self::FAILURE_LOG_CHANNEL_ENV,
         self::DELIVERY_MODE_ENV,
@@ -1154,6 +1179,12 @@ final class ShippedConfigTest extends TestCase
             'redaction.ip',
             'redaction.max_bytes',
             'redaction.max_context_bytes',
+            'privacy.keys',
+            'privacy.current',
+            'privacy.subject_keys_table',
+            'privacy.owner_erasures_table',
+            'privacy.key_uses_table',
+            'privacy.rewrap_batch',
             'failure.mode',
             'failure.log_channel',
             'delivery.mode',
@@ -1281,6 +1312,90 @@ final class ShippedConfigTest extends TestCase
 
         self::assertSame('9000', $redaction['max_bytes']);
         self::assertSame('2000', $redaction['max_context_bytes']);
+    }
+
+    /**
+     * With nothing in the environment the wrapping keys are derived from
+     * `app.key`, with no explicit ring and no current key, the three key tables
+     * have their default names and a rewrap changes 500 keys per transaction,
+     * as an integer; and the shipped privacy settings pass beside a valid
+     * `app.key`.
+     *
+     * @return void
+     */
+    public function testThePrivacyLeavesHaveTheirDefaults(): void
+    {
+        self::assertSame([
+            'keys'                 => [],
+            'current'              => null,
+            'subject_keys_table'   => 'audit_log_subject_keys',
+            'owner_erasures_table' => 'audit_log_owner_erasures',
+            'key_uses_table'       => 'audit_log_key_uses',
+            'rewrap_batch'         => 500,
+        ], $this->config()['privacy']);
+
+        $settings = $this->keySettings();
+
+        $settings->validate();
+
+        self::assertSame([], $settings->explicitKeys());
+        self::assertNull($settings->currentKeyId());
+        self::assertSame(500, $settings->rewrapBatch());
+    }
+
+    /**
+     * Each privacy setting with an env var is read from it, raw, so a malformed
+     * batch fails closed when it is read rather than casting to `0`.
+     *
+     * @return void
+     */
+    public function testThePrivacyLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::PRIVACY_CURRENT_ENV . '=w2026');
+        putenv(self::PRIVACY_SUBJECT_KEYS_TABLE_ENV . '=audit_subject_keys');
+        putenv(self::PRIVACY_OWNER_ERASURES_TABLE_ENV . '=audit_owner_erasures');
+        putenv(self::PRIVACY_KEY_USES_TABLE_ENV . '=audit_key_uses');
+        putenv(self::PRIVACY_REWRAP_BATCH_ENV . '=1000');
+
+        self::assertSame([
+            'keys'                 => [],
+            'current'              => 'w2026',
+            'subject_keys_table'   => 'audit_subject_keys',
+            'owner_erasures_table' => 'audit_owner_erasures',
+            'key_uses_table'       => 'audit_key_uses',
+            'rewrap_batch'         => '1000',
+        ], $this->config()['privacy']);
+
+        self::assertSame(1000, $this->keySettings()->rewrapBatch());
+
+        putenv(self::PRIVACY_REWRAP_BATCH_ENV . '=1e3');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('`audit-log.privacy.rewrap_batch` must be an integer from 100 to 10000.');
+
+        $this->keySettings()->rewrapBatch();
+    }
+
+    /**
+     * A current wrapping key named in the environment beside the shipped empty
+     * ring fails closed rather than falling back to the key derived from
+     * `app.key`, and an empty env line reads as no current key.
+     *
+     * @return void
+     */
+    public function testACurrentWrappingKeyWithoutARingFailsClosed(): void
+    {
+        putenv(self::PRIVACY_CURRENT_ENV . '=');
+
+        self::assertSame('', $this->config()['privacy']['current']);
+        self::assertNull($this->keySettings()->currentKeyId());
+
+        putenv(self::PRIVACY_CURRENT_ENV . '=w2026');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('`audit-log.privacy.current` names a key, but `audit-log.privacy.keys` is empty;');
+
+        $this->keySettings()->currentKeyId();
     }
 
     /**
@@ -1454,6 +1569,19 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * The owners' key settings over the shipped configuration as the
+     * environment gives it now, beside a valid `app.key`.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Keys\KeySettings
+     */
+    private function keySettings(): KeySettings
+    {
+        $config = new Repository(['audit-log' => $this->config(), 'app' => ['key' => self::APP_KEY, 'previous_keys' => []]]);
+
+        return new KeySettings($config, new IntegritySettings($config));
+    }
+
+    /**
      * The dotted leaves of a settings map, a list or an empty map being one
      * leaf.
      *
@@ -1483,7 +1611,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -1491,7 +1619,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
         $config = require self::CONFIG;
 
         return $config;

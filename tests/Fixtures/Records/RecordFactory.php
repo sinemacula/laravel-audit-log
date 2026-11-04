@@ -13,6 +13,7 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer;
 use SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher;
 use SineMacula\Laravel\AuditLog\Privacy\IpMinimiser;
@@ -26,6 +27,7 @@ use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\DisclosureManifest;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\ExportManifest;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
@@ -67,6 +69,9 @@ final class RecordFactory
 
     /** @var string The application key minimising derives any hash from. */
     private const string APP_KEY = '0123456789abcdef0123456789abcdef';
+
+    /** @var string The id of the log a minimised record's values are sealed for. */
+    private const string LOG_ID = 'app-eu-1';
 
     /** @var string The code of the permissive definition minimising defaults to; not the builder's, which may have none. */
     private const string PERMISSIVE_CODE = 'invoice.approved';
@@ -329,7 +334,9 @@ final class RecordFactory
         $builder->fillClient('198.51.100.4', null);
         $builder->fillContext(['route' => 'invoices.approve']);
 
-        return AuditRecord::fromImport($builder, self::minimisedOf($builder), 1, 'finance', $occurredAt, $origin, $source ?? self::source(), self::instant($importedAt));
+        $id = Str::uuid7(self::instant($importedAt))->toString();
+
+        return AuditRecord::fromImport($builder, self::minimisedOf($builder, null, $id), 1, 'finance', $occurredAt, $origin, $source ?? self::source(), $id);
     }
 
     /**
@@ -349,14 +356,16 @@ final class RecordFactory
     }
 
     /**
-     * What the real minimiser leaves of the builder, with nothing but an
-     * application key configured and no field encrypter, so a record built from
-     * it proves the permissive pipeline disturbs nothing. The builder stays
-     * usable, and needs no code: the default definition has its own, so that
-     * building its record is what refuses a builder with none.
+     * What the real minimiser leaves of the builder, as the entry of the id
+     * given or a fresh one, with nothing but an application key and a log id
+     * configured and no field encrypter, so a record built from it proves the
+     * permissive pipeline disturbs nothing. The builder stays usable, and needs
+     * no code: the default definition has its own, so that building its record
+     * is what refuses a builder with none.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
+     * @param  ?string  $entryId
      * @return \SineMacula\Laravel\AuditLog\Privacy\Minimised
      *
      * @throws \InvalidArgumentException
@@ -364,15 +373,18 @@ final class RecordFactory
      * @throws \LogicException
      * @throws \UnexpectedValueException
      */
-    public static function minimisedOf(PendingRecord $pending, ?EventDefinition $definition = null): Minimised
+    public static function minimisedOf(PendingRecord $pending, ?EventDefinition $definition = null, ?string $entryId = null): Minimised
     {
-        $settings = new RedactionSettings(new Repository(['app' => ['key' => self::APP_KEY]]));
+        $config   = new Repository(['app' => ['key' => self::APP_KEY], 'audit-log' => ['integrity' => ['log_id' => self::LOG_ID]]]);
+        $settings = new RedactionSettings($config);
         $hasher   = new IdentifierHasher($settings);
         $sealer   = new EnvelopeSealer(new NoFieldEncrypter, new RecordingExceptionHandler);
 
-        $minimiser = new RecordMinimiser($settings, new Redactor($settings), new IpMinimiser($settings, $hasher), $hasher, $sealer);
+        $minimiser = new RecordMinimiser($settings, new Redactor($settings), new IpMinimiser($settings, $hasher), $hasher, $sealer, new SealSettings($config));
+        $snapshot  = $pending->snapshot();
+        $entryId ??= $snapshot->id ?? Str::uuid7()->toString();
 
-        return $minimiser->minimise($pending->snapshot(), $definition ?? EventDefinition::permissive(EventCode::of(self::PERMISSIVE_CODE)));
+        return $minimiser->minimise($snapshot, $definition ?? EventDefinition::permissive(EventCode::of(self::PERMISSIVE_CODE)), $entryId);
     }
 
     /**
@@ -402,7 +414,31 @@ final class RecordFactory
         $builder->fillClient('203.0.113.7', 'Mozilla/5.0');
         $builder->fillContext(['route' => 'invoices.approve', 'method' => 'POST']);
 
-        return AuditRecord::fromPending($builder, self::minimisedOf($builder), 1, 'finance', self::instant($occurredAt), 'app-eu-1', 'eu-west-2');
+        $id     = Str::uuid7(self::instant($occurredAt))->toString();
+        $record = AuditRecord::fromPending($builder, self::minimisedOf($builder, null, $id), $id, 1, 'finance', self::instant($occurredAt), 'app-eu-1', 'eu-west-2');
+
+        // An envelope among the properties stands for a field the record's own
+        // sealer sealed, which minimising removes from what a record is given,
+        // so such properties are set on the record as given
+        return self::holdsAnEnvelope($properties) ? self::withFields(['properties' => $properties], $record) : $record;
+    }
+
+    /**
+     * Whether the value is, or holds at any depth, a map that is exactly an
+     * encryption envelope.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $value
+     * @return bool
+     */
+    private static function holdsAnEnvelope(mixed $value): bool
+    {
+        if (!is_array($value)) {
+            return false;
+        }
+
+        return EnvelopeKeys::isEnvelope($value) || array_filter($value, self::holdsAnEnvelope(...)) !== [];
     }
 
     /**
@@ -431,10 +467,11 @@ final class RecordFactory
         $builder->fillGuard('web');
         $builder->fillClient('203.0.113.7', 'Mozilla/5.0');
 
-        $minimised  = self::minimisedOf($builder);
+        $id         = Str::uuid7(self::instant(self::OCCURRED_AT))->toString();
+        $minimised  = self::minimisedOf($builder, null, $id);
         $attachment = Attachment::sealed($manifest, self::encrypter());
 
-        return AuditRecord::fromPending($builder, $minimised, 1, 'finance', self::instant(self::OCCURRED_AT), 'app-eu-1', 'eu-west-2', $attachment);
+        return AuditRecord::fromPending($builder, $minimised, $id, 1, 'finance', self::instant(self::OCCURRED_AT), 'app-eu-1', 'eu-west-2', $attachment);
     }
 
     /**

@@ -12,6 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityKey;
 use SineMacula\Laravel\AuditLog\Querying\AccessEvidence;
 use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
+use SineMacula\Laravel\AuditLog\Querying\FieldDisclosure;
 use SineMacula\Laravel\AuditLog\Querying\Position;
 use SineMacula\Laravel\AuditLog\Querying\ReadTerms;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
@@ -29,8 +30,8 @@ use Tests\Fixtures\Records\RecordFactory;
  * each read code, keys and order pinned; the keyed fingerprints; the page, a
  * position shown only under a scope of one tenant; the disclosure of the
  * filters, the scope, the position and the returned pairs, empty for a denied
- * or failed read; an export's manifest; the verdict of a verification;
- * the policy name's limit; and the canonical exact-or-refused check of a record
+ * or failed read; an export's manifest; the verdict of a verification; the
+ * policy name's limit; and the canonical exact-or-refused check of a record
  * against it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -78,7 +79,7 @@ final class AccessEvidenceTest extends TestCase
         yield from [
             'a page' => [
                 static fn (): AccessEvidence => self::page(),
-                ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'outcome'],
+                ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'reveal', 'fields', 'outcome'],
                 ArtifactKind::DISCLOSURE,
             ],
             'a count' => [
@@ -234,7 +235,7 @@ final class AccessEvidenceTest extends TestCase
     #[DataProvider('providePages')]
     public function testThePageIsFirstCursorThePositionOrNext(\Closure $scope, bool $cursor, ?Position $position, array|string $page): void
     {
-        $evidence   = AccessEvidence::forPage(self::terms($scope()), self::POLICY, $cursor, $position, 25, [], Outcome::SUCCESS);
+        $evidence   = AccessEvidence::forPage(self::terms($scope()), self::POLICY, $cursor, $position, 25, [], FieldDisclosure::none(false), Outcome::SUCCESS);
         $disclosure = json_decode((string) $evidence->manifest?->canonical, true, 16, JSON_THROW_ON_ERROR);
 
         self::assertSame($page, $evidence->properties['page']);
@@ -333,6 +334,57 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
+     * A page keeps whether its scope revealed the encrypted fields, and how
+     * many fragments it showed in each state, after what it returned and before
+     * its outcome; its disclosure is the same with the grant or without it.
+     *
+     * @return void
+     */
+    public function testAPageRecordsItsRevealGrantAndFieldCounts(): void
+    {
+        $returned  = [[self::SECOND_ID, self::hmac('b')], [self::FIRST_ID, self::hmac('a')]];
+        $revealing = AccessEvidence::forPage(self::terms(self::scope()), self::POLICY, false, null, 25, $returned, new FieldDisclosure(true, 4, 1, 7, 2), Outcome::SUCCESS);
+        $sealed    = AccessEvidence::forPage(self::terms(self::scope()), self::POLICY, false, null, 25, $returned, new FieldDisclosure(false, 9, 0, 0, 1), Outcome::SUCCESS);
+
+        self::assertSame(['returned', 'reveal', 'fields', 'outcome'], array_slice(array_keys($revealing->properties), -4));
+        self::assertTrue($revealing->properties['reveal']);
+        self::assertSame(['encrypted' => 4, 'erased' => 1, 'revealed' => 7, 'unreadable' => 2], $revealing->properties['fields']);
+        self::assertFalse($sealed->properties['reveal']);
+        self::assertSame(['encrypted' => 9, 'erased' => 0, 'revealed' => 0, 'unreadable' => 1], $sealed->properties['fields']);
+        self::assertInstanceOf(Manifest::class, $revealing->manifest);
+        self::assertSame(2, $revealing->manifest->count);
+
+        $metadata = ['manifest' => $revealing->manifest->descriptor()];
+        $altered  = [...$revealing->properties['fields'], 'revealed' => 6];
+
+        $revealing->assertKeptBy(self::record([...$revealing->properties, '_audit' => $metadata]));
+
+        $this->expectException(AuditReadRefusedException::class);
+
+        $revealing->assertKeptBy(self::record([...$revealing->properties, 'fields' => $altered, '_audit' => $metadata]));
+    }
+
+    /**
+     * A page that was denied or failed showed nothing, so it counts no fragment
+     * of any state, whatever it was given, and still records the grant its
+     * scope held.
+     *
+     * @return void
+     */
+    public function testADeniedPageCountsNoField(): void
+    {
+        $none = ['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0];
+
+        $denied  = self::unsuccessfulPage(AccessScope::none(), Outcome::DENIED);
+        $failed  = self::unsuccessfulPage(self::scope()->revealingEncryptedFields(), Outcome::FAILURE, true);
+        $refused = self::unsuccessfulPage(self::scope(), Outcome::DENIED, true);
+
+        self::assertSame([false, $none, 0], [$denied->properties['reveal'], $denied->properties['fields'], $denied->properties['returned']]);
+        self::assertSame([true, $none, 0], [$failed->properties['reveal'], $failed->properties['fields'], $failed->properties['returned']]);
+        self::assertSame([true, $none, 0], [$refused->properties['reveal'], $refused->properties['fields'], $refused->properties['returned']]);
+    }
+
+    /**
      * A successful verification that found the export entry discloses its id
      * and HMAC; one that did not find it discloses nothing and names no entry.
      *
@@ -403,8 +455,11 @@ final class AccessEvidenceTest extends TestCase
      */
     public static function providePolicyNames(): iterable
     {
+        $none = FieldDisclosure::none(true);
+        $page = static fn (string $policy): AccessEvidence => AccessEvidence::forPage(self::terms(self::scope()), $policy, false, null, 25, [], $none, Outcome::SUCCESS);
+
         yield from [
-            'a page'         => [static fn (string $policy): AccessEvidence => AccessEvidence::forPage(self::terms(self::scope()), $policy, false, null, 25, [], Outcome::SUCCESS)],
+            'a page'         => [$page],
             'a count'        => [static fn (string $policy): AccessEvidence => AccessEvidence::forCount(self::terms(self::scope()), $policy, 0, Outcome::SUCCESS)],
             'an export'      => [static fn (string $policy): AccessEvidence => AccessEvidence::forExport(self::terms(null), $policy, 'cef', 0, null, null, Outcome::FAILURE)],
             'a verification' => [static fn (string $policy): AccessEvidence => AccessEvidence::forVerification(self::verified(null), $policy, null, [], Outcome::FAILURE)],
@@ -540,7 +595,7 @@ final class AccessEvidenceTest extends TestCase
     {
         $returned = [[self::SECOND_ID, self::hmac('b')], [self::FIRST_ID, self::hmac('a')]];
 
-        return AccessEvidence::forPage(self::terms(self::scope()), self::POLICY, false, null, 25, $returned, Outcome::SUCCESS);
+        return AccessEvidence::forPage(self::terms(self::scope()), self::POLICY, false, null, 25, $returned, FieldDisclosure::none(false), Outcome::SUCCESS);
     }
 
     /**
@@ -586,15 +641,16 @@ final class AccessEvidenceTest extends TestCase
 
     /**
      * The evidence of a page under the scope that did not succeed, given an
-     * entry all the same.
+     * entry and fragments of each state all the same.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
+     * @param  bool  $reveal
      * @return \SineMacula\Laravel\AuditLog\Querying\AccessEvidence
      */
-    private static function unsuccessfulPage(AccessScope $scope, Outcome $outcome): AccessEvidence
+    private static function unsuccessfulPage(AccessScope $scope, Outcome $outcome, bool $reveal = false): AccessEvidence
     {
-        return AccessEvidence::forPage(self::terms($scope), self::POLICY, false, null, 25, [self::entry()], $outcome);
+        return AccessEvidence::forPage(self::terms($scope), self::POLICY, false, null, 25, [self::entry()], new FieldDisclosure($reveal, 1, 2, 3, 4), $outcome);
     }
 
     /**

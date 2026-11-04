@@ -13,9 +13,11 @@ use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorConflictException;
@@ -27,6 +29,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalVerifier;
+use SineMacula\Laravel\AuditLog\Integrity\KeyStoreVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
@@ -40,12 +43,16 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationRange;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\Verifier;
+use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Integrity\RecordingAnchor;
+use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
@@ -61,7 +68,9 @@ use Tests\TestCase;
  * completion; seals written after the run began are never read; keys rotated
  * between seals and within one verify; a bundle's artifact is checked with its
  * seal; every run, a ranged one included, verifies the whole journal, and a
- * journal finding fails it; and every statement reads the writer.
+ * journal finding fails it; a run of the whole log verifies the key store, or
+ * says it skipped it for a custom encrypter, a ranged one leaves it, and a key
+ * finding fails the run; and every statement reads the writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,7 +80,7 @@ use Tests\TestCase;
 #[CoversClass(Verifier::class)]
 final class VerifierTest extends TestCase
 {
-    use SealsEntries, SeedsArtifacts, WritesTheJournal;
+    use MakesSubjectKeys, SealsEntries, SeedsArtifacts, WritesTheJournal;
 
     /** @var string When every seal of a test is made. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -1359,6 +1368,96 @@ final class VerifierTest extends TestCase
     }
 
     /**
+     * A run of the whole log verifies the key store after the journal: its keys
+     * are counted, verified and erased, and its findings are the run's, at the
+     * key they were found at.
+     *
+     * @return void
+     */
+    public function testACompleteRunVerifiesTheKeyStore(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        $this->storeSeals(1);
+        $this->makeSubjectKey($owner);
+        $this->makeSubjectKey(Reference::of('App\Models\User', '43'));
+        $this->eraseByHand($owner);
+
+        $summary = $this->verifyLog();
+
+        self::assertSame(['keys' => 2, 'erased' => 1, 'findings' => 0, 'skipped' => false, 'encrypter' => null], $summary->keys?->toArray());
+        self::assertSame([], $summary->findings);
+        self::assertFalse($summary->fails(false));
+    }
+
+    /**
+     * A run of a range leaves the key store, as it leaves the unsealed entries:
+     * it reads no key and no key use, finds nothing of them, and its summary
+     * holds no key store section.
+     *
+     * @return void
+     */
+    public function testARangedRunLeavesTheKeyStore(): void
+    {
+        $this->storeSeals(2);
+        $this->keyConnection()->table(KeyTables::keyUsesTable())->insert(['key_id' => self::OTHER_ID, 'entry_id' => self::OTHER_ID]);
+
+        $statements = $this->recordStatements();
+        $summary    = $this->verifyLog(new VerificationRange(1, 2));
+
+        self::assertNull($summary->keys);
+        self::assertSame([], $summary->findings);
+        $tables   = [KeyTables::keyUsesTable(), KeyTables::subjectKeysTable()];
+        $keyStore = array_filter($statements->getArrayCopy(), static fn (string $sql): bool => str_contains($sql, $tables[0]) || str_contains($sql, $tables[1]));
+
+        self::assertSame([], array_values($keyStore));
+    }
+
+    /**
+     * A key finding is a finding of the run and fails it, whatever the seals'
+     * own integrity, and is the run's first failure, at the key.
+     *
+     * @return void
+     */
+    public function testAKeyFindingFailsTheRun(): void
+    {
+        $this->storeSeals(1);
+
+        [$key] = $this->makeSubjectKey(Reference::of('App\Models\User', '42'));
+
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['generation' => 9]);
+
+        $summary = $this->verifyLog();
+
+        self::assertEquals([new RunFinding(Finding::KEY_SUBSTITUTED, $key->id)], $summary->findings);
+        self::assertSame(1, $summary->integrity['valid']);
+        self::assertTrue($summary->fails(false));
+        self::assertSame(Finding::KEY_SUBSTITUTED, $summary->firstFinding);
+        self::assertSame($key->id, $summary->firstBadId);
+        self::assertSame(1, $summary->keys?->findings);
+        self::assertFalse(app(IntegrityProgress::class)->get(IntegrityProgress::VERIFY_LAST_FULL)['passed'] ?? true);
+    }
+
+    /**
+     * With a custom field encrypter bound, the package's key store is not in
+     * use: the run's key store section says it was skipped, naming the
+     * encrypter, and a key use with no key is not found.
+     *
+     * @return void
+     */
+    public function testACustomEncrypterSkipsTheKeyStore(): void
+    {
+        $this->storeSeals(1);
+        $this->keyConnection()->table(KeyTables::keyUsesTable())->insert(['key_id' => self::OTHER_ID, 'entry_id' => self::OTHER_ID]);
+
+        $summary = $this->verifier(encrypter: new RecordingFieldEncrypter)->verify(VerificationRange::whole(), static function (): void {});
+
+        self::assertSame(['keys' => 0, 'erased' => 0, 'findings' => 0, 'skipped' => true, 'encrypter' => RecordingFieldEncrypter::class], $summary->keys?->toArray());
+        self::assertSame([], $summary->findings);
+        self::assertFalse($summary->fails(false));
+    }
+
+    /**
      * Every statement of a run reads the writer, so a replica's lag can never
      * read as a missing row: with a reader that refuses to be used, a complete
      * run under an anchor still passes.
@@ -1461,21 +1560,46 @@ final class VerifierTest extends TestCase
     /**
      * A verifier from the container's collaborators, under the anchor given or
      * none, on the clock given or one stopped when a run begins by default,
-     * with nothing pruned.
+     * with nothing pruned, and the field encrypter given or none.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
+     * @param  ?\SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter  $encrypter
      * @return \SineMacula\Laravel\AuditLog\Integrity\Verifier
      */
-    private function verifier(?CheckpointAnchor $anchor = null, ?Clock $clock = null): Verifier
+    private function verifier(?CheckpointAnchor $anchor = null, ?Clock $clock = null, ?FieldEncrypter $encrypter = null): Verifier
     {
+        $this->keyWrapper();
+
         $anchor ??= new NullAnchor;
         $database = app(DatabaseManager::class);
         $settings = app(SealSettings::class);
         $manifest = app(ManifestVerifier::class);
         $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, new NullPruneLedger, $anchor, $database, $manifest);
 
-        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), $clock ?? FrozenClock::at(self::VERIFIED_AT), $database, app(JournalVerifier::class));
+        $keys = app(KeyStoreVerifier::class);
+        $clock ??= FrozenClock::at(self::VERIFIED_AT);
+
+        $encrypter ??= new NoFieldEncrypter;
+
+        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), $clock, $database, app(JournalVerifier::class), $keys, $encrypter);
+    }
+
+    /**
+     * Record every statement the storage connection runs from now on.
+     *
+     * @return \ArrayObject<int, string>
+     */
+    private function recordStatements(): \ArrayObject
+    {
+        /** @var \ArrayObject<int, string> $statements */
+        $statements = new \ArrayObject;
+
+        DB::connection(StorageConnection::name())->listen(static function (QueryExecuted $query) use ($statements): void {
+            $statements->append(strtolower($query->sql));
+        });
+
+        return $statements;
     }
 
     /**

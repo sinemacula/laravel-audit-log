@@ -16,6 +16,7 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Integrity\Anchorer;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
@@ -25,6 +26,8 @@ use SineMacula\Laravel\AuditLog\Integrity\CheckpointWriter;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalVerifier;
+use SineMacula\Laravel\AuditLog\Integrity\KeyStoreVerifier;
+use SineMacula\Laravel\AuditLog\Integrity\KeyUseCheck;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
@@ -37,10 +40,15 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationRange;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\Verifier;
+use SineMacula\Laravel\AuditLog\Keys\KeyUnit;
+use SineMacula\Laravel\AuditLog\Keys\KeyUses;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
+use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Concerns\WritesTheJournal;
@@ -52,16 +60,20 @@ use Tests\Fixtures\Support\FrozenClock;
  * one included, reads the seals' journal commitments once and the journal a
  * page at a time, one page for a journal shorter than one, whatever the seals;
  * a run of an empty log reads the head and the five whole-log counts and writes
- * its completion; each segment adds one read of its members and their entries,
- * and each page of seals one more; a segment's bundles add one read of their
- * artifacts and one of their members for each batch of them, and a segment
- * without one adds nothing; a ranged run reads its range, its boundary and the
- * head, and writes nothing; the null prune ledger and the null anchor cost no
- * statement, the journal's ledger one indexed read of each seal's records, and
- * the present members a valid record covers one read again for each 500 of
- * them; an anchor that answers costs one read of the local seal at its head;
- * every report is let go as the run goes; and the peak memory of a run follows
- * its largest segment, never the number of segments.
+ * its completion, and reads the key store: the journal's transitions, a page of
+ * keys at a time, the erasure rows of a page that holds an erased key, and the
+ * keys a key use names and no key row has; each segment adds one read of its
+ * members and their entries, and each page of seals one more, and a segment
+ * whose entries hold envelopes one read of their key uses for each 500 of them;
+ * a segment's bundles add one read of their artifacts and one of their members
+ * for each batch of them, and a segment without one adds nothing; a ranged run
+ * reads its range, its boundary and the head, and writes nothing; the null
+ * prune ledger and the null anchor cost no statement, the journal's ledger one
+ * indexed read of each seal's records, and the present members a valid record
+ * covers one read again for each 500 of them; an anchor that answers costs one
+ * read of the local seal at its head; every report is let go as the run goes;
+ * and the peak memory of a run follows its largest segment, never the number of
+ * segments.
  *
  * Memory is measured as the growth of the peak over what the process held
  * before the run, the peak reset first, always against another run in this
@@ -76,13 +88,19 @@ use Tests\Fixtures\Support\FrozenClock;
 #[CoversClass(SegmentVerifier::class)]
 final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 {
-    use SealsEntries, SeedsArtifacts, WritesTheJournal;
+    use MakesSubjectKeys, SealsEntries, SeedsArtifacts, WritesTheJournal;
 
     /** @var int The reads every run makes of the lifecycle journal, a ranged one included, while the journal is shorter than a page: the seals' commitments and one page of rows. */
     private const int JOURNAL_READS = 2;
 
-    /** @var int The reads a run of the whole log makes whatever it holds: the head, the seals outside the chain, the orphaned members, the overdue, the far-ahead and the pending entries, and the journal's. */
-    private const int WHOLE_RUN_READS = 6 + self::JOURNAL_READS;
+    /** @var int The reads a run of the whole log makes of the key store while it holds fewer keys than a page and no erased one: the journal's transitions, one page of keys and the keys a key use names and no key row has. */
+    private const int KEY_STORE_READS = 3;
+
+    /** @var int The reads a run of the whole log makes whatever it holds: the head, the seals outside the chain, the orphaned members, the overdue, the far-ahead and the pending entries, the journal's and the key store's. */
+    private const int WHOLE_RUN_READS = 6 + self::JOURNAL_READS + self::KEY_STORE_READS;
+
+    /** @var string The key every envelope of a test names. */
+    private const string KEY_ID = '01932b4e-9000-7000-8000-00000000000a';
 
     /** @var int How many entries a segment of the largest-segment measurement holds. */
     private const int SEGMENT_ENTRIES = 100;
@@ -142,11 +160,72 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
         $summary = $this->assertStatementBudget(self::WHOLE_RUN_READS + 5 + 1, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog());
         $journal = array_filter($this->capturedStatements(), static fn (string $statement): bool => str_contains($statement, LifecycleTables::journalTable()));
         $commits = array_filter($this->capturedStatements(), static fn (string $statement): bool => str_contains($statement, 'journal_sequence'));
+        $folds   = array_filter($journal, static fn (string $statement): bool => str_contains($statement, 'kind'));
 
         self::assertSame([], $summary->findings);
         self::assertSame(['rows' => 5, 'head' => 5, 'committed' => 5], $summary->journal?->toArray());
-        self::assertCount(1, $journal);
+        self::assertCount(2, $journal);
+        self::assertCount(1, $folds);
         self::assertCount(1, $commits);
+    }
+
+    /**
+     * Each seal whose entries hold envelopes reads their key uses once more,
+     * through the entry index, one statement for each 500 of its entries; a
+     * seal without one reads none, as the segment budget above shows.
+     *
+     * @return void
+     */
+    public function testEachSealWithEnvelopesReadsItsKeyUsesOnce(): void
+    {
+        $unit = new KeyUnit(Reference::of('App\Models\User', '42'), null, self::KEY_CATEGORY);
+
+        $this->insertSubjectKey($this->signedSubjectKey($unit, 1, str_repeat('k', 32), self::KEY_ID));
+        $this->storeSeals(3, 2, true);
+        $this->storeSeals(1, KeyUseCheck::BATCH + 1, true);
+
+        $summary = $this->assertStatementBudget(self::WHOLE_RUN_READS + 4 + 1 + 3 + 2, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog());
+        $table   = KeyTables::keyUsesTable();
+        $uses    = array_filter($this->capturedStatements(), static fn (string $statement): bool => str_contains($statement, $table) && !str_contains($statement, 'exists'));
+
+        self::assertSame(4, $summary->integrity['valid']);
+        self::assertSame([], $summary->findings);
+        self::assertCount(5, $uses);
+    }
+
+    /**
+     * The key store is read in pages of a thousand keys by id, and a page that
+     * holds an erased key reads the erasure rows its keys name once more: a
+     * thousand and one keys, one of them erased, cost two pages and one read of
+     * the journal by id beyond an empty key store.
+     *
+     * @return void
+     */
+    public function testTheKeyStoreIsReadInPages(): void
+    {
+        $owner = Reference::of('App\Models\User', 'erased');
+
+        $this->makeSubjectKey($owner);
+        $this->eraseByHand($owner);
+
+        $rows = [];
+
+        for ($index = 0; $index < KeyStoreVerifier::PAGE; $index++) {
+            $unit   = new KeyUnit(Reference::of('App\Models\User', (string) $index), null, self::KEY_CATEGORY);
+            $rows[] = $this->signedSubjectKey($unit, 1, str_repeat('k', 32))->toRow();
+        }
+
+        foreach (array_chunk($rows, self::INSERT_CHUNK) as $chunk) {
+            DB::connection()->table(KeyTables::subjectKeysTable())->insert($chunk);
+        }
+
+        $summary = $this->assertStatementBudget(self::WHOLE_RUN_READS + 1 + 1, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog());
+        $table   = KeyTables::subjectKeysTable();
+        $pages   = array_filter($this->capturedStatements(), static fn (string $statement): bool => str_contains($statement, $table) && !str_contains($statement, 'exists'));
+
+        self::assertSame([], $summary->findings);
+        self::assertSame(['keys' => KeyStoreVerifier::PAGE + 1, 'erased' => 1, 'findings' => 0, 'skipped' => false, 'encrypter' => null], $summary->keys?->toArray());
+        self::assertCount(2, $pages);
     }
 
     /**
@@ -542,7 +621,11 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
         $prunes ??= new NullPruneLedger;
         $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, $prunes, $anchor, $database, $manifest);
 
-        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), app(Clock::class), $database, app(JournalVerifier::class));
+        $this->keyWrapper();
+
+        $keys = app(KeyStoreVerifier::class);
+
+        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), app(Clock::class), $database, app(JournalVerifier::class), $keys, new NoFieldEncrypter);
     }
 
     /**
@@ -552,41 +635,50 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
      *
      * @param  int  $seals
      * @param  int  $entries
+     * @param  bool  $envelopes
      * @return void
      */
-    private function storeSeals(int $seals, int $entries): void
+    private function storeSeals(int $seals, int $entries, bool $envelopes = false): void
     {
         $writer = new CheckpointWriter(app(DatabaseManager::class), app(SealSigner::class), app(SealSettings::class), app(Clock::class));
         $until  = StoredTime::format(CarbonImmutable::now());
 
         for ($seal = 0; $seal < $seals; $seal++) {
-            $this->insertEntries($entries);
+            $this->insertEntries($entries, $envelopes);
 
             $writer->write(null, $until, $entries);
         }
     }
 
     /**
-     * Insert the number of finalised records as entries, a chunk at a time.
+     * Insert the number of finalised records as entries, a chunk at a time,
+     * each holding an envelope of the test's key with its key use when asked.
      *
      * @param  int  $count
+     * @param  bool  $envelopes
      * @return void
      */
-    private function insertEntries(int $count): void
+    private function insertEntries(int $count, bool $envelopes = false): void
     {
-        $first = new CarbonImmutable(self::ENTRIES_RECORDED_AT, 'UTC');
-        $codec = app(RowCodec::class);
-        $rows  = [];
+        $first      = new CarbonImmutable(self::ENTRIES_RECORDED_AT, 'UTC');
+        $codec      = app(RowCodec::class);
+        $properties = $envelopes ? ['card' => ['v' => 1, 'k' => self::KEY_ID, 'c' => 'c2VhbGVk']] : ['amount' => '1200.00'];
+        $rows       = [];
 
         for ($index = 0; $index < $count; $index++) {
             $instant   = StoredTime::format($first->addMicroseconds($this->stored++));
             $finaliser = new RecordFinaliser(FrozenClock::at($instant), app(RecordSigner::class));
-            $rows[]    = $codec->encode($finaliser->finalise(RecordFactory::captured(occurredAt: $instant)));
+            $rows[]    = $codec->encode($finaliser->finalise(RecordFactory::captured($properties, occurredAt: $instant)));
         }
 
         foreach (array_chunk($rows, self::INSERT_CHUNK) as $chunk) {
             DB::connection()->table(EntrySettings::table())->insert($chunk);
         }
+
+        // An entry with no envelope has no key use, as the store writes none
+        $uses = array_map(static fn (array $row): array => ['key_id' => self::KEY_ID, 'entry_id' => $row['id']], $envelopes ? $rows : []);
+
+        KeyUses::insert(DB::connection(), $uses);
     }
 
     /**

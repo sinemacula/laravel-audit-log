@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\DiskAnchor;
@@ -37,12 +38,15 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationContext;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
+use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
+use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Records\RecordFactory;
+use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
@@ -57,7 +61,9 @@ use Tests\TestCase;
  * resurrected, the manifests of the bundles whose entries verified, checked
  * together, and anchoring as a separate answer: asked of the anchor, never of
  * the receipt, not asked once it has failed, contradicted by the anchor's head,
- * and awaiting its first anchoring within the grace.
+ * and awaiting its first anchoring within the grace; and every key a verified
+ * entry's envelope names must have its key use, read for the seal's entries
+ * together, and not at all for a seal with no envelope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -95,6 +101,15 @@ final class SegmentVerifierTest extends TestCase
 
     /** @var string An id no seal has. */
     private const string OTHER_ID = '01932b4e-9000-7000-8000-00000000ffff';
+
+    /** @var string The key an envelope names. */
+    private const string KEY_ID = '01932b4e-9000-7000-8000-00000000000a';
+
+    /** @var string Another key an envelope names. */
+    private const string OTHER_KEY_ID = '01932b4e-9000-7000-8000-00000000000b';
+
+    /** @var string An envelope's ciphertext, as the reader requires it: non-empty clean text. */
+    private const string CIPHERTEXT = 'c2VhbGVk';
 
     /** @var string The id of a prune operation. */
     private const string OPERATION_ID = '01932b4e-a000-7000-8000-000000000001';
@@ -999,8 +1014,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A prune record whose signature fails is forged, which is tampering;
-     * the missing entries are not excused.
+     * A prune record whose signature fails is forged, which is tampering; the
+     * missing entries are not excused.
      *
      * @return void
      */
@@ -1261,7 +1276,8 @@ final class SegmentVerifierTest extends TestCase
         $pruned   = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($bytewise)));
 
         self::assertSame(IntegrityStatus::PRUNED, $pruned->integrity);
-        self::assertSame(array_reverse($sorted), $reversed->getArrayCopy());
+        self::assertEqualsCanonicalizing($sorted, $reversed->getArrayCopy());
+        self::assertNotSame($sorted, $reversed->getArrayCopy());
 
         $misplaced = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($engine)));
 
@@ -2073,6 +2089,101 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
+     * An entry whose envelope names a key with no key use naming the entry is
+     * `key_use_missing` at that entry, tampered, and its segment's other
+     * entries, whose key uses are there, are not.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeWithoutItsKeyUseIsMissing(): void
+    {
+        $kept     = $this->storeEnvelopeEntry(self::KEY_ID, '2026-11-01T12:00:00.000000Z');
+        $stripped = $this->storeEnvelopeEntry(self::OTHER_KEY_ID, '2026-11-01T12:00:01.000000Z');
+
+        $this->storeEntries(1);
+        $this->sealAll();
+
+        $this->keyUses()->where('entry_id', $stripped)->delete();
+
+        $report = $this->report(1);
+
+        self::assertSame(1, $this->keyUses()->where('entry_id', $kept)->count());
+        self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
+        self::assertSame(Finding::KEY_USE_MISSING, $report->finding);
+        self::assertSame($stripped, $report->firstBadId);
+    }
+
+    /**
+     * A key use is asked for only of an entry that verified: an entry that
+     * fails its HMAC is reported for that, and says nothing of its keys, so no
+     * key use is read.
+     *
+     * @return void
+     */
+    public function testAnEntryThatFailsItsHmacIsNotAskedForItsKeyUses(): void
+    {
+        $entryId = $this->storeEnvelopeEntry(self::KEY_ID, '2026-11-01T12:00:00.000000Z');
+
+        $this->sealAll();
+        $this->keyUses()->where('entry_id', $entryId)->delete();
+        $this->entries()->where('id', $entryId)->update(['subject_id' => '43']);
+
+        $seal       = $this->seal(1);
+        $statements = $this->listen();
+        $report     = $this->verifier()->verify($seal, 1, null, self::context());
+
+        self::assertSame(Finding::ENTRY_HMAC, $report->finding);
+        self::assertCount(1, $statements);
+    }
+
+    /**
+     * An envelope whose key is not a canonical UUID, such as a custom
+     * encrypter's, is given no key use and needs none: its segment is valid.
+     *
+     * @return void
+     */
+    public function testANonUuidKeyNeedsNoKeyUse(): void
+    {
+        $this->storeEnvelopeEntry('vault:key-7', '2026-11-01T12:00:00.000000Z');
+        $this->sealAll();
+
+        self::assertSame(0, $this->keyUses()->count());
+        self::assertSame(IntegrityStatus::VALID, $this->report(1)->integrity);
+    }
+
+    /**
+     * A seal whose entries hold no envelope reads no key use, and one whose
+     * entries hold envelopes reads them all in one more statement, through the
+     * key uses' entry index.
+     *
+     * @return void
+     */
+    public function testASealWithoutEnvelopesReadsNoKeyUse(): void
+    {
+        $this->storeEntries(3);
+        $this->sealAll();
+
+        $plain = $this->seal(1);
+
+        $this->storeEnvelopeEntry(self::KEY_ID, '2026-11-01T12:30:00.000000Z');
+        $this->storeEnvelopeEntry(self::OTHER_KEY_ID, '2026-11-01T12:30:01.000000Z');
+        $this->sealAll();
+
+        $sealed     = $this->seal(2);
+        $previous   = $this->report(1);
+        $statements = $this->listen();
+
+        self::assertSame(IntegrityStatus::VALID, $this->verifier()->verify($plain, 1, null, self::context())->integrity);
+        self::assertCount(1, $statements);
+
+        $statements->exchangeArray([]);
+
+        self::assertSame(IntegrityStatus::VALID, $this->verifier()->verify($sealed, 2, $previous, self::context())->integrity);
+        self::assertCount(2, $statements);
+        self::assertStringContainsString(KeyTables::keyUsesTable(), $statements[1]);
+    }
+
+    /**
      * Store entries and seal them twice, two seals of two entries each.
      *
      * @return void
@@ -2106,6 +2217,52 @@ final class SegmentVerifierTest extends TestCase
         ?int $expected = null,
     ): SegmentReport {
         return ($verifier ?? $this->verifier())->verify($this->seal($sequence), $expected ?? $sequence, $previous, $context ?? self::context());
+    }
+
+    /**
+     * Store an entry, recorded and occurring at the instant, whose properties
+     * hold an envelope naming the key, as the store writes one with its key
+     * uses, and return its id.
+     *
+     * @param  string  $keyId
+     * @param  string  $at
+     * @return string
+     */
+    private function storeEnvelopeEntry(string $keyId, string $at): string
+    {
+        $finaliser = new RecordFinaliser(FrozenClock::at($at), app(RecordSigner::class));
+        $record    = $finaliser->finalise(RecordFactory::captured(['card' => ['v' => 1, 'k' => $keyId, 'c' => self::CIPHERTEXT]], occurredAt: $at));
+
+        app(DatabaseAuditStore::class)->store($record);
+
+        return $record->record->id;
+    }
+
+    /**
+     * Record every statement the storage connection runs from now on.
+     *
+     * @return \ArrayObject<int, string>
+     */
+    private function listen(): \ArrayObject
+    {
+        /** @var \ArrayObject<int, string> $statements */
+        $statements = new \ArrayObject;
+
+        DB::connection(StorageConnection::name())->listen(static function (QueryExecuted $query) use ($statements): void {
+            $statements->append(strtolower($query->sql));
+        });
+
+        return $statements;
+    }
+
+    /**
+     * A query of the key uses table on the storage connection.
+     *
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private function keyUses(): Builder
+    {
+        return DB::connection(StorageConnection::name())->table(KeyTables::keyUsesTable());
     }
 
     /**

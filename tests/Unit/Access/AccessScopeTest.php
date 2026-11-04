@@ -56,6 +56,7 @@ final class AccessScopeTest extends TestCase
             'denied'            => true,
             'except_categories' => [],
             'only_categories'   => [],
+            'reveal'            => false,
             'tenantless'        => false,
             'tenants'           => [],
         ], $scope->toArray());
@@ -158,7 +159,9 @@ final class AccessScopeTest extends TestCase
             'excepting none'           => [static fn (AccessScope $scope): AccessScope => $scope->exceptCategories()],
             'about some'               => [static fn (AccessScope $scope): AccessScope => $scope->onlyAbout(Reference::of('user', '1'))],
             'about no one'             => [static fn (AccessScope $scope): AccessScope => $scope->onlyAbout()],
+            'revealing the fields'     => [static fn (AccessScope $scope): AccessScope => $scope->revealingEncryptedFields()],
             'every operation in a row' => [static fn (AccessScope $scope): AccessScope => $scope
+                ->revealingEncryptedFields()
                 ->withTenantless()
                 ->onlyCategories('auth')
                 ->exceptCategories('audit')
@@ -503,6 +506,7 @@ final class AccessScopeTest extends TestCase
             'denied'            => false,
             'except_categories' => [],
             'only_categories'   => ['alpha', 'beta', 'zeta'],
+            'reveal'            => false,
             'tenantless'        => true,
             'tenants'           => [['Team', 'a'], ['te', 'z'], ['team', 'B'], ['team', 'b']],
         ], $scope->toArray());
@@ -525,19 +529,167 @@ final class AccessScopeTest extends TestCase
      */
     public function testTheFingerprintIsTheSha256OfTheCanonicalForm(): void
     {
-        $all = '{"about":null,"denied":false,"except_categories":[],"only_categories":null,"tenantless":true,"tenants":null}';
+        $all = '{"about":null,"denied":false,"except_categories":[],"only_categories":null,"reveal":false,"tenantless":true,"tenants":null}';
 
         self::assertSame(hash('sha256', $all), AccessScope::all()->fingerprint());
 
-        $none = '{"about":[],"denied":true,"except_categories":[],"only_categories":[],"tenantless":false,"tenants":[]}';
+        $none = '{"about":[],"denied":true,"except_categories":[],"only_categories":[],"reveal":false,"tenantless":false,"tenants":[]}';
 
         self::assertSame(hash('sha256', $none), AccessScope::none()->fingerprint());
 
         $scope = AccessScope::tenants(Reference::of('team', '1'))->exceptCategories('auth')->onlyAbout(Reference::of('user', '1'));
-        $text  = '{"about":[["user","1"]],"denied":false,"except_categories":["auth"],"only_categories":null,"tenantless":false,"tenants":[["team","1"]]}';
+        $text  = '{"about":[["user","1"]],"denied":false,"except_categories":["auth"],"only_categories":null,"reveal":false,"tenantless":false,"tenants":[["team","1"]]}';
 
         self::assertSame(hash('sha256', $text), $scope->fingerprint());
         self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/', $scope->fingerprint());
+    }
+
+    /**
+     * No scope reveals the encrypted fields until it is granted: `none()`,
+     * `all()` and `tenants()` each start without the grant, and say so in their
+     * normalised form.
+     *
+     * @return void
+     */
+    public function testRevealingIsOffOnEveryStartingScope(): void
+    {
+        $starting = [
+            'none'        => AccessScope::none(),
+            'all'         => AccessScope::all(),
+            'one tenant'  => AccessScope::tenants(Reference::of('team', '1')),
+            'no tenant'   => AccessScope::tenants(),
+            'two tenants' => AccessScope::tenants(Reference::of('team', '1'), Reference::of('team', '2')),
+        ];
+
+        foreach ($starting as $name => $scope) {
+            self::assertFalse($scope->revealsEncryptedFields(), $name);
+            self::assertFalse($scope->toArray()['reveal'], $name);
+        }
+    }
+
+    /**
+     * Rows of `[narrowing]`: every operation that keeps a scope seeing
+     * something, to apply after the grant.
+     *
+     * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Access\AccessScope): \SineMacula\Laravel\AuditLog\Access\AccessScope}>
+     */
+    public static function provideNarrowings(): iterable
+    {
+        yield from [
+            'the tenantless rows'  => [static fn (AccessScope $scope): AccessScope => $scope->withTenantless()],
+            'only some categories' => [static fn (AccessScope $scope): AccessScope => $scope->onlyCategories('billing', 'auth')],
+            'excepting some'       => [static fn (AccessScope $scope): AccessScope => $scope->exceptCategories('billing')],
+            'excepting none'       => [static fn (AccessScope $scope): AccessScope => $scope->exceptCategories()],
+            'about some'           => [static fn (AccessScope $scope): AccessScope => $scope->onlyAbout(Reference::of('user', '1'))],
+            'every one in a row'   => [static fn (AccessScope $scope): AccessScope => $scope
+                ->withTenantless()
+                ->onlyCategories('auth', 'billing')
+                ->exceptCategories('billing')
+                ->onlyAbout(Reference::of('user', '1'), Reference::of('service', '1'))
+                ->onlyAbout(Reference::of('user', '1'))],
+        ];
+    }
+
+    /**
+     * The grant survives every narrowing that leaves the scope seeing
+     * something, from every starting scope that sees anything, and changes
+     * nothing of what the scope sees.
+     *
+     * @param  \Closure(\SineMacula\Laravel\AuditLog\Access\AccessScope): \SineMacula\Laravel\AuditLog\Access\AccessScope  $narrowing
+     * @return void
+     */
+    #[DataProvider('provideNarrowings')]
+    public function testRevealingSurvivesEveryNarrowing(\Closure $narrowing): void
+    {
+        foreach ([AccessScope::all(), AccessScope::tenants(Reference::of('team', '1'), Reference::of('team', '2'))] as $scope) {
+            $plain    = $narrowing($scope);
+            $revealed = $narrowing($scope->revealingEncryptedFields());
+
+            self::assertFalse($plain->revealsEncryptedFields());
+            self::assertTrue($revealed->revealsEncryptedFields());
+            self::assertTrue($revealed->toArray()['reveal']);
+            self::assertFalse($revealed->isDenied());
+            self::assertSame(self::seen($plain), self::seen($revealed));
+            self::assertSame([...$plain->toArray(), 'reveal' => true], $revealed->toArray());
+        }
+    }
+
+    /**
+     * A denied scope never reveals: the grant on a denied scope is the denied
+     * scope itself, and a narrowing that leaves a revealing scope seeing
+     * nothing gives the one form of `none()`, without the grant.
+     *
+     * @return void
+     */
+    public function testADeniedScopeNeverReveals(): void
+    {
+        $none = AccessScope::none();
+
+        self::assertSame($none, $none->revealingEncryptedFields());
+        self::assertFalse(AccessScope::tenants()->revealingEncryptedFields()->revealsEncryptedFields());
+
+        $revealing = AccessScope::all()->revealingEncryptedFields();
+        $emptied   = [
+            'no category'             => $revealing->onlyCategories(),
+            'no shared category'      => $revealing->onlyCategories('auth')->onlyCategories('billing'),
+            'every category excepted' => $revealing->onlyCategories('auth')->exceptCategories('auth'),
+            'about no one'            => $revealing->onlyAbout(),
+            'about no shared one'     => $revealing->onlyAbout(Reference::of('user', '1'))->onlyAbout(Reference::of('user', '2')),
+        ];
+
+        foreach ($emptied as $name => $scope) {
+            self::assertTrue($scope->isDenied(), $name);
+            self::assertFalse($scope->revealsEncryptedFields(), $name);
+            self::assertSame(AccessScope::none()->toArray(), $scope->toArray(), $name);
+            self::assertSame(AccessScope::none()->fingerprint(), $scope->fingerprint(), $name);
+        }
+    }
+
+    /**
+     * The grant is part of the normalised form, as `reveal`, and so of the
+     * canonical text the fingerprint is the SHA-256 of, pinned here as text.
+     *
+     * @return void
+     */
+    public function testTheGrantIsInTheNormalisedFormAndFingerprint(): void
+    {
+        $scope = AccessScope::tenants(Reference::of('team', '1'))->exceptCategories('auth')->revealingEncryptedFields();
+
+        self::assertSame([
+            'about'             => null,
+            'denied'            => false,
+            'except_categories' => ['auth'],
+            'only_categories'   => null,
+            'reveal'            => true,
+            'tenantless'        => false,
+            'tenants'           => [['team', '1']],
+        ], $scope->toArray());
+
+        $text = '{"about":null,"denied":false,"except_categories":["auth"],"only_categories":null,"reveal":true,"tenantless":false,"tenants":[["team","1"]]}';
+
+        self::assertSame(hash('sha256', $text), $scope->fingerprint());
+    }
+
+    /**
+     * Two scopes that see the same entries by the same rules, one granted the
+     * reveal and one not, have different normalised forms and fingerprints,
+     * whatever order the grant was given in, and granting it twice is granting
+     * it once.
+     *
+     * @return void
+     */
+    public function testScopesDifferingOnlyInTheGrantHaveDifferentFingerprints(): void
+    {
+        $plain  = AccessScope::all()->onlyCategories('auth');
+        $before = AccessScope::all()->revealingEncryptedFields()->onlyCategories('auth');
+        $after  = AccessScope::all()->onlyCategories('auth')->revealingEncryptedFields();
+
+        self::assertSame(self::seen($plain), self::seen($before));
+        self::assertNotSame($plain->toArray(), $before->toArray());
+        self::assertNotSame($plain->fingerprint(), $before->fingerprint());
+        self::assertSame($before->toArray(), $after->toArray());
+        self::assertSame($before->fingerprint(), $after->fingerprint());
+        self::assertSame($after->fingerprint(), $after->revealingEncryptedFields()->fingerprint());
     }
 
     /**
@@ -627,7 +779,7 @@ final class AccessScopeTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @param  array{about: ?list<array{0: string, 1: string}>, denied: bool, except_categories: list<string>, only_categories: ?list<string>, tenantless: bool, tenants: ?list<array{0: string, 1: string}>}  $form
+     * @param  array{about: ?list<array{0: string, 1: string}>, denied: bool, except_categories: list<string>, only_categories: ?list<string>, reveal: bool, tenantless: bool, tenants: ?list<array{0: string, 1: string}>}  $form
      * @param  array{0: ?string, 1: ?string}  $tenant
      * @param  string  $category
      * @param  ?array{0: string, 1: string}  $actor

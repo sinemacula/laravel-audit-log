@@ -15,9 +15,10 @@ use Tests\Fixtures\Database\EntriesTableShape;
  * against: the entries table's is what its migration gives, column by column
  * and index by index, the artifacts', the outbox's, the deliveries', the
  * checkpoints', the checkpoint members', the integrity state's, the lifecycle
- * journal's, the holds', the lifecycle lock's and the import batches' are what
- * theirs give, and each names its table and describes a column the package does
- * not write in its own words.
+ * journal's, the holds', the lifecycle lock's, the import batches', the subject
+ * keys', the owner erasures' and the key uses' are what theirs give, and each
+ * names its table and describes a column the package does not write in its own
+ * words.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -376,14 +377,105 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index a lifecycle
-     * shape names fits PostgreSQL's 63 characters.
+     * Each key table's shape is what its migration gives: the subject keys
+     * keyed by the key's id, with its unit, its generation, its state, its
+     * wrapped key, its erasure and its signature, one key per unit and
+     * generation and its keys found by owner and by erasure; the owner erasures
+     * keyed by the journal row's id, with the owner, the transition,
+     * the floor and the journal's sequence, found by owner in journal order;
+     * and the key uses keyed by the key and the entry, found by the entry.
+     *
+     * @return void
+     */
+    public function testEveryKeyTableHasItsShape(): void
+    {
+        $keys     = TableShape::subjectKeys();
+        $markers  = TableShape::ownerErasures();
+        $keyUses  = TableShape::keyUses();
+        $required = static fn (TableShape $shape): array => array_keys(array_filter($shape->columns, static fn (array $column): bool => !$column[2]));
+
+        self::assertSame([
+            'id'          => ['uuid', 36, false],
+            'owner_type'  => ['string', 191, false],
+            'owner_id'    => ['string', 191, false],
+            'tenant_type' => ['string', 191, true],
+            'tenant_id'   => ['string', 191, true],
+            'category'    => ['string', 64, false],
+            'unit'        => ['string', 64, false],
+            'generation'  => ['integer', null, false],
+            'state'       => ['string', 16, false],
+            'wrapped_key' => ['text', null, true],
+            'wrap_key_id' => ['string', 191, true],
+            'created_at'  => ['datetime', 6, false],
+            'erasure_id'  => ['uuid', 36, true],
+            'key_id'      => ['string', 32, false],
+            'hmac'        => ['string', 64, false],
+        ], $keys->columns);
+        self::assertSame([
+            '_unit_unique'   => [['unit', 'generation'], true],
+            '_owner_index'   => [['owner_type', 'owner_id'], false],
+            '_erasure_index' => [['erasure_id'], false],
+        ], $keys->indexes);
+        self::assertSame(['id'], $keys->primary);
+
+        self::assertSame([
+            'id'               => ['uuid', 36, false],
+            'owner_type'       => ['string', 191, false],
+            'owner_id'         => ['string', 191, false],
+            'transition'       => ['string', 16, false],
+            'generation_floor' => ['integer', null, false],
+            'journal_sequence' => ['bigint', null, false],
+            'created_at'       => ['datetime', 6, false],
+        ], $markers->columns);
+        self::assertSame(['_owner_index' => [['owner_type', 'owner_id', 'journal_sequence'], false]], $markers->indexes);
+        self::assertSame(['id'], $markers->primary);
+
+        self::assertSame(['key_id' => ['uuid', 36, false], 'entry_id' => ['uuid', 36, false]], $keyUses->columns);
+        self::assertSame(['_entry_index' => [['entry_id'], false]], $keyUses->indexes);
+        self::assertSame(['key_id', 'entry_id'], $keyUses->primary);
+
+        self::assertSame(array_keys($markers->columns), $required($markers));
+        self::assertSame(array_keys($keyUses->columns), $required($keyUses));
+    }
+
+    /**
+     * No column of a key table is named a word any supported engine reserves,
+     * so every statement names them bare: the marker's transition and floor are
+     * `transition` and `generation_floor`, never `action` or `floor`.
+     *
+     * @return void
+     */
+    public function testNoKeyTableColumnIsAReservedWord(): void
+    {
+        $reserved = ['action', 'floor', 'order', 'user', 'collation', 'key', 'range', 'generated', 'use', 'usage'];
+
+        foreach ([TableShape::subjectKeys(), TableShape::ownerErasures(), TableShape::keyUses()] as $shape) {
+            self::assertSame([], array_values(array_intersect(array_keys($shape->columns), $reserved)), $shape->label);
+        }
+    }
+
+    /**
+     * At the longest table name the setting accepts, every index a lifecycle or
+     * key shape names fits PostgreSQL's 63 characters, and a key use's primary
+     * key, which its migration names after the table too.
      *
      * @return void
      */
     public function testEveryLifecycleIndexFitsAtTheLongestTableName(): void
     {
-        foreach ([TableShape::journal(), TableShape::holds(), TableShape::lock(), TableShape::importBatches()] as $shape) {
+        self::assertLessThanOrEqual(63, 47 + strlen('_primary'));
+
+        $shapes = [
+            TableShape::journal(),
+            TableShape::holds(),
+            TableShape::lock(),
+            TableShape::importBatches(),
+            TableShape::subjectKeys(),
+            TableShape::ownerErasures(),
+            TableShape::keyUses(),
+        ];
+
+        foreach ($shapes as $shape) {
             foreach (array_keys($shape->indexes) as $suffix) {
                 self::assertLessThanOrEqual(63, 47 + strlen($suffix), $suffix);
             }
@@ -410,6 +502,9 @@ final class TableShapeTest extends TestCase
             'the holds'              => [TableShape::holds(), 'holds', 'Column `notes` is not one the package writes.'],
             'the lifecycle lock'     => [TableShape::lock(), 'lifecycle lock', 'Column `notes` is not one the package writes.'],
             'the import batches'     => [TableShape::importBatches(), 'import batches', 'Column `notes` is not one the package writes.'],
+            'the subject keys'       => [TableShape::subjectKeys(), 'subject keys', 'Column `notes` is not one the package writes.'],
+            'the owner erasures'     => [TableShape::ownerErasures(), 'owner erasures', 'Column `notes` is not one the package writes.'],
+            'the key uses'           => [TableShape::keyUses(), 'key uses', 'Column `notes` is not one the package writes.'],
         ];
     }
 

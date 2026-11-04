@@ -26,8 +26,9 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ImportLineParser;
  * order; every lifecycle command and every option it declares is named; the
  * import format is documented field by field, every field the parser accepts;
  * every value of the lifecycle's enums is named in its guide; and every call
- * the guides show on `AuditLog::lifecycle()` is a method of the lifecycle. It
- * catches an omission or a rename, not wrong prose.
+ * the guides show on `AuditLog::lifecycle()`, the privacy guide's erasure and
+ * key calls included, is a method of the lifecycle, and every method is shown.
+ * It catches an omission or a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,6 +44,9 @@ final class LifecycleGuidesTest extends TestCase
     /** @var string The import guide, from the repository's root. */
     private const string IMPORT_GUIDE = '/docs/guides/import.md';
 
+    /** @var string The privacy guide, from the repository's root, which shows the erasure and key calls. */
+    private const string PRIVACY_GUIDE = '/docs/guides/privacy.md';
+
     /** @var list<string> The retention guide's sections, in order. */
     private const array RETENTION_SECTIONS = ['Retention by category', 'A policy of your own', 'Preservation', 'Holds', 'Prune runs', 'After a prune'];
 
@@ -51,6 +55,9 @@ final class LifecycleGuidesTest extends TestCase
 
     /** @var string The field naming a line's format, which the parser reads before the others. */
     private const string FORMAT_FIELD = 'format';
+
+    /** @var string Pattern of a claim that destruction is prevented; "never impossible" denies one. */
+    private const string PREVENTION_CLAIM = '/\b(?:prevents?|(?<!never )impossible|cannot be deleted)\b/i';
 
     /** @var string Pattern of a call on the lifecycle the facade gives: the method chained after `AuditLog::lifecycle()`. */
     private const string LIFECYCLE_CALL = '/\bAuditLog::lifecycle\(\)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/';
@@ -261,14 +268,16 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The guides make no claim that a hold, a prune or the journal prevents
-     * destruction by someone holding the database's credentials.
+     * The guides make no claim that a hold, a prune, the journal or an erasure
+     * prevents destruction by someone holding the database's credentials;
+     * "never impossible", the phrase that denies such a claim, is not one.
      *
      * @return void
      */
     public function testTheGuidesNeverClaimDestructionIsPrevented(): void
     {
-        self::assertSame(0, preg_match('/\b(?:prevents?|impossible|cannot be deleted)\b/i', self::guides()));
+        self::assertSame(0, preg_match(self::PREVENTION_CLAIM, self::guides()));
+        self::assertSame(1, preg_match(self::PREVENTION_CLAIM, 'Erasure makes a restore impossible.'));
     }
 
     /**
@@ -325,13 +334,13 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Both guides, one after the other.
+     * The guides that show the lifecycle's calls, one after the other.
      *
      * @return string
      */
     private static function guides(): string
     {
-        return self::read(self::RETENTION_GUIDE) . "\n" . self::read(self::IMPORT_GUIDE);
+        return implode("\n", array_map(self::read(...), [self::RETENTION_GUIDE, self::IMPORT_GUIDE, self::PRIVACY_GUIDE]));
     }
 
     /**

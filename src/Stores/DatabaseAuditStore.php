@@ -14,13 +14,16 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Keys\KeyUses;
 use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
+use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
  * Stores finalised records as rows of the entries table, on the storage
- * connection's writer, with one plain insert each, and a bulk record's
- * attachment as a row of the artifacts table, written with its entry.
+ * connection's writer, with one plain insert each, a bulk record's attachment
+ * as a row of the artifacts table, written with its entry, and the key uses of
+ * a record that holds an envelope, written with its entry too.
  *
  * Outside a transaction a record's insert runs alone, and the store opens no
  * transaction of its own. Inside one, Laravel-managed on the storage
@@ -32,11 +35,15 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * connections and a host transaction that is already aborted propagate, and the
  * host must handle them.
  *
- * A bulk record is a bundle: its artifact and its entry are written together,
- * artifact first, in one transaction of one attempt, which is a real
- * transaction outside a host and a savepoint inside one, so the entry's failure
- * rolls the artifact back and neither is ever kept without the other. A bundle
- * costs two inserts and that one transaction or savepoint.
+ * A record is written together with what describes it when it is a bulk record,
+ * whose artifact is written first, or when it holds an envelope, whose key uses
+ * are written after it: one row for each distinct key, a canonical lower-case
+ * UUID, its envelopes name, so an owner's entries are found through the owner's
+ * keys and verification proves every envelope has its row. Together means in
+ * one transaction of one attempt, which is a real transaction outside a host
+ * and a savepoint inside one, so a failure of any insert rolls the others back
+ * and none is ever kept without the rest. A record with no envelope and no
+ * attachment keeps its single insert.
  *
  * An insert never ignores a conflict. When it violates a unique index, the
  * violation is caught outside the savepoint or the transaction, once it is
@@ -50,36 +57,43 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * verification, or whose captured content differs, is a
  * `RecordConflictException`; an entry that verifies with the same captured
  * content is the record, stored already, and is kept as it is, its time and key
- * included. A bundle's duplicate reads its entry and its artifact, and is the
- * bundle stored already only when the entry is the record's and the artifact
- * has its id, entry, kind, member count and digest, never compared by its
- * sealed members, which a retry carries unchanged; an entry without its
- * artifact, with another, or an artifact without its entry is a
- * `RecordConflictException` too. A row that cannot be verified at all (its key
- * is unknown, its version unsupported, or it is malformed) propagates the
+ * included, as are its key uses. A bundle's duplicate reads its entry and its
+ * artifact, and is the bundle stored already only when the entry is the
+ * record's and the artifact has its id, entry, kind, member count and digest,
+ * never compared by its sealed members, which a retry carries unchanged; an
+ * entry without its artifact, with another, or an artifact without its entry is
+ * a `RecordConflictException` too. A row that cannot be verified at all (its
+ * key is unknown, its version unsupported, or it is malformed) propagates the
  * signer's or the codec's exception. Nothing else is caught.
  *
- * A fresh insert of a pruned record's id violates no index, so it is not
- * refused here: the store would need a statement on every write to see it. The
- * paths that hand the store an id it did not mint now, the outbox drain and the
- * spill replay, check every id first; a record an application kept and stores
- * again directly is inserted, and verification reports its seal `resurrected`.
+ * Retention leaves a pruned entry's key uses, so a record holding an envelope
+ * that is stored again once pruned violates their key, and is refused as
+ * already pruned. A fresh insert of any other pruned record's id violates no
+ * index, so it is not refused here: the store would need a statement on every
+ * write to see it. The paths that hand the store an id it did not mint now, the
+ * outbox drain and the spill replay, check every id first; a record an
+ * application kept and stores again directly is inserted, and verification
+ * reports its seal `resurrected`.
  *
  * A record costs one statement, and inside a transaction Laravel's savepoint
  * too; a duplicate costs one more, the read, and inside a transaction the
  * savepoint's rollback; a violation with nothing stored costs the read of the
- * tombstones too. A bundle's duplicate costs the two reads, and the rollback of
- * its transaction or savepoint.
+ * tombstones too. A record holding an envelope costs its insert and one insert
+ * of its key uses, in one transaction of its own or a savepoint, a second only
+ * past 400 keys on SQLite and 10,000 elsewhere. A bundle costs two inserts and
+ * that one transaction or savepoint, and one more insert for its key uses. A
+ * duplicate written together costs the reads of what it is written with, and
+ * the rollback of its transaction or savepoint.
  *
  * Laravel never releases a savepoint that succeeds, and releasing it would not
  * help: on PostgreSQL every savepoint is a subtransaction, and one that wrote
- * keeps its subtransaction id until the host transaction ends. Each record or
- * bundle stored inside a host transaction therefore holds one subtransaction
- * until the host commits or rolls back, and past 64 in one transaction
- * PostgreSQL's snapshots overflow, slowing every session of the cluster, hot
- * standbys included, until it ends. Keep the records stored in one host
- * transaction well under 64, or give the audit log a storage connection of its
- * own, on which the host's transactions are not open, so no savepoint is used.
+ * keeps its subtransaction id until the host transaction ends. Each record
+ * stored inside a host transaction therefore holds one subtransaction until the
+ * host commits or rolls back, and past 64 in one transaction PostgreSQL's
+ * snapshots overflow, slowing every session of the cluster, hot standbys
+ * included, until it ends. Keep the records stored in one host transaction well
+ * under 64, or give the audit log a storage connection of its own, on which the
+ * host's transactions are not open, so no savepoint is used.
  *
  * It is durable, since a return is a committed insert or a write inside the
  * host's transaction, it participates in a transaction on the storage
@@ -120,9 +134,10 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
     ) {}
 
     /**
-     * Store the finalised record as one row of the entries table, and a bulk
-     * record's attachment with it as one row of the artifacts table, or succeed
-     * without writing when what is stored under its ids is the same record.
+     * Store the finalised record as one row of the entries table, with a bulk
+     * record's attachment as one row of the artifacts table and the key uses of
+     * the keys its envelopes name, or succeed without writing when what is
+     * stored under its ids is the same record.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return void
@@ -142,9 +157,10 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
         $connection = $this->connection();
         $table      = EntrySettings::table();
         $row        = $this->codec->encode($record);
+        $keys       = EnvelopeKeys::ofRecord($record->record);
 
-        if ($record->record->attachment !== null) {
-            $this->storeBundle($connection, $table, $record, $row);
+        if ($record->record->attachment !== null || $keys !== []) {
+            $this->storeTogether($connection, $table, $record, $row, $keys === [] ? [] : KeyUses::rowsFor($record->record->id, $keys));
 
             return;
         }
@@ -248,16 +264,18 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
     }
 
     /**
-     * Store the bundle: its artifact's row and then its entry's, in one
-     * transaction of one attempt, a savepoint inside a host's, so a failure of
-     * either rolls both back. Laravel is given each failure masked, as a
-     * record's insert gives it, and a unique violation is resolved once the
-     * rollback is done.
+     * Store the record together with what describes it: a bulk record's
+     * artifact first, then its entry, then its key uses, in one transaction of
+     * one attempt, a savepoint inside a host's, so a failure of any rolls them
+     * all back. Laravel is given each failure masked, as a record's insert
+     * gives it, and a unique violation is resolved once the rollback is done,
+     * as a bundle's when the record has an attachment.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $table
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  array<string, int|string|null>  $row
+     * @param  list<array{key_id: string, entry_id: string}>  $uses
      * @return void
      *
      * @throws \InvalidArgumentException
@@ -268,21 +286,26 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
      * @throws \SineMacula\Laravel\AuditLog\Stores\RecordConflictException
      * @throws \Throwable
      */
-    private function storeBundle(Connection $connection, string $table, #[\SensitiveParameter] FinalisedRecord $record, #[\SensitiveParameter] array $row): void
+    private function storeTogether(Connection $connection, string $table, #[\SensitiveParameter] FinalisedRecord $record, #[\SensitiveParameter] array $row, array $uses): void
     {
         $artifacts = EntrySettings::artifactsTable();
-        $artifact  = $this->codec->encodeAttachment($record);
+        $artifact  = $record->record->attachment === null ? null : $this->codec->encodeAttachment($record);
 
         try {
-            $connection->transaction(static function (Connection $bundle) use ($artifacts, $artifact, $table, $row): void {
+            $connection->transaction(static function (Connection $together) use ($artifacts, $artifact, $table, $row, $uses): void {
                 try {
-                    $bundle->table($artifacts)->insert($artifact);
-                    $bundle->table($table)->insert($row);
+                    self::insertTogether($together, $artifacts, $artifact, $table, $row, $uses);
                 } catch (QueryException $exception) { // @phpstan-ignore catch.neverThrown
                     throw FailureClassifier::masked($exception);
                 }
             });
         } catch (UniqueConstraintViolationException $exception) {
+            if ($artifact === null) {
+                $this->resolveDuplicate($connection, $table, $record, $exception);
+
+                return;
+            }
+
             $this->resolveBundleDuplicate($connection, $table, $artifacts, $record, $artifact, $exception);
         }
     }
@@ -481,6 +504,39 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
         }
 
         return $query->first();
+    }
+
+    /**
+     * Insert the record's rows on the connection, in order: the artifact's,
+     * when it has one, its entry's, and its key uses, if any.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $artifacts
+     * @param  ?array{id: string, entry_id: string, kind: string, member_count: int, digest: string, members: string, created_at: string}  $artifact
+     * @param  string  $table
+     * @param  array<string, int|string|null>  $row
+     * @param  list<array{key_id: string, entry_id: string}>  $uses
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function insertTogether(
+        Connection $connection,
+        string $artifacts,
+        #[\SensitiveParameter]
+        ?array $artifact,
+        string $table,
+        #[\SensitiveParameter]
+        array $row,
+        array $uses,
+    ): void {
+        if ($artifact !== null) {
+            $connection->table($artifacts)->insert($artifact);
+        }
+
+        $connection->table($table)->insert($row);
+
+        KeyUses::insert($connection, $uses);
     }
 
     /**

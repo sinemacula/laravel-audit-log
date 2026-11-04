@@ -1,0 +1,42 @@
+{
+    "_comment": "Golden vector of an owner's key row and its signature, version 1, under the integrity ring key `k2026`. Computed once, outside the package, from the canonical encoding written by hand; SubjectKeySignerTest::testTheGoldenHmacReproduces and SubjectKeyRowTest pin it. Change it only with those tests.",
+    "secret": "audit-log golden key 0123456789!",
+    "key_id": "k2026",
+    "derivation_info": "sinemacula/audit-log:subject-key:v1",
+    "subject_key": "2df1fbd41e24ca8788e6c5577bedc465831daa1d3ebeb327035b75321995f918",
+    "row": {
+        "id": "01932b4e-e000-7000-8000-000000000001",
+        "owner_type": "App\\Models\\User",
+        "owner_id": "7",
+        "tenant_type": "App\\Models\\Team",
+        "tenant_id": "3",
+        "category": "security",
+        "generation": 1,
+        "wrapped_key": "sLGys7S1tre4ubq7Ufv8MC459F6SLRHJEYFweHWRYIE_2pVvtOOryuL_sdaRQqx9caKma29mE_fM3Mpg",
+        "wrap_key_id": "w2026",
+        "created_at": "2026-11-02T09:30:00.000000Z"
+    },
+    "unit_canonical": "[\"App\\\\Models\\\\User\",\"7\",\"App\\\\Models\\\\Team\",\"3\",\"security\"]",
+    "unit": "e04da77c985cc0ed5a98c5faf362eab7ebb34e4db753aef921fa2e05e6585a79",
+    "tenantless_unit_canonical": "[\"App\\\\Models\\\\User\",\"7\",null,null,\"security\"]",
+    "tenantless_unit": "3c9a6b94170161be0740cd7dae1ce1371c3fd2d2d819a75bd9c07624c040eb79",
+    "signed_fields": {
+        "v": 1,
+        "id": "01932b4e-e000-7000-8000-000000000001",
+        "owner_type": "App\\Models\\User",
+        "owner_id": "7",
+        "tenant_type": "App\\Models\\Team",
+        "tenant_id": "3",
+        "category": "security",
+        "unit": "e04da77c985cc0ed5a98c5faf362eab7ebb34e4db753aef921fa2e05e6585a79",
+        "generation": 1,
+        "created_at": "2026-11-02T09:30:00.000000Z",
+        "key_id": "k2026"
+    },
+    "canonical": "{\"category\":\"security\",\"created_at\":\"2026-11-02T09:30:00.000000Z\",\"generation\":1,\"id\":\"01932b4e-e000-7000-8000-000000000001\",\"key_id\":\"k2026\",\"owner_id\":\"7\",\"owner_type\":\"App\\\\Models\\\\User\",\"tenant_id\":\"3\",\"tenant_type\":\"App\\\\Models\\\\Team\",\"unit\":\"e04da77c985cc0ed5a98c5faf362eab7ebb34e4db753aef921fa2e05e6585a79\",\"v\":1}",
+    "digest": "5380a75e82b10261ec06c5c041770ddc9e9df8049595abb28f97080d165dfcef",
+    "label": "audit-log:subject-key:v1\n",
+    "hmac": "f544c7d634722dd4e6f99b345614462868e2d017ecf207105079680b7951e752",
+    "wrap_context": "{\"d\":\"sinemacula/audit-log:wrap:v1\",\"generation\":1,\"k\":\"01932b4e-e000-7000-8000-000000000001\",\"unit\":\"e04da77c985cc0ed5a98c5faf362eab7ebb34e4db753aef921fa2e05e6585a79\",\"wrap_key_id\":\"w2026\"}",
+    "wrapped_digest": "31e812ce8650bb52b4471534f5c1fb3b3785751bd2d8beec6e3155951c8acafd"
+}

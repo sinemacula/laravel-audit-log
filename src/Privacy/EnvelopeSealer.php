@@ -11,10 +11,10 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * The one way a value reaches the field encrypter during a capture. It accepts
- * only an envelope of exactly `v`, `k` and `c`, returned in that order, and
- * contains every failure, so a broken encrypter costs a field and never the
- * record.
+ * The one way a value reaches the field encrypter during a capture, with the
+ * context it is sealed for. It accepts only an envelope of exactly `v`, `k` and
+ * `c`, returned in that order, and contains every failure, so a broken
+ * encrypter costs a field and never the record.
  *
  * A failure is an encrypter that throws or returns anything else. It is
  * reported once, as a `FieldEncryptionFailedException` that names only the
@@ -55,23 +55,25 @@ final class EnvelopeSealer
     ) {}
 
     /**
-     * The plaintext sealed under the owner's key, as `v`, `k` and `c` in that
-     * order, or `null` when the owner has no key, when the encrypter fails, or
-     * when it has already failed during this capture. Only a failure is
-     * reported; an owner with no key is not one, and later calls go on.
+     * The plaintext sealed under the owner's key for the context, as `v`, `k`
+     * and `c` in that order, or `null` when the owner has no key, when the
+     * encrypter fails, or when it has already failed during this capture. Only
+     * a failure is reported; an owner with no key is not one, and later calls
+     * go on.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  string  $plaintext
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\FieldContext  $context
      * @return ?array{v: int, k: string, c: string}
      */
-    public function seal(#[\SensitiveParameter] Reference $owner, #[\SensitiveParameter] string $plaintext): ?array
+    public function seal(#[\SensitiveParameter] Reference $owner, #[\SensitiveParameter] string $plaintext, #[\SensitiveParameter] FieldContext $context): ?array
     {
         if ($this->failed) {
             return null;
         }
 
         try {
-            $envelope = $this->encrypter->encrypt($owner, $plaintext);
+            $envelope = $this->encrypter->encrypt($owner, $plaintext, $context);
         } catch (\Throwable) {
             // What was thrown could hold the plaintext in its message, so it is
             // never kept, logged or chained: all it leaves is an empty envelope

@@ -35,11 +35,12 @@ use Tests\Fixtures\Support\FrozenClock;
  * Reads the trail as an application does and inspects what each read leaves:
  * the read path's bindings, defaults that the provider's own bindings make a
  * no-op of; an access policy answered by a closure, or one that sees every
- * entry or the entries of some tenants; entries seeded through the database
- * store, signed as the package signs them; the records of the package's own
- * codes, decoded as stored, and their properties compared as the engine keeps
- * them; the plaintext of a read's disclosure; the viewer
- * the tests read for; and the statements run on any connection.
+ * entry, with its encrypted fields revealed or not, or the entries of some
+ * tenants; entries seeded through the database store, signed as the package
+ * signs them; the records of the package's own codes, decoded as stored, and
+ * their properties compared as the engine keeps them; the plaintext of a read's
+ * disclosure; the viewer the tests read for; and the statements run on any
+ * connection.
  *
  * A seeded entry is a captured record of an approved invoice, in the `finance`
  * category, by `user` 42 on `invoice` `inv_0042` for `organisation` `org_01`,
@@ -107,6 +108,17 @@ trait ReadsTheTrail
     protected function allowEverything(): void
     {
         $this->usePolicy(static fn (): AccessScope => AccessScope::all());
+    }
+
+    /**
+     * Bind an access policy that lets every viewer see every entry, with its
+     * encrypted fields revealed through the bound field reader.
+     *
+     * @return void
+     */
+    protected function revealEverything(): void
+    {
+        $this->usePolicy(static fn (): AccessScope => AccessScope::all()->revealingEncryptedFields());
     }
 
     /**

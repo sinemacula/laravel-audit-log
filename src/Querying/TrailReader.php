@@ -37,8 +37,11 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  * table, a replica when one is configured, narrowed by the scope compiler
  * alone. A page reads one row beyond its size to learn whether another page
  * follows; that row is dropped before it is decoded, so it is never shown,
- * disclosed or counted. The page's entries are projected together, so a field
- * reader that fails is reported once for the page.
+ * disclosed or counted. The page's entries are projected together, their
+ * encrypted fields revealed through one call to the field reader only when the
+ * scope reveals them, so a field reader that fails is reported once for the
+ * page, and the page's record keeps the scope's grant and how many fragments it
+ * showed in each state.
  *
  * Every read after the gate is recorded under its code: a success with what it
  * returned, a denied scope as `denied` with `no_scope`, a refused cursor as
@@ -184,6 +187,7 @@ final readonly class TrailReader
             Outcome $outcome,
             ?string $reason = null,
             array $returned = [],
+            ?FieldDisclosure $fields = null,
         ) use (
             $viewer,
             $filters,
@@ -192,7 +196,8 @@ final readonly class TrailReader
             $presented,
             &$position,
         ): void {
-            $evidence = AccessEvidence::forPage($this->terms($filters, $scope), get_debug_type($policy), $presented, $position, $perPage, $returned, $outcome);
+            $fields ??= FieldDisclosure::none($scope?->revealsEncryptedFields() ?? false);
+            $evidence = AccessEvidence::forPage($this->terms($filters, $scope), get_debug_type($policy), $presented, $position, $perPage, $returned, $fields, $outcome);
 
             $this->container->make(AccessRecorder::class)->record(PackageActivity::TRAIL_READ, $viewer, $scope, $evidence, $outcome, $reason);
         };
@@ -218,14 +223,14 @@ final readonly class TrailReader
         $rows = $this->attempt(fn (): array => $this->rows($scope, $filters, $position, $perPage + 1), static fn () => $record($scope, Outcome::FAILURE, self::QUERY_FAILED));
         $more = count($rows) > $perPage ? $binding : null;
 
-        [$entries, $returned, $next] = $this->attempt(
-            fn (): array => $this->project(array_slice($rows, 0, $perPage), $more),
+        [$projected, $returned, $next] = $this->attempt(
+            fn (): array => $this->project(array_slice($rows, 0, $perPage), $scope->revealsEncryptedFields(), $more),
             static fn () => $record($scope, Outcome::FAILURE, self::FORMAT_FAILED),
         );
 
-        $record($scope, Outcome::SUCCESS, null, $returned);
+        $record($scope, Outcome::SUCCESS, null, $returned, $projected->fields);
 
-        return new TrailPage($entries, $next, $perPage);
+        return new TrailPage($projected->entries, $next, $perPage);
     }
 
     /**
@@ -393,20 +398,22 @@ final readonly class TrailReader
     }
 
     /**
-     * The entries shown of the rows, each decoded as stored, then projected
-     * together, the id and HMAC of each, and the cursor of the last one when
-     * another page follows, which it does when a binding is given.
+     * The page shown of the rows, each decoded as stored, then projected
+     * together, revealing their encrypted fields when the scope does, the id
+     * and HMAC of each, and the cursor of the last one when another page
+     * follows, which it does when a binding is given.
      *
      * @param  list<array<string, scalar|null>>  $rows
+     * @param  bool  $reveal
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\CursorBinding  $more
-     * @return array{0: list<\SineMacula\Laravel\AuditLog\Querying\TrailEntry>, 1: list<array{0: string, 1: string}>, 2: ?string}
+     * @return array{0: \SineMacula\Laravel\AuditLog\Querying\ProjectedPage, 1: list<array{0: string, 1: string}>, 2: ?string}
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
      */
-    private function project(#[\SensitiveParameter] array $rows, ?CursorBinding $more): array
+    private function project(#[\SensitiveParameter] array $rows, bool $reveal, ?CursorBinding $more): array
     {
         $codec    = $this->container->make(RowCodec::class);
         $stored   = [];
@@ -419,10 +426,10 @@ final readonly class TrailReader
             $returned[] = [$last->id(), $last->hmac()];
         }
 
-        $entries = $this->container->make(EntryProjector::class)->project($stored);
-        $next    = $more === null || $last === null ? null : $this->container->make(CursorCodec::class)->issue($more, $last->occurredPosition());
+        $projected = $this->container->make(EntryProjector::class)->project($stored, $reveal);
+        $next      = $more === null || $last === null ? null : $this->container->make(CursorCodec::class)->issue($more, $last->occurredPosition());
 
-        return [$entries, $returned, $next];
+        return [$projected, $returned, $next];
     }
 
     /**

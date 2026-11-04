@@ -6,37 +6,44 @@ namespace SineMacula\Laravel\AuditLog\Querying;
 
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
-use SineMacula\Laravel\AuditLog\Integrity\ArtifactInspector;
+use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Privacy\EncryptedField;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
-use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
-use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
-use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
-use SineMacula\Laravel\AuditLog\Records\Reference;
-use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 
 /**
- * Projects a stored entry as the entry a viewer is shown, privacy-safe by
- * construction, in this order: a reason is concealed when the stored properties
- * flag `concealed` as exactly `true`, read before anything is projected; the
- * properties are projected recursively, maps as associative arrays and lists as
- * lists, every encryption envelope through the field reader, and the manifest
- * descriptor lifted out; then the IP address, an encrypted one through the
- * field reader; then the context, read as the properties are; and last the
- * references, enums and times of the columns.
+ * Projects the stored entries of a page as the entries a viewer is shown,
+ * privacy-safe by construction, each in this order: a reason is concealed when
+ * the stored properties flag `concealed` as exactly `true`, read before
+ * anything is projected; the properties are projected recursively, maps as
+ * associative arrays and lists as lists, and the manifest descriptor lifted
+ * out; then the IP address; then the context, read as the properties are; and
+ * last the references, enums and times of the columns.
  *
  * An encryption envelope is a map of exactly `v`, an integer from 1, and `k`
  * and `c`, non-empty strings, wherever it sits, even when an application stored
- * that shape itself; one the field cannot hold is `unreadable`. Nothing the
- * stored entry holds is changed, so it stays evidence.
+ * that shape itself, and an encrypted IP address is one stored as its JSON; one
+ * whose parts its rules refuse is `unreadable`. Under a scope that does not
+ * reveal the encrypted fields every envelope is shown as `encrypted` and the
+ * field reader is never asked. Under one that does, each row's signature is
+ * verified first: every envelope of a row that fails it, or whose signing key
+ * the ring does not hold, is `unreadable` and never reaches the reader; every
+ * envelope of the rows that pass is a field, at its segments, and every field
+ * of the page is read in one call to the field reader. Nothing the stored entry
+ * holds is changed, so it stays evidence.
+ *
+ * A field reader that throws, or answers another count or anything but
+ * readings, costs every field of the page, each shown as `unreadable`: the
+ * failure is reported once for the page, naming only the reader's class, and
+ * what it threw is discarded, because its message could hold the plaintext. An
+ * address the reader reveals as anything but a string is `unreadable`. The page
+ * counts the fragments it shows in each state, never naming one.
  *
  * Only a descriptor the artifact inspector accepts is shown, as its kind, count
  * and digest; any other is dropped from the display and shows as none, since
  * only a tampered row holds one, which verification reports, and a page is
- * never refused for it. A field reader that throws costs the field alone, shown
- * as `unreadable`: the failure is reported once for all the entries projected
- * together, a page's, naming only the reader's class, and what it threw is
- * discarded, because its message could hold the plaintext.
+ * never refused for it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,116 +67,391 @@ final readonly class EntryProjector
     /** @var int The JSON depth of an encrypted IP address: one object of scalars. */
     private const int IP_DEPTH = 2;
 
+    /** @var string The column, and the one segment, of an encrypted IP address. */
+    private const string IP = 'ip';
+
+    /** @var string The count of the fragments the field reader revealed. */
+    private const string REVEALED = 'revealed';
+
+    /** @var array{encrypted: int, erased: int, revealed: int, unreadable: int} A page's counts before any fragment is shown. */
+    private const array NO_FRAGMENT = ['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0];
+
     /**
      * Constructor.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\FieldReader  $reader
      * @param  \Illuminate\Contracts\Debug\ExceptionHandler  $handler
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\RecordSigner  $signer
      */
     public function __construct(
 
-        /** What reads every encrypted fragment of an entry. */
+        /** What reads the encrypted fields of a page under a scope that reveals them. */
         private FieldReader $reader,
 
         /** Where a failed field reader is reported. */
         private ExceptionHandler $handler,
+
+        /** What verifies each row's signature before any of its fields is read. */
+        private RecordSigner $signer,
     ) {}
 
     /**
-     * The entries a viewer is shown of the stored entries, in their order; a
-     * field reader that failed on any of them is reported once.
+     * The entries a viewer is shown of the stored entries, in their order, with
+     * the encrypted fields revealed through one call to the field reader when
+     * the scope reveals them, and what the page disclosed of them.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Querying\StoredEntry>  $stored
-     * @return list<\SineMacula\Laravel\AuditLog\Querying\TrailEntry>
+     * @param  bool  $reveal
+     * @return \SineMacula\Laravel\AuditLog\Querying\ProjectedPage
      *
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      */
-    public function project(#[\SensitiveParameter] array $stored): array
+    public function project(#[\SensitiveParameter] array $stored, bool $reveal): ProjectedPage
     {
-        $failed  = false;
-        $entries = [];
+        $page  = ['fields' => [], 'counts' => self::NO_FRAGMENT];
+        $parts = [];
 
         foreach ($stored as $entry) {
             $envelope = $entry->envelope;
             $id       = $entry->id();
+            $sealedAs = $reveal ? $this->sealedAs($entry) : FieldState::ENCRYPTED;
 
             $concealed  = self::isConcealed($envelope['properties']);
-            $properties = $this->displayedMap(self::withoutDescriptor($envelope['properties']), 'properties', $id, $failed);
-            $ip         = $this->ip(self::nullable($envelope, 'ip'), $id, $failed);
-            $context    = $this->displayedMap($envelope['context'], 'context', $id, $failed);
+            $properties = $this->displayedMap(self::withoutDescriptor($envelope['properties']), 'properties', $id, $sealedAs, $page);
+            $ip         = $this->ip(EntryColumns::nullable($envelope, self::IP), $id, $sealedAs, $page);
+            $context    = $this->displayedMap($envelope['context'], 'context', $id, $sealedAs, $page);
 
-            $entries[] = self::entry($entry, $concealed, $properties, $context, $ip);
+            $parts[] = [$entry, $concealed, $properties, $context, $ip];
         }
 
-        if ($failed) {
-            $this->report();
+        $displays = $this->displays($page);
+        $entries  = [];
+
+        foreach ($parts as [$entry, $concealed, $properties, $context, $ip]) {
+            $shownProperties = self::resolvedMap($properties, $displays);
+            $shownContext    = self::resolvedMap($context, $displays);
+
+            $entries[] = EntryColumns::entry($entry, $concealed, $shownProperties, $shownContext, self::resolvedIp($ip, $displays));
         }
 
-        return $entries;
+        return new ProjectedPage($entries, new FieldDisclosure($reveal, ...$page['counts']));
     }
 
     /**
-     * The shown entry of the stored entry's columns, with what was projected of
-     * its properties, context and IP address.
+     * How the stored entry's envelopes are shown under a scope that reveals
+     * them: `null`, each read through the field reader, when its row's
+     * signature verifies, and `unreadable` when it does not, or its signing key
+     * is not in the ring, or the row cannot be judged.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $entry
+     * @return ?\SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState
+     */
+    private function sealedAs(#[\SensitiveParameter] StoredEntry $entry): ?FieldState
+    {
+        try {
+            return $this->signer->verifies($entry->envelope) ? null : FieldState::UNREADABLE;
+        } catch (\UnexpectedValueException|UnknownKeyException) {
+            // A row whose key is not held, or that cannot be judged, is not
+            // authenticated, so none of what it holds reaches the reader
+            return FieldState::UNREADABLE;
+        }
+    }
+
+    /**
+     * The JSON column projected for display, `null` as an empty array; a column
+     * holding anything but an object or a list is refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $stored
-     * @param  bool  $concealed
-     * @param  array<array-key, mixed>  $properties
-     * @param  array<array-key, mixed>  $context
-     * @param  ?string  $ip
-     * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
+     * @param  mixed  $value
+     * @param  'context'|'properties'  $column
+     * @param  string  $id
+     * @param  ?\SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState  $sealedAs
+     * @param  array{fields: list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>, counts: array{encrypted: int, erased: int, revealed: int, unreadable: int}}  $page
+     * @return array<array-key, mixed>
      *
-     * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      */
-    private static function entry(
-        #[\SensitiveParameter] StoredEntry $stored,
-        bool $concealed,
-        #[\SensitiveParameter] array $properties,
-        #[\SensitiveParameter] array $context,
-        #[\SensitiveParameter] ?string $ip,
-    ): TrailEntry {
-        $envelope = $stored->envelope;
+    private function displayedMap(#[\SensitiveParameter] mixed $value, string $column, string $id, ?FieldState $sealedAs, array &$page): array
+    {
+        $shown = $value === null ? [] : $this->displayed($value, [$column], $id, $sealedAs, $page);
 
-        return new TrailEntry(
-            id: $stored->id(),
-            event: self::text($envelope, 'event'),
-            eventVersion: self::integer($envelope, 'event_version'),
-            recordVersion: self::integer($envelope, 'record_version'),
-            integrityVersion: self::integer($envelope, 'integrity_version'),
-            category: self::text($envelope, 'category'),
-            outcome: Outcome::tryFrom(self::text($envelope, 'outcome')) ?? throw self::malformed('outcome'),
-            reason: $concealed ? null : self::nullable($envelope, 'reason'),
-            actor: self::reference($envelope, 'actor'),
-            subject: self::reference($envelope, 'subject'),
-            principal: self::reference($envelope, 'principal'),
-            tenant: self::reference($envelope, 'tenant'),
-            credentialId: self::nullable($envelope, 'credential_id'),
-            guard: self::nullable($envelope, 'guard'),
-            sessionId: self::nullable($envelope, 'session_id'),
-            requestId: self::nullable($envelope, 'request_id'),
-            traceId: self::nullable($envelope, 'trace_id'),
-            correlationId: self::nullable($envelope, 'correlation_id'),
-            origin: self::origin($envelope),
-            provenance: Provenance::tryFrom(self::text($envelope, 'provenance')) ?? throw self::malformed('provenance'),
-            sourceId: self::text($envelope, 'source_id'),
-            sourceRegion: self::nullable($envelope, 'source_region'),
-            sourceRecordId: self::nullable($envelope, 'source_record_id'),
-            importBatchId: self::nullable($envelope, 'import_batch_id'),
-            sourceDigest: self::nullable($envelope, 'source_digest'),
-            ip: $ip,
-            userAgent: self::nullable($envelope, 'user_agent'),
-            context: $context,
-            properties: $properties,
-            occurredAt: StoredTime::instant(StoredTime::toStorage($stored->occurredAt())),
-            recordedAt: StoredTime::instant(StoredTime::toStorage($stored->recordedAt())),
-            keyId: $stored->keyId(),
-            hmac: $stored->hmac(),
-            manifest: self::manifest($stored),
-        );
+        if (is_array($shown)) {
+            return $shown;
+        }
+
+        throw self::malformed($column);
+    }
+
+    /**
+     * The value at the segments projected for display: an encryption envelope
+     * as its field, to be read, or its marker, a map as an associative array
+     * and a list as a list, each member projected in turn at its key as
+     * `EncryptedField::segment()` names it, which the writer named it by, and
+     * anything else as it is.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $value
+     * @param  non-empty-list<int|string>  $segments
+     * @param  string  $id
+     * @param  ?\SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState  $sealedAs
+     * @param  array{fields: list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>, counts: array{encrypted: int, erased: int, revealed: int, unreadable: int}}  $page
+     * @return mixed
+     */
+    private function displayed(#[\SensitiveParameter] mixed $value, #[\SensitiveParameter] array $segments, string $id, ?FieldState $sealedAs, array &$page): mixed
+    {
+        if (!$value instanceof \stdClass && !is_array($value)) {
+            return $value;
+        }
+
+        $map     = $value instanceof \stdClass;
+        $members = $map ? get_object_vars($value) : $value;
+
+        if (self::isEnvelope($members)) {
+            return self::envelope($members, $segments, $id, $sealedAs, $page);
+        }
+
+        $shown = [];
+
+        foreach ($members as $key => $member) {
+            $shown[$key] = $this->displayed($member, [...$segments, EncryptedField::segment($key)], $id, $sealedAs, $page);
+        }
+
+        return $shown;
+    }
+
+    /**
+     * The IP address for display: one stored as an encrypted envelope as its
+     * field at `ip`, to be read, or its marker; any other value beginning `{`
+     * as `unreadable`; and any other value as stored.
+     *
+     * @param  ?string  $ip
+     * @param  string  $id
+     * @param  ?\SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState  $sealedAs
+     * @param  array{fields: list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>, counts: array{encrypted: int, erased: int, revealed: int, unreadable: int}}  $page
+     * @return \SineMacula\Laravel\AuditLog\Privacy\EncryptedField|string|null
+     */
+    private function ip(#[\SensitiveParameter] ?string $ip, string $id, ?FieldState $sealedAs, array &$page): EncryptedField|string|null
+    {
+        if ($ip === null || !str_starts_with($ip, '{')) {
+            return $ip;
+        }
+
+        $decoded = json_decode($ip, false, self::IP_DEPTH);
+        $members = $decoded instanceof \stdClass ? get_object_vars($decoded) : [];
+
+        if (!self::isEnvelope($members)) {
+            $page['counts'][FieldState::UNREADABLE->value]++;
+
+            return FieldState::UNREADABLE->marker();
+        }
+
+        return self::envelope($members, [self::IP], $id, $sealedAs, $page);
+    }
+
+    /**
+     * What is shown, once the page's fields are read, of each field by its
+     * object's id, each counted by its state: the reading's display, or
+     * `unreadable` for every field when the field reader failed, which is
+     * reported once, and for an address revealed as anything but a string.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array{fields: list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>, counts: array{encrypted: int, erased: int, revealed: int, unreadable: int}}  $page
+     * @return array<int, array<array-key, mixed>|scalar|null>
+     */
+    private function displays(#[\SensitiveParameter] array &$page): array
+    {
+        $readings = $this->readings($page['fields']);
+        $displays = [];
+
+        foreach ($page['fields'] as $index => $field) {
+            $reading = $readings[$index] ?? FieldReading::sealed(FieldState::UNREADABLE);
+            $display = $reading->display();
+            $state   = $reading->state->value ?? self::REVEALED;
+
+            if ($field->segments === [self::IP] && !is_string($display)) {
+                $display = FieldState::UNREADABLE->marker();
+                $state   = FieldState::UNREADABLE->value;
+            }
+
+            $page['counts'][$state]++;
+            $displays[spl_object_id($field)] = $display;
+        }
+
+        return $displays;
+    }
+
+    /**
+     * The readings of the page's fields, in order, from one call to the field
+     * reader, which is never asked for none; or nothing, once reported, when it
+     * throws or answers another count or anything but readings.
+     *
+     * @param  list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>  $fields
+     * @return list<\SineMacula\Laravel\AuditLog\Privacy\FieldReading>
+     */
+    private function readings(#[\SensitiveParameter] array $fields): array
+    {
+        if ($fields === []) {
+            return [];
+        }
+
+        try {
+            $readings = $this->reader->readAll($fields);
+        } catch (\Throwable) {
+            // What was thrown could hold the plaintext in its message, so it is
+            // never kept: every field shows as unreadable and the failure is
+            // reported naming the reader alone
+            $readings = null;
+        }
+
+        if (self::isReadingOf($readings, count($fields))) {
+            return $readings;
+        }
+
+        $this->report();
+
+        return [];
+    }
+
+    /**
+     * Report, once, that the field reader failed, naming only its class. A
+     * reporter that fails too is ignored: the fields already show as
+     * unreadable, and there is nowhere left to say so.
+     *
+     * @return void
+     */
+    private function report(): void
+    {
+        try {
+            $this->handler->report(new \UnexpectedValueException(sprintf('The field reader %s failed.', get_debug_type($this->reader))));
+        } catch (\Throwable) {
+            // The page is still being shown; a broken reporter must not undo
+            // the containment of the failure it was told about
+        }
+    }
+
+    /**
+     * The envelope's members for display: under a scope that reveals the fields
+     * and a row that verified, its field, kept to be read, and otherwise the
+     * marker of the state it is sealed as; one whose parts its rules refuse is
+     * `unreadable`. Each marker is counted.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $members
+     * @param  non-empty-list<int|string>  $segments
+     * @param  string  $id
+     * @param  ?\SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState  $sealedAs
+     * @param  array{fields: list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>, counts: array{encrypted: int, erased: int, revealed: int, unreadable: int}}  $page
+     * @return \SineMacula\Laravel\AuditLog\Privacy\EncryptedField|string
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function envelope(
+        #[\SensitiveParameter]
+        array $members,
+        #[\SensitiveParameter]
+        array $segments,
+        string $id,
+        ?FieldState $sealedAs,
+        array &$page,
+    ): EncryptedField|string {
+        $field = $sealedAs === null ? EncryptedField::fromEnvelope($id, $segments, $members) : null;
+
+        if ($field !== null) {
+            $page['fields'][] = $field;
+
+            return $field;
+        }
+
+        $state = $sealedAs !== null && EncryptedField::isWellFormed($members) ? $sealedAs : FieldState::UNREADABLE;
+
+        $page['counts'][$state->value]++;
+
+        return $state->marker();
+    }
+
+    /**
+     * The projected map with each field in it replaced by what is shown of it.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $shown
+     * @param  array<int, array<array-key, mixed>|scalar|null>  $displays
+     * @return array<array-key, mixed>
+     */
+    private static function resolvedMap(#[\SensitiveParameter] array $shown, #[\SensitiveParameter] array $displays): array
+    {
+        if ($displays === []) {
+            return $shown;
+        }
+
+        foreach ($shown as $key => $member) {
+            if ($member instanceof EncryptedField) {
+                $shown[$key] = $displays[spl_object_id($member)];
+
+                continue;
+            }
+
+            if (!is_array($member)) {
+                continue;
+            }
+
+            $shown[$key] = self::resolvedMap($member, $displays);
+        }
+
+        return $shown;
+    }
+
+    /**
+     * The IP address with its field, if it is one, replaced by what is shown of
+     * it, which is always a string.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\EncryptedField|string|null  $ip
+     * @param  array<int, array<array-key, mixed>|scalar|null>  $displays
+     * @return ?string
+     */
+    private static function resolvedIp(#[\SensitiveParameter] EncryptedField|string|null $ip, #[\SensitiveParameter] array $displays): ?string
+    {
+        if (!$ip instanceof EncryptedField) {
+            return $ip;
+        }
+
+        $display = $displays[spl_object_id($ip)];
+
+        return is_string($display) ? $display : FieldState::UNREADABLE->marker();
+    }
+
+    /**
+     * Whether the field reader's answer is exactly a list of as many readings
+     * as it was asked for.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @phpstan-assert-if-true list<\SineMacula\Laravel\AuditLog\Privacy\FieldReading> $answer
+     *
+     * @param  mixed  $answer
+     * @param  int  $count
+     * @return bool
+     */
+    private static function isReadingOf(#[\SensitiveParameter] mixed $answer, int $count): bool
+    {
+        if (!is_array($answer) || !array_is_list($answer) || count($answer) !== $count) {
+            return false;
+        }
+
+        foreach ($answer as $reading) {
+            if (!$reading instanceof FieldReading) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -189,8 +471,8 @@ final readonly class EntryProjector
     /**
      * The stored properties without the manifest descriptor, which the entry
      * shows on its own or not at all: a copy of the properties and of their
-     * metadata, left out when the descriptor was all it held, and the stored
-     * value itself, unchanged, when there is no descriptor.
+     * metadata, still maps, left out when the descriptor was all it held, and
+     * the stored value itself, unchanged, when there is no descriptor.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -199,148 +481,26 @@ final readonly class EntryProjector
      */
     private static function withoutDescriptor(#[\SensitiveParameter] mixed $properties): mixed
     {
-        $members  = $properties instanceof \stdClass ? get_object_vars($properties) : [];
-        $metadata = $members[self::METADATA_KEY] ?? null;
+        $metadata = $properties instanceof \stdClass ? ($properties->{self::METADATA_KEY} ?? null) : null;
 
         if (!$metadata instanceof \stdClass || !property_exists($metadata, self::MANIFEST_KEY)) {
             return $properties;
         }
 
-        $kept = get_object_vars($metadata);
+        $copy = clone $properties;
+        $kept = clone $metadata;
 
-        unset($kept[self::MANIFEST_KEY]);
+        unset($kept->{self::MANIFEST_KEY});
 
-        if ($kept === []) {
-            unset($members[self::METADATA_KEY]);
+        if (get_object_vars($kept) === []) {
+            unset($copy->{self::METADATA_KEY});
 
-            return $members;
+            return $copy;
         }
 
-        $members[self::METADATA_KEY] = $kept;
+        $copy->{self::METADATA_KEY} = $kept;
 
-        return $members;
-    }
-
-    /**
-     * The JSON column projected for display, `null` as an empty array; a column
-     * holding anything but an object or a list is refused.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $value
-     * @param  'context'|'properties'  $column
-     * @param  string  $id
-     * @param  bool  $failed
-     * @return array<array-key, mixed>
-     *
-     * @throws \UnexpectedValueException
-     */
-    private function displayedMap(#[\SensitiveParameter] mixed $value, string $column, string $id, bool &$failed): array
-    {
-        $shown = $value === null ? [] : $this->displayed($value, $column, $id, $failed);
-
-        return is_array($shown) ? $shown : throw self::malformed($column);
-    }
-
-    /**
-     * The value at the path projected for display: an encryption envelope as
-     * the field reader answers it, `unreadable` when the field cannot hold it,
-     * a map as an associative array and a list as a list, each member projected
-     * in turn, and anything else as it is.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $value
-     * @param  string  $path
-     * @param  string  $id
-     * @param  bool  $failed
-     * @return mixed
-     */
-    private function displayed(#[\SensitiveParameter] mixed $value, #[\SensitiveParameter] string $path, string $id, bool &$failed): mixed
-    {
-        if (!$value instanceof \stdClass && !is_array($value)) {
-            return $value;
-        }
-
-        $members = $value instanceof \stdClass ? get_object_vars($value) : $value;
-
-        if (self::isEnvelope($members)) {
-            $field = EncryptedField::fromEnvelope($id, $path, $members);
-
-            return $field === null ? FieldState::UNREADABLE->marker() : $this->read($field, $failed);
-        }
-
-        $shown = [];
-
-        foreach ($members as $key => $member) {
-            $shown[$key] = $this->displayed($member, $path . '.' . $key, $id, $failed);
-        }
-
-        return $shown;
-    }
-
-    /**
-     * What the field reader shows of the field, or `unreadable` when it throws,
-     * which marks the projection failed and is otherwise discarded.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Privacy\EncryptedField  $field
-     * @param  bool  $failed
-     * @return array<array-key, mixed>|scalar|null
-     */
-    private function read(#[\SensitiveParameter] EncryptedField $field, bool &$failed): array|bool|float|int|string|null
-    {
-        try {
-            return $this->reader->read($field)->display();
-        } catch (\Throwable) {
-            // What was thrown could hold the plaintext in its message, so it is
-            // never kept: the field shows as unreadable and the failure is
-            // reported naming the reader alone
-            $failed = true;
-
-            return FieldState::UNREADABLE->marker();
-        }
-    }
-
-    /**
-     * The IP address for display: one stored as an encrypted envelope as the
-     * field reader answers it at `ip`, a string, `unreadable` for any other
-     * value beginning `{`, and any other value as stored.
-     *
-     * @param  ?string  $ip
-     * @param  string  $id
-     * @param  bool  $failed
-     * @return ?string
-     */
-    private function ip(#[\SensitiveParameter] ?string $ip, string $id, bool &$failed): ?string
-    {
-        if ($ip === null || !str_starts_with($ip, '{')) {
-            return $ip;
-        }
-
-        $decoded = json_decode($ip, false, self::IP_DEPTH);
-        $field   = $decoded instanceof \stdClass ? EncryptedField::fromEnvelope($id, 'ip', $decoded) : null;
-        $shown   = $field === null ? null : $this->read($field, $failed);
-
-        return is_string($shown) ? $shown : FieldState::UNREADABLE->marker();
-    }
-
-    /**
-     * Report, once, that the field reader failed, naming only its class. A
-     * reporter that fails too is ignored: the field already shows as
-     * unreadable, and there is nowhere left to say so.
-     *
-     * @return void
-     */
-    private function report(): void
-    {
-        try {
-            $this->handler->report(new \UnexpectedValueException(sprintf('The field reader %s failed.', get_debug_type($this->reader))));
-        } catch (\Throwable) {
-            // The entry is still being shown; a broken reporter must not undo
-            // the containment of the failure it was told about
-        }
+        return $copy;
     }
 
     /**
@@ -381,119 +541,6 @@ final readonly class EntryProjector
     }
 
     /**
-     * The entry's manifest descriptor as its kind, count and digest, when the
-     * artifact inspector accepts it as exactly a descriptor, or `null`.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $stored
-     * @return ?array{kind: string, count: int, digest: string}
-     */
-    private static function manifest(#[\SensitiveParameter] StoredEntry $stored): ?array
-    {
-        $descriptor = $stored->descriptor();
-
-        if ($descriptor === null || !ArtifactInspector::isDescriptor($descriptor)) {
-            return null;
-        }
-
-        return ['kind' => $descriptor['kind'], 'count' => $descriptor['count'], 'digest' => $descriptor['digest']];
-    }
-
-    /**
-     * The reference of the pair of columns, or `null` unless both are stored.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<string, mixed>  $envelope
-     * @param  'actor'|'principal'|'subject'|'tenant'  $pair
-     * @return ?\SineMacula\Laravel\AuditLog\Records\Reference
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function reference(#[\SensitiveParameter] array $envelope, string $pair): ?Reference
-    {
-        $type = self::nullable($envelope, $pair . '_type');
-        $id   = self::nullable($envelope, $pair . '_id');
-
-        return $type === null || $id === null ? null : Reference::of($type, $id);
-    }
-
-    /**
-     * The entry's origin, or `null` when none is stored.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<string, mixed>  $envelope
-     * @return ?\SineMacula\Laravel\AuditLog\Records\Enums\Origin
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function origin(#[\SensitiveParameter] array $envelope): ?Origin
-    {
-        $origin = self::nullable($envelope, 'origin');
-
-        return $origin === null ? null : Origin::tryFrom($origin) ?? throw self::malformed('origin');
-    }
-
-    /**
-     * The column the row codec read as a string.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<string, mixed>  $envelope
-     * @param  string  $column
-     * @return string
-     */
-    private static function text(#[\SensitiveParameter] array $envelope, string $column): string
-    {
-        $value = $envelope[$column];
-
-        // The codec reads each of these columns as a string or refuses the row
-        assert(is_string($value));
-
-        return $value;
-    }
-
-    /**
-     * The column the row codec read as a string or `null`.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<string, mixed>  $envelope
-     * @param  string  $column
-     * @return ?string
-     */
-    private static function nullable(#[\SensitiveParameter] array $envelope, string $column): ?string
-    {
-        $value = $envelope[$column];
-
-        // The codec reads each of these columns as a string or null, or refuses
-        // the row
-        assert($value === null || is_string($value));
-
-        return $value;
-    }
-
-    /**
-     * The column the row codec read as an integer.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<string, mixed>  $envelope
-     * @param  string  $column
-     * @return int
-     */
-    private static function integer(#[\SensitiveParameter] array $envelope, string $column): int
-    {
-        $value = $envelope[$column];
-
-        // The codec reads each of these columns as an integer or refuses the
-        // row
-        assert(is_int($value));
-
-        return $value;
-    }
-
-    /**
      * The refusal of a column whose stored value the shown entry cannot hold,
      * naming the column, never its value.
      *
@@ -502,6 +549,6 @@ final readonly class EntryProjector
      */
     private static function malformed(string $column): \UnexpectedValueException
     {
-        return new \UnexpectedValueException(sprintf('A stored entry\'s `%s` cannot be shown.', $column));
+        return EntryColumns::malformed($column);
     }
 }

@@ -1552,7 +1552,8 @@ final class SchemaChecksTest extends TestCase
     /**
      * A journal whose payload is a JSON column is a problem on MySQL and
      * PostgreSQL, since the engine may rewrite the text the digest covers;
-     * SQLite keeps JSON as text, so there it cannot be told apart.
+     * SQLite keeps JSON as text, so there it cannot be told apart. PostgreSQL
+     * casts the text column to JSON only when told how.
      *
      * @return void
      */
@@ -1560,9 +1561,13 @@ final class SchemaChecksTest extends TestCase
     {
         $this->migrateLifecycleTables();
 
-        Schema::connection(self::CONNECTION)->table('audit_check_journal', static function (Blueprint $table): void {
-            $table->json('payload')->change();
-        });
+        if ($this->driver() === 'pgsql') {
+            Schema::connection(self::CONNECTION)->getConnection()->statement('alter table "audit_check_journal" alter column "payload" type json using "payload"::json');
+        } else {
+            Schema::connection(self::CONNECTION)->table('audit_check_journal', static function (Blueprint $table): void {
+                $table->json('payload')->change();
+            });
+        }
 
         $expected = match ($this->driver()) {
             'mysql' => ['Column `payload` is json; expected longtext.'],

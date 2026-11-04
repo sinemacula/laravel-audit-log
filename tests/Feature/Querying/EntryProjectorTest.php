@@ -16,9 +16,16 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
+use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Privacy\EncryptedField;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
+use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
+use SineMacula\Laravel\AuditLog\Querying\EntryColumns;
 use SineMacula\Laravel\AuditLog\Querying\EntryProjector;
+use SineMacula\Laravel\AuditLog\Querying\ProjectedPage;
 use SineMacula\Laravel\AuditLog\Querying\StoredEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Recorder;
@@ -35,13 +42,17 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for the projection of a stored entry into the entry a viewer is
- * shown: a reason concealed on the stored value, properties and context
- * projected recursively, every encryption envelope, an owned note and an
- * encrypted IP address read through the field reader, `encrypted`, `erased`,
- * `unreadable` or a revealed value, a throwing reader contained and reported
- * once naming its class, no ciphertext anywhere in what is shown, and only a
- * descriptor the artifact inspector accepts lifted out of the properties.
+ * Feature tests for the projection of a page of stored entries into the entries
+ * a viewer is shown: a reason concealed on the stored value, properties and
+ * context projected recursively, every encryption envelope `encrypted` without
+ * asking the reader under a scope that does not reveal them, and under one that
+ * does, each row's signature verified first, then every field of the page, an
+ * owned note and an encrypted IP address among them, read at its segments in
+ * one call to the field reader, `encrypted`, `erased`, `unreadable` or a
+ * revealed value; a reader that throws or answers wrongly costing the page's
+ * fields, reported once naming its class; the page's counts of each state; no
+ * ciphertext anywhere in what is shown; and only a descriptor the artifact
+ * inspector accepts lifted out of the properties.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,6 +60,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(EntryProjector::class)]
+#[CoversClass(EntryColumns::class)]
 final class EntryProjectorTest extends TestCase
 {
     /** @var string The entry's id. */
@@ -68,6 +80,9 @@ final class EntryProjectorTest extends TestCase
 
     /** @var string The refusal a failed field reader is reported with. */
     private const string READER_FAILED = 'The field reader Tests\Fixtures\Querying\RevealingFieldReader failed.';
+
+    /** @var array{encrypted: int, erased: int, revealed: int, unreadable: int} The counts of a page that showed no fragment. */
+    private const array NO_FRAGMENT = ['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0];
 
     /**
      * A reason is `null` when the stored properties flag `concealed` as `true`,
@@ -139,23 +154,48 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * An envelope at any depth, in a map or a list, is read through the field
-     * reader at its path, the list's indexes as digits, in the order the
-     * properties hold them, and shown as the reader answers.
+     * A scope that does not reveal the encrypted fields never reaches the
+     * reader, whatever the page holds, a row that would verify included: every
+     * envelope, a note and an address among them, is `encrypted`, and counted
+     * so.
      *
      * @return void
      */
-    public function testAnEnvelopeAnywhereGoesThroughTheFieldReader(): void
+    public function testANonRevealingProjectionNeverCallsTheReader(): void
+    {
+        $reader = new RevealingFieldReader(['properties.card' => '4242', 'ip' => '203.0.113.7']);
+        $sealed = self::sealed(['card' => 'Y2FyZA'], '"_audit":{"note":' . self::envelope('bm90ZQ') . '}');
+        $stored = self::signed($sealed, ['ip' => self::ENCRYPTED_IP], self::sealed(['token' => 'dG9rZW4']));
+
+        $page  = self::page([$stored, $stored], $reader, reveal: false);
+        $entry = $page->entries[0];
+
+        self::assertSame(0, $reader->calls());
+        self::assertSame(['card' => '[ENCRYPTED]', '_audit' => ['note' => '[ENCRYPTED]']], $entry->properties);
+        self::assertSame('[ENCRYPTED]', $entry->ip);
+        self::assertSame(['token' => '[ENCRYPTED]'], $entry->context);
+        self::assertFalse($page->fields->reveal);
+        self::assertSame(['encrypted' => 8, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0], $page->fields->toArray());
+    }
+
+    /**
+     * Under the grant, an envelope at any depth, in a map or a list, is read
+     * through the field reader at its path, the list's indexes as digits, in
+     * the order the properties hold them, and shown as the reader answers.
+     *
+     * @return void
+     */
+    public function testAnEnvelopeAnywhereGoesThroughTheReaderUnderTheGrant(): void
     {
         $reader = new RevealingFieldReader(['properties.cards.1.number' => '4242']);
         $cards  = '[{"number":"none"},{"number":' . self::envelope('bnVtYmVy') . '}]';
-        $stored = self::stored('{"card":' . self::envelope('Y2FyZA') . ',"cards":' . $cards . ',"deep":{"a":{"b":' . self::envelope('ZGVlcA') . '}}}');
+        $stored = self::signed('{"card":' . self::envelope('Y2FyZA') . ',"cards":' . $cards . ',"deep":{"a":{"b":' . self::envelope('ZGVlcA') . '}}}');
 
         $entry = self::project($stored, $reader);
 
         self::assertSame(['properties.card', 'properties.cards.1.number', 'properties.deep.a.b'], $reader->paths());
-        self::assertSame(['Y2FyZA', 'bnVtYmVy', 'ZGVlcA'], array_map(static fn ($field): string => $field->ciphertext, $reader->fields()));
-        self::assertSame([self::ID], array_values(array_unique(array_map(static fn ($field): string => $field->entryId, $reader->fields()))));
+        self::assertSame(['Y2FyZA', 'bnVtYmVy', 'ZGVlcA'], array_map(static fn (EncryptedField $field): string => $field->ciphertext, $reader->fields()));
+        self::assertSame([self::ID], array_values(array_unique(array_map(static fn (EncryptedField $field): string => $field->entryId, $reader->fields()))));
         self::assertSame([
             'card'  => '[ENCRYPTED]',
             'cards' => [['number' => 'none'], ['number' => '4242']],
@@ -164,22 +204,118 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A map of exactly an integer `v` from 1 and non-empty strings `k` and `c`
-     * is read through the field reader even when the application stored that
-     * shape itself, so its `c` is never shown; one whose parts the envelope's
-     * rules refuse is `unreadable` without asking the reader; and a map that
-     * only resembles one is shown as a map.
+     * Each field carries its segments: its column, then each list index as an
+     * integer and each map key as PHP keys it, a key of digits from 0 as an
+     * integer and any other as a string, as the writer named them and the
+     * envelope's additional data binds them; an address is at `ip`.
+     *
+     * @return void
+     */
+    public function testEachFieldCarriesItsSegments(): void
+    {
+        $reader     = new RevealingFieldReader;
+        $byId       = '{"7":' . self::envelope('c2V2ZW4') . ',"-1":' . self::envelope('bWludXM') . '}';
+        $properties = '{"items":[{"iban":' . self::envelope('aWJhbg') . '}],"by_id":' . $byId . ',"_audit":{"note":' . self::envelope('bm90ZQ') . '}}';
+        $stored     = self::signed($properties, ['ip' => self::ENCRYPTED_IP], '{"headers":[' . self::envelope('aDA') . ']}');
+
+        self::project($stored, $reader);
+
+        self::assertSame([
+            ['properties', 'items', 0, 'iban'],
+            ['properties', 'by_id', 7],
+            ['properties', 'by_id', '-1'],
+            ['properties', '_audit', 'note'],
+            ['ip'],
+            ['context', 'headers', 0],
+        ], array_map(static fn (EncryptedField $field): array => $field->segments, $reader->fields()));
+        self::assertSame(['properties.items.0.iban', 'properties.by_id.7', 'properties.by_id.-1', 'properties._audit.note', 'ip', 'context.headers.0'], $reader->paths());
+    }
+
+    /**
+     * Every field of a page, of every entry, is read in one call to the field
+     * reader, in the order of the entries and, within each, of its properties,
+     * address and context; a page holding no envelope never calls it.
+     *
+     * @return void
+     */
+    public function testTheFieldsOfAPageAreReadInOneCall(): void
+    {
+        $reader = new RevealingFieldReader(['properties.card' => '4242', 'ip' => '203.0.113.7']);
+        $first  = self::signed('{"card":' . self::envelope('Y2FyZA') . '}', ['ip' => self::ENCRYPTED_IP]);
+        $second = self::signed('{"amount":"1"}', [], '{"token":' . self::envelope('dG9rZW4') . '}');
+        $third  = self::signed('{"card":' . self::envelope('b3RoZXI') . '}');
+
+        $page = self::page([$first, $second, $third], $reader);
+
+        self::assertSame(1, $reader->calls());
+        self::assertSame(['properties.card', 'ip', 'context.token', 'properties.card'], $reader->paths());
+        self::assertSame(['Y2FyZA', 'aXAgY2lwaGVydGV4dA', 'dG9rZW4', 'b3RoZXI'], array_map(static fn (EncryptedField $field): string => $field->ciphertext, $reader->fields()));
+        self::assertSame(['4242', '203.0.113.7', '[ENCRYPTED]', '4242'], [
+            $page->entries[0]->properties['card'],
+            $page->entries[0]->ip,
+            $page->entries[1]->context['token'],
+            $page->entries[2]->properties['card'],
+        ]);
+
+        $quiet = new RevealingFieldReader;
+
+        self::page([self::signed('{"amount":"1"}'), self::signed('{"none":[]}')], $quiet);
+
+        self::assertSame(0, $quiet->calls());
+    }
+
+    /**
+     * Under the grant, a row whose signature does not verify, or whose signing
+     * key the ring does not hold, shows every envelope, a note and an address
+     * among them, as `unreadable`, and none of them reaches the reader; the
+     * rows beside it that verify are read as usual.
+     *
+     * @return void
+     */
+    public function testARowThatFailsItsHmacShowsEveryEnvelopeUnreadable(): void
+    {
+        $reader     = new RevealingFieldReader(['properties.card' => '4242', 'ip' => '203.0.113.7']);
+        $properties = self::sealed(['card' => 'Y2FyZA'], '"_audit":{"note":' . self::envelope('bm90ZQ') . '}');
+        $tampered   = self::stored($properties, ['ip' => self::ENCRYPTED_IP], self::sealed(['token' => 'dG9rZW4']));
+        $unknown    = self::signed($properties, ['ip' => self::ENCRYPTED_IP], self::sealed(['token' => 'dG9rZW4']), 'k-retired');
+        $edited     = self::signedThenEdited('{"card":' . self::envelope('Y2FyZA') . '}', '{"card":' . self::envelope('Y29waWVk') . '}');
+        $verified   = self::signed('{"card":' . self::envelope('Y2FyZA') . '}');
+
+        $page = self::page([$tampered, $unknown, $edited, $verified], $reader);
+
+        foreach ([0, 1] as $index) {
+            $entry = $page->entries[$index];
+
+            self::assertSame(['card' => '[UNREADABLE]', '_audit' => ['note' => '[UNREADABLE]']], $entry->properties, (string) $index);
+            self::assertSame('[UNREADABLE]', $entry->ip, (string) $index);
+            self::assertSame(['token' => '[UNREADABLE]'], $entry->context, (string) $index);
+        }
+
+        self::assertSame(['card' => '[UNREADABLE]'], $page->entries[2]->properties);
+        self::assertSame(['card' => '4242'], $page->entries[3]->properties);
+        self::assertSame(['Y2FyZA'], array_map(static fn (EncryptedField $field): string => $field->ciphertext, $reader->fields()));
+        self::assertSame(['encrypted' => 0, 'erased' => 0, 'revealed' => 1, 'unreadable' => 9], $page->fields->toArray());
+    }
+
+    /**
+     * Under the grant, a map of exactly an integer `v` from 1 and non-empty
+     * strings `k` and `c` is read through the field reader even when the
+     * application stored that shape itself, so its `c` is never shown; one
+     * whose parts the envelope's rules refuse is `unreadable` without asking
+     * the reader, under the grant or not; and a map that only resembles one is
+     * shown as a map.
      *
      * @return void
      */
     public function testAnEnvelopeShapedPropertyIsAlwaysRead(): void
     {
         $reader = new RevealingFieldReader;
-        $stored = self::stored('{"own":{"k":"mine","c":"plain words","v":2},"dirty":{"v":1,"k":"key\u0007","c":"x"},"unsafe":{"v":9007199254740992,"k":"k","c":"x"},'
+        $stored = self::signed('{"own":{"k":"mine","c":"plain words","v":2},"dirty":{"v":1,"k":"key\u0007","c":"x"},"unsafe":{"v":9007199254740992,"k":"k","c":"x"},'
             . '"text":{"v":"1","k":"k","c":"shown"},"zero":{"v":0,"k":"k","c":"shown"},"more":{"v":1,"k":"k","c":"shown","d":1},"blank":{"v":1,"k":"","c":"shown"},'
             . '"number":{"v":1,"k":"k","c":42},"empty":{"v":1,"k":"k","c":""}}');
 
-        $entry = self::project($stored, $reader);
+        $entry  = self::project($stored, $reader);
+        $sealed = self::page([$stored], reveal: false);
 
         self::assertSame(['properties.own'], $reader->paths());
         self::assertSame('[ENCRYPTED]', $entry->properties['own']);
@@ -192,6 +328,12 @@ final class EntryProjectorTest extends TestCase
         self::assertSame(['v' => 1, 'k' => 'k', 'c' => 42], $entry->properties['number']);
         self::assertSame(['v' => 1, 'k' => 'k', 'c' => ''], $entry->properties['empty']);
         self::assertStringNotContainsString('plain words', (string) json_encode($entry->toArray()));
+        self::assertSame(['[ENCRYPTED]', '[UNREADABLE]', '[UNREADABLE]'], [
+            $sealed->entries[0]->properties['own'],
+            $sealed->entries[0]->properties['dirty'],
+            $sealed->entries[0]->properties['unsafe'],
+        ]);
+        self::assertSame(['encrypted' => 1, 'erased' => 0, 'revealed' => 0, 'unreadable' => 2], $sealed->fields->toArray());
     }
 
     /**
@@ -203,7 +345,7 @@ final class EntryProjectorTest extends TestCase
     public function testAnOwnedNoteGoesThroughTheFieldReader(): void
     {
         $reader = new RevealingFieldReader(['properties._audit.note' => 'called the customer']);
-        $entry  = self::project(self::stored('{"amount":"1200.00","_audit":{"note":' . self::envelope('bm90ZQ') . ',"omitted":{"count":1,"paths":["*"]}}}'), $reader);
+        $entry  = self::project(self::signed('{"amount":"1200.00","_audit":{"note":' . self::envelope('bm90ZQ') . ',"omitted":{"count":1,"paths":["*"]}}}'), $reader);
 
         self::assertSame(['properties._audit.note'], $reader->paths());
         self::assertSame(['amount' => '1200.00', '_audit' => ['note' => 'called the customer', 'omitted' => ['count' => 1, 'paths' => ['*']]]], $entry->properties);
@@ -220,12 +362,13 @@ final class EntryProjectorTest extends TestCase
         $sealed   = new RevealingFieldReader;
         $revealed = new RevealingFieldReader(['ip' => '203.0.113.7']);
 
-        self::assertSame('[ENCRYPTED]', self::project(self::stored(fields: ['ip' => self::ENCRYPTED_IP]), $sealed)->ip);
-        self::assertSame('203.0.113.7', self::project(self::stored(fields: ['ip' => self::ENCRYPTED_IP]), $revealed)->ip);
+        self::assertSame('[ENCRYPTED]', self::project(self::signed(fields: ['ip' => self::ENCRYPTED_IP]), $sealed)->ip);
+        self::assertSame('203.0.113.7', self::project(self::signed(fields: ['ip' => self::ENCRYPTED_IP]), $revealed)->ip);
 
         $field = $revealed->fields()[0];
 
         self::assertSame(['ip'], $revealed->paths());
+        self::assertSame(['ip'], $field->segments);
         self::assertSame('aXAgY2lwaGVydGV4dA', $field->ciphertext);
         self::assertSame('key_42', $field->keyReference);
         self::assertSame(1, $field->version);
@@ -249,6 +392,7 @@ final class EntryProjectorTest extends TestCase
             'version 0'                => ['{"c":"x","k":"y","v":0}', null],
             'a nested ciphertext'      => ['{"c":{"a":"x"},"k":"y","v":1}', null],
             'a brace and words'        => ['{not an address}', null],
+            'a key that is not clean'  => ['{"c":"x","k":"y\u0007","v":1}', null],
             'revealed as an integer'   => [self::ENCRYPTED_IP, 42],
             'revealed as null'         => [self::ENCRYPTED_IP, null],
             'revealed as an array'     => [self::ENCRYPTED_IP, ['203.0.113.7']],
@@ -257,8 +401,8 @@ final class EntryProjectorTest extends TestCase
 
     /**
      * A stored IP beginning `{` that is not exactly an envelope is `unreadable`
-     * and never reaches the reader, and one the reader reveals as anything but
-     * a string is `unreadable` too.
+     * and never reaches the reader, under the grant or not, and one the reader
+     * reveals as anything but a string is `unreadable` too, and counted so.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -270,9 +414,14 @@ final class EntryProjectorTest extends TestCase
     public function testAMalformedEncryptedIpIsUnreadable(string $ip, array|int|null $answer): void
     {
         $reader = new RevealingFieldReader(['ip' => $answer]);
+        $page   = self::page([self::signed('{"amount":"1"}', ['ip' => $ip])], $reader);
 
-        self::assertSame('[UNREADABLE]', self::project(self::stored(fields: ['ip' => $ip]), $reader)->ip);
+        self::assertSame('[UNREADABLE]', $page->entries[0]->ip);
         self::assertSame($ip === self::ENCRYPTED_IP ? ['ip'] : [], $reader->paths());
+        self::assertSame(['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 1], $page->fields->toArray());
+        $sealed = self::page([self::stored(fields: ['ip' => $ip])], reveal: false)->entries[0]->ip;
+
+        self::assertSame($ip === self::ENCRYPTED_IP ? '[ENCRYPTED]' : '[UNREADABLE]', $sealed);
     }
 
     /**
@@ -293,8 +442,8 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * An address stored in any other mode, or none, is shown as stored and
-     * never reaches the reader.
+     * An address stored in any other mode, or none, is shown as stored, never
+     * reaches the reader and is not counted.
      *
      * @param  ?string  $ip
      * @return void
@@ -303,9 +452,11 @@ final class EntryProjectorTest extends TestCase
     public function testATruncatedOrHashedIpIsShownAsStored(?string $ip): void
     {
         $reader = new RevealingFieldReader;
+        $page   = self::page([self::signed('{"amount":"1"}', ['ip' => $ip])], $reader);
 
-        self::assertSame($ip, self::project(self::stored(fields: ['ip' => $ip]), $reader)->ip);
+        self::assertSame($ip, $page->entries[0]->ip);
         self::assertSame([], $reader->paths());
+        self::assertSame(self::NO_FRAGMENT, $page->fields->toArray());
     }
 
     /**
@@ -317,7 +468,7 @@ final class EntryProjectorTest extends TestCase
     public function testAnErasedFieldReadsAsErased(): void
     {
         $reader = new RevealingFieldReader(['properties.card' => FieldState::ERASED, 'properties._audit.note' => FieldState::ERASED, 'ip' => FieldState::ERASED]);
-        $stored = self::stored(self::sealed(['card' => 'Y2FyZA'], '"_audit":{"note":' . self::envelope('bm90ZQ') . '}'), ['ip' => self::ENCRYPTED_IP]);
+        $stored = self::signed(self::sealed(['card' => 'Y2FyZA'], '"_audit":{"note":' . self::envelope('bm90ZQ') . '}'), ['ip' => self::ENCRYPTED_IP]);
         $entry  = self::project($stored, $reader);
 
         self::assertSame(['card' => '[ERASED]', '_audit' => ['note' => '[ERASED]']], $entry->properties);
@@ -333,39 +484,66 @@ final class EntryProjectorTest extends TestCase
     public function testARevealedFieldReadsAsItsValue(): void
     {
         $reader = new RevealingFieldReader(['properties.card' => '4242', 'properties.address' => ['city' => 'Leeds'], 'properties.pin' => FieldState::UNREADABLE]);
-        $entry  = self::project(self::stored(self::sealed(['card' => 'Y2FyZA', 'address' => 'YWRkcmVzcw', 'pin' => 'cGlu'])), $reader);
+        $entry  = self::project(self::signed(self::sealed(['card' => 'Y2FyZA', 'address' => 'YWRkcmVzcw', 'pin' => 'cGlu'])), $reader);
 
         self::assertSame(['card' => '4242', 'address' => ['city' => 'Leeds'], 'pin' => '[UNREADABLE]'], $entry->properties);
     }
 
     /**
-     * A reader that throws costs each field it throws on, shown as
-     * `[UNREADABLE]`, and the failure is reported once for the projection,
-     * naming the reader's class alone: nothing it threw is kept, chained or
-     * shown, and the next projection is reported once again.
+     * The page counts every fragment it shows by what it showed: `encrypted`,
+     * `erased` and `unreadable` as the reader answered or the envelope's rules
+     * required, and `revealed` for each value, across every entry, column and
+     * address, keeping the grant.
+     *
+     * @return void
+     */
+    public function testTheDisclosureCountsEachState(): void
+    {
+        $reader = new RevealingFieldReader([
+            'properties.card'        => '4242',
+            'properties.pin'         => FieldState::ERASED,
+            'properties._audit.note' => FieldState::UNREADABLE,
+            'ip'                     => '203.0.113.7',
+            'context.token'          => FieldState::ENCRYPTED,
+        ]);
+
+        $sealed = self::sealed(['card' => 'Y2FyZA', 'pin' => 'cGlu'], '"_audit":{"note":' . self::envelope('bm90ZQ') . '}');
+        $first  = self::signed($sealed, ['ip' => self::ENCRYPTED_IP], self::sealed(['token' => 'dG9rZW4']));
+        $second = self::signed('{"card":' . self::envelope('Y2FyZA') . ',"dirty":{"v":1,"k":"k\u0007","c":"x"}}', ['ip' => '{"v":1}']);
+        $third  = self::stored('{"card":' . self::envelope('Y2FyZA') . '}');
+
+        $page = self::page([$first, $second, $third], $reader);
+
+        self::assertTrue($page->fields->reveal);
+        self::assertSame(['encrypted' => 1, 'erased' => 1, 'revealed' => 3, 'unreadable' => 4], $page->fields->toArray());
+        self::assertSame(self::NO_FRAGMENT, self::page([self::signed('{"amount":"1"}')], $reader)->fields->toArray());
+        self::assertTrue(self::page([], $reader)->fields->reveal);
+        self::assertSame([], self::page([], $reader)->entries);
+    }
+
+    /**
+     * A reader that throws costs every field it was asked for, a note, an
+     * address and a field it would have revealed among them, each shown as
+     * `[UNREADABLE]` and counted so, and the failure is reported naming the
+     * reader's class alone: nothing it threw is kept, chained or shown.
      *
      * @return void
      */
     public function testAThrowingReaderIsUnreadableAndReportedOnce(): void
     {
-        $thrown  = new \RuntimeException('plaintext 4242 leaked');
         $handler = new RecordingExceptionHandler;
-        $reader  = new RevealingFieldReader([
-            'properties.card'        => $thrown,
-            'properties._audit.note' => $thrown,
-            'ip'                     => $thrown,
-            'context.secret'         => $thrown,
-            'properties.ok'          => 'fine',
-        ]);
+        $reader  = new RevealingFieldReader(['properties.card' => new \RuntimeException('plaintext 4242 leaked'), 'properties.ok' => 'fine']);
 
         $properties = self::sealed(['card' => 'Y2FyZA', 'ok' => 'b2s'], '"_audit":{"note":' . self::envelope('bm90ZQ') . '}');
-        $stored     = self::stored($properties, ['ip' => self::ENCRYPTED_IP], self::sealed(['secret' => 'c2VjcmV0']));
+        $page       = self::page([self::signed($properties, ['ip' => self::ENCRYPTED_IP], self::sealed(['secret' => 'c2VjcmV0']))], $reader, $handler);
+        $entry      = $page->entries[0];
 
-        $entry = self::project($stored, $reader, $handler);
-
-        self::assertSame(['card' => '[UNREADABLE]', 'ok' => 'fine', '_audit' => ['note' => '[UNREADABLE]']], $entry->properties);
+        self::assertSame(['card' => '[UNREADABLE]', 'ok' => '[UNREADABLE]', '_audit' => ['note' => '[UNREADABLE]']], $entry->properties);
         self::assertSame('[UNREADABLE]', $entry->ip);
         self::assertSame(['secret' => '[UNREADABLE]'], $entry->context);
+        self::assertStringNotContainsString('4242', (string) json_encode($entry->toArray()));
+        self::assertStringNotContainsString('fine', (string) json_encode($entry->toArray()));
+        self::assertSame(['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 5], $page->fields->toArray());
         self::assertCount(1, $handler->reports());
 
         $report = $handler->reports()[0];
@@ -373,36 +551,107 @@ final class EntryProjectorTest extends TestCase
         self::assertInstanceOf(\UnexpectedValueException::class, $report);
         self::assertSame(self::READER_FAILED, $report->getMessage());
         self::assertNull($report->getPrevious());
-        self::assertStringNotContainsString('4242', (string) json_encode($entry->toArray()));
-
-        $again = new RecordingExceptionHandler;
-
-        self::project($stored, $reader, $again);
-
-        self::assertCount(1, $again->reports());
     }
 
     /**
-     * The entries of a page are projected together, so a reader that throws on
-     * every one of them is reported once for the page, while each entry still
-     * shows its field as `[UNREADABLE]`.
+     * The fields of every entry of a page are read in the one call, so a reader
+     * that throws is asked once and reported once for the page, while each
+     * entry still shows its fields as `[UNREADABLE]`; the next page is reported
+     * once again.
      *
      * @return void
      */
-    public function testAReaderThatThrowsOnEveryEntryOfAPageIsReportedOnce(): void
+    public function testAThrowingReaderIsReportedOnceForThePage(): void
     {
         $handler = new RecordingExceptionHandler;
         $reader  = new RevealingFieldReader(['properties.card' => new \RuntimeException('plaintext 4242 leaked')]);
-        $stored  = self::stored('{"card":' . self::envelope('Y2FyZA') . '}');
+        $stored  = self::signed('{"card":' . self::envelope('Y2FyZA') . '}');
 
-        $entries = (new EntryProjector($reader, $handler))->project([$stored, $stored, $stored]);
-
-        self::assertCount(3, $entries);
-        $shown = array_map(static fn (TrailEntry $entry): array => $entry->properties, $entries);
+        $page  = self::page([$stored, $stored, $stored], $reader, $handler);
+        $shown = array_map(static fn (TrailEntry $entry): array => $entry->properties, $page->entries);
 
         self::assertSame([['card' => '[UNREADABLE]'], ['card' => '[UNREADABLE]'], ['card' => '[UNREADABLE]']], $shown);
+        self::assertSame(1, $reader->calls());
+        self::assertSame(['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 3], $page->fields->toArray());
         self::assertCount(1, $handler->reports());
         self::assertSame(self::READER_FAILED, $handler->reports()[0]->getMessage());
+
+        $again = new RecordingExceptionHandler;
+
+        self::page([$stored], $reader, $again);
+
+        self::assertCount(1, $again->reports());
+        self::assertSame(2, $reader->calls());
+    }
+
+    /**
+     * Rows of `[what the reader answers for a page of two fields]`: fewer
+     * readings, more, a list holding something other than a reading, and a map
+     * of readings.
+     *
+     * @return iterable<string, array{0: \Closure(): array<int, \SineMacula\Laravel\AuditLog\Privacy\FieldReading|string>}>
+     */
+    public static function provideWrongAnswers(): iterable
+    {
+        $reading = static fn (): FieldReading => FieldReading::revealed('4242');
+
+        yield from [
+            'one reading'          => [static fn (): array => [$reading()]],
+            'three readings'       => [static fn (): array => [$reading(), $reading(), $reading()]],
+            'none'                 => [static fn (): array => []],
+            'a value, not reading' => [static fn (): array => [$reading(), '4242']],
+            'a map of readings'    => [static fn (): array => [1 => $reading(), 2 => $reading()]],
+        ];
+    }
+
+    /**
+     * A reader that answers another count, anything but readings or anything
+     * but a list costs every field of the page, each shown as `[UNREADABLE]`,
+     * nothing it answered is shown, and the failure is reported once naming the
+     * reader's class.
+     *
+     * @param  \Closure(): array<int, \SineMacula\Laravel\AuditLog\Privacy\FieldReading|string>  $answer
+     * @return void
+     */
+    #[DataProvider('provideWrongAnswers')]
+    public function testAReaderAnsweringTheWrongCountCostsThePagesFields(\Closure $answer): void
+    {
+        $handler = new RecordingExceptionHandler;
+        $reader  = new class ($answer) implements FieldReader {
+            /**
+             * Constructor.
+             *
+             * @param  \Closure(): array<int, \SineMacula\Laravel\AuditLog\Privacy\FieldReading|string>  $answer
+             */
+            public function __construct(
+
+                /** What it answers for any page. */
+                private readonly \Closure $answer,
+            ) {}
+
+            /**
+             * What it was made to answer, whatever it is asked.
+             *
+             * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+             *
+             * @param  list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>  $fields
+             * @return list<\SineMacula\Laravel\AuditLog\Privacy\FieldReading>
+             */
+            #[\Override]
+            public function readAll(#[\SensitiveParameter] array $fields): array
+            {
+                /** @var list<\SineMacula\Laravel\AuditLog\Privacy\FieldReading> */
+                return ($this->answer)();
+            }
+        };
+
+        $page = self::page([self::signed('{"card":' . self::envelope('Y2FyZA') . '}', ['ip' => self::ENCRYPTED_IP])], $reader, $handler);
+
+        self::assertSame(['card' => '[UNREADABLE]'], $page->entries[0]->properties);
+        self::assertSame('[UNREADABLE]', $page->entries[0]->ip);
+        self::assertSame(['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 2], $page->fields->toArray());
+        self::assertCount(1, $handler->reports());
+        self::assertSame(sprintf('The field reader %s failed.', get_debug_type($reader)), $handler->reports()[0]->getMessage());
     }
 
     /**
@@ -415,21 +664,22 @@ final class EntryProjectorTest extends TestCase
     {
         $quiet = new RecordingExceptionHandler;
 
-        self::project(self::stored('{"card":' . self::envelope('Y2FyZA') . '}', ['ip' => self::ENCRYPTED_IP]), new RevealingFieldReader, $quiet);
+        self::project(self::signed('{"card":' . self::envelope('Y2FyZA') . '}', ['ip' => self::ENCRYPTED_IP]), new RevealingFieldReader, $quiet);
 
         self::assertSame([], $quiet->reports());
 
         $broken = new RecordingExceptionHandler(throwsOnReport: true);
-        $entry  = self::project(self::stored('{"card":' . self::envelope('Y2FyZA') . '}'), new RevealingFieldReader(['properties.card' => new \LogicException('x')]), $broken);
+        $entry  = self::project(self::signed('{"card":' . self::envelope('Y2FyZA') . '}'), new RevealingFieldReader(['properties.card' => new \LogicException('x')]), $broken);
 
         self::assertSame(['card' => '[UNREADABLE]'], $entry->properties);
         self::assertCount(1, $broken->reports());
+        self::assertSame(self::READER_FAILED, $broken->reports()[0]->getMessage());
     }
 
     /**
-     * With the package's own reader, no ciphertext of a property, a nested
-     * envelope, an owned note, the context or the address reaches any string
-     * the shown entry holds.
+     * With the package's own reader, under the grant or not, no ciphertext of a
+     * property, a nested envelope, an owned note, the context or the address
+     * reaches any string the shown entry holds.
      *
      * @return void
      */
@@ -437,17 +687,19 @@ final class EntryProjectorTest extends TestCase
     {
         $ciphertexts = ['Y2FyZCBjaXBoZXJ0ZXh0', 'bGlzdCBjaXBoZXJ0ZXh0', 'bm90ZSBjaXBoZXJ0ZXh0', 'Y29udGV4dCBjaXBoZXJ0ZXh0', 'aXAgY2lwaGVydGV4dA'];
         $properties  = self::sealed(['card' => $ciphertexts[0]], '"cards":[' . self::envelope($ciphertexts[1]) . '],"_audit":{"note":' . self::envelope($ciphertexts[2]) . '}');
-        $stored      = self::stored($properties, ['ip' => self::ENCRYPTED_IP], '{"route":"x","token":' . self::envelope($ciphertexts[3]) . '}');
+        $stored      = self::signed($properties, ['ip' => self::ENCRYPTED_IP], '{"route":"x","token":' . self::envelope($ciphertexts[3]) . '}');
 
-        $strings = self::stringsOf(self::project($stored)->toArray());
+        foreach ([true, false] as $reveal) {
+            $strings = self::stringsOf(self::page([$stored], new SealedFieldReader, reveal: $reveal)->entries[0]->toArray());
 
-        self::assertNotEmpty($strings);
+            self::assertNotEmpty($strings);
 
-        foreach ($ciphertexts as $ciphertext) {
-            self::assertStringContainsString($ciphertext, $stored->line(), $ciphertext);
+            foreach ($ciphertexts as $ciphertext) {
+                self::assertStringContainsString($ciphertext, $stored->line(), $ciphertext);
 
-            foreach ($strings as $string) {
-                self::assertStringNotContainsString($ciphertext, $string, $ciphertext);
+                foreach ($strings as $string) {
+                    self::assertStringNotContainsString($ciphertext, $string, $ciphertext);
+                }
             }
         }
     }
@@ -461,7 +713,7 @@ final class EntryProjectorTest extends TestCase
     public function testTheContextIsReadAsThePropertiesAre(): void
     {
         $reader = new RevealingFieldReader(['context.headers.token' => FieldState::ERASED]);
-        $entry  = self::project(self::stored(context: '{"route":"invoices.approve","headers":{"token":' . self::envelope('dG9rZW4') . '},"empty":{}}'), $reader);
+        $entry  = self::project(self::signed(context: '{"route":"invoices.approve","headers":{"token":' . self::envelope('dG9rZW4') . '},"empty":{}}'), $reader);
 
         self::assertSame(['context.headers.token'], $reader->paths());
         self::assertSame(['route' => 'invoices.approve', 'headers' => ['token' => '[ERASED]'], 'empty' => []], $entry->context);
@@ -478,7 +730,7 @@ final class EntryProjectorTest extends TestCase
     {
         $reader = new RevealingFieldReader;
 
-        self::project(self::stored('{"card":' . self::envelope('Y2FyZA') . '}', ['ip' => self::ENCRYPTED_IP], '{"token":' . self::envelope('dG9rZW4') . '}'), $reader);
+        self::project(self::signed('{"card":' . self::envelope('Y2FyZA') . '}', ['ip' => self::ENCRYPTED_IP], '{"token":' . self::envelope('dG9rZW4') . '}'), $reader);
 
         self::assertSame(['properties.card', 'ip', 'context.token'], $reader->paths());
     }
@@ -487,7 +739,8 @@ final class EntryProjectorTest extends TestCase
      * A descriptor the artifact inspector accepts is lifted out of the
      * properties to the entry's manifest, as its kind, count and digest; the
      * metadata it was in is dropped when it held nothing else and kept, less
-     * the descriptor, when it did; and the stored entry is left as it was.
+     * the descriptor, when it did, an envelope beside it read at its segments;
+     * and the stored entry is left as it was.
      *
      * @return void
      */
@@ -495,7 +748,9 @@ final class EntryProjectorTest extends TestCase
     {
         $alone  = self::stored('{"batch":"march","_audit":{"manifest":' . self::descriptor() . '}}');
         $beside = self::stored('{"batch":"march","_audit":{"omitted":{"count":1,"paths":["*"]},"manifest":' . self::descriptor() . '}}');
+        $noted  = self::signed('{"batch":"march","_audit":{"note":' . self::envelope('bm90ZQ') . ',"manifest":' . self::descriptor() . '}}');
         $line   = $alone->line();
+        $reader = new RevealingFieldReader(['properties._audit.note' => 'called']);
 
         $entry = self::project($alone);
 
@@ -503,6 +758,8 @@ final class EntryProjectorTest extends TestCase
         self::assertSame(['batch' => 'march'], $entry->properties);
         self::assertSame(['batch' => 'march', '_audit' => ['omitted' => ['count' => 1, 'paths' => ['*']]]], self::project($beside)->properties);
         self::assertSame(['kind' => 'bulk', 'count' => 3, 'digest' => self::DIGEST], self::project($beside)->manifest);
+        self::assertSame(['batch' => 'march', '_audit' => ['note' => 'called']], self::project($noted, $reader)->properties);
+        self::assertSame([['properties', '_audit', 'note']], array_map(static fn (EncryptedField $field): array => $field->segments, $reader->fields()));
         self::assertSame($line, $alone->line());
         self::assertNull(self::project(self::stored())->manifest);
     }
@@ -616,7 +873,7 @@ final class EntryProjectorTest extends TestCase
 
     /**
      * A column the shown entry cannot hold is refused, naming the column and
-     * never the value.
+     * never the value, under the grant or not.
      *
      * @param  string  $column
      * @param  string  $value
@@ -627,17 +884,25 @@ final class EntryProjectorTest extends TestCase
     {
         $stored = StoredEntry::fromRow([$column => $value] + self::row(), new RowCodec);
 
+        try {
+            self::page([$stored], reveal: false);
+            self::fail('Expected the column to be refused.');
+        } catch (\UnexpectedValueException $refusal) {
+            self::assertSame(sprintf('A stored entry\'s `%s` cannot be shown.', $column), $refusal->getMessage());
+        }
+
         $this->expectException(\UnexpectedValueException::class);
         $this->expectExceptionMessage(sprintf('A stored entry\'s `%s` cannot be shown.', $column));
 
-        self::project($stored);
+        self::page([$stored]);
     }
 
     /**
      * An entry recorded through the facade, with a field encrypted under the
      * actor, a note owned by the actor and an address in the `encrypt` mode, is
-     * read back from the table and shown with each fragment read through the
-     * field reader and none of its ciphertexts.
+     * read back from the table, its row signed as the store signs it, and shown
+     * under the grant with each fragment read through the field reader and none
+     * of its ciphertexts.
      *
      * @return void
      */
@@ -671,7 +936,7 @@ final class EntryProjectorTest extends TestCase
 
     /**
      * The projector the package resolves reads through the field reader bound
-     * in the container.
+     * in the container, and verifies rows under the ring the container holds.
      *
      * @return void
      */
@@ -681,29 +946,53 @@ final class EntryProjectorTest extends TestCase
 
         app()->instance(FieldReader::class, $reader);
 
-        $entry = app(EntryProjector::class)->project([self::stored('{"card":' . self::envelope('Y2FyZA') . '}')])[0];
+        $page = app(EntryProjector::class)->project([self::signed('{"card":' . self::envelope('Y2FyZA') . '}')], true);
 
-        self::assertSame(['card' => '4242'], $entry->properties);
+        self::assertSame(['card' => '4242'], $page->entries[0]->properties);
         self::assertSame(['properties.card'], $reader->paths());
     }
 
     /**
-     * The entry of the stored entry, read through the reader given, or the
-     * package's own, and reported to the handler given.
+     * The entry of the stored entry, read under the grant through the reader
+     * given, or the package's own, and reported to the handler given.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $stored
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\FieldReader  $reader
      * @param  ?\Tests\Fixtures\Privacy\RecordingExceptionHandler  $handler
      * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
+     *
+     * @throws \InvalidArgumentException
+     * @throws \UnexpectedValueException
      */
     private static function project(StoredEntry $stored, ?FieldReader $reader = null, ?RecordingExceptionHandler $handler = null): TrailEntry
     {
-        return (new EntryProjector($reader ?? new SealedFieldReader, $handler ?? new RecordingExceptionHandler))->project([$stored])[0];
+        return self::page([$stored], $reader, $handler)->entries[0];
+    }
+
+    /**
+     * The page of the stored entries, read under the grant or not through the
+     * reader given, or the package's own, and reported to the handler given.
+     *
+     * @param  list<\SineMacula\Laravel\AuditLog\Querying\StoredEntry>  $stored
+     * @param  ?\SineMacula\Laravel\AuditLog\Contracts\FieldReader  $reader
+     * @param  ?\Tests\Fixtures\Privacy\RecordingExceptionHandler  $handler
+     * @param  bool  $reveal
+     * @return \SineMacula\Laravel\AuditLog\Querying\ProjectedPage
+     *
+     * @throws \InvalidArgumentException
+     * @throws \UnexpectedValueException
+     */
+    private static function page(array $stored, ?FieldReader $reader = null, ?RecordingExceptionHandler $handler = null, bool $reveal = true): ProjectedPage
+    {
+        $projector = new EntryProjector($reader ?? new SealedFieldReader, $handler ?? new RecordingExceptionHandler, app(RecordSigner::class));
+
+        return $projector->project($stored, $reveal);
     }
 
     /**
      * A stored entry of a captured record of an approved invoice, with the
-     * fields given in place of its own and its JSON columns as given.
+     * fields given in place of its own and its JSON columns as given, under the
+     * fixed key id and an HMAC that verifies under no key.
      *
      * @param  string  $properties
      * @param  array<string, ?string>  $fields
@@ -713,6 +1002,64 @@ final class EntryProjectorTest extends TestCase
     private static function stored(string $properties = '{"amount":"1200.00"}', array $fields = [], ?string $context = '{"route":"invoices.approve"}'): StoredEntry
     {
         return StoredEntry::fromRow(['properties' => $properties, 'context' => $context] + self::row($fields), new RowCodec);
+    }
+
+    /**
+     * The stored entry `stored()` gives, signed as the package signs a row:
+     * under the ring's signing key, or under the key id given, which the ring
+     * does not hold, with the signing key's secret.
+     *
+     * @param  string  $properties
+     * @param  array<string, ?string>  $fields
+     * @param  ?string  $context
+     * @param  ?string  $keyId
+     * @return \SineMacula\Laravel\AuditLog\Querying\StoredEntry
+     */
+    private static function signed(
+        string $properties = '{"amount":"1200.00"}',
+        array $fields = [],
+        ?string $context = '{"route":"invoices.approve"}',
+        ?string $keyId = null,
+    ): StoredEntry {
+        $key = app(KeyRing::class)->signingKey();
+        $row = ['properties' => $properties, 'context' => $context, 'key_id' => $keyId ?? $key->id] + self::row($fields);
+
+        return StoredEntry::fromRow(['hmac' => self::hmacOf($row, $key->secret())] + $row, new RowCodec);
+    }
+
+    /**
+     * A stored entry signed with the first properties, then edited to hold the
+     * second, as a copy of another entry's envelope would be.
+     *
+     * @param  string  $signed
+     * @param  string  $edited
+     * @return \SineMacula\Laravel\AuditLog\Querying\StoredEntry
+     */
+    private static function signedThenEdited(string $signed, string $edited): StoredEntry
+    {
+        $key = app(KeyRing::class)->signingKey();
+        $row = ['properties' => $signed, 'key_id' => $key->id] + self::row();
+
+        return StoredEntry::fromRow(['hmac' => self::hmacOf($row, $key->secret()), 'properties' => $edited] + $row, new RowCodec);
+    }
+
+    /**
+     * The HMAC of the row's signed columns, as decoded, under the secret.
+     *
+     * @param  array<string, int|string|null>  $row
+     * @param  string  $secret
+     * @return string
+     */
+    private static function hmacOf(array $row, #[\SensitiveParameter] string $secret): string
+    {
+        $decoded = (new RowCodec)->decode($row);
+        $signed  = [];
+
+        foreach (RecordSigner::SIGNED_COLUMNS as $column) {
+            $signed[$column] = $decoded[$column];
+        }
+
+        return hash_hmac('sha256', CanonicalEncoder::encode($signed), $secret);
     }
 
     /**

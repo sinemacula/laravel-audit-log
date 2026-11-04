@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -46,7 +47,7 @@ final class EnvelopeSealerTest extends TestCase
         $handler = new RecordingExceptionHandler;
         $sealer  = new EnvelopeSealer(new MalformedFieldEncrypter(['c' => 'ciphertext', 'v' => 1, 'k' => 'key_1']), $handler);
 
-        self::assertSame(['v' => 1, 'k' => 'key_1', 'c' => 'ciphertext'], $sealer->seal(self::owner(), self::PLAINTEXT));
+        self::assertSame(['v' => 1, 'k' => 'key_1', 'c' => 'ciphertext'], $sealer->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertSame([], $handler->reports());
     }
 
@@ -61,10 +62,40 @@ final class EnvelopeSealerTest extends TestCase
         $encrypter = new RecordingFieldEncrypter;
         $owner     = self::owner();
 
-        $envelope = (new EnvelopeSealer($encrypter, new RecordingExceptionHandler))->seal($owner, self::PLAINTEXT);
+        $envelope = (new EnvelopeSealer($encrypter, new RecordingExceptionHandler))->seal($owner, self::PLAINTEXT, self::context());
 
         self::assertSame([[$owner, self::PLAINTEXT]], $encrypter->calls());
         self::assertSame(['v' => 1, 'k' => 'key_42', 'c' => base64_encode(self::PLAINTEXT)], $envelope);
+    }
+
+    /**
+     * The context the sealer is given reaches the encrypter as it is, so the
+     * envelope is bound to the entry and the path it was sealed for.
+     *
+     * @return void
+     */
+    public function testTheContextReachesTheEncrypter(): void
+    {
+        $encrypter = new RecordingFieldEncrypter;
+        $context   = self::context();
+
+        (new EnvelopeSealer($encrypter, new RecordingExceptionHandler))->seal(self::owner(), self::PLAINTEXT, $context);
+
+        self::assertSame([$context], $encrypter->contexts());
+    }
+
+    /**
+     * The context is marked sensitive, since it lists the record's owners.
+     *
+     * @return void
+     *
+     * @throws \ReflectionException
+     */
+    public function testTheContextParameterIsSensitive(): void
+    {
+        $parameter = new \ReflectionParameter([EnvelopeSealer::class, 'seal'], 'context');
+
+        self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class));
     }
 
     /**
@@ -92,7 +123,7 @@ final class EnvelopeSealerTest extends TestCase
         $handler = new RecordingExceptionHandler;
         $sealer  = new EnvelopeSealer(new MalformedFieldEncrypter(['v' => $version, 'k' => 'key_1', 'c' => 'ciphertext']), $handler);
 
-        self::assertSame(['v' => $version, 'k' => 'key_1', 'c' => 'ciphertext'], $sealer->seal(self::owner(), self::PLAINTEXT));
+        self::assertSame(['v' => $version, 'k' => 'key_1', 'c' => 'ciphertext'], $sealer->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertSame([], $handler->reports());
     }
 
@@ -106,7 +137,7 @@ final class EnvelopeSealerTest extends TestCase
     {
         $handler = new RecordingExceptionHandler;
 
-        self::assertNull((new EnvelopeSealer(new NoFieldEncrypter, $handler))->seal(self::owner(), self::PLAINTEXT));
+        self::assertNull((new EnvelopeSealer(new NoFieldEncrypter, $handler))->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertSame([], $handler->reports());
     }
 
@@ -161,7 +192,7 @@ final class EnvelopeSealerTest extends TestCase
         $handler = new RecordingExceptionHandler;
         $sealer  = new EnvelopeSealer(new MalformedFieldEncrypter($envelope), $handler);
 
-        self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT));
+        self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertCount(1, $handler->reports());
         self::assertInstanceOf(FieldEncryptionFailedException::class, $handler->reports()[0]);
     }
@@ -176,7 +207,7 @@ final class EnvelopeSealerTest extends TestCase
     {
         $handler = new RecordingExceptionHandler;
 
-        self::assertNull((new EnvelopeSealer(new ThrowingFieldEncrypter, $handler))->seal(self::owner(), self::PLAINTEXT));
+        self::assertNull((new EnvelopeSealer(new ThrowingFieldEncrypter, $handler))->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertCount(1, $handler->reports());
     }
 
@@ -190,7 +221,7 @@ final class EnvelopeSealerTest extends TestCase
     {
         $handler = new RecordingExceptionHandler;
 
-        self::assertNull((new EnvelopeSealer(new ThrowingFieldEncrypter(throwsAnError: true), $handler))->seal(self::owner(), self::PLAINTEXT));
+        self::assertNull((new EnvelopeSealer(new ThrowingFieldEncrypter(throwsAnError: true), $handler))->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertCount(1, $handler->reports());
     }
 
@@ -224,7 +255,7 @@ final class EnvelopeSealerTest extends TestCase
         $ignored = ini_set('zend.exception_ignore_args', '0');
 
         try {
-            (new EnvelopeSealer($encrypter, $handler))->seal(self::owner(), self::PLAINTEXT);
+            (new EnvelopeSealer($encrypter, $handler))->seal(self::owner(), self::PLAINTEXT, self::context());
         } finally {
             ini_set('zend.exception_ignore_args', (string) $ignored);
         }
@@ -254,7 +285,7 @@ final class EnvelopeSealerTest extends TestCase
         $sealer  = new EnvelopeSealer(new MalformedFieldEncrypter([]), $handler);
 
         foreach (range(1, 3) as $attempt) {
-            self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT), "Seal {$attempt} gave an envelope.");
+            self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT, self::context()), "Seal {$attempt} gave an envelope.");
         }
 
         self::assertCount(1, $handler->reports());
@@ -271,8 +302,8 @@ final class EnvelopeSealerTest extends TestCase
         $encrypter = new ThrowingFieldEncrypter;
         $sealer    = new EnvelopeSealer($encrypter, new RecordingExceptionHandler);
 
-        $sealer->seal(self::owner(), self::PLAINTEXT);
-        $sealer->seal(self::owner(), self::PLAINTEXT);
+        $sealer->seal(self::owner(), self::PLAINTEXT, self::context());
+        $sealer->seal(self::owner(), self::PLAINTEXT, self::context());
 
         self::assertSame(1, $encrypter->calls());
     }
@@ -288,8 +319,8 @@ final class EnvelopeSealerTest extends TestCase
         $encrypter = new MalformedFieldEncrypter([]);
         $sealer    = new EnvelopeSealer($encrypter, new RecordingExceptionHandler);
 
-        $sealer->seal(self::owner(), self::PLAINTEXT);
-        $sealer->seal(self::owner(), self::PLAINTEXT);
+        $sealer->seal(self::owner(), self::PLAINTEXT, self::context());
+        $sealer->seal(self::owner(), self::PLAINTEXT, self::context());
 
         self::assertSame(1, $encrypter->calls());
     }
@@ -307,10 +338,11 @@ final class EnvelopeSealerTest extends TestCase
              *
              * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
              * @param  string  $plaintext
+             * @param  \SineMacula\Laravel\AuditLog\Privacy\FieldContext  $context
              * @return ?array{v: int, k: string, c: string}
              */
             #[\Override]
-            public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext): ?array
+            public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext, FieldContext $context): ?array
             {
                 return $owner->id === '42' ? ['v' => 1, 'k' => 'key_42', 'c' => 'ciphertext'] : null;
             }
@@ -319,8 +351,8 @@ final class EnvelopeSealerTest extends TestCase
         $handler = new RecordingExceptionHandler;
         $sealer  = new EnvelopeSealer($encrypter, $handler);
 
-        self::assertNull($sealer->seal(Reference::of('user', 7), self::PLAINTEXT));
-        self::assertSame(['v' => 1, 'k' => 'key_42', 'c' => 'ciphertext'], $sealer->seal(self::owner(), self::PLAINTEXT));
+        self::assertNull($sealer->seal(Reference::of('user', 7), self::PLAINTEXT, self::context()));
+        self::assertSame(['v' => 1, 'k' => 'key_42', 'c' => 'ciphertext'], $sealer->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertSame([], $handler->reports());
     }
 
@@ -334,8 +366,8 @@ final class EnvelopeSealerTest extends TestCase
         $encrypter = new RecordingFieldEncrypter;
         $sealer    = new EnvelopeSealer($encrypter, new RecordingExceptionHandler);
 
-        $sealer->seal(self::owner(), 'one');
-        $sealer->seal(self::owner(), 'two');
+        $sealer->seal(self::owner(), 'one', self::context());
+        $sealer->seal(self::owner(), 'two', self::context());
 
         self::assertCount(2, $encrypter->calls());
     }
@@ -367,8 +399,8 @@ final class EnvelopeSealerTest extends TestCase
         $handler = new RecordingExceptionHandler(throwsOnReport: true);
         $sealer  = new EnvelopeSealer($encrypter, $handler);
 
-        self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT));
-        self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT));
+        self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT, self::context()));
+        self::assertNull($sealer->seal(self::owner(), self::PLAINTEXT, self::context()));
         self::assertCount(1, $handler->reports());
         self::assertSame(1, $encrypter->calls());
     }
@@ -391,7 +423,7 @@ final class EnvelopeSealerTest extends TestCase
         $ignored = ini_set('zend.exception_ignore_args', '0');
 
         try {
-            (new EnvelopeSealer(new ThrowingFieldEncrypter, $handler))->seal(self::owner(), self::PLAINTEXT);
+            (new EnvelopeSealer(new ThrowingFieldEncrypter, $handler))->seal(self::owner(), self::PLAINTEXT, self::context());
         } finally {
             ini_set('zend.exception_ignore_args', (string) $ignored);
         }
@@ -400,6 +432,17 @@ final class EnvelopeSealerTest extends TestCase
 
         self::assertCount(1, $seal);
         self::assertInstanceOf(\SensitiveParameterValue::class, ($seal[0]['args'] ?? [])[1] ?? null);
+    }
+
+    /**
+     * The context every test seals for: a property of an entry of a tenant,
+     * encrypted for the owner.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Privacy\FieldContext
+     */
+    private static function context(): FieldContext
+    {
+        return new FieldContext('0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e', ['properties', 'card'], 'app-eu-1', Reference::of('organisation', 'org_01'), 'finance', [self::owner()]);
     }
 
     /**

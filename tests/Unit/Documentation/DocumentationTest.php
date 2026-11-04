@@ -31,11 +31,17 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\KeyState;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\MarkerTransition;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\RewrapStatus;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
@@ -69,28 +75,29 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
  * in docs/design: every outcome, origin, provenance, field handling, key owner,
  * IP mode, identifier mode, failure mode, delivery mode, failed operation,
  * envelope failure, integrity status, anchoring status, finding, anchor driver,
- * journal kind, hold basis, prune status, import status, import format and
- * import rejection, every configuration key and every method of the recorder is
+ * journal kind, hold basis, prune status, import status, import format, import
+ * rejection, key state, marker transition, erasure refusal, erasure status and
+ * rewrap status, every configuration key and every method of the recorder is
  * documented; every package event has a row in the events table and in the
  * events guide; every `AuditLog::` call shown exists or is planned; every
  * design note, the redaction note, the threat model, the delivery note and the
- * integrity and lifecycle notes among them, exists, has the standard sections
- * and is listed in the index, which ends with the standard sentence; the notes
- * state what they must, and the threat model opens with the limits of key
- * matching and states each limit of integrity; the redaction note lists every
- * entry of the matcher and every IP mode, and never calls key matching
- * fail-closed; the integrity note has a row for every status and finding; every
- * redaction, failure, delivery and integrity setting's environment variable is
- * in the README; the operations guide has its sections, names every integrity
- * command, option and progress name, and claims nothing beyond its
- * measurements; the outcomes table has exactly its rows, and no document says a
- * failed record is not true; the documented spill channel is the one the tests
- * use, and the spill and the outbox are called personal data; every test a note
- * cites and every file it anchors exists, and no document cites a file kept out
- * of the repository, a milestone or another package of the suite, or describes
- * a transition from a release that does not exist; the vocabulary reserves
- * every prefix and every shipped code sits under one; and every example is
- * valid and neutral, naming no other package of the suite. The
+ * integrity, lifecycle and privacy notes among them, exists, has the standard
+ * sections and is listed in the index, which ends with the standard sentence;
+ * the notes state what they must, and the threat model opens with the limits of
+ * key matching and states each limit of integrity and of erasure; the redaction
+ * note lists every entry of the matcher and every IP mode, and never calls key
+ * matching fail-closed; the integrity note has a row for every status and
+ * finding; every redaction, failure, delivery and integrity setting's
+ * environment variable is in the README; the operations guide has its sections,
+ * names every integrity command, option and progress name, and claims nothing
+ * beyond its measurements; the outcomes table has exactly its rows, and no
+ * document says a failed record is not true; the documented spill channel is
+ * the one the tests use, and the spill and the outbox are called personal data;
+ * every test a note cites and every file it anchors exists, and no document
+ * cites a file kept out of the repository, a milestone or another package of
+ * the suite, or describes a transition from a release that does not exist; the
+ * vocabulary reserves every prefix and every shipped code sits under one; and
+ * every example is valid and neutral, naming no other package of the suite. The
  * automatic-capture guide has its sections, names every package code and states
  * every gap in capture, the extending guide has its sections and documents the
  * correlation id format, which the builder holds to, every capture setting's
@@ -99,8 +106,9 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
  * makes each of its statements, names every value of the read path, every
  * export option and both read settings' environment variables, and shows no
  * call that does not exist; the threat model states the limits of a PHP access
- * policy; the reading note names the seams it leaves; each package code's row
- * in the vocabulary keeps what its definition retains; and no document says the
+ * policy; the reading note names the seams it leaves, and no longer the
+ * decrypting reader or owner discovery, which ship; each package code's row in
+ * the vocabulary keeps what its definition retains; and no document says the
  * immediate path is outside the caller's transaction.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
@@ -143,6 +151,11 @@ final class DocumentationTest extends TestCase
         ImportStatus::class,
         ImportFormat::class,
         ImportRejection::class,
+        KeyState::class,
+        MarkerTransition::class,
+        ErasureRefusal::class,
+        ErasureStatus::class,
+        RewrapStatus::class,
     ];
 
     /** @var list<string> The sections of every design note, in order. */
@@ -164,6 +177,7 @@ final class DocumentationTest extends TestCase
         'testing-helpers.md',
         'reading.md',
         'lifecycle.md',
+        'privacy.md',
     ];
 
     /** @var string The sentence the threat model opens with. */
@@ -172,6 +186,23 @@ final class DocumentationTest extends TestCase
 
     /** @var string The sentence the threat model states the brute force limit with. */
     private const string BRUTE_FORCE_LIMIT = 'A guessable identifier falls to brute force once the key leaks.';
+
+    /** @var list<string> What the threat model says erasure does not promise, each in its own section. */
+    private const array ERASURE_LIMITS = [
+        'Database credentials can still destroy keys, key uses and markers; the package\'s cryptographic evidence makes '
+            . 'unauthorised destruction, substitution or restoration detectable, never impossible',
+        'An erasure, a hold and a trigger decide what the package does, and stop no one holding those credentials',
+        'A wrapping key derived from `app.key` gives domain separation, not independence from `app.key`',
+        'A decryption already returned cannot be recalled',
+        'A restore from before an erasure brings the erased keys back',
+        'without one, a full restore cannot be found',
+        'An erasure revokes the owner\'s fields in the live store',
+        'No store is claimed to hold no personal data: `privacy.md` lists each with what it holds and why',
+        'The grant reveals every encrypted field of every entry a scope sees, whoever owns it',
+    ];
+
+    /** @var string The privacy note. */
+    private const string PRIVACY_NOTE = '/docs/design/privacy.md';
 
     /** @var string The redaction note. */
     private const string REDACTION_NOTE = '/docs/design/redaction.md';
@@ -402,6 +433,34 @@ final class DocumentationTest extends TestCase
         'queued listener'  => 'A queued listener runs outside the read guard: a listener that reads the trail ignores `audit_log.` codes.',
         'wal'              => 'On SQLite use WAL: in rollback-journal mode an export\'s snapshot blocks every writer\'s commit until it ends.',
         'open transaction' => 'A trail is never read inside a transaction the application has open on the storage connection or the outbox connection.',
+        'no grant'         => 'Without the grant no reader is asked, and every sealed field shows `[ENCRYPTED]`.',
+        'grant reveals'    => 'The grant reveals every encrypted field of every entry the scope sees, whoever owns it: it is not an owner-specific projection.',
+        'grant binds'      => 'The grant is part of the scope\'s normalised form and fingerprint',
+        'no decryption'    => 'A count and an export never decrypt',
+        'reveal evidence'  => 'A page read under the grant records `reveal` and `fields`',
+        'recall'           => 'A decryption already returned cannot be recalled.',
+        'authenticated'    => 'Under the grant, each row\'s HMAC is verified before any field of it is read.',
+        'unauthenticated'  => 'shows every sealed field it holds as `[UNREADABLE]`, and none of them reaches the reader',
+        'default reader'   => 'The package binds `Privacy\SubjectKeyFieldReader`, which reads the keys of a page in one statement',
+        'never a replica'  => 'on the storage connection\'s writer, never a replica, so a page read once an erasure has committed never reveals',
+        'erased only'      => '`erased` only for a key whose tombstone a verified erasure row lists',
+        'sealed reader'    => '`Privacy\SealedFieldReader` reads nothing and answers `encrypted` for every field',
+        'reader contract'  => 'only under the grant and only from rows whose HMAC verified, and answers each, in order and in number',
+        'holding filter'   => '`holdingDataOf()` keeps the entries holding a fragment sealed under one of the owner\'s keys',
+    ];
+
+    /** @var list<string> What the subject access procedure must say of what it finds, reveals and erases. */
+    private const array PROCEDURE_STATEMENTS = [
+        'The canonical evidence export is not a copy for the data subject.',
+        'a policy is not told the trail\'s filters',
+        'The grant reveals every encrypted field of each entry, whoever owns it',
+        'leaves out every other person\'s reference, every other owner\'s fragment',
+        'From its commit every fragment sealed under the subject\'s keys reads `[ERASED]`',
+        'Other owners\' fragments in the same entries are untouched.',
+        'it is complete only once the backups, replicas, exports, logs, destination stores and pending deliveries',
+        'through `onlyAbout()`, and the entries holding a fragment sealed under the subject\'s keys, through `holdingDataOf()`',
+        'Principal references and bulk members are still not found',
+        'no erasure reaches it',
     ];
 
     /** @var array<string, string> What the threat model says a PHP access policy cannot do, by what each statement is about. */
@@ -414,10 +473,14 @@ final class DocumentationTest extends TestCase
 
     /** @var list<string> What the reading note says the read path leaves for others to build. */
     private const array READING_SEAMS = [
-        'The decrypting `Contracts\FieldReader`',
-        '`erased` once an erasure has destroyed the owner\'s keys',
-        'Owner discovery and erasure for a subject access request',
+        'An owner-specific projection for a subject access request',
+        'the other owners\' fragments the selected entries hold are reviewed by the investigator',
+        'A copy for the data subject',
+        'built from revealed pages, never from an export',
     ];
+
+    /** @var list<string> What the reading note's seams no longer name, since the package ships them. */
+    private const array SHIPPED_SEAMS = ['FieldReader', 'Owner discovery'];
 
     /** @var string The rule that keeps the export evidence verifiable, which the reading note and the reading guide both state. */
     private const string EXPORT_EVIDENCE = '`audit_log.trail_exported` entries are protected from retention, so `--verify` keeps working while the database and `app.key` live';
@@ -434,6 +497,7 @@ final class DocumentationTest extends TestCase
         FakeAuditStore::class,
         InteractsWithAuditLog::class,
         Recorder::class,
+        AuditLifecycle::class,
         Container::class,
     ];
 
@@ -1053,6 +1117,9 @@ final class DocumentationTest extends TestCase
             'what the metadata holds'             => [$record, 'it holds `note`, `identifier_hash` and `omitted`'],
             'an owned note is sealed'             => [$record, 'it is sealed through `Contracts\FieldEncrypter`'],
             'the record takes the minimised'      => [$record, '`AuditRecord::fromPending()` takes the minimised value'],
+            'the id is minted first'              => [$record, 'The id is minted before the record is minimised, never after'],
+            'the record takes the minted id'      => [$record, '`AuditRecord::fromPending()` takes the id it was given'],
+            'values are sealed for the entry'     => [$record, 'Minimising seals each encrypted value for the record\'s entry id'],
             'an exemption is an assumption'       => [self::REDACTION_NOTE, 'An exemption assumes non-secret metadata'],
             'an exempt container is kept'         => [self::REDACTION_NOTE, 'an exempt container\'s scalar values are kept'],
             'the remedy is a field rule'          => [self::REDACTION_NOTE, 'the remedy is an explicit field rule'],
@@ -1187,7 +1254,13 @@ final class DocumentationTest extends TestCase
             yield 'the threat model: ' . $limit => [self::THREAT_MODEL, $limit];
         }
 
+        foreach (self::ERASURE_LIMITS as $limit) {
+            yield 'the threat model on erasure: ' . $limit => [self::THREAT_MODEL, $limit];
+        }
+
         yield from self::operationsStatements();
+
+        yield from self::privacyStatements();
     }
 
     /**
@@ -1213,17 +1286,24 @@ final class DocumentationTest extends TestCase
     {
         yield from [
             'redaction'    => [self::REDACTION_NOTE, ['Key Matching', 'Field Rules', 'Budgets And Omission', 'IP Modes']],
-            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox', 'Limits Of Integrity', 'Limits Of A PHP Access Policy']],
-            'delivery'     => [self::DELIVERY_NOTE, ['Spill Channel', 'Claims And Receipts', 'Replay', 'Stores And Capabilities', 'Captures And Bundles', 'Formatters']],
-            'integrity'    => [self::INTEGRITY_NOTE, ['Seals', 'Anchors', 'Verification', 'Pruning And Erasure', 'Alerting And Progress', 'Seams Left']],
-            'reading'      => [self::READING_NOTE, ['Seams Left']],
+            'threat model' => [
+                self::THREAT_MODEL,
+                ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox', 'Limits Of Integrity', 'Limits Of A PHP Access Policy', 'Limits Of Erasure'],
+            ],
+            'delivery'  => [self::DELIVERY_NOTE, ['Spill Channel', 'Claims And Receipts', 'Replay', 'Stores And Capabilities', 'Captures And Bundles', 'Formatters']],
+            'integrity' => [self::INTEGRITY_NOTE, ['Seals', 'Anchors', 'Verification', 'Pruning And Erasure', 'Alerting And Progress', 'Seams Left']],
+            'reading'   => [self::READING_NOTE, ['Seams Left']],
+            'privacy'   => [
+                self::PRIVACY_NOTE,
+                ['Keys', 'Encryption', 'Key Uses', 'Reading', 'Erasure', 'Restores', 'What Is Not Erased', 'Stores And What They Hold', 'Seams Left'],
+            ],
         ];
     }
 
     /**
      * The redaction note, the threat model, the delivery note, the integrity
-     * note and the reading note have their own sections, in order, between the
-     * failure and edge cases and the implementation anchors.
+     * note, the reading note and the privacy note have their own sections, in
+     * order, between the failure and edge cases and the implementation anchors.
      *
      * @param  string  $note
      * @param  list<string>  $extra
@@ -1284,6 +1364,23 @@ final class DocumentationTest extends TestCase
 
         foreach (self::INTEGRITY_LIMITS as $limit) {
             self::assertStringContainsString($limit, $section, sprintf('The threat model\'s limits of integrity do not say: %s.', $limit));
+        }
+    }
+
+    /**
+     * The threat model states in its own section each limit of erasure: the two
+     * guarantees for keys, the derived wrapping key, recall, restores, what an
+     * erasure revokes, the inventory that replaces any claim of no personal
+     * data, and what the reveal grant shows, however the lines are wrapped.
+     *
+     * @return void
+     */
+    public function testTheThreatModelStatesTheLimitsOfErasure(): void
+    {
+        $section = self::collapsed(self::section(self::read(self::THREAT_MODEL), 'Limits Of Erasure'));
+
+        foreach (self::ERASURE_LIMITS as $limit) {
+            self::assertStringContainsString($limit, $section, sprintf('The threat model\'s limits of erasure do not say: %s.', $limit));
         }
     }
 
@@ -2023,8 +2120,9 @@ final class DocumentationTest extends TestCase
      * The reading guide's sections say what each of their own rules pins: the
      * scopes narrow only through the instance methods and warn of a static
      * factory, the verification names what the viewer's scope must reach and
-     * the offline steps, and the subject access procedure has its three blocks
-     * and its limits.
+     * the offline steps, and the subject access procedure has its four blocks,
+     * says what the reveal grant shows and what the erasure reaches, states its
+     * limits, and no longer defers owner discovery and erasure.
      *
      * @return void
      */
@@ -2043,12 +2141,16 @@ final class DocumentationTest extends TestCase
             self::assertStringContainsString($step, $verification);
         }
 
-        foreach (['<!-- procedure:policy -->', '<!-- procedure:select -->', '<!-- procedure:review -->'] as $marker) {
+        foreach (['<!-- procedure:policy -->', '<!-- procedure:select -->', '<!-- procedure:review -->', '<!-- procedure:erase -->'] as $marker) {
             self::assertSame(1, substr_count($procedure, $marker), sprintf('The procedure does not hold %s once.', $marker));
         }
 
-        self::assertStringContainsString('principal references, owned fragments and bulk members are not found by `onlyAbout()`', $procedure);
-        self::assertStringContainsString('Owner discovery and erasure are the erasure feature\'s', $procedure);
+        foreach (self::PROCEDURE_STATEMENTS as $statement) {
+            self::assertStringContainsString($statement, $procedure);
+        }
+
+        self::assertStringNotContainsString('the erasure feature\'s', $procedure);
+        self::assertStringNotContainsString('erases nothing', $procedure);
     }
 
     /**
@@ -2112,7 +2214,9 @@ final class DocumentationTest extends TestCase
      */
     public function testTheReadingCallCheckKnowsOnlyRealMethods(): void
     {
-        foreach (['cursorPaginate', 'onlyAbout', 'tenants', 'hasMore', 'describe', 'isVerified', 'assertAudited', 'instance', 'trail'] as $call) {
+        $calls = ['cursorPaginate', 'onlyAbout', 'tenants', 'hasMore', 'describe', 'isVerified', 'assertAudited', 'instance', 'trail'];
+
+        foreach ([...$calls, 'holdingDataOf', 'revealingEncryptedFields', 'lifecycle', 'erase'] as $call) {
             self::assertTrue(self::isDeclaredByAReadingClass($call), $call);
         }
 
@@ -2256,6 +2360,10 @@ final class DocumentationTest extends TestCase
         foreach (self::READING_SEAMS as $seam) {
             self::assertStringContainsString($seam, $section, sprintf('The reading note\'s seams do not say: %s.', $seam));
         }
+
+        foreach (self::SHIPPED_SEAMS as $shipped) {
+            self::assertStringNotContainsString($shipped, $section, sprintf('The reading note still leaves what ships: %s.', $shipped));
+        }
     }
 
     /**
@@ -2345,6 +2453,48 @@ final class DocumentationTest extends TestCase
             'the journal derivation'      => [$note, '`hash_hkdf(\'sha256\', $secret, 32, \'sinemacula/audit-log:lifecycle:v1\', \'\')`'],
             'the ledger is always asked'  => [$note, 'even one with no member missing'],
             'the prune is conditional'    => [$note, 'The prune is registered only when it can delete something'],
+        ];
+    }
+
+    /**
+     * Rows of `[note, statement]`: what the notes the owners' keys reach must
+     * say of them, each a rule of encryption, key uses, reading or erasure a
+     * reader of that note would otherwise miss.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    private static function privacyStatements(): array
+    {
+        $record      = '/docs/design/record-model.md';
+        $definitions = '/docs/design/event-definitions.md';
+        $storage     = '/docs/design/storage.md';
+
+        return [
+            'a fingerprint falls to brute force'  => [self::THREAT_MODEL, 'so it falls to brute force like any identifier once the integrity key leaks'],
+            'a leak gives wrapped keys'           => [self::THREAT_MODEL, 'the owners\' wrapped keys, but neither a wrapping key, a hashing key nor plaintext'],
+            'erasure keeps verification'          => [self::INTEGRITY_NOTE, 'an erasure keeps verification whole'],
+            'the key store section'               => [self::INTEGRITY_NOTE, 'A complete run then verifies the owners\' key store'],
+            'a missing key use'                   => [self::INTEGRITY_NOTE, 'a missing key use hides the entry from its owner\'s erasure'],
+            'no destroyed set'                    => [self::INTEGRITY_NOTE, 'No set of destroyed keys is kept'],
+            'the grant never asks without'        => [self::READING_NOTE, 'A scope without the grant never asks a reader'],
+            'only from a verified row'            => [self::READING_NOTE, '`Privacy\EncryptedField`, from a verified row'],
+            'a page in one call'                  => [self::READING_NOTE, 'in one call, answered in order and in number'],
+            'the owner\'s entries'                => [self::READING_NOTE, '`holdingDataOf()` compiles to an `EXISTS` over the key uses joined to the owner\'s keys'],
+            'key uses with their entry'           => [$storage, 'so a failed key use rolls its entry back and neither is ever kept without the other'],
+            'no envelope keeps one insert'        => [$storage, 'A record with no such envelope keeps its single insert'],
+            'the default encrypter'               => [self::REDACTION_NOTE, 'The package binds `Privacy\SubjectKeyEncrypter`, the default encrypter'],
+            'never encrypting is explicit'        => [self::REDACTION_NOTE, 'is the explicit choice never to encrypt'],
+            'typed plaintext'                     => [self::REDACTION_NOTE, 'so the string `"true"` and the boolean `true` seal apart'],
+            'no reason discloses an erasure'      => [self::REDACTION_NOTE, 'an owner with no key, an absent owner and an erased owner read alike'],
+            'a record is personal data'           => [$record, 'A record is personal data about everyone it names'],
+            'only a sealed value is erased'       => [$record, 'Only a value sealed under an owner\'s key is erased, by destroying the key'],
+            'an encrypted address is erased'      => [$record, 'unless the `encrypt` IP mode sealed it under the actor\'s key, in which case it is erased with that key'],
+            'encryption by default'               => [$definitions, 'the package\'s encrypter seals each such field under a key of its owner\'s by default'],
+            'categories are erasable apart'       => [$definitions, 'leaves the owner\'s other categories erasable'],
+            'key uses at the drain'               => [self::DELIVERY_NOTE, 'writes its key uses with its entry, at the drain or the replay'],
+            'a hold protects only stored records' => [self::DELIVERY_NOTE, 'a hold protects a record only once it is stored'],
+            'a late delivery is erased'           => [self::DELIVERY_NOTE, 'its owner\'s fields read `erased` by construction'],
+            'pending deliveries refuse'           => [self::DELIVERY_NOTE, 'an erasure refuses while the outbox holds rows created before the erasure started'],
         ];
     }
 

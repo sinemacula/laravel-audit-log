@@ -3,20 +3,23 @@
 ## Purpose
 
 This note records what the package does to the log after it is written: how entries are held, kept for as long as a
-retention policy says and then pruned one by one, how another system's records are imported, and what makes each of
-these accountable. Every destructive or privileged operation is journalled in a chained, signed journal that every seal
-commits to, so the journal is anchored as the entries are, and every decision to delete is read from that verified
-journal inside one lock, never from a table anyone could edit. Two guarantees are stated apart, here as everywhere.
-Database credentials can still destroy rows; the package's cryptographic evidence makes unauthorised destruction
-detectable, never impossible. Whoever holds the maintenance credentials can delete entries, holds and journal rows
-outside the package, and the seals, the journal and `audit-log:verify` make that detectable; a hold, a retention policy
-and the journal decide what the package itself deletes, and stop no one else. What none of this promises is in
-`threat-model.md`; how a prune is verified is in `integrity.md`.
+retention policy says and then pruned one by one, how another system's records are imported, how the maintenance
+operations on owners' keys, erasure, reinstatement, rewrap and the reconciliation of a restore, are journalled and
+recorded beside them, and what makes each of these accountable. Every destructive or privileged operation is journalled
+in a chained, signed journal that every seal commits to, so the journal is anchored as the entries are, and every
+decision to delete is read from that verified journal inside one lock, never from a table anyone could edit. Two
+guarantees are stated apart, here as everywhere. Database credentials can still destroy rows; the package's
+cryptographic evidence makes unauthorised destruction detectable, never impossible. Whoever holds the maintenance
+credentials can delete entries, holds and journal rows outside the package, and the seals, the journal and
+`audit-log:verify` make that detectable; a hold, a retention policy and the journal decide what the package itself
+deletes, and stop no one else. What none of this promises is in `threat-model.md`; how a prune is verified is in
+`integrity.md`.
 
 ## Invariants
 
 - Every maintenance operation, a hold, a release, each prune chunk and each prune run's start and finish rows, an
-  import's journal rows and a projection rebuild, is one outermost transaction on `storage.maintenance_connection`,
+  import's journal rows, a projection rebuild, an erasure, a reinstatement, each rewrap batch and a reconciled
+  restore, is one outermost transaction on `storage.maintenance_connection`,
   through `Lifecycle\MaintenanceTransaction`. It is refused while the maintenance or the storage connection is already
   in a transaction, so it is never a savepoint of the host's and commits on its own. Nothing else writes the journal or
   the holds projection.
@@ -50,11 +53,16 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   writes it again only when the seeded row was lost, and `audit-log:check` only reads it, reporting one that is
   missing. A mismatch is refused with a `Database\InstallationMismatchException`, before the lock, naming no value.
 - The journal row commits with what it describes; the activity record follows the commit. `audit_log.pruned`,
-  `audit_log.held`, `audit_log.released` and `audit_log.imported` are written after the lifecycle transaction commits,
-  by `Lifecycle\LifecycleRecorder`, fail-closed and immediate whatever `failure.mode` says. Fail-closed names the
-  recording attempt only: a record that cannot be written never undoes the operation, is reported as a payload-free
-  `Lifecycle\LifecycleRecordFailedException`, and shows as `recorded: false` on the result, and `audit-log:reconcile`
-  writes it later from the journal, once per operation id. Each of the four codes is category `audit`.
+  `audit_log.held`, `audit_log.released`, `audit_log.imported`, `audit_log.subject_erased`, `audit_log.keys_reinstated`
+  and `audit_log.keys_rewrapped` are written after the lifecycle transaction commits, their evidence built by
+  `Lifecycle\LifecycleRecords` and written by `Lifecycle\LifecycleRecorder`, fail-closed and immediate whatever
+  `failure.mode` says. Fail-closed names the recording attempt only: a record that cannot be written never undoes the
+  operation, is reported as a payload-free `Lifecycle\LifecycleRecordFailedException`, and shows as `recorded: false`
+  on the result, and `audit-log:reconcile` writes it later from the journal, once per operation id. Each of the seven
+  codes is category `audit`. A refusal that wrote nothing, a release of a hold that is not active, a refused erasure
+  and a reinstatement of an owner who is not erased, is recorded `denied` and rethrown; an erasure or a rewrap that
+  fails is recorded as a failure, with `journal_broken`, `erasure_failed` or `rewrap_failed`, a code and never the
+  failure's message, and rethrown.
 - Only `audit_log.trail_exported` is protected from retention (`PackageActivity::isProtected()`), and no policy can
   change that. Every other code, the package's own included, follows its category's policy.
 - The package records the basis it is given and never decides legal necessity. A hold's basis, its external reference
@@ -91,6 +99,15 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   `audit_log.imported`.
 - `audit-log:verify` verifies the whole journal on every run, each seal's commitment to it, and every pruned member
   against the prune records the journal holds.
+- `AuditLog::lifecycle()->erase(...)` or `audit-log:erase` journals the owner's erasure, tombstones the owner's keys
+  and marks the owner in one transaction, then records `audit_log.subject_erased`; `reinstate()` and
+  `audit-log:reinstate` journal a reinstatement and record `audit_log.keys_reinstated`; `rewrap()` and
+  `audit-log:rewrap` journal each batch and record `audit_log.keys_rewrapped` once the run ends. How each decides what
+  it destroys or changes is in `privacy.md`.
+- After a restore, `audit-log:erase --reapply=<file>` (`AuditLifecycle::reapplyErasures()`) erases again each owner
+  the file names, each as `erase()` erases and records one, in part and accepting pending deliveries, and journals
+  `restore_reconciled`, naming the file's SHA-256, its counts and the anchor's head, once every owner ended `complete`
+  or `already_erased` and every line named an owner.
 
 ## Failure / Edge Cases
 
@@ -107,6 +124,9 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
 - A tampered candidate, a row whose HMAC fails, whose HMAC is not the one its member was sealed with, or that is not a
   member of the authenticated seal, deletes nothing of its chunk and skips its seal for the run, so a prune never
   erases evidence of tampering.
+- A refused erasure, a refused reinstatement and a dry-run rewrap write no row; a reapply whose file changed between
+  its two reads, or holds more than 100,000 lines that are not blank, journals no reconciliation, and an owner it
+  could not erase whole leaves the restore unreconciled, `audit-log:check` with it.
 - An affected-count mismatch, a delete of entries that affects other than the rows it names, rolls the chunk back with a
   `Lifecycle\PruneMismatchException`; the chunk is retried once from a fresh read, then its seal is skipped.
 - A policy exception, an answer out of range, or a custom policy retaining a category for less than it is preserved
@@ -136,9 +156,14 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   with no maintenance exception.
 - A row's kind is one of `Integrity\Enums\JournalKind`: `policy` (a retention policy version, the first time a run is
   under it), `prune_run` (a prune run's start and its finish), `prune` (one committed chunk, holding its prune record),
-  `hold` (a hold placed), `release` (a hold released), `import_started` (an import, before its first entry) and
-  `import_finished` (an import's end, or its close). A hold, a release and an import's rows name their authority;
-  the others name none.
+  `hold` (a hold placed), `release` (a hold released), `import_started` (an import, before its first entry),
+  `import_finished` (an import's end, or its close), `erasure` (an owner's erasure: the keys it destroyed, the keys it
+  kept and why, and the generation floor it set), `reinstate` (an erased owner's reinstatement, so keys may be created
+  again above that floor), `rewrap` (one committed batch of a rewrap, each key's wrapping before and after) and
+  `restore_reconciled` (a restored database reconciled, once every owner its erasures file names is erased again). A
+  hold, a release, an import's rows, an erasure, a reinstatement, a rewrap batch and a reconciled restore name their
+  authority; the others name none. The pruner replays the payloads of the policy, hold and release rows alone; no
+  privacy kind's payload decides what a prune keeps.
 - The chain: `sequence` runs 1, 2, 3 and so on with no gap, under a unique index; row 1's `previous_hmac` is `null` and
   every later row's is the `hmac` of the row before; every row names the log, `integrity.log_id`.
 - The payload is the canonical JSON text of a map, kept as `longText` and never in a JSON column, which MySQL would
@@ -156,6 +181,20 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   advanced its `Lifecycle\JournalReplay` in that transaction: the stored head must be the replay's head, by sequence and
   HMAC, or nothing is appended. A replay is a value, and an operation keeps only the replay a committed transaction
   returned, so a retried attempt never starts ahead of the database.
+- The payload of each privacy kind: `erasure` holds `owner_fingerprint`, `fingerprint_key`, `generation_floor`,
+  `partial`, `pending_accepted`, `pending_rows`, `destroyed` (each key's `key_id`, `unit` and `generation`, its
+  `before`, `state`, `hmac`, `wrapped_digest` and `wrap_key_id`, and its `after`, `state` `erased`, sorted by key id),
+  `kept` (each kept key's `key_id`, `unit`, `generation` and `reasons`) and `entries_affected`; `reinstate` holds
+  `owner_fingerprint`, `fingerprint_key` and `generation_floor`; `rewrap` holds `run_id`, `rotate`, `keys` (each key's
+  `key_id` and its `before` and `after`, `state`, `wrapped_digest` and `wrap_key_id`), `skipped`, the ids of the keys
+  it could not authenticate or unwrap, each a UUID, and `skipped_unnamed`, only when some skipped key's id is not one,
+  how many; and `restore_reconciled` holds `file_sha256`, `owners`, `erased`,
+  `already_erased`, `anchored_sequence` and `anchored_digest`, both `null` when the anchor cannot report its head. A
+  `wrapped_digest` is the lower-case hex SHA-256 of the stored wrapped key. The owner is named by a keyed fingerprint
+  alone, which is personal data while it can be linked to the owner.
+- A rewrap run's batches share its operation id, so `audit-log:reconcile` records the run once, summing the batches it
+  finds in its window; an erasure's and a reinstatement's record are rebuilt from their one row
+  (`Lifecycle\ReconciledOperations`).
 - Before a destructive decision the whole chain is verified, every signature, link and transition, the payloads of the
   policy, hold and release rows checked against their digests, and the latest seal's commitment and the highest
   commitment of any seal must each name a row of the chain; a seal is never written over a journal behind the last
@@ -290,10 +329,8 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
 
 ## Seams Left
 
-- Erasure and the owners' keys: destroying the keys of an owner's encrypted fields, journalled with the lock protocol
-  and the replayed holds as a prune is, and import adding key uses to its insert.
-- Key destruction checked against preservation: `preserveFor()` is asked and enforced against pruning now, and will be
-  enforced against key destruction the same way.
+- External verification of an imported bundle: every batch records `externally_verified` as `false`, since the
+  package verifies nothing a source signed, and a source's own seals or anchor are not checked on import.
 
 ## Implementation Anchors
 
@@ -302,9 +339,10 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   `retainsAnythingForLess()`, `MAX_DAYS`; `src/Lifecycle/RetentionDecisions.php`: `for()`, `midnight()`;
   `src/Lifecycle/RetentionDecision.php`, `src/Lifecycle/RetentionConflictException.php`.
 - `src/Lifecycle/AuditLifecycle.php`: `hold()`, `release()`, `prune()`, `import()`, `closeImport()`, `holds()`,
-  `rebuildHolds()`, `reconcile()`; `src/Lifecycle/Authority.php`; `src/Lifecycle/HoldResult.php`,
-  `src/Lifecycle/ReleaseResult.php`, `src/Lifecycle/PruneResult.php`, `src/Lifecycle/ImportResult.php`,
-  `src/Lifecycle/ReconcileResult.php`.
+  `rebuildHolds()`, `reconcile()`, `erase()`, `reinstate()`, `rewrap()`, `reapplyErasures()`, `rebuildKeyUses()`;
+  `src/Lifecycle/Authority.php`; `src/Lifecycle/HoldResult.php`, `src/Lifecycle/ReleaseResult.php`,
+  `src/Lifecycle/PruneResult.php`, `src/Lifecycle/ImportResult.php`, `src/Lifecycle/ReconcileResult.php`,
+  `src/Lifecycle/ReapplyResult.php`.
 - `src/Lifecycle/MaintenanceTransaction.php`: `confirm()`, `run()`, `MAX_ATTEMPTS`, `JITTER_BASE_MS`, `JITTER_MAX_MS`;
   `src/Lifecycle/LifecycleContentionException.php`, `src/Lifecycle/LifecycleLockException.php`.
 - `src/Database/InstallationIdentity.php`: `ensure()`, `confirm()`, `check()`, `NAME`;
@@ -324,9 +362,12 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   `src/Lifecycle/JournalPruneLedger.php`.
 - `src/Lifecycle/PruneTombstones.php`: `prunedAmong()`, `isPruned()`; `src/Delivery/OutboxDrainer.php`,
   `src/Delivery/Replayer.php`, `src/Stores/DatabaseAuditStore.php`.
-- `src/Lifecycle/LifecycleRecorder.php`: `record()`; `src/Lifecycle/LifecycleEvidence.php`;
-  `src/Lifecycle/LifecycleRecordFailedException.php`; `src/Lifecycle/Reconciler.php`: `reconcile()`;
-  `src/Querying/Enums/PackageActivity.php`: `isProtected()`.
+- `src/Lifecycle/LifecycleRecorder.php`: `record()`; `src/Lifecycle/LifecycleRecords.php`: `blocked()`,
+  `MAX_BLOCKED`; `src/Lifecycle/LifecycleEvidence.php`; `src/Lifecycle/LifecycleRecordFailedException.php`;
+  `src/Lifecycle/Reconciler.php`: `reconcile()`; `src/Lifecycle/ReconciledOperations.php`: `erased()`,
+  `reinstated()`, `rewrapped()`; `src/Querying/Enums/PackageActivity.php`: `isProtected()`.
+- `src/Lifecycle/ErasureReapplier.php`: `reapply()`, `MAX_LINES`, `MAX_LINE_BYTES`; `src/Lifecycle/Eraser.php`,
+  `src/Lifecycle/Reinstater.php`, `src/Lifecycle/Rewrapper.php`, `src/Keys/KeyUseRebuilder.php`.
 - `src/Lifecycle/AuditImporter.php`: `import()`, `close()`; `src/Lifecycle/ImportSource.php`,
   `src/Lifecycle/ImportFile.php`, `src/Lifecycle/ImportLineParser.php`: `REQUIRED`, `OPTIONAL`,
   `isEnvelopeShaped()`; `src/Lifecycle/ExportLineAdapter.php`; `src/Lifecycle/SourceDigest.php`: `DERIVATION_INFO`;
@@ -337,7 +378,9 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   `src/Lifecycle/Enums/ImportRejection.php`.
 - `src/Console/PruneCommand.php`, `src/Console/HoldCommand.php`, `src/Console/ReleaseCommand.php`,
   `src/Console/HoldsCommand.php`, `src/Console/ImportCommand.php`, `src/Console/ReconcileCommand.php`,
-  `src/Console/LifecycleOptions.php`, `src/Console/LifecycleChecks.php`, `src/Console/IntegritySchedule.php`.
+  `src/Console/EraseCommand.php`, `src/Console/ReinstateCommand.php`, `src/Console/RewrapCommand.php`,
+  `src/Console/KeysCommand.php`, `src/Console/LifecycleOptions.php`, `src/Console/LifecycleChecks.php`,
+  `src/Console/IntegritySchedule.php`.
 - `database/migrations/2026_11_02_000700_create_audit_log_lifecycle_table.php`,
   `database/migrations/2026_11_02_000800_create_audit_log_holds_table.php`,
   `database/migrations/2026_11_02_000900_create_audit_log_lifecycle_lock_table.php`,
@@ -426,9 +469,23 @@ and the journal decide what the package itself deletes, and stop no one else. Wh
   `testAFailedRecordIsReportedOnceAndReturnsFalse`, `testNothingIsRethrown`, `testTheCategoryIsAudit`
 - `tests/Feature/Lifecycle/AuditLifecycleTest.php` `testAHoldIsRecordedAfterItCommits`,
   `testARecordingFailureLeavesTheHoldCommittedAndRecordedFalse`, `testAnUnknownReleaseIsRecordedDeniedAndRethrown`,
-  `testAFailedPruneIsRecordedAsAFailure`, `testAnImportsHoldIsRecordedHeld`, `testHoldsAreReadFromTheVerifiedChain`
+  `testAFailedPruneIsRecordedAsAFailure`, `testAnImportsHoldIsRecordedHeld`, `testHoldsAreReadFromTheVerifiedChain`,
+  `testAnErasureIsRecordedAfterItsCommit`, `testARefusedErasureIsRecordedDeniedAndRethrown`,
+  `testARecordingFailureLeavesTheErasureCommitted`, `testAReinstatementIsRecorded`, `testARewrapIsRecorded`,
+  `testTheSubjectErasedRecordReachesTheDestinations`
+- `tests/Feature/Lifecycle/LifecycleRecordsTest.php` `testEachRefusalIsRecordedDenied`,
+  `testAFailedErasureIsRecordedWithACode`, `testTheBlocksAreBoundedAtFifty`
 - `tests/Feature/Lifecycle/ReconcilerTest.php` `testAMissingRecordIsRecordedAgain`,
-  `testAnOperationRecordedAlreadyIsSkipped`, `testOnlyTheWindowIsReconciled`, `testNoJsonPathQueryIsIssued`
+  `testAnOperationRecordedAlreadyIsSkipped`, `testOnlyTheWindowIsReconciled`, `testNoJsonPathQueryIsIssued`,
+  `testAnErasureMissingItsRecordIsRecorded`, `testRewrapsAndReinstatementsAreReconciled`
+- `tests/Unit/Lifecycle/ReconciledOperationsTest.php` `testARewrapRunIsSummedOverItsBatches`,
+  `testARunWithABatchThatDescribesNoBatchIsNull`
+- `tests/Feature/Lifecycle/ErasureReapplierTest.php` `testEachOwnerIsErasedPartiallyWithPendingAccepted`,
+  `testAPartiallyErasedOwnerLeavesTheRestoreUnreconciled`,
+  `testAllOwnersErasedJournalsTheReconciliationWithTheAnchoredHead`, `testAMalformedLineIsCounted`,
+  `testAFileChangedDuringTheRunFails`
+- `tests/Feature/Console/EraseCommandTest.php` `testAFailurePrintsItsClassNotItsMessage`,
+  `testAReapplyReconcilesTheRestore`
 - `tests/Unit/Querying/Enums/PackageActivityTest.php` `testOnlyTheExportIsProtected`, `testNoLifecycleCodeIsARead`
 - `tests/Feature/Lifecycle/AuditImporterTest.php` `testADryRunWritesNothing`, `testEveryColumnOfAnImportedRow`,
   `testTheBatchIsNotExternallyVerified`, `testImportedRowsAreNotDispatchedOrDelivered`,
@@ -474,5 +531,6 @@ Update this note when any of the following change:
 - the paths that check the tombstones
 - an import format, the source digest, the classification, the chunks, the batch states or the hold an import places
 - the installation identity, or which connection each operation writes through
-- the activity codes, what they retain or when they are written
+- the activity codes, what they retain or when they are written, or what a refusal or a failure records
+- a privacy kind's payload, how a rewrap run is reconciled, or what reconciles a restore
 - the basis, archive, Article 17 or export key statements

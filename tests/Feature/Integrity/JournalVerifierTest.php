@@ -315,7 +315,7 @@ final class JournalVerifierTest extends TestCase
         $malformed = $this->journalHold(self::OTHER_HOLD);
 
         $this->journalRow(JournalKind::RELEASE, ['hold_id' => self::HOLD], self::HOLD);
-        $this->tamperJournal(2, ['kind' => 'erasure']);
+        $this->tamperJournal(2, ['kind' => 'no_such_kind']);
 
         [$summary, $findings] = $this->verifyJournal();
 

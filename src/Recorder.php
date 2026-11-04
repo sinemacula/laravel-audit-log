@@ -57,7 +57,8 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
  * until a viewer is named and a terminal call made, and which every read
  * authorises through the bound access policy and records before anything it
  * found is returned. `lifecycle()` likewise gives a fresh way into the log's
- * lifecycle, its holds, prunes and imports, on each call.
+ * lifecycle, its holds, prunes, imports, erasures, reinstatements and rewraps,
+ * on each call.
  *
  * A singleton that outlives requests under Octane, so it holds only frozen
  * registration data, its definitions and contributors. The event mappers and
@@ -324,9 +325,9 @@ final readonly class Recorder
 
     /**
      * A fresh way into the log's lifecycle, resolved from the current
-     * container: holds, prunes, imports and their reconciliation, each a
-     * privileged operation the caller must have authorised, since the package
-     * authorises none of them.
+     * container: holds, prunes, imports, erasures, reinstatements, rewraps and
+     * their reconciliation, each a privileged operation the caller must have
+     * authorised, since the package authorises none of them.
      *
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle
      *

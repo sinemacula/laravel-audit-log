@@ -23,7 +23,8 @@ use Tests\TestCase;
  * not; each id is named once, in the order given, at most 500 to a statement;
  * and the outbox is read inside the chunk's transaction when it lives on the
  * storage database, and through its own connection after the lock when it does
- * not.
+ * not. The outbox rows an erasure counts are every row created before its
+ * start, failed and claimed ones included, read the same way.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -212,6 +213,94 @@ final class PendingDeliveriesTest extends TestCase
         $lock    = array_search('lock', array_column($entries, 2), true);
         $read    = array_search('outbox', array_column($entries, 2), true);
 
+        self::assertIsInt($lock);
+        self::assertIsInt($read);
+        self::assertGreaterThan($lock, $read);
+        self::assertSame([self::MOVED_OUTBOX_CONNECTION, 0], [$entries[$read][0], $entries[$read][3]]);
+    }
+
+    /**
+     * Every outbox row created before the instant is counted, failed and
+     * claimed ones included, whoever's record it holds; one created at the
+     * instant or after is not.
+     *
+     * @return void
+     */
+    public function testOlderThanCountsFailedRowsToo(): void
+    {
+        $this->seedOutboxRow(self::PENDING, 'payload', ['created_at' => '2026-11-02T08:00:00.000000Z']);
+        $failed  = ['created_at' => '2026-11-02T08:30:00.000000Z', 'attempts' => 5, 'failed_at' => self::NOW, 'last_error_class' => \RuntimeException::class];
+        $claimed = ['created_at' => '2026-11-02T08:59:59.999999Z', 'claimed_until' => '2026-11-02T09:05:00.000000Z', 'claimed_by' => 'claim-1'];
+
+        $this->seedOutboxRow(self::DONE, 'payload', $failed);
+        $this->seedOutboxRow('01932b4e-9000-7000-8000-000000000003', 'payload', $claimed);
+        $this->seedOutboxRow('01932b4e-9000-7000-8000-000000000004', 'payload', ['created_at' => self::NOW]);
+        $this->seedOutboxRow('01932b4e-9000-7000-8000-000000000005', 'payload', ['created_at' => '2026-11-02T09:00:00.000001Z']);
+
+        self::assertSame(3, $this->deliveries()->olderThan($this->maintenance(), self::NOW));
+        self::assertSame(0, $this->deliveries()->olderThan($this->maintenance(), '2026-11-02T08:00:00.000000Z'));
+        self::assertSame(5, $this->deliveries()->olderThan($this->maintenance(), '2026-11-02T10:00:00.000000Z'));
+    }
+
+    /**
+     * An empty outbox counts nothing.
+     *
+     * @return void
+     */
+    public function testOlderThanCountsNothingInAnEmptyOutbox(): void
+    {
+        self::assertSame(0, $this->deliveries()->olderThan($this->maintenance(), self::NOW));
+    }
+
+    /**
+     * An outbox on the storage database is counted through the maintenance
+     * connection, inside the erasure's transaction, after its lock.
+     *
+     * @return void
+     */
+    public function testOlderThanReadsTheStorageOutboxInTheTransaction(): void
+    {
+        $this->seedOutboxRow(self::PENDING, 'payload', ['created_at' => '2026-11-02T08:00:00.000000Z']);
+
+        $log = $this->statementLog();
+
+        $count = app(MaintenanceTransaction::class)->run(self::OPERATION, fn (Connection $connection): int => $this->deliveries()->olderThan($connection, self::NOW));
+
+        $entries = $log->getArrayCopy();
+        $lock    = array_search('lock', array_column($entries, 2), true);
+        $read    = array_search('outbox', array_column($entries, 2), true);
+
+        self::assertSame(1, $count);
+        self::assertIsInt($lock);
+        self::assertIsInt($read);
+        self::assertGreaterThan($lock, $read);
+        self::assertSame([StorageConnection::resolvedMaintenanceName(), 1], [$entries[$read][0], $entries[$read][3]]);
+    }
+
+    /**
+     * An outbox on another connection is counted through that connection's
+     * writer, in a read of its own outside the transaction, after the lock
+     * statement.
+     *
+     * @return void
+     */
+    public function testOlderThanReadsAnOutboxOnAnotherConnectionAfterTheLock(): void
+    {
+        $this->moveOutboxToItsOwnConnection();
+        $failed = ['created_at' => '2026-11-02T08:00:00.000000Z', 'attempts' => 5, 'failed_at' => self::NOW, 'last_error_class' => \RuntimeException::class];
+
+        $this->seedOutboxRow(self::PENDING, 'payload', $failed);
+        $this->seedOutboxRow(self::DONE, 'payload', ['created_at' => '2026-11-02T08:00:00.000000Z']);
+
+        $log = $this->statementLog();
+
+        $count = app(MaintenanceTransaction::class)->run(self::OPERATION, fn (Connection $connection): int => $this->deliveries()->olderThan($connection, self::NOW));
+
+        $entries = $log->getArrayCopy();
+        $lock    = array_search('lock', array_column($entries, 2), true);
+        $read    = array_search('outbox', array_column($entries, 2), true);
+
+        self::assertSame(2, $count);
         self::assertIsInt($lock);
         self::assertIsInt($read);
         self::assertGreaterThan($lock, $read);

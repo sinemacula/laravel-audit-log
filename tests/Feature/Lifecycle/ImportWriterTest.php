@@ -17,9 +17,15 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
+use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportBatches;
@@ -29,11 +35,15 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ImportRecordBuilder;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportTally;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportWriter;
 use SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions;
+use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
+use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
@@ -41,7 +51,8 @@ use Tests\TestCase;
  * runs against: one transaction of its own and no savepoint, refused inside a
  * host's; every line built before any is classified; the rows per insert of
  * each engine; a unique violation classified again once, a second making the
- * new lines conflicts; the counts committed with the rows; and a dry run that
+ * new lines conflicts; the counts committed with the rows; the key uses of the
+ * new rows inserted after them, in the same transaction; and a dry run that
  * writes nothing.
  *
  * A concurrent import is stood in for by a row of the same source identity
@@ -57,6 +68,11 @@ use Tests\TestCase;
 #[CoversClass(ImportWriter::class)]
 final class ImportWriterTest extends TestCase
 {
+    use MakesSubjectKeys;
+
+    /** @var string The code whose card is encrypted for its actor. */
+    private const string ENCRYPTED_CODE = 'billing.card_charged';
+
     /** @var string The batch every chunk is of. */
     private const string BATCH = '01932b4e-a000-7000-8000-0000000000b1';
 
@@ -127,6 +143,87 @@ final class ImportWriterTest extends TestCase
         self::assertSame(['begin', 'claim', 'classify', 'insert', 'counts', 'commit'], $log->getArrayCopy());
         self::assertSame(3, $tally->imported());
         self::assertSame(3, $this->entries());
+    }
+
+    /**
+     * Each chunk inserts the key uses of its new rows after the rows, in its
+     * one transaction, one key use for each entry's key: the entry of each
+     * actor's line under that actor's key.
+     *
+     * @return void
+     */
+    public function testEachChunkInsertsItsKeyUses(): void
+    {
+        $first  = Reference::of('App\Models\User', '7');
+        $second = Reference::of('App\Models\User', '8');
+
+        $this->encryptCardsFor($first, $second);
+
+        $log   = $this->statements();
+        $tally = self::read(3);
+
+        $this->writer()->write(self::BATCH, [self::encryptedLine(1, $first), self::encryptedLine(2, $second), self::encryptedLine(3, $first)], $tally, CarbonImmutable::now());
+
+        self::assertSame(['begin', 'claim', 'classify', 'insert', 'key uses', 'counts', 'commit'], $log->getArrayCopy());
+        self::assertSame(3, $tally->imported());
+
+        $entries = $this->connection()->table(EntrySettings::table())->orderBy('source_record_id')->pluck('id')->all();
+        $keys    = array_map(fn (Reference $actor): string => $this->makeSubjectKey($actor, null, 'finance')[0]->id, [$first, $second, $first]);
+
+        self::assertSame(self::sortedUses(array_map(null, $keys, $entries)), $this->keyUses());
+    }
+
+    /**
+     * Only the chunk's new rows have their key uses inserted: the same lines
+     * written again are duplicates, which insert neither a row nor a key use.
+     *
+     * @return void
+     */
+    public function testADuplicateLineInsertsNoKeyUse(): void
+    {
+        $actor = Reference::of('App\Models\User', '7');
+
+        $this->encryptCardsFor($actor);
+
+        $this->writer()->write(self::BATCH, [self::encryptedLine(1, $actor)], self::read(1), CarbonImmutable::now());
+
+        $uses  = $this->keyUses();
+        $tally = self::read(1);
+
+        $this->writer()->write(self::BATCH, [self::encryptedLine(1, $actor)], $tally, CarbonImmutable::now());
+
+        self::assertSame(1, $tally->duplicates());
+        self::assertCount(1, $uses);
+        self::assertSame($uses, $this->keyUses());
+        self::assertSame(1, $this->entries());
+    }
+
+    /**
+     * A chunk whose key uses fail is rolled back whole: no row is kept without
+     * its key uses, and the batch's counts are not written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAChunkWhoseKeyUsesFailKeepsNoRow(): void
+    {
+        $actor = Reference::of('App\Models\User', '7');
+
+        $this->encryptCardsFor($actor);
+
+        app(ConfigRepository::class)->set('audit-log.privacy.key_uses_table', 'audit_missing_key_uses');
+
+        try {
+            $this->writer()->write(self::BATCH, [self::encryptedLine(1, $actor)], self::read(1), CarbonImmutable::now());
+
+            self::fail('Expected the chunk to fail.');
+        } catch (QueryException $exception) {
+            self::assertStringContainsString('audit_missing_key_uses', $exception->getMessage());
+        }
+
+        self::assertSame(0, $this->entries());
+        self::assertSame(0, $this->connection()->table(LifecycleTables::importBatchesTable())->where('id', self::BATCH)->where('imported', '>', 0)->count());
     }
 
     /**
@@ -495,7 +592,8 @@ final class ImportWriterTest extends TestCase
 
     /**
      * Log the chunk's transaction events and statements by what each is: the
-     * claim and the counts on the batch, the classification, the inserts.
+     * claim and the counts on the batch, the classification, the inserts and
+     * the key uses.
      *
      * @return \ArrayObject<int, string>
      */
@@ -505,23 +603,14 @@ final class ImportWriterTest extends TestCase
         $log     = new \ArrayObject;
         $batches = LifecycleTables::importBatchesTable();
         $entries = EntrySettings::table();
+        $uses    = KeyTables::keyUsesTable();
 
         Event::listen(TransactionBeginning::class, static fn () => $log->append('begin'));
         Event::listen(TransactionCommitted::class, static fn () => $log->append('commit'));
         Event::listen(TransactionRolledBack::class, static fn () => $log->append('rollback'));
 
-        DB::listen(static function (QueryExecuted $query) use ($log, $batches, $entries): void {
-            $sql  = strtolower($query->sql);
-            $verb = (string) strtok($sql, ' ');
-
-            $label = match (true) {
-                str_contains($sql, 'savepoint')                                                        => 'savepoint',
-                $verb === 'update' && str_contains($sql, $batches) && str_contains($sql, 'lines_read') => 'counts',
-                $verb === 'update' && str_contains($sql, $batches)                                     => 'claim',
-                $verb === 'select' && str_contains($sql, $entries)                                     => 'classify',
-                $verb === 'insert' && str_contains($sql, $entries)                                     => 'insert',
-                default                                                                                => null,
-            };
+        DB::listen(static function (QueryExecuted $query) use ($log, $batches, $entries, $uses): void {
+            $label = self::labelOf(strtolower($query->sql), $batches, $entries, $uses);
 
             if ($label === null || ($label === 'insert' && $log->getArrayCopy() !== [] && $log[$log->count() - 1] === 'insert')) {
                 return;
@@ -531,6 +620,32 @@ final class ImportWriterTest extends TestCase
         });
 
         return $log;
+    }
+
+    /**
+     * What the statement is to the chunk: the savepoint, the counts or the
+     * claim on the batch, the classification, an insert of entries or of key
+     * uses, or `null` for anything else.
+     *
+     * @param  string  $sql
+     * @param  string  $batches
+     * @param  string  $entries
+     * @param  string  $uses
+     * @return ?string
+     */
+    private static function labelOf(string $sql, string $batches, string $entries, string $uses): ?string
+    {
+        $verb = (string) strtok($sql, ' ');
+
+        return match (true) {
+            str_contains($sql, 'savepoint')                                                        => 'savepoint',
+            $verb === 'update' && str_contains($sql, $batches) && str_contains($sql, 'lines_read') => 'counts',
+            $verb === 'update' && str_contains($sql, $batches)                                     => 'claim',
+            $verb === 'select' && str_contains($sql, $entries)                                     => 'classify',
+            $verb === 'insert' && str_contains($sql, $entries)                                     => 'insert',
+            $verb === 'insert' && str_contains($sql, $uses)                                        => 'key uses',
+            default                                                                                => null,
+        };
     }
 
     /**
@@ -599,6 +714,86 @@ final class ImportWriterTest extends TestCase
             'finance',
             $correlationId,
             ['amount' => '1200.00'],
+            null,
+            null,
+            null,
+        );
+    }
+
+    /**
+     * Encrypt the card of the encrypted code for its actor, under the package's
+     * encrypter and wrapper, and make each actor's key first, so a chunk only
+     * looks the keys up.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  ...$actors
+     * @return void
+     */
+    private function encryptCardsFor(Reference ...$actors): void
+    {
+        $catalogue = new EventCatalogue;
+
+        $catalogue->define(EventDefinition::for(self::ENCRYPTED_CODE)->category('finance')->retain('amount')->encrypt('card', KeyOwner::ACTOR));
+
+        app()->instance(EventCatalogue::class, $catalogue);
+        app()->instance(Recorder::class, new Recorder($catalogue, new ContributorRegistry));
+        app()->bind(FieldEncrypter::class, SubjectKeyEncrypter::class);
+
+        foreach ($actors as $actor) {
+            $this->makeSubjectKey($actor, null, 'finance');
+        }
+    }
+
+    /**
+     * Every stored key use, as its key and entry, sorted.
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function keyUses(): array
+    {
+        $rows = $this->connection()->table(KeyTables::keyUsesTable())->orderBy('key_id')->orderBy('entry_id')->get();
+
+        return array_values(array_map(static fn (object $row): array => [(string) $row->key_id, (string) $row->entry_id], $rows->all()));
+    }
+
+    /**
+     * The key uses, sorted by key and then entry, as the store reads them.
+     *
+     * @param  list<array{0: string, 1: string}>  $uses
+     * @return list<array{0: string, 1: string}>
+     */
+    private static function sortedUses(array $uses): array
+    {
+        usort($uses, static fn (array $left, array $right): int => strcmp($left[0], $right[0]) ?: strcmp($left[1], $right[1]));
+
+        return $uses;
+    }
+
+    /**
+     * A line of the encrypted code of the number given, `rec-<number>`, by the
+     * actor, its card to be encrypted for them.
+     *
+     * @param  int  $number
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $actor
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine
+     */
+    private static function encryptedLine(int $number, Reference $actor): ImportLine
+    {
+        return new ImportLine(
+            $number,
+            'crm-eu',
+            null,
+            'rec-' . $number,
+            self::ENCRYPTED_CODE,
+            '2026-10-01T09:00:00.000001Z',
+            Outcome::SUCCESS,
+            null,
+            $actor,
+            null,
+            null,
+            null,
+            'finance',
+            null,
+            ['amount' => '12.00', 'card' => '4242'],
             null,
             null,
             null,

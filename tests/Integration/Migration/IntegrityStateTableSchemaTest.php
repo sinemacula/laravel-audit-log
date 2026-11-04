@@ -183,9 +183,12 @@ final class IntegrityStateTableSchemaTest extends TestCase
         self::assertSame(['id'], array_keys($value));
         self::assertIsString($value['id']);
         self::assertMatchesRegularExpression(self::UUID_V7, $value['id']);
-        self::assertMatchesRegularExpression('/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}\z/', (string) $rows[0]->updated_at);
+        // PostgreSQL drops a fraction's trailing zeros when it returns a time
+        $written = (string) $rows[0]->updated_at;
 
-        $at = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s.u', (string) $rows[0]->updated_at, new \DateTimeZone('UTC'));
+        self::assertMatchesRegularExpression('/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?\z/', $written);
+
+        $at = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s.u', str_pad(str_contains($written, '.') ? $written : $written . '.', 26, '0'), new \DateTimeZone('UTC'));
 
         self::assertInstanceOf(\DateTimeImmutable::class, $at);
         self::assertSame((int) $at->format('Uv'), hexdec(substr(str_replace('-', '', $value['id']), 0, 12)));

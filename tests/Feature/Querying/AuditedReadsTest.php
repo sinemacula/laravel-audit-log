@@ -54,7 +54,9 @@ final class AuditedReadsTest extends TestCase
     use CapturesLogLines, InteractsWithAuditLog, ReadsTheTrail;
 
     /** @var list<string> The evidence a page's record holds, in this order. */
-    private const array PAGE_EVIDENCE = ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'outcome'];
+    private const array PAGE_EVIDENCE = [
+        'purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'reveal', 'fields', 'outcome',
+    ];
 
     /** @var list<string> The evidence a count's record holds, in this order. */
     private const array COUNT_EVIDENCE = ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'returned', 'outcome'];
@@ -191,6 +193,8 @@ final class AuditedReadsTest extends TestCase
             'page'              => 'first',
             'per_page'          => 2,
             'returned'          => 2,
+            'reveal'            => false,
+            'fields'            => ['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0],
             'outcome'           => 'success',
         ], $properties);
         self::assertIsArray($audit);
@@ -252,6 +256,43 @@ final class AuditedReadsTest extends TestCase
 
         self::assertSame($scope->toArray(), $disclosure['scope']);
         self::assertSame($filters->normalised(), $disclosure['filters']);
+    }
+
+    /**
+     * A read of the entries holding an owner's data names the owner only in its
+     * encrypted disclosure: the read row and its artifact hold the keyed
+     * fingerprint of the filters, which differs from the same read's without
+     * the owner, and no column of either names the owner's id.
+     *
+     * @return void
+     */
+    public function testTheOwnerHoldingDataIsFingerprintedNeverNamed(): void
+    {
+        $owner   = Reference::of('App\Models\User', 'owner_9917');
+        $filters = TrailFilters::none()->withCategories(['finance'])->withHoldingDataOf($owner);
+
+        $this->allowEverything();
+        $this->seedEntry();
+        $this->trail()->holdingDataOf($owner)->cursorPaginate();
+        $this->trail()->cursorPaginate();
+
+        [$record, $without] = $this->readRecords('audit_log.trail_read');
+
+        $columns = [
+            'the entry'    => DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $record['id'])->first(),
+            'the artifact' => DB::connection(StorageConnection::name())->table(EntrySettings::artifactsTable())->where('entry_id', $record['id'])->first(),
+        ];
+
+        foreach ($columns as $name => $columnsOf) {
+            self::assertStringNotContainsString('owner_9917', json_encode($columnsOf, JSON_THROW_ON_ERROR), "The columns of {$name} name the owner.");
+        }
+
+        $fingerprint = self::propertiesOf($record)['query_fingerprint'];
+
+        self::assertSame(self::termsOf($filters, AccessScope::all())->queryFingerprint, $fingerprint);
+        self::assertNotSame(self::propertiesOf($without)['query_fingerprint'], $fingerprint);
+        self::assertSame(['App\Models\User', 'owner_9917'], $this->disclosureOf($record['id'])['filters']['holding_data_of']);
+        self::assertNull($this->disclosureOf($without['id'])['filters']['holding_data_of']);
     }
 
     /**

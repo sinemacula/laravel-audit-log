@@ -19,6 +19,9 @@ use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
+use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
+use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
@@ -30,18 +33,19 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Reconciler;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\SealsEntries;
-use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
  * Feature tests for reconciliation: every prune run that finished, hold,
- * release and import that finished within the days looked back, and recorded by
- * no entry of its code, is recorded again with the properties its journal
- * rows give; one already recorded is skipped, so a second run records nothing;
- * a row that does not verify, or an operation whose start does not, is never
+ * release, import that finished, erasure, reinstatement and rewrap run within
+ * the days looked back, and recorded by no entry of its code, is recorded again
+ * with the properties its journal rows give, a rewrap run once for all its
+ * batches; one already recorded is skipped, so a second run records nothing; a
+ * row that does not verify, or an operation whose start does not, is never
  * recorded; a prune run that has not finished is counted apart; the window is
  * the days given; and the operation each entry names is read in PHP, never by a
  * JSON path query.
@@ -54,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(Reconciler::class)]
 final class ReconcilerTest extends TestCase
 {
-    use ReadsTheTrail, SealsEntries, WritesTheJournal;
+    use MakesSubjectKeys, ReadsTheTrail, SealsEntries;
 
     /** @var string When the reconciler runs, unless a test moves the clock. */
     private const string NOW = '2026-11-02 09:00:00.123456';
@@ -106,8 +110,8 @@ final class ReconcilerTest extends TestCase
 
     /**
      * Rows of `[what the journal holds, the code it is recorded under, its
-     * expected properties, the actor, the outcome and reason]`: a prune run,
-     * a hold, a release and an import, each journalled and unrecorded.
+     * expected properties, the actor, the outcome and reason]`: a prune run, a
+     * hold, a release and an import, each journalled and unrecorded.
      *
      * @formatter:off
      *
@@ -650,6 +654,35 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
+     * In sync mode no record waits in the outbox, and the writer holds no grant
+     * on it, so the outbox is never read: an operation is recorded through the
+     * entries alone, and a second run finds its record there.
+     *
+     * @return void
+     */
+    public function testInSyncModeTheOutboxIsNeverRead(): void
+    {
+        $this->holdRow();
+
+        $read = [];
+
+        DB::listen(static function (QueryExecuted $query) use (&$read): void {
+            if (!str_contains($query->sql, DeliveryTables::outboxTable())) {
+                return;
+            }
+
+            $read[] = $query->sql;
+        });
+
+        $first  = $this->reconciler()->reconcile();
+        $second = $this->reconciler()->reconcile();
+
+        self::assertSame([1, 0], [$first->recorded, $first->alreadyRecorded]);
+        self::assertSame([0, 1], [$second->recorded, $second->alreadyRecorded]);
+        self::assertSame([], $read);
+    }
+
+    /**
      * A record written meanwhile by another run, under the same derived id, is
      * never written twice: the second write meets the primary key and finds the
      * record stored already, so one record is stored.
@@ -827,6 +860,155 @@ final class ReconcilerTest extends TestCase
         self::assertSame([501, 501], [$first->examined, $first->recorded]);
         self::assertSame([501, 0, 501], [$second->examined, $second->recorded, $second->alreadyRecorded]);
         self::assertCount(501, $this->readRecords(PackageActivity::RELEASED->value));
+    }
+
+    /**
+     * An erasure whose record could not be written is recorded from its journal
+     * row, with exactly the properties the erasure itself would have recorded,
+     * by its operator; a second run records nothing.
+     *
+     * @return void
+     */
+    public function testAnErasureMissingItsRecordIsRecorded(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        $this->makeSubjectKey($owner, null, 'billing');
+
+        app(ConfigRepository::class)->set('audit-log.redaction.keys', ['entries_affected']);
+
+        $result = app(AuditLifecycle::class)->erase($owner, self::authority());
+
+        app(ConfigRepository::class)->set('audit-log.redaction.keys', []);
+
+        self::assertFalse($result->recorded);
+        $tally = $this->reconciler()->reconcile()->toArray();
+
+        self::assertSame(['examined' => 1, 'recorded' => 1, 'already_recorded' => 0, 'unverifiable' => 0, 'unfinished' => 0, 'failed' => 0], $tally);
+
+        $records = $this->readRecords(PackageActivity::SUBJECT_ERASED->value);
+
+        [$fingerprintKey, $fingerprint] = app(OwnerFingerprint::class)->of($owner);
+
+        self::assertCount(1, $records);
+        self::assertSame(['success', null, 'App\Models\User', '7'], [$records[0]['outcome'], $records[0]['reason'], $records[0]['actor_type'], $records[0]['actor_id']]);
+        self::assertSameProperties([
+            'operation_id'      => $result->operationId,
+            'erasure_id'        => $result->erasureId,
+            'owner_fingerprint' => $fingerprint,
+            'fingerprint_key'   => $fingerprintKey,
+            'status'            => 'complete',
+            'keys_destroyed'    => 1,
+            'keys_kept'         => 0,
+            'entries_affected'  => 0,
+            'blocked'           => [],
+            'pending_accepted'  => false,
+            'authority_reason'  => 'case.review',
+            'outcome'           => 'success',
+        ], self::propertiesOf($records[0]));
+        self::assertSame(0, $this->reconciler()->reconcile()->recorded);
+    }
+
+    /**
+     * A partial erasure journalled with kept keys is recorded `partial`, its
+     * kept keys counted and their reasons named once each.
+     *
+     * @return void
+     */
+    public function testAPartialErasureIsRecordedWithItsBlocks(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        [$kept]  = $this->makeSubjectKey($owner, null, 'billing');
+        [$other] = $this->makeSubjectKey($owner, null, 'support');
+
+        $this->eraseByHand($owner, [$kept->id => ['unverified', 'held:' . self::HOLD_ID], $other->id => ['unverified']], true);
+
+        self::assertSame(1, $this->reconciler()->reconcile()->recorded);
+
+        $properties = self::propertiesOf($this->readRecords(PackageActivity::SUBJECT_ERASED->value)[0]);
+
+        self::assertSame(['partial', 0, 2], [$properties['status'], $properties['keys_destroyed'], $properties['keys_kept']]);
+        self::assertSameProperties(['held:' . self::HOLD_ID => 1, 'unverified' => 1], $properties['blocked']);
+    }
+
+    /**
+     * A rewrap run and a reinstatement whose records could not be written are
+     * recorded from their journal rows, as they would have been, and an erasure
+     * already recorded is skipped.
+     *
+     * @return void
+     */
+    public function testRewrapsAndReinstatementsAreReconciled(): void
+    {
+        $owner     = Reference::of('App\Models\User', '42');
+        $lifecycle = app(AuditLifecycle::class);
+
+        $this->makeSubjectKey($owner, null, 'billing');
+        $lifecycle->erase($owner, self::authority());
+
+        app(ConfigRepository::class)->set('audit-log.redaction.keys', ['generation_floor', 'keys_rotated']);
+
+        $reinstated = $lifecycle->reinstate($owner, self::authority());
+
+        $this->makeSubjectKey(Reference::of('App\Models\User', '43'), null, 'billing');
+
+        $rewrapped = $lifecycle->rewrap(self::authority(), true);
+
+        app(ConfigRepository::class)->set('audit-log.redaction.keys', []);
+
+        self::assertSame([false, false], [$reinstated->recorded, $rewrapped->recorded]);
+        $tally = $this->reconciler()->reconcile()->toArray();
+
+        self::assertSame(['examined' => 3, 'recorded' => 2, 'already_recorded' => 1, 'unverifiable' => 0, 'unfinished' => 0, 'failed' => 0], $tally);
+
+        $reinstatement = self::propertiesOf($this->readRecords(PackageActivity::KEYS_REINSTATED->value)[0]);
+        $rewrap        = self::propertiesOf($this->readRecords(PackageActivity::KEYS_REWRAPPED->value)[0]);
+
+        self::assertSame(
+            [$reinstated->operationId, $reinstated->reinstatementId, 1],
+            [$reinstatement['operation_id'], $reinstatement['reinstatement_id'], $reinstatement['generation_floor']],
+        );
+        self::assertSameProperties([
+            'operation_id'     => $rewrapped->operationId,
+            'status'           => 'complete',
+            'keys_rewrapped'   => 0,
+            'keys_rotated'     => 1,
+            'keys_skipped'     => 0,
+            'wrap_key_id'      => $this->keyWrapper()->currentKeyId(),
+            'batches'          => 1,
+            'authority_reason' => 'case.review',
+            'outcome'          => 'success',
+        ], $rewrap);
+    }
+
+    /**
+     * An erasure, a reinstatement or a rewrap row whose payload does not
+     * describe its operation is counted unverifiable and never recorded.
+     *
+     * @return void
+     */
+    public function testAPrivacyRowThatDescribesNoOperationIsNeverRecorded(): void
+    {
+        $this->journalRow(JournalKind::ERASURE, ['owner_fingerprint' => 'f']);
+        $this->journalRow(JournalKind::REINSTATE, ['owner_fingerprint' => 'f', 'fingerprint_key' => 'k']);
+        $this->journalRow(JournalKind::REWRAP, ['run_id' => 'another run', 'keys' => [], 'skipped' => []]);
+
+        $result = $this->reconciler()->reconcile();
+
+        self::assertSame([0, 3], [$result->recorded, $result->unverifiable]);
+        self::assertSame([], $this->readRecords());
+    }
+
+    /**
+     * The authority every operation is asked for on, the journal's own
+     * operator.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\Authority
+     */
+    private static function authority(): Authority
+    {
+        return new Authority(Reference::of(...self::JOURNAL_AUTHORITY), 'case.review');
     }
 
     /**

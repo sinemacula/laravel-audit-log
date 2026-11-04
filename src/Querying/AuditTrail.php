@@ -6,7 +6,9 @@ namespace SineMacula\Laravel\AuditLog\Querying;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat;
+use SineMacula\Laravel\AuditLog\Privacy\KeyStoreUse;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
@@ -21,6 +23,9 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * `InvalidArgumentException` that names the filter, never the value; each
  * dimension replaces itself, and exact codes and a prefix are one dimension. A
  * model given as a reference is referred to exactly as capture refers to it.
+ * The entries holding an owner's encrypted fragments are found through the
+ * package's key store, so that filter is refused with a `LogicException` naming
+ * the bound field encrypter when the encrypter keeps its keys elsewhere.
  *
  * Every terminal call names its viewer, refused with a `LogicException` before
  * anything is queried when none was given, and is authorised on its own: the
@@ -36,6 +41,9 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  */
 final readonly class AuditTrail
 {
+    /** @var string What the filter for an owner's entries is refused with when another encrypter is bound: its type. */
+    private const string FOREIGN_KEYS = 'holdingDataOf() finds an owner\'s entries through the package\'s key store, which the bound field encrypter, %s, does not use.';
+
     /** @var \SineMacula\Laravel\AuditLog\Querying\TrailFilters What the trail is narrowed to. */
     private TrailFilters $filters;
 
@@ -45,6 +53,7 @@ final readonly class AuditTrail
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailReader  $reader
      * @param  \SineMacula\Laravel\AuditLog\Querying\Exporter  $exporter
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportVerifier  $verifier
+     * @param  \SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter  $encrypter
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      *
@@ -60,6 +69,9 @@ final readonly class AuditTrail
 
         /** What verifies an export for the verification call. */
         private ExportVerifier $verifier,
+
+        /** The bound field encrypter, which says whether the package's key store is in use; it is never called. */
+        private FieldEncrypter $encrypter,
 
         // What the trail is narrowed to, or nothing for an unfiltered trail.
         ?TrailFilters $filters = null,
@@ -215,6 +227,32 @@ final readonly class AuditTrail
     }
 
     /**
+     * The trail narrowed to the entries holding an encrypted fragment sealed
+     * under one of the owner's keys, the model or the reference, in any of its
+     * tenants and categories and whether or not the owner was erased, replacing
+     * any earlier owner. Each entry is read as a page shows it, every other
+     * owner's fragments in it included, revealed only under a scope that
+     * reveals encrypted fields. It needs the package's key store, so it is
+     * refused with a `LogicException` naming the bound field encrypter when
+     * that encrypter keeps its keys elsewhere; a model that cannot be
+     * referenced is refused with an `InvalidArgumentException`, as by every
+     * other filter.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @return self
+     *
+     * @throws \LogicException
+     */
+    public function holdingDataOf(#[\SensitiveParameter] Model|Reference $owner): self
+    {
+        if (!KeyStoreUse::covers($this->encrypter)) {
+            throw new \LogicException(sprintf(self::FOREIGN_KEYS, KeyStoreUse::describe($this->encrypter)));
+        }
+
+        return $this->narrowed($this->filters->withHoldingDataOf(self::referenceOf($owner)));
+    }
+
+    /**
      * The trail read for the viewer, whom the application has authenticated: a
      * model or another authenticatable user, referenced as capture references a
      * user, or a reference, which asserts who is reading and proves nothing. A
@@ -227,7 +265,7 @@ final readonly class AuditTrail
      */
     public function visibleTo(#[\SensitiveParameter] Authenticatable|Reference $viewer): self
     {
-        return new self($this->reader, $this->exporter, $this->verifier, $this->filters, Viewer::of($viewer));
+        return new self($this->reader, $this->exporter, $this->verifier, $this->encrypter, $this->filters, Viewer::of($viewer));
     }
 
     /**
@@ -321,14 +359,15 @@ final readonly class AuditTrail
     }
 
     /**
-     * A trail of the same readers and viewer narrowed to the filters.
+     * A trail of the same readers, encrypter and viewer narrowed to the
+     * filters.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
      * @return self
      */
     private function narrowed(TrailFilters $filters): self
     {
-        return new self($this->reader, $this->exporter, $this->verifier, $filters, $this->viewer);
+        return new self($this->reader, $this->exporter, $this->verifier, $this->encrypter, $filters, $this->viewer);
     }
 
     /**

@@ -4,11 +4,12 @@
 
 This note records how the trail is read, for whom, and what a read leaves behind: the one immutable query a terminal
 call ends, the access policy that answers a scope for each viewer and purpose, the one compiler that turns a scope and
-the caller's filters into SQL, the cursor that opens the next page, the entry a viewer is shown, the record every read
-writes before anything it found leaves the package, and the export that is journalled before it is published and
-verified later from its bundle. An audit log is personal data held about everyone it names, and a read that is not
-itself recorded, or that shows more than its scope, would make the log a way around the controls it records. How to
-read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is in `threat-model.md`.
+the caller's filters into SQL, the cursor that opens the next page, the entry a viewer is shown and the grant that
+reveals its encrypted fields, the record every read writes before anything it found leaves the package, and the export
+that is journalled before it is published and verified later from its bundle. An audit log is personal data held about
+everyone it names, and a read that is not itself recorded, or that shows more than its scope, would make the log a way
+around the controls it records. How to read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is
+in `threat-model.md`.
 
 ## Invariants
 
@@ -26,13 +27,18 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
 - **One compiler.** Every statement that reads entries for a viewer, a page, a count, an export's bound and chunks, and
   the export entry a verification looks up, is narrowed by `Access\ScopeCompiler` alone: `apply()`, `before()`,
   `after()` and `entry()`. The compiled form is tenant AND category AND about AND the caller's filters AND the cursor,
-  each a grouped condition, so no `or` reaches past its own group and a caller's filter only narrows. Column names,
+  each a grouped condition, so no `or` reaches past its own group and a caller's filter only narrows.
+  `holdingDataOf()` compiles to an `EXISTS` over the key uses joined to the owner's keys, correlated on the entry, so
+  it selects the entries holding a fragment the owner's keys sealed and narrows like any other filter. Column names,
   operators and the `like` escape character `!` are the compiler's own; every value is bound; times are bound in UTC
   with six fractional digits; no collation is applied, so ids compare in the type each engine migrated them as.
 - **The scope algebra.** `Access\AccessScope` starts from `none()`, `all()` or `tenants()` and narrows through
   `withTenantless()`, `onlyCategories()`, `exceptCategories()` and `onlyAbout()`. References match as exact `(type, id)`
   pairs, never as lists of types and ids apart; tenantless means both tenant columns are `null`; `none()` absorbs every
-  operation; an empty list denies and never means unrestricted; narrowing only intersects, so nothing widens. A scope
+  operation; an empty list denies and never means unrestricted; narrowing only intersects, so nothing widens.
+  `revealingEncryptedFields()` grants the scope its encrypted fields: off on every starting scope, kept by every
+  narrowing, part of the normalised form, the fingerprint and so the cursor's binding, and a denied scope stays denied
+  and reveals nothing. A scope
   holds at most 100 tenants, 50 categories and 100 about-references. A denied scope, or one the filters cannot meet, is
   answered with a uniform empty result and no statement. `onlyAbout()` matches the actor or the subject only.
 - **The cursor.** `v1.` and the key id, the payload `{pos: [occurred_at, id]}` and the MAC, each unpadded base64url, at
@@ -66,8 +72,16 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
 - **Stored versus shown.** `Querying\StoredEntry` is `RowCodec::decode()` exactly, the integrity fields included, and
   its line is the canonical encoding the entry was signed over; export and verification read it. `Querying\TrailEntry`
   is privacy-safe by construction: a concealed reason is nulled from the stored value, the properties and the context
-  are projected recursively, every encryption envelope and an encrypted IP address are read through
-  `Contracts\FieldReader`, and an artifact is shown by its descriptor alone, its members never loaded.
+  are projected recursively, an artifact is shown by its descriptor alone, its members never loaded, and every
+  encryption envelope and an encrypted IP address is shown `encrypted` unless the scope reveals encrypted fields.
+- **The reveal grant reads authenticated rows, a page at a time.** Under a revealing scope `Querying\EntryProjector`
+  verifies each row's HMAC with `Integrity\RecordSigner` before any envelope reaches a reader: a row that fails, or
+  whose signing key the ring does not hold, shows every envelope `unreadable`. Only the projector builds a
+  `Privacy\EncryptedField`, from a verified row, and every field of the page goes to `Contracts\FieldReader::readAll()`
+  in one call, answered in order and in number. The package binds `Privacy\SubjectKeyFieldReader`, which reads the
+  page's keys in one statement on the writer and answers each field's typed value, `erased` or `unreadable`; how is in
+  `privacy.md`. A scope without the grant never asks a reader. A revealing page's record keeps `reveal` and `fields`,
+  the count of fragments shown `encrypted`, `erased`, `revealed` and `unreadable`; counts and exports never decrypt.
 - **The export protocol.** Prepare a temporary file beside the target, created exclusively under `umask(0077)` and
   `0600`; read one consistent snapshot on a dedicated session, the bound first, then the chunks ascending by
   `(recorded_at, id)`; end the snapshot; journal `audit_log.trail_exported` with its canonical manifest as the `export`
@@ -105,7 +119,10 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
 - A record that cannot be written is spilled, said and reported once, and the read is refused with
   `AuditReadRefusedException::unrecorded()`; a write the store returns from without acknowledging is refused the same
   way, and nothing it found is returned.
-- A field reader that throws costs the field alone, shown as `unreadable` and reported once naming its class.
+- A field reader that throws, or answers another count or anything but readings, costs every field of the page, each
+  shown as `unreadable`, reported once for the page naming its class.
+- `holdingDataOf()` with a bound field encrypter other than the package's is refused with a `\LogicException` naming
+  the encrypter's class, before any query, since its keys are where the key uses cannot reach.
 - A file that cannot be published once journalled is removed, `audit_log.export_publish_failed` is recorded naming the
   export entry, and the export is refused.
 - A row inserted into an interval the pages have already walked may be missed: occurrence order is kept, and late rows
@@ -119,10 +136,11 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
 
 ## Seams Left
 
-- The decrypting `Contracts\FieldReader`, which reads a field sealed under its owner's key and answers its value, or
-  `erased` once an erasure has destroyed the owner's keys. The package binds `Privacy\SealedFieldReader`, which answers
-  `encrypted` for every field.
-- Owner discovery and erasure for a subject access request, which `onlyAbout()` does not find.
+- An owner-specific projection for a subject access request: the reveal grant reveals every encrypted field of every
+  entry a scope sees, whoever owns it, so the other owners' fragments the selected entries hold are reviewed by the
+  investigator before anything is disclosed.
+- A copy for the data subject: an export is canonical evidence, its envelopes as stored, and a copy for the subject is
+  built from revealed pages, never from an export.
 
 ## Implementation Anchors
 
@@ -138,6 +156,10 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
 - `src/Querying/StoredEntry.php`, `src/Querying/EntryProjector.php`, `src/Querying/TrailEntry.php`,
   `src/Querying/TrailPage.php`; `src/Contracts/FieldReader.php`, `src/Privacy/SealedFieldReader.php`,
   `src/Privacy/Enums/FieldState.php`.
+- `src/Access/AccessScope.php`: `revealingEncryptedFields()`, `revealsEncryptedFields()`; `src/Access/ScopeValues.php`;
+  `src/Privacy/EncryptedField.php`: `fromEnvelope()`; `src/Privacy/SubjectKeyFieldReader.php`: `readAll()`;
+  `src/Querying/FieldDisclosure.php`, `src/Querying/ProjectedPage.php`, `src/Querying/EntryColumns.php`;
+  `src/Privacy/KeyStoreUse.php`.
 - `src/Querying/AccessRecorder.php`: `record()`; `src/Querying/AccessEvidence.php`; `src/Delivery/PackageWrite.php`;
   `src/Querying/Enums/PackageActivity.php`: `isProtected()`; `src/Records/DisclosureManifest.php`.
 - `src/Querying/Exporter.php`: `export()`; `src/Querying/ExportSnapshot.php`, `src/Querying/ExportFile.php`,
@@ -186,7 +208,27 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
 - `tests/Feature/Delivery/RecordedNotifierTest.php` `testAPackageRecordsListenersRunInsideTheReadGuard`
 - `tests/Unit/Querying/StoredEntryTest.php` `testTheEnvelopeIsLossless`
 - `tests/Feature/Querying/EntryProjectorTest.php` `testAConcealedReasonIsNulledFromTheStoredValue`,
-  `testNoCiphertextReachesTheEntry`, `testAThrowingReaderIsUnreadableAndReportedOnce`
+  `testNoCiphertextReachesTheEntry`, `testAThrowingReaderIsUnreadableAndReportedOnce`,
+  `testANonRevealingProjectionNeverCallsTheReader`, `testARowThatFailsItsHmacShowsEveryEnvelopeUnreadable`,
+  `testTheFieldsOfAPageAreReadInOneCall`, `testAReaderAnsweringTheWrongCountCostsThePagesFields`,
+  `testTheDisclosureCountsEachState`
+- `tests/Unit/Privacy/EncryptedFieldTest.php` `testOnlyTheFactoryBuildsOne`
+- `tests/Unit/Access/AccessScopeTest.php` `testRevealingIsOffOnEveryStartingScope`,
+  `testRevealingSurvivesEveryNarrowing`, `testADeniedScopeNeverReveals`,
+  `testTheGrantIsInTheNormalisedFormAndFingerprint`
+- `tests/Feature/Querying/TrailReaderTest.php` `testARevealingPageRecordsItsDisclosureCounts`,
+  `testACursorIssuedWithoutTheGrantIsRefusedWithIt`, `testAnOwnersPageIsOneStatementWithTheOwnerInItsFilters`
+- `tests/Unit/Querying/AccessEvidenceTest.php` `testAPageRecordsItsRevealGrantAndFieldCounts`
+- `tests/Feature/Querying/RevealedReadingTest.php` `testEachMarkerThroughARevealingScope`,
+  `testANonRevealingScopeNeverCallsTheReader`, `testAnErasedOwnersRecordReadsErased`
+- `tests/Performance/RevealedPageBudgetTest.php` `testARevealingPageAsksForItsKeysOnce`,
+  `testANonRevealingPageAsksForNoKey`
+- `tests/Feature/Access/ScopeCompilerTest.php` `testHoldingDataOfIsAnExistsOverKeyUsesAndTheOwnersKeys`,
+  `testItStaysInsideTheScope`
+- `tests/Feature/Querying/AuditTrailTest.php` `testHoldingDataOfFindsEntriesHoldingTheOwnersFragments`,
+  `testACustomEncrypterThrowsNamingTheBinding`
+- `tests/Integration/Querying/HoldingDataOfEnginesTest.php` `testItFindsTheOwnersEntriesOnEachEngine`,
+  `testAnEntryHoldingTwoOwnersIsFoundForEach`
 - `tests/Unit/Privacy/SealedFieldReaderTest.php` `testItAlwaysAnswersEncrypted`
 - `tests/Feature/Querying/TrailReadingTest.php` `testTheTrailIsNotReadYourWrites`,
   `testADeletedUsersHistoryReadsAsBefore`, `testAnEncryptedPropertyReadsAsEncrypted`
@@ -229,7 +271,9 @@ Update this note when any of the following change:
 - the cursor's format, its key, what it binds, or when it is refused
 - the read's record: its codes, outcomes, reasons, evidence, attachment, tenant or acknowledgement
 - what the gate refuses, or what the read guard spans
-- what a shown entry holds, or how an encrypted field is read
+- what a shown entry holds, how an encrypted field is read, what the reveal grant reveals, or how a row is
+  authenticated before a reader sees it
+- what `holdingDataOf()` compiles to
 - the export's protocol, snapshot, order, manifest, bundle or publication
 - which codes retention never prunes, or what verifying an export needs kept
 - the verification's chain or a finding

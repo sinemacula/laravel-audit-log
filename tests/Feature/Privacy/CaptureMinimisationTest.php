@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
+use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Recorder;
@@ -237,14 +238,15 @@ final class CaptureMinimisationTest extends TestCase
             'password' => Redactor::MARKER,
             'memo'     => Redactor::MARKER,
             'email'    => self::ALICE_PSEUDONYM,
-            'card'     => ['v' => 1, 'k' => 'key_42', 'c' => base64_encode('4242')],
+            'card'     => ['v' => 1, 'k' => 'key_42', 'c' => base64_encode('"4242"')],
             '_audit'   => ['omitted' => ['count' => 2, 'paths' => ['*', 'ssn']]],
         ];
 
         self::assertSame($expected, $record->properties);
         self::assertEqualsCanonicalizing($expected, $this->storedProperties($record->id));
         self::assertCount(1, $encrypter->calls());
-        self::assertSame('4242', $encrypter->calls()[0][1]);
+        self::assertSame('"4242"', $encrypter->calls()[0][1]);
+        self::assertSame([['properties', 'card']], $encrypter->paths());
     }
 
     /**
@@ -267,8 +269,8 @@ final class CaptureMinimisationTest extends TestCase
             'hash, IPv6'       => ['hash', '2001:db8::1', '05d70d576b2b05d5:70ba167d07452e86911ea28f6f4067e2c9963f07d216a158ee83f07f6371c95a'],
             'hash, mapped'     => ['hash', '::ffff:203.0.113.7', '05d70d576b2b05d5:d8cd13f098906335536b7d3cff22a70c382c0d3a2a4c38cbd2815e6a456118e1'],
             'drop, IPv4'       => ['drop', self::CLIENT_IP, null],
-            'encrypt, IPv4'    => ['encrypt', self::CLIENT_IP, '{"c":"MjAzLjAuMTEzLjc=","k":"key_1","v":1}'],
-            'encrypt, mapped'  => ['encrypt', '::ffff:203.0.113.7', '{"c":"MjAzLjAuMTEzLjc=","k":"key_1","v":1}'],
+            'encrypt, IPv4'    => ['encrypt', self::CLIENT_IP, '{"c":"IjIwMy4wLjExMy43Ig==","k":"key_1","v":1}'],
+            'encrypt, mapped'  => ['encrypt', '::ffff:203.0.113.7', '{"c":"IjIwMy4wLjExMy43Ig==","k":"key_1","v":1}'],
         ];
     }
 
@@ -467,19 +469,46 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * An owned note under the default encrypter, which has no keys, is dropped
-     * and counted under its fixed path, and its text reaches no row.
+     * An owned note under the default encrypter is sealed under its owner's key
+     * at its fixed path: the record and the row hold the same envelope, naming
+     * the owner's key, nothing is counted as omitted, and its text reaches no
+     * row.
      *
      * @return void
      */
-    public function testAnOwnedNoteIsCountedWithTheDefaultEncrypter(): void
+    public function testAnOwnedNoteIsSealedWithTheDefaultEncrypter(): void
     {
+        $record = AuditLog::event(self::CODE)->withNote('Erasable.', Reference::of('user', '1'))->record();
+        $note   = $record->properties['_audit']['note'] ?? null;
+
+        self::assertIsArray($note);
+        self::assertSame(['v', 'k', 'c'], array_keys($note));
+        self::assertSame(1, $note['v']);
+        self::assertIsString($note['k']);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/', $note['k']);
+        self::assertSame(['note'], array_keys($record->properties['_audit'] ?? []));
+        self::assertEqualsCanonicalizing($record->properties, $this->storedProperties($record->id));
+        self::assertStringNotContainsString('Erasable.', (string) json_encode($this->storedRow($record->id)));
+    }
+
+    /**
+     * An application that binds `NoFieldEncrypter`, the choice never to
+     * encrypt, has an owned note dropped and counted under its fixed path, and
+     * its text reaches no row.
+     *
+     * @return void
+     */
+    public function testAnOwnedNoteIsCountedWhenNothingIsEncrypted(): void
+    {
+        app()->bind(FieldEncrypter::class, NoFieldEncrypter::class);
+
         $record = AuditLog::event(self::CODE)->withNote('Erasable.', Reference::of('user', '1'))->record();
 
         $expected = ['_audit' => ['omitted' => ['count' => 1, 'paths' => ['_audit.note']]]];
 
         self::assertSame($expected, $record->properties);
         self::assertEqualsCanonicalizing($expected, $this->storedProperties($record->id));
+        self::assertStringNotContainsString('Erasable.', (string) json_encode($this->storedRow($record->id)));
     }
 
     /**

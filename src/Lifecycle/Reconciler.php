@@ -12,23 +12,23 @@ use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
+use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
 use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
-use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
-use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
-use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
  * Writes again the activity records the journal says are missing: for every
- * prune run that finished, every hold, every release and every import that
- * finished within the days looked back, the record of its code is written
- * through `LifecycleRecorder` unless an entry of that code already names the
- * operation, or the record's id, derived from its code and its operation, is
- * already stored or queued in the outbox.
+ * prune run that finished, every hold, every release, every import that
+ * finished, every erasure, every reinstatement and every rewrap run within the
+ * days looked back, the record of its code is written through
+ * `LifecycleRecorder` unless an entry of that code already names the operation,
+ * or the record's id, derived from its code and its operation, is already
+ * stored or, in outbox mode, queued in the outbox.
  *
  * The journal's rows of those kinds, and the starts of runs and imports, are
  * read by kind and time on the storage connection's writer, a page at a time;
@@ -36,24 +36,29 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * verify, or an operation whose start row is not among the verified rows, is
  * counted `unverifiable` and never recorded. A start before the window is
  * looked for backwards from it, a page at a time, only when its finish is in
- * the window. The entries of the four codes within the window are read by event
- * and time, and the operation each names is read from its decoded properties in
- * PHP, never by a JSON path query, so every engine reads them alike. The
- * derived ids are looked for by primary key in the entries and in the outbox, a
- * page at a time, so a record still waiting for its delivery counts as
- * recorded. An operation is recorded at most once per run, so a second run
- * records nothing, whether or not the outbox drained between them; a prune run
- * that started and has not finished has nothing to record and is counted
- * `unfinished`.
+ * the window. The entries of the seven codes within the window are read by
+ * event and time, and the operation each names is read from its decoded
+ * properties in PHP, never by a JSON path query, so every engine reads them
+ * alike. The derived ids are looked for by primary key in the entries and, in
+ * outbox mode, in the outbox, a page at a time, so a record still waiting for
+ * its delivery counts as recorded; in sync mode no record is ever queued there,
+ * and the writer holds no grant on the outbox, so it is never read. An
+ * operation is recorded at most once per run, so a second run records nothing,
+ * whether or not the outbox drained between them; a prune run that started and
+ * has not finished has nothing to record and is counted `unfinished`.
  *
- * A record is written again with the properties its journal rows give, a
- * prune's tenants affected and the reason a failed prune gave included, since
- * its finish row holds them; one the row does not hold is `null`. Nothing here
- * takes the lifecycle lock, so the reconciler is never scheduled; but a record
- * keeps its derived id however it is written, so two runs at once, or a run
- * alongside an operation still writing its own record, never write it twice:
- * the second write meets the outbox's or the entries' primary key and is
- * counted `failed`, or is the record stored already.
+ * A record is written again with the properties its journal rows give, built by
+ * `ReconciledOperations`: a prune's tenants affected and the reason a failed
+ * prune gave included, since its finish row holds them, and a rewrap run's
+ * counts summed over its batches in the window; one the rows do not hold is
+ * `null`. A refused erasure or reinstatement wrote no row, so it is never
+ * reconciled; a rewrap that failed after committing batches, whose own failure
+ * record is missing, is recorded from those batches. Nothing here takes the
+ * lifecycle lock, so the reconciler is never scheduled; but a record keeps its
+ * derived id however it is written, so two runs at once, or a run alongside an
+ * operation still writing its own record, never write it twice: the second
+ * write meets the outbox's or the entries' primary key and is counted `failed`,
+ * or is the record stored already.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,12 +79,6 @@ final readonly class Reconciler
     /** @var string The phase a prune run's finish row names. */
     private const string FINISH = 'finish';
 
-    /** @var list<string> The reasons a failed prune's record may give. */
-    private const array PRUNE_FAILURES = ['policy_failed', 'configuration_refused', 'journal_broken', 'prune_failed'];
-
-    /** @var array<string, ?string> The reason each status of an import's finish gives its record, `null` for a success. */
-    private const array IMPORT_STATUSES = ['complete' => null, 'partial' => null, 'failed' => 'import_failed', 'interrupted' => 'interrupted'];
-
     /**
      * Constructor.
      *
@@ -87,6 +86,7 @@ final readonly class Reconciler
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalSigner  $signer
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecorder  $recorder
      * @param  \SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\DeliverySettings  $delivery
      */
     public function __construct(
 
@@ -101,6 +101,9 @@ final readonly class Reconciler
 
         /** The time the window ends at. */
         private Clock $clock,
+
+        /** The delivery mode, which says whether a record may wait in the outbox. */
+        private DeliverySettings $delivery,
     ) {}
 
     /**
@@ -192,13 +195,24 @@ final readonly class Reconciler
             $operations[] = $operation;
         }
 
+        foreach (ReconciledOperations::rewrapped($rows) as $operation) {
+            if ($operation === null) {
+                $unverifiable++;
+
+                continue;
+            }
+
+            $operations[] = $operation;
+        }
+
         return [$operations, $unverifiable, $unfinished];
     }
 
     /**
      * The record the verified row's operation needs, `null` when the row, or
      * the start row it needs, does not describe its operation, and `false` for
-     * a row that records no operation of its own: a start.
+     * a row that records no operation of its own: a start, or a rewrap batch,
+     * whose run is recorded from all of its batches together.
      *
      * @formatter:off
      *
@@ -221,11 +235,13 @@ final readonly class Reconciler
         $finish = self::finishIdOf($row, $payload);
 
         return match (true) {
-            $row->kind === JournalKind::HOLD            => self::held($row, $payload),
-            $row->kind === JournalKind::RELEASE         => self::released($row, $payload),
+            $row->kind === JournalKind::HOLD            => ReconciledOperations::held($row, $payload),
+            $row->kind === JournalKind::RELEASE         => ReconciledOperations::released($row, $payload),
+            $row->kind === JournalKind::ERASURE         => ReconciledOperations::erased($row, $payload),
+            $row->kind === JournalKind::REINSTATE       => ReconciledOperations::reinstated($row, $payload),
             $finish    === null                         => false,
-            $row->kind === JournalKind::IMPORT_FINISHED => self::imported($row, $payload, $batches[$finish] ?? null),
-            default                                     => self::pruned($payload, $runs[$finish] ?? null),
+            $row->kind === JournalKind::IMPORT_FINISHED => ReconciledOperations::imported($row, $payload, $batches[$finish] ?? null),
+            default                                     => ReconciledOperations::pruned($payload, $runs[$finish] ?? null),
         };
     }
 
@@ -244,7 +260,10 @@ final readonly class Reconciler
      */
     private function journalSince(Connection $connection, string $since): array
     {
-        $kinds = [JournalKind::PRUNE_RUN, JournalKind::HOLD, JournalKind::RELEASE, JournalKind::IMPORT_STARTED, JournalKind::IMPORT_FINISHED];
+        $kinds = [
+            JournalKind::PRUNE_RUN, JournalKind::HOLD, JournalKind::RELEASE, JournalKind::IMPORT_STARTED, JournalKind::IMPORT_FINISHED,
+            JournalKind::ERASURE, JournalKind::REINSTATE, JournalKind::REWRAP,
+        ];
         $query = $connection->table(LifecycleTables::journalTable())
             ->useWritePdo()
             ->whereIn('kind', array_map(static fn (JournalKind $kind): string => $kind->value, $kinds))
@@ -320,7 +339,7 @@ final readonly class Reconciler
      * Each operation recorded already, by its code and its operation id: those
      * an entry of the four codes since the time names in its decoded
      * properties, and those among the operations given whose record's derived
-     * id the entries or the outbox hold.
+     * id the entries hold, or the outbox in outbox mode.
      *
      * @formatter:off
      *
@@ -339,7 +358,10 @@ final readonly class Reconciler
      */
     private function recordedSince(Connection $connection, string $since, array $operations): array
     {
-        $codes = [PackageActivity::PRUNED, PackageActivity::HELD, PackageActivity::RELEASED, PackageActivity::IMPORTED];
+        $codes = [
+            PackageActivity::PRUNED, PackageActivity::HELD, PackageActivity::RELEASED, PackageActivity::IMPORTED,
+            PackageActivity::SUBJECT_ERASED, PackageActivity::KEYS_REINSTATED, PackageActivity::KEYS_REWRAPPED,
+        ];
         $query = $connection->table(EntrySettings::table())
             ->useWritePdo()
             ->select(['id', 'event', 'occurred_at', 'properties'])
@@ -370,13 +392,15 @@ final readonly class Reconciler
             array_chunk(array_keys($keys), self::PAGE),
         ));
 
-        $outbox = $this->database->connection(DeliveryTables::resolvedOutboxConnection());
+        $ids = $present($connection, EntrySettings::table());
 
-        foreach ([...$present($connection, EntrySettings::table()), ...$present($outbox, DeliveryTables::outboxTable())] as $id) {
-            $recorded[$keys[(string) $id] ?? ''] = true;
+        if ($this->delivery->mode() === DeliveryMode::OUTBOX) {
+            $ids = [...$ids, ...$present($this->database->connection(DeliveryTables::resolvedOutboxConnection()), DeliveryTables::outboxTable())];
         }
 
-        unset($recorded['']);
+        foreach (array_intersect_key($keys, array_flip($ids)) as $key) {
+            $recorded[$key] = true;
+        }
 
         return $recorded;
     }
@@ -403,223 +427,6 @@ final readonly class Reconciler
             return [$row, $row->payloadMap() ?? []];
         } catch (\JsonException|\UnexpectedValueException|UnknownKeyException) {
             // A row that cannot be read or verified is never recorded
-            return null;
-        }
-    }
-
-    /**
-     * The record of a hold: its operation, its id, basis, scope digest and
-     * review date, the authority's reason, by its operator; `null` when the row
-     * and its payload do not describe a hold.
-     *
-     * @formatter:off
-     *
-     * @phpcs:disable Generic.Files.LineLength.TooLong
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
-     * @param  array<array-key, mixed>  $payload
-     * @return ?array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: ?\SineMacula\Laravel\AuditLog\Records\Reference, 2: \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleEvidence, 3: \SineMacula\Laravel\AuditLog\Records\Enums\Outcome, 4: ?string}
-     *
-     * @phpcs:enable Generic.Files.LineLength.TooLong
-     *
-     * @formatter:on
-     */
-    private static function held(#[\SensitiveParameter] JournalRow $row, #[\SensitiveParameter] array $payload): ?array
-    {
-        $scope    = $payload['scope'] ?? null;
-        $basis    = is_string($payload['basis'] ?? null) ? HoldBasis::tryFrom($payload['basis']) : null;
-        $reviewBy = $payload['review_by'] ?? null;
-        $named    = $row->holdId !== null && ($payload['hold_id'] ?? null) === $row->holdId;
-        $reviewed = $reviewBy                                              === null || is_string($reviewBy);
-
-        if (!$named || !$reviewed || $basis === null || !is_array($scope)) {
-            return null;
-        }
-
-        try {
-            $digest = HoldScope::fromArray($scope)->digest();
-        } catch (\UnexpectedValueException) {
-            return null;
-        }
-
-        return self::operation(PackageActivity::HELD, $row, [
-            'operation_id'     => $row->operationId,
-            'hold_id'          => $row->holdId,
-            'basis'            => $basis->value,
-            'scope_digest'     => $digest,
-            'review_by'        => $reviewBy,
-            'authority_reason' => $row->reason,
-            'outcome'          => Outcome::SUCCESS->value,
-        ], Outcome::SUCCESS, null);
-    }
-
-    /**
-     * The record of a release: its operation, the hold's id and the authority's
-     * reason, by its operator; `null` when the row and its payload do not
-     * describe a release.
-     *
-     * @formatter:off
-     *
-     * @phpcs:disable Generic.Files.LineLength.TooLong
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
-     * @param  array<array-key, mixed>  $payload
-     * @return ?array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: ?\SineMacula\Laravel\AuditLog\Records\Reference, 2: \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleEvidence, 3: \SineMacula\Laravel\AuditLog\Records\Enums\Outcome, 4: ?string}
-     *
-     * @phpcs:enable Generic.Files.LineLength.TooLong
-     *
-     * @formatter:on
-     */
-    private static function released(#[\SensitiveParameter] JournalRow $row, #[\SensitiveParameter] array $payload): ?array
-    {
-        if ($row->holdId === null || ($payload['hold_id'] ?? null) !== $row->holdId) {
-            return null;
-        }
-
-        return self::operation(PackageActivity::RELEASED, $row, [
-            'operation_id'     => $row->operationId,
-            'hold_id'          => $row->holdId,
-            'authority_reason' => $row->reason,
-            'outcome'          => Outcome::SUCCESS->value,
-        ], Outcome::SUCCESS, null);
-    }
-
-    /**
-     * The record of a finished prune run, by no one: the run's id, status,
-     * policy version and counts from its finish and start rows, a success for a
-     * complete or partial run and a failure otherwise; `null` without its
-     * start, or when the finish does not describe a run.
-     *
-     * @formatter:off
-     *
-     * @phpcs:disable Generic.Files.LineLength.TooLong
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<array-key, mixed>  $finish
-     * @param  ?array<array-key, mixed>  $start
-     * @return ?array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: ?\SineMacula\Laravel\AuditLog\Records\Reference, 2: \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleEvidence, 3: \SineMacula\Laravel\AuditLog\Records\Enums\Outcome, 4: ?string}
-     *
-     * @phpcs:enable Generic.Files.LineLength.TooLong
-     *
-     * @formatter:on
-     */
-    private static function pruned(#[\SensitiveParameter] array $finish, #[\SensitiveParameter] ?array $start): ?array
-    {
-        $runId   = $finish['run_id']  ?? null;
-        $status  = $finish['status']  ?? null;
-        $failure = $finish['failure'] ?? null;
-
-        if ($start === null || !is_string($runId) || !in_array($status, ['complete', 'partial', 'failed'], true)) {
-            return null;
-        }
-
-        $outcome = $status  === 'failed' ? Outcome::FAILURE : Outcome::SUCCESS;
-        $reason  = $outcome === Outcome::FAILURE && in_array($failure, self::PRUNE_FAILURES, true) ? $failure : null;
-
-        return self::operation(PackageActivity::PRUNED, null, [
-            'operation_id'     => $runId,
-            'status'           => $status,
-            'policy_version'   => self::scalar($start, 'policy_version'),
-            'deleted'          => self::scalar($finish, 'deleted'),
-            'seals'            => self::scalar($finish, 'seals'),
-            'held'             => self::scalar($finish, 'held'),
-            'pending_delivery' => self::scalar($finish, 'pending_delivery'),
-            'skipped_seals'    => self::scalar($finish, 'skipped_seals'),
-            'categories'       => self::counts($finish, 'categories'),
-            'tenants_affected' => self::scalar($finish, 'tenants_affected'),
-            'outcome'          => $outcome->value,
-        ], $outcome, $reason);
-    }
-
-    /**
-     * The record of a finished import, by the operator of its finish: its
-     * batch, the source, format and hold from its start row, and the status and
-     * counts from its finish, a success for a complete or partial import and a
-     * failure otherwise; `null` without its start, or when the finish does not
-     * describe an import.
-     *
-     * @formatter:off
-     *
-     * @phpcs:disable Generic.Files.LineLength.TooLong
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
-     * @param  array<array-key, mixed>  $finish
-     * @param  ?array<array-key, mixed>  $start
-     * @return ?array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: ?\SineMacula\Laravel\AuditLog\Records\Reference, 2: \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleEvidence, 3: \SineMacula\Laravel\AuditLog\Records\Enums\Outcome, 4: ?string}
-     *
-     * @phpcs:enable Generic.Files.LineLength.TooLong
-     *
-     * @formatter:on
-     */
-    private static function imported(#[\SensitiveParameter] JournalRow $row, #[\SensitiveParameter] array $finish, #[\SensitiveParameter] ?array $start): ?array
-    {
-        $status = $finish['status'] ?? null;
-
-        if ($start === null || !is_string($finish['batch_id'] ?? null) || !is_string($status) || !array_key_exists($status, self::IMPORT_STATUSES)) {
-            return null;
-        }
-
-        $reason  = self::IMPORT_STATUSES[$status];
-        $outcome = $reason === null ? Outcome::SUCCESS : Outcome::FAILURE;
-
-        return self::operation(PackageActivity::IMPORTED, $row, [
-            'operation_id'     => $row->operationId,
-            'batch_id'         => $finish['batch_id'],
-            'source_id'        => self::scalar($start, 'source_id'),
-            'format'           => self::scalar($start, 'format'),
-            'status'           => $status,
-            'lines_read'       => self::scalar($finish, 'lines_read'),
-            'imported'         => self::scalar($finish, 'imported'),
-            'duplicates'       => self::scalar($finish, 'duplicates'),
-            'conflicts'        => self::scalar($finish, 'conflicts'),
-            'rejected'         => self::scalar($finish, 'rejected'),
-            'hold_id'          => self::scalar($start, 'hold_id'),
-            'authority_reason' => $row->reason,
-            'outcome'          => $outcome->value,
-        ], $outcome, $reason);
-    }
-
-    /**
-     * The record an operation needs: its code, its actor, the operator of the
-     * row given or no one, its evidence, its outcome and its reason; `null`
-     * when the row names an operator that is not a reference.
-     *
-     * @formatter:off
-     *
-     * @phpcs:disable Generic.Files.LineLength.TooLong
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
-     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
-     * @param  array<string, array<array-key, scalar|null>|scalar|null>  $properties
-     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
-     * @param  ?string  $reason
-     * @return ?array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: ?\SineMacula\Laravel\AuditLog\Records\Reference, 2: \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleEvidence, 3: \SineMacula\Laravel\AuditLog\Records\Enums\Outcome, 4: ?string}
-     *
-     * @phpcs:enable Generic.Files.LineLength.TooLong
-     *
-     * @formatter:on
-     */
-    private static function operation(
-        PackageActivity $activity,
-        #[\SensitiveParameter]
-        ?JournalRow $row,
-        #[\SensitiveParameter]
-        array $properties,
-        Outcome $outcome,
-        ?string $reason,
-    ): ?array {
-        try {
-            $actor = $row?->authorityType === null || $row->authorityId === null ? null : Reference::of($row->authorityType, $row->authorityId);
-
-            return [$activity, $actor, new LifecycleEvidence($properties), $outcome, $reason];
-        } catch (\InvalidArgumentException) {
             return null;
         }
     }
@@ -759,38 +566,5 @@ final readonly class Reconciler
                 $after = [$stored['occurred_at'] ?? null, $stored['id'] ?? null];
             }
         } while (count($rows) === self::PAGE);
-    }
-
-    /**
-     * The scalar under the key, or `null` when there is none.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<array-key, mixed>  $payload
-     * @param  string  $key
-     * @return scalar|null
-     */
-    private static function scalar(#[\SensitiveParameter] array $payload, string $key): bool|float|int|string|null
-    {
-        $value = $payload[$key] ?? null;
-
-        return is_scalar($value) ? $value : null;
-    }
-
-    /**
-     * The map of scalars under the key, its other values dropped, or `null`
-     * when there is none.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<array-key, mixed>  $payload
-     * @param  string  $key
-     * @return ?array<array-key, scalar>
-     */
-    private static function counts(#[\SensitiveParameter] array $payload, string $key): ?array
-    {
-        $value = $payload[$key] ?? null;
-
-        return is_array($value) ? array_filter($value, is_scalar(...)) : null;
     }
 }

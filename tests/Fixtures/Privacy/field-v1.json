@@ -1,0 +1,24 @@
+{
+    "_comment": "Golden vector of a field envelope, version 1. Computed once, outside the package, with openssl_encrypt() under the fixed nonce below, which no method of the package takes; FieldCipherTest::testTheGoldenVectorReproduces opens it and recomputes its field key, additional data and ciphertext. Change it only with that test.",
+    "data_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "entry_id": "01932b4e-8a40-7000-8000-00000000000a",
+    "path": [
+        "properties",
+        "items",
+        0,
+        "iban"
+    ],
+    "log_id": "app-eu-1",
+    "key_id": "01932b4e-e000-7000-8000-000000000001",
+    "value": "GB82 WEST 1234 5698 7654 32",
+    "plaintext": "\"GB82 WEST 1234 5698 7654 32\"",
+    "field_key_info": "sinemacula/audit-log:field-key:v1",
+    "field_key": "5d32ad5a1e517c3f67f8a7d5064c9a11aee82a0c0b9d46da7823a7d3748a14b1",
+    "additional_data": "{\"d\":\"sinemacula/audit-log:field:v1\",\"entry\":\"01932b4e-8a40-7000-8000-00000000000a\",\"k\":\"01932b4e-e000-7000-8000-000000000001\",\"log\":\"app-eu-1\",\"path\":[\"properties\",\"items\",0,\"iban\"],\"v\":1}",
+    "nonce": "a0a1a2a3a4a5a6a7a8a9aaab",
+    "envelope": {
+        "v": 1,
+        "k": "01932b4e-e000-7000-8000-000000000001",
+        "c": "oKGio6Slpqeoqaqrk9kRZbd-6-IyN9i9AV9f47Jk268j5wQZY5vf_LBUbM7p0m2P2knvFEqhto4j"
+    }
+}

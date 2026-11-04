@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Fixtures\Privacy;
 
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
@@ -37,13 +38,14 @@ final class ThrowingFieldEncrypter implements FieldEncrypter
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  string  $plaintext
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\FieldContext  $context
      * @return never
      *
      * @throws \Error
      * @throws \RuntimeException
      */
     #[\Override]
-    public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext): never
+    public function encrypt(Reference $owner, #[\SensitiveParameter] string $plaintext, FieldContext $context): never
     {
         $this->calls++;
 

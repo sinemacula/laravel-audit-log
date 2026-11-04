@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Access;
 
 use Illuminate\Contracts\Support\Arrayable;
-use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
@@ -22,11 +21,16 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * `withTenantless()` is the one way to add entries, and only those whose tenant
  * type and tenant id are both `null`, still under every other restriction.
  *
+ * Every scope starts without revealing the entries' encrypted fields, each
+ * shown as its marker; `revealingEncryptedFields()` grants it, every narrowing
+ * keeps the grant, and the grant is part of the normalised form, so it changes
+ * the fingerprint and binds a cursor to it.
+ *
  * A denied scope absorbs every operation: whatever is done to it, it stays
- * denied. It is immutable; each operation returns a new scope. Its normalised
- * form sorts every list bytewise, so two scopes that see the same entries by
- * the same rules have the same form and fingerprint, and every denied scope has
- * the one form of `none()`.
+ * denied and reveals nothing. It is immutable; each operation returns a new
+ * scope. Its normalised form sorts every list bytewise, so two scopes that see
+ * the same entries by the same rules have the same form and fingerprint, and
+ * every denied scope has the one form of `none()`.
  *
  * @api
  *
@@ -55,6 +59,7 @@ final readonly class AccessScope implements Arrayable
      * @param  ?list<string>  $onlyCategories
      * @param  list<string>  $exceptCategories
      * @param  ?list<\SineMacula\Laravel\AuditLog\Records\Reference>  $about
+     * @param  bool  $reveal
      */
     private function __construct(
 
@@ -75,6 +80,9 @@ final readonly class AccessScope implements Arrayable
 
         /** The references whose activity, as actor or subject, is seen, sorted, or `null` for anyone's. */
         private ?array $about,
+
+        /** Whether the encrypted fields of the entries seen are revealed through the field reader. */
+        private bool $reveal,
     ) {}
 
     /**
@@ -88,7 +96,7 @@ final readonly class AccessScope implements Arrayable
      */
     public static function none(): self
     {
-        return new self(true, [], false, [], [], []);
+        return new self(true, [], false, [], [], [], false);
     }
 
     /**
@@ -103,7 +111,7 @@ final readonly class AccessScope implements Arrayable
      */
     public static function all(): self
     {
-        return new self(false, null, true, null, [], null);
+        return new self(false, null, true, null, [], null, false);
     }
 
     /**
@@ -122,9 +130,9 @@ final readonly class AccessScope implements Arrayable
      */
     public static function tenants(Reference ...$tenants): self
     {
-        $held = self::references(array_values($tenants), self::MAX_TENANTS, 'tenants');
+        $held = ScopeValues::references(array_values($tenants), self::MAX_TENANTS, 'tenants');
 
-        return $held === [] ? self::none() : new self(false, $held, false, null, [], null);
+        return $held === [] ? self::none() : new self(false, $held, false, null, [], null, false);
     }
 
     /**
@@ -140,7 +148,7 @@ final readonly class AccessScope implements Arrayable
             return $this;
         }
 
-        return new self(false, $this->tenants, true, $this->onlyCategories, $this->exceptCategories, $this->about);
+        return new self(false, $this->tenants, true, $this->onlyCategories, $this->exceptCategories, $this->about, $this->reveal);
     }
 
     /**
@@ -155,7 +163,7 @@ final readonly class AccessScope implements Arrayable
      */
     public function onlyCategories(string ...$categories): self
     {
-        $given = self::categoryList(array_values($categories));
+        $given = ScopeValues::categoryList(array_values($categories));
 
         if ($this->denied) {
             return $this;
@@ -166,7 +174,7 @@ final readonly class AccessScope implements Arrayable
             $this->exceptCategories,
         ));
 
-        return $only === [] ? self::none() : new self(false, $this->tenants, $this->tenantless, $only, [], $this->about);
+        return $only === [] ? self::none() : new self(false, $this->tenants, $this->tenantless, $only, [], $this->about, $this->reveal);
     }
 
     /**
@@ -181,7 +189,7 @@ final readonly class AccessScope implements Arrayable
      */
     public function exceptCategories(string ...$categories): self
     {
-        $given = self::categoryList(array_values($categories));
+        $given = ScopeValues::categoryList(array_values($categories));
 
         if ($this->denied || $given === []) {
             return $this;
@@ -190,10 +198,10 @@ final readonly class AccessScope implements Arrayable
         if ($this->onlyCategories !== null) {
             $only = array_values(array_diff($this->onlyCategories, $given));
 
-            return $only === [] ? self::none() : new self(false, $this->tenants, $this->tenantless, $only, [], $this->about);
+            return $only === [] ? self::none() : new self(false, $this->tenants, $this->tenantless, $only, [], $this->about, $this->reveal);
         }
 
-        return new self(false, $this->tenants, $this->tenantless, null, self::categoryList([...$this->exceptCategories, ...$given]), $this->about);
+        return new self(false, $this->tenants, $this->tenantless, null, ScopeValues::categoryList([...$this->exceptCategories, ...$given]), $this->about, $this->reveal);
     }
 
     /**
@@ -211,7 +219,7 @@ final readonly class AccessScope implements Arrayable
      */
     public function onlyAbout(Reference ...$references): self
     {
-        $given = self::references(array_values($references), self::MAX_ABOUT, 'about-references');
+        $given = ScopeValues::references(array_values($references), self::MAX_ABOUT, 'about-references');
 
         if ($this->denied) {
             return $this;
@@ -222,7 +230,26 @@ final readonly class AccessScope implements Arrayable
             static fn (Reference $held): bool => array_filter($given, $held->equals(...)) !== [],
         ));
 
-        return $about === [] ? self::none() : new self(false, $this->tenants, $this->tenantless, $this->onlyCategories, $this->exceptCategories, $about);
+        return $about === [] ? self::none() : new self(false, $this->tenants, $this->tenantless, $this->onlyCategories, $this->exceptCategories, $about, $this->reveal);
+    }
+
+    /**
+     * The scope with the encrypted fields of the entries it sees revealed: each
+     * read through the field reader, from rows whose signature verifies, in
+     * place of its `[ENCRYPTED]` marker. It reveals every encrypted field of
+     * every entry the scope sees, whoever owns it, so it is not on its own a
+     * projection of one owner's data. A denied scope stays denied, and reveals
+     * nothing.
+     *
+     * @return self
+     */
+    public function revealingEncryptedFields(): self
+    {
+        if ($this->denied) {
+            return $this;
+        }
+
+        return new self(false, $this->tenants, $this->tenantless, $this->onlyCategories, $this->exceptCategories, $this->about, true);
     }
 
     /**
@@ -298,6 +325,17 @@ final readonly class AccessScope implements Arrayable
     }
 
     /**
+     * Whether the encrypted fields of the entries seen are revealed through the
+     * field reader; never for a denied scope.
+     *
+     * @return bool
+     */
+    public function revealsEncryptedFields(): bool
+    {
+        return $this->reveal;
+    }
+
+    /**
      * The scope's normalised form: every list sorted bytewise, each reference
      * as its type and id, and a denied scope always the form of `none()`.
      *
@@ -305,7 +343,7 @@ final readonly class AccessScope implements Arrayable
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{about: ?list<array{0: string, 1: string}>, denied: bool, except_categories: list<string>, only_categories: ?list<string>, tenantless: bool, tenants: ?list<array{0: string, 1: string}>}
+     * @return array{about: ?list<array{0: string, 1: string}>, denied: bool, except_categories: list<string>, only_categories: ?list<string>, reveal: bool, tenantless: bool, tenants: ?list<array{0: string, 1: string}>}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -315,12 +353,13 @@ final readonly class AccessScope implements Arrayable
     public function toArray(): array
     {
         return [
-            'about'             => self::pairs($this->about),
+            'about'             => ScopeValues::pairs($this->about),
             'denied'            => $this->denied,
             'except_categories' => $this->exceptCategories,
             'only_categories'   => $this->onlyCategories,
+            'reveal'            => $this->reveal,
             'tenantless'        => $this->tenantless,
-            'tenants'           => self::pairs($this->tenants),
+            'tenants'           => ScopeValues::pairs($this->tenants),
         ];
     }
 
@@ -335,74 +374,5 @@ final readonly class AccessScope implements Arrayable
     public function fingerprint(): string
     {
         return hash('sha256', CanonicalEncoder::encode($this->toArray()));
-    }
-
-    /**
-     * The references, each exact pair once, sorted by type then id bytewise,
-     * refused beyond the limit.
-     *
-     * @param  list<\SineMacula\Laravel\AuditLog\Records\Reference>  $references
-     * @param  int  $limit
-     * @param  string  $what
-     * @return list<\SineMacula\Laravel\AuditLog\Records\Reference>
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function references(array $references, int $limit, string $what): array
-    {
-        $unique = [];
-
-        foreach ($references as $reference) {
-            // A part holds no control character, so the NUL keeps the pair
-            // apart and sorts it first
-            $unique[$reference->type . "\0" . $reference->id] = $reference;
-        }
-
-        if (count($unique) > $limit) {
-            throw new \InvalidArgumentException(sprintf('An access scope holds at most %d %s.', $limit, $what));
-        }
-
-        ksort($unique, SORT_STRING);
-
-        return array_values($unique);
-    }
-
-    /**
-     * The categories, each held to the definitions' grammar, each once, sorted
-     * bytewise, refused beyond the limit.
-     *
-     * @param  list<string>  $categories
-     * @return list<string>
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function categoryList(array $categories): array
-    {
-        foreach ($categories as $category) {
-            if (preg_match(EventDefinition::CATEGORY_PATTERN, $category) !== 1) {
-                throw new \InvalidArgumentException('An access scope\'s categories must each be 1 to 64 lower-case letters, digits or underscores, starting with a letter.');
-            }
-        }
-
-        $unique = array_values(array_unique($categories));
-
-        if (count($unique) > self::MAX_CATEGORIES) {
-            throw new \InvalidArgumentException(sprintf('An access scope holds at most %d categories in each list.', self::MAX_CATEGORIES));
-        }
-
-        sort($unique, SORT_STRING);
-
-        return $unique;
-    }
-
-    /**
-     * Each reference as its type and id, or `null` for no list.
-     *
-     * @param  ?list<\SineMacula\Laravel\AuditLog\Records\Reference>  $references
-     * @return ?list<array{0: string, 1: string}>
-     */
-    private static function pairs(?array $references): ?array
-    {
-        return $references === null ? null : array_map(static fn (Reference $reference): array => [$reference->type, $reference->id], $references);
     }
 }

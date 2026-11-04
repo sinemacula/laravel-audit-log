@@ -18,6 +18,11 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   is built, and no object, enum or model is ever in it.
 - Its `id` is a UUID version 7 made from the time it occurred, so records captured in one millisecond still sort in the
   order they were captured. `occurred_at` is ISO-8601 in UTC with microseconds (`2026-10-31T23:34:56.789012Z`).
+- The id is minted before the record is minimised, never after: the pipeline reads the clock once and mints the id from
+  it (a package record keeps the id the package gave it), minimising seals every encrypted value for that entry, and
+  `AuditRecord::fromPending()` takes the id it was given. An envelope is bound to its entry and its path, so a record
+  built under any other id would hold values that open nowhere; `fromPending()` refuses an id that is not a lower-case
+  UUID, and one other than the pending record's own when the package gave it one.
 - A record kept in the outbox or a spill line comes back only through `Records\EnvelopeCodec`, the one decoder, which
   holds the envelope to its version's schema and verifies its signature first. It then calls
   `AuditRecord::fromEnvelope()`, so the record keeps its id, its times and its provenance, and is never minimised,
@@ -65,7 +70,8 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   definition, the time the source says the activity happened, an origin the source may not know, and its source
   (`Records\ImportedSource`): the source's id and region, the record's id there, the batch it came in and its
   `source_digest`. Its provenance is `imported`. Its id is a UUID version 7 of the time it is imported, not of when it
-  happened, so imported ids sort near their recording; `occurred_at` is kept as given. It carries no credential, guard,
+  happened, so imported ids sort near their recording, minted by the import before the line is minimised and given to
+  `fromImport()`, as a captured record's is; `occurred_at` is kept as given. It carries no credential, guard,
   session, request, trace or user agent, nothing a contributor fills, and no artifact.
 - `source_digest` is the lower-case hex HMAC-SHA256 of the canonical encoding of the source's assertion as the line gave
   it (`{v: 1, event, occurred_at, outcome, actor, subject, principal, tenant, reason, correlation_id, properties,
@@ -84,11 +90,19 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   plaintext: it is sealed through `Contracts\FieldEncrypter`, and when the owner is absent, has no key or the encrypter
   fails, it is dropped and counted in `properties._audit.omitted` under `_audit.note`. A note is free text, and nothing
   claims it holds no personal data or secrets.
+- A record is personal data about everyone it names. Its references, its retained and hashed values and its unowned
+  note are kept as given and are never erased. Its address is kept as given too, unless the `encrypt` IP mode sealed it
+  under the actor's key, in which case it is erased with that key. Only a value sealed under an owner's key is erased,
+  by destroying the key, which leaves the record and its signature as they were. `privacy.md` lists each store a record passes
+  through with what it holds and why.
 - A sign-in identifier (`withIdentifier()`) is kept as given, validated not at all because it is untrusted input, and
   held on the builder apart from the properties. At capture it becomes `properties._audit.identifier_hash`, so
   `withProperties()` cannot spoof it and an `unlisted` `drop` cannot lose it; see `redaction.md`.
 - `AuditRecord::fromPending()` takes the minimised value (`Privacy\Minimised`), so the record's `ip`, `context` and
   `properties` are what minimising left of the builder's, and its `user_agent` and every other field are the builder's.
+  Minimising seals each encrypted value for the record's entry id, the integrity log id, the record's tenant and its
+  definition's category, which are the stored entry's, so the key a value is sealed under belongs to the unit the stored
+  row names.
 - Setting one field twice keeps the last value given (the code, the references, the outcome and reason, the note and
   its owner); `withProperties()` merges at the top level, later keys replacing earlier ones. Different calls never
   interact, so the record does not depend on the order they are made in.
@@ -112,9 +126,10 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   origin, the request and trace ids, the IP address and user agent, the actor and its guard, and the context (see
   `context-resolution.md`). The application's own, registered with `AuditLog::contribute()`, then fill whatever is left,
   such as the principal, the tenant or the session reference.
-- `record()` hands the builder to the recorder, which runs the contributors, minimises what they leave (see
-  `redaction.md`), builds the `AuditRecord` from that with the code's event version and category, the time it occurred
-  and the application's source id and region, delivers it according to its timing (see `outcomes.md`) and returns it.
+- `record()` hands the builder to the recorder, which runs the contributors, reads the clock and mints the entry's id,
+  minimises what they leave for that entry (see `redaction.md`), builds the `AuditRecord` from that with the minted id,
+  the code's event version and category, the time it occurred and the application's source id and region, delivers it
+  according to its timing (see `outcomes.md`) and returns it.
 
 ## Failure / Edge Cases
 
@@ -225,8 +240,8 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 
 - `src/Records/AuditRecord.php`: `fromPending()`, `fromImport()`, `fromEnvelope()`, `toArray()`;
   `src/Records/FinalisedRecord.php`: `decoded()`; `src/Records/ImportedSource.php`.
-- `src/Lifecycle/SourceDigest.php`; `src/Lifecycle/ImportRecordBuilder.php`; `src/Integrity/RecordSigner.php`:
-  `CAPTURED_COLUMNS`.
+- `src/Lifecycle/SourceDigest.php`; `src/Lifecycle/ImportRecordBuilder.php`: `build()`; `src/RecordPipeline.php`:
+  `write()`; `src/Integrity/RecordSigner.php`: `CAPTURED_COLUMNS`.
 - `src/Records/EnvelopeCodec.php`: `encode()`, `decode()`; `src/Records/EnvelopeRejectedException.php`,
   `src/Records/Enums/EnvelopeFailure.php`.
 - `src/Records/PendingRecord.php`: `record()`, `NOTE_MAX_BYTES`; `src/Records/PendingSnapshot.php`.
@@ -239,13 +254,13 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 - `src/Records/Enums/Outcome.php`, `src/Records/Enums/Origin.php`, `src/Records/Enums/Provenance.php`,
   `src/Records/Enums/Timing.php`.
 - `src/Support/ValueNormaliser.php`, `src/Support/Normalised.php`, `src/Support/TextSanitizer.php`.
-- `src/Privacy/Minimised.php`, `src/Privacy/RecordMinimiser.php`: `minimise()`.
+- `src/Privacy/Minimised.php`, `src/Privacy/RecordMinimiser.php`: `minimise()`; `src/Privacy/SealingScope.php`: `at()`.
 
 ## Authoritative Tests
 
 - `tests/Unit/Records/AuditRecordTest.php` `testIsFinalAndReadonlyWithOnlyOneNamedConstructor`,
   `testEveryLeafOfTheEnvelopeIsAScalarOrNull`, `testTheEnvelopeKeysArePinned`, `testTheGoldenV1RecordDecodesUnchanged`,
-  `testTheIdIsAUuidVersion7`, `testRecordsCapturedInOneMillisecondSortInCaptureOrder`,
+  `testFromPendingKeepsTheMintedId`, `testFromPendingRefusesAnIdOtherThanTheSnapshotsOwn`, `testAMalformedIdIsRefused`,
   `testOccurredAtIsUtcWithMicroseconds`, `testTheEventVersionAndCategoryAreTheCallers`,
   `testProvenanceIsCapturedAndTheImportFieldsAreNull`, `testReferencesArePairsOrAbsent`,
   `testTheNoteIsStoredUnderTheReservedMetadata`, `testAnOwnedNoteIsNeverStoredInPlaintext`,
@@ -253,13 +268,17 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testAnEnvelopeKeepsItsProvenance`, `testAnEnvelopeOfAnotherTypeIsRefused`, `testAnEnvelopeWithoutAFieldIsRefused`,
   `testTheEnvelopeParameterIsSensitive`, `testACapturedRecordHasNoSourceDigest`,
   `testFromImportIsImportedWithItsSourceFields`, `testAnImportedRecordCarriesNoAmbientFields`,
-  `testAnImportedRecordsIdIsDrawnAtImport`, `testAnImportedRecordKeepsItsOccurrenceTime`,
+  `testFromImportKeepsTheMintedId`, `testAnImportedRecordKeepsItsOccurrenceTime`,
   `testAnImportedRecordMayHaveNoOrigin`, `testAnImportedRecordRefusesAnAttachment`
 - `tests/Unit/Lifecycle/SourceDigestTest.php` `testTheDigestIsKeyedUnderItsOwnInfo`,
   `testTheSameAssertionUnderTheSameKeyIsEqual`, `testAnyChangedFieldChangesIt`, `testMinimisationDoesNotChangeIt`
 - `tests/Unit/Integrity/RecordSignerTest.php` `testTheSourceDigestIsSigned`
 - `tests/Unit/Records/EnvelopeCodecTest.php` `testAnImportedRecordRoundTripsByteForByte`
-- `tests/Feature/Lifecycle/ImportRecordBuilderTest.php` `testTheRecordIsTheLineImported`, `testNoContributorRuns`
+- `tests/Feature/RecordPipelineTest.php` `testTheEntryIdIsMintedBeforeMinimisingAndKept`, `testTheIdIsAUuidVersion7`,
+  `testRecordsCapturedInOneMillisecondSortInCaptureOrder`, `testAPackageRecordsOwnIdIsTheOneEncryptedFor`,
+  `testTheContextsTenantAndCategoryAreTheStoredEntrys`
+- `tests/Feature/Lifecycle/ImportRecordBuilderTest.php` `testTheRecordIsTheLineImported`, `testNoContributorRuns`,
+  `testTheImportedIdIsMintedBeforeMinimising`
 - `tests/Unit/Records/FinalisedRecordTest.php` `testADecodedRecordReturnsItsColumnsAsDecoded`,
   `testADecodedRecordKeepsTableOrder`, `testADecodedRecordIsCheckedLikeAnyOther`
 - `tests/Unit/Records/EnvelopeCodecTest.php` `testDecodingGivesTheSameCanonicalBytes`, `testDecodingKeepsEveryColumn`,
@@ -279,7 +298,8 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testWithNoteSanitisesAndCapsTheText`, `testWithNoteRefusesEmptyText`, `testCorrelatedWithRefusesAnInvalidId`,
   `testWithIdentifierKeepsTheValueAsGiven`, `testAnIdentifierIsNotInTheProperties`,
   `testAPropertyCannotSpoofTheIdentifierHash`
-- `tests/Unit/Privacy/RecordMinimiserTest.php` `testAPlaintextNoteGoesToTheMetadataAfterTheCallersKeys`,
+- `tests/Unit/Privacy/RecordMinimiserTest.php` `testTheEntryIdAndLogIdReachEveryField`,
+  `testTheTenantAndCategoryReachEveryField`, `testAPlaintextNoteGoesToTheMetadataAfterTheCallersKeys`,
   `testAnOwnedNoteWithNoEncrypterIsDroppedAndDiagnosed`, `testAnOwnedNoteWithAnAbsentOwnerIsDroppedAndDiagnosed`,
   `testAnOwnedNoteWithAnEncrypterStoresItsEnvelope`, `testAPropertyCollisionIsCountedAndMasked`
 - `tests/Unit/Privacy/ByteBudgetTest.php` `testMetadataComesLastInItsFixedOrder`
@@ -304,6 +324,7 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testALiteralDotInACollidedKeyStaysOneSegment`, `testOtherValuesAreUnserialisable`
 - `tests/Unit/Support/TextSanitizerTest.php` `testRepairsInvalidUtf8`, `testStripsControlsAndBidiControls`,
   `testWhitespaceControlsBecomeSpaces`, `testCutsAtAByteCapWithoutSplittingACharacter`
+- `tests/Feature/Lifecycle/EraserTest.php` `testHmacsStillVerifyAfterTheErasure`
 
 ## Change Triggers
 
@@ -319,3 +340,5 @@ Update this note when any of the following change:
 - what a `Contribution` can fill or read
 - how a record is rebuilt from its envelope, or what that keeps
 - how an imported record is built, its id, or what its source digest covers
+- when a record's id is minted, or what minimising seals each value for
+- what a record keeps that an erasure does not reach

@@ -8,6 +8,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
  * Which entries a prune must keep because their delivery is not finished: an
@@ -24,6 +25,12 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
  * That read is sound: an outbox row for an id already stored and sealed is only
  * ever written again by a restore, and the drain checks every row it claims
  * against the pruned ids. Each statement names at most 500 ids.
+ *
+ * An erasure asks how many outbox rows were created before it started, failed
+ * ones included, since a failed row is replayed: every row, not only its
+ * owner's, because the outbox's payload is sealed under the application's key
+ * and its owners cannot be told without opening every row. It is read the same
+ * way, after the erasure's lock.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,13 +67,31 @@ final readonly class PendingDeliveries
      */
     public function inOutbox(Connection $maintenance, array $ids): array
     {
-        $outbox = DeliveryTables::resolvedOutboxConnection() === StorageConnection::resolvedName()
-            ? $maintenance
-            : $this->database->connection(DeliveryTables::outboxConnection());
-
-        $table = DeliveryTables::outboxTable();
+        $outbox = $this->outboxOn($maintenance);
+        $table  = DeliveryTables::outboxTable();
 
         return self::among($ids, static fn (array $chunk): array => $outbox->table($table)->useWritePdo()->whereIn('id', $chunk)->pluck('id')->all());
+    }
+
+    /**
+     * How many outbox rows were created before the instant, in the package's
+     * form, failed and claimed ones included: read through the maintenance
+     * connection, inside its transaction, when the outbox lives on the storage
+     * database, and through the outbox connection's writer otherwise.
+     *
+     * @param  \Illuminate\Database\Connection  $maintenance
+     * @param  string  $instant
+     * @return int
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function olderThan(Connection $maintenance, string $instant): int
+    {
+        return $this->outboxOn($maintenance)
+            ->table(DeliveryTables::outboxTable())
+            ->useWritePdo()
+            ->where('created_at', '<', StoredTime::toStorage($instant))
+            ->count();
     }
 
     /**
@@ -91,6 +116,23 @@ final readonly class PendingDeliveries
             ->all();
 
         return self::among($ids, $receipts);
+    }
+
+    /**
+     * The connection the outbox is read through: the maintenance connection
+     * when the outbox lives on the storage database, and the outbox connection
+     * otherwise.
+     *
+     * @param  \Illuminate\Database\Connection  $maintenance
+     * @return \Illuminate\Database\Connection
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function outboxOn(Connection $maintenance): Connection
+    {
+        return DeliveryTables::resolvedOutboxConnection() === StorageConnection::resolvedName()
+            ? $maintenance
+            : $this->database->connection(DeliveryTables::outboxConnection());
     }
 
     /**

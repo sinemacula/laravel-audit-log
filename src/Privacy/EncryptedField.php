@@ -13,12 +13,19 @@ use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
  * sealed in, its version, the reference of the key that sealed it and the
  * ciphertext.
  *
- * Its path is `ip` for an address stored under the `encrypt` mode, and
- * otherwise the column, `properties` or `context`, followed by the dotted path
- * of keys down to the envelope, with a list's indexes as digits. An envelope is
- * held to the rules it was sealed under: a version from 1 to the largest
- * integer every reader of the stored JSON keeps exactly, and a key reference
- * and a ciphertext that are non-empty clean text.
+ * Where it sits is its segments: the column, `properties`, `context` or `ip`,
+ * then each map key down to the envelope as a string and each list index as an
+ * integer, the index the element is stored at, as the envelope's additional
+ * data binds them; its path is their dotted form, `ip` for an address stored
+ * under the `encrypt` mode. An envelope is held to the rules it was sealed
+ * under: a version from 1 to the largest integer every reader of the stored
+ * JSON keeps exactly, and a key reference and a ciphertext that are non-empty
+ * clean text.
+ *
+ * Only the projector builds one, through `fromEnvelope()`, and only from an
+ * entry whose row verified its signature under a scope that reveals the
+ * encrypted fields, so no caller can hand a field reader an envelope of its own
+ * through the read path.
  *
  * @api
  *
@@ -30,25 +37,26 @@ final readonly class EncryptedField
     /** @var list<string> The keys of an envelope, sorted: exactly these and nothing else. */
     private const array ENVELOPE_KEYS = ['c', 'k', 'v'];
 
+    /** @var string Where in the entry the fragment sits, as the dotted form of its segments. */
+    public string $path;
+
     /**
      * Constructor.
      *
      * @param  string  $entryId
-     * @param  string  $path
+     * @param  non-empty-list<int|string>  $segments
      * @param  int  $version
      * @param  string  $keyReference
      * @param  string  $ciphertext
-     *
-     * @throws \InvalidArgumentException
      */
-    public function __construct(
+    private function __construct(
 
         /** The id of the entry the fragment belongs to. */
         public string $entryId,
 
-        /** Where in the entry the fragment sits: `ip`, or the column and the dotted path of keys down to it. */
+        /** Where in the entry the fragment sits: the column, then each map key and list index as `segment()` names it. */
         #[\SensitiveParameter]
-        public string $path,
+        public array $segments,
 
         /** The envelope's version, from 1. */
         public int $version,
@@ -60,28 +68,85 @@ final readonly class EncryptedField
         #[\SensitiveParameter]
         public string $ciphertext,
     ) {
-        if (!self::isVersion($version)) {
-            throw new \InvalidArgumentException(sprintf('An encrypted field\'s version must be an integer from 1 to %d.', ValueNormaliser::MAX_SAFE_INTEGER));
-        }
-
-        if (!self::isText($keyReference) || !self::isText($ciphertext)) {
-            throw new \InvalidArgumentException('An encrypted field\'s key reference and ciphertext must be non-empty clean text.');
-        }
+        $this->path = implode('.', $segments);
     }
 
     /**
-     * The fragment the value holds when it is exactly an envelope, of exactly
-     * `v`, `k` and `c` in any order, each as its rules require, or `null` for
-     * any other value.
+     * The fragment the value holds at the segments when it is exactly an
+     * envelope, of exactly `v`, `k` and `c` in any order, each as its rules
+     * require, or `null` for any other value. Segments that are not a column
+     * followed by strings and indexes from 0 are refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  string  $entryId
-     * @param  string  $path
+     * @param  array<array-key, mixed>  $segments
      * @param  array<array-key, mixed>|\stdClass  $envelope
      * @return ?self
+     *
+     * @throws \InvalidArgumentException
+     *
+     * @internal
      */
-    public static function fromEnvelope(string $entryId, #[\SensitiveParameter] string $path, #[\SensitiveParameter] array|\stdClass $envelope): ?self
+    public static function fromEnvelope(string $entryId, #[\SensitiveParameter] array $segments, #[\SensitiveParameter] array|\stdClass $envelope): ?self
+    {
+        if (!self::isSegmentList($segments)) {
+            throw new \InvalidArgumentException('An encrypted field\'s segments must be its column, then strings and indexes from 0.');
+        }
+
+        $parts = self::parts($envelope);
+
+        return $parts === null ? null : new self($entryId, $segments, $parts['v'], $parts['k'], $parts['c']);
+    }
+
+    /**
+     * Whether the value is exactly an envelope, of exactly `v`, `k` and `c` in
+     * any order, each as its rules require: what `fromEnvelope()` builds a
+     * field of. It builds nothing, so the projector can tell a malformed
+     * envelope from one it shows sealed without making a field of either.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>|\stdClass  $envelope
+     * @return bool
+     *
+     * @internal
+     */
+    public static function isWellFormed(#[\SensitiveParameter] array|\stdClass $envelope): bool
+    {
+        return self::parts($envelope) !== null;
+    }
+
+    /**
+     * The path segment of a member's key, as the writer that seals the member
+     * and the reader that opens it both name it: an integer key from 0, which
+     * every list index and every map key PHP reads as such is, as that integer,
+     * and any other key as a string. Both sides name a member by its PHP key
+     * rather than by its container's shape, which minimisation can change after
+     * a member is sealed: a map left holding the keys 0 to n - 1 in order is
+     * stored as a list, and the metadata turns a list of properties into a map,
+     * and either way its members' segments are the same.
+     *
+     * @param  int|string  $key
+     * @return int|string
+     *
+     * @internal
+     */
+    public static function segment(#[\SensitiveParameter] int|string $key): int|string
+    {
+        return is_int($key) && $key >= 0 ? $key : (string) $key;
+    }
+
+    /**
+     * The envelope's version, key reference and ciphertext when it is exactly
+     * an envelope, each as its rules require, or `null`.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>|\stdClass  $envelope
+     * @return ?array{v: int, k: string, c: string}
+     */
+    private static function parts(#[\SensitiveParameter] array|\stdClass $envelope): ?array
     {
         $parts = $envelope instanceof \stdClass ? get_object_vars($envelope) : $envelope;
         $keys  = array_map(strval(...), array_keys($parts));
@@ -98,7 +163,33 @@ final readonly class EncryptedField
             return null;
         }
 
-        return new self($entryId, $path, $version, $keyReference, $ciphertext);
+        return ['v' => $version, 'k' => $keyReference, 'c' => $ciphertext];
+    }
+
+    /**
+     * Whether the segments are a non-empty list whose first is a non-empty
+     * string, the column, and each of the rest a string or an integer from 0.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @phpstan-assert-if-true non-empty-list<int|string> $segments
+     *
+     * @param  array<array-key, mixed>  $segments
+     * @return bool
+     */
+    private static function isSegmentList(#[\SensitiveParameter] array $segments): bool
+    {
+        if (!array_is_list($segments) || !isset($segments[0]) || !is_string($segments[0]) || $segments[0] === '') {
+            return false;
+        }
+
+        foreach ($segments as $segment) {
+            if (!is_string($segment) && (!is_int($segment) || $segment < 0)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

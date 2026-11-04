@@ -18,10 +18,12 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * address that is not valid, whatever a contributor filled, is stored in no
  * mode, not even in full, and is diagnosed without its value, so it never
  * reaches the column or a report and never costs the record. An encrypted
- * address is the envelope's canonical JSON, and when there is no actor, no key,
- * a failed encrypter or more JSON than the column holds, it is dropped and
- * diagnosed, never truncated. The `drop` mode is configuration rather than
- * loss, so dropping a valid address adds nothing to the diagnostics.
+ * address is sealed as the typed plaintext of the canonical form, its JSON
+ * string, for the path `["ip"]`, and is stored as the envelope's canonical
+ * JSON. When there is no actor, no key, a failed encrypter or more JSON than
+ * the column holds, it is dropped and diagnosed, never truncated. The `drop`
+ * mode is configuration rather than loss, so dropping a valid address adds
+ * nothing to the diagnostics.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,6 +34,9 @@ final readonly class IpMinimiser
 {
     /** @var int Most bytes the column holds, and so the most an encrypted address may encode to. */
     public const int COLUMN_BYTES = 255;
+
+    /** @var string The column an address is stored in, the one segment of the path it is sealed at. */
+    private const string COLUMN = 'ip';
 
     /** @var string The diagnostic path of an address that was not stored. */
     private const string DIAGNOSTIC_PATH = '$ip';
@@ -79,14 +84,22 @@ final readonly class IpMinimiser
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor
      * @param  \SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer  $sealer
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\SealingScope  $scope
      * @return ?string
      *
      * @throws \InvalidArgumentException
      * @throws \JsonException
      * @throws \UnexpectedValueException
      */
-    public function minimise(#[\SensitiveParameter] ?string $ip, ?Reference $actor, EnvelopeSealer $sealer, OmissionLog $omissions): ?string
-    {
+    public function minimise(
+        #[\SensitiveParameter]
+        ?string $ip,
+        #[\SensitiveParameter]
+        ?Reference $actor,
+        EnvelopeSealer $sealer,
+        OmissionLog $omissions,
+        SealingScope $scope,
+    ): ?string {
         $mode = $this->settings->ipMode();
 
         if ($ip === null) {
@@ -106,7 +119,7 @@ final readonly class IpMinimiser
             IpMode::TRUNCATE => self::truncated($canonical),
             IpMode::HASH     => $this->hasher->ip($canonical),
             IpMode::DROP     => null,
-            IpMode::ENCRYPT  => self::encrypted($canonical, $actor, $sealer, $omissions),
+            IpMode::ENCRYPT  => self::encrypted($canonical, $actor, $sealer, $omissions, $scope),
         };
     }
 
@@ -152,23 +165,34 @@ final readonly class IpMinimiser
 
     /**
      * The canonical JSON of the canonical address's envelope under the actor's
-     * key, or `null` with its path added to the log when there is no actor, no
-     * envelope, or more JSON than the column holds. It is never truncated,
-     * since a cut envelope could not be decrypted.
+     * key, sealed as its JSON string for the path `["ip"]`, or `null` with its
+     * path added to the log when there is no actor, no envelope, or more JSON
+     * than the column holds. It is never truncated, since a cut envelope could
+     * not be decrypted.
      *
      * @param  string  $canonicalIp
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor
      * @param  \SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer  $sealer
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\SealingScope  $scope
      * @return ?string
      *
      * @throws \InvalidArgumentException
      * @throws \JsonException
      * @throws \UnexpectedValueException
      */
-    private static function encrypted(#[\SensitiveParameter] string $canonicalIp, ?Reference $actor, EnvelopeSealer $sealer, OmissionLog $omissions): ?string
-    {
-        $envelope = $actor    === null ? null : $sealer->seal($actor, $canonicalIp);
+    private static function encrypted(
+        #[\SensitiveParameter]
+        string $canonicalIp,
+        #[\SensitiveParameter]
+        ?Reference $actor,
+        EnvelopeSealer $sealer,
+        OmissionLog $omissions,
+        SealingScope $scope,
+    ): ?string {
+        // An address is far shorter than the limit, so its typed plaintext is
+        // always its whole JSON string
+        $envelope = $actor    === null ? null : $sealer->seal($actor, (string) TypedPlaintext::encode($canonicalIp), $scope->at([self::COLUMN]));
         $encoded  = $envelope === null ? null : CanonicalEncoder::encode($envelope);
 
         if ($encoded === null || strlen($encoded) > self::COLUMN_BYTES) {

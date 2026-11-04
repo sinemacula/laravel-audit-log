@@ -14,8 +14,9 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * The reading guide's subject access policy, `App\Audit\SubjectAccessPolicy`,
  * whose text from its class declaration to its end is the guide's own: the
  * investigator reads, counts and exports the subject's activity, as the actor
- * or the subject of an entry, and verifies the export in the audit category;
- * anyone else sees nothing.
+ * or the subject of an entry, or every entry while finding the subject's
+ * fragments, with the encrypted fields revealed, and verifies an export in the
+ * audit category; anyone else sees nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,6 +30,7 @@ final readonly class SubjectAccessPolicy implements AuditAccessPolicy
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable  $investigator
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $subject
+     * @param  bool  $fragments
      */
     public function __construct(
 
@@ -38,13 +40,17 @@ final readonly class SubjectAccessPolicy implements AuditAccessPolicy
 
         /** The person the request is about. */
         private Reference $subject,
+
+        /** Whether the investigator is finding the entries that hold the subject's fragments. */
+        private bool $fragments = false,
     ) {}
 
     /**
-     * The subject's activity, as the actor or the subject of an entry, for the
-     * investigator to read, count and export; the audit category, where the
-     * export is journalled, for the investigator to verify the export; and
-     * nothing for anyone else.
+     * For the investigator, the audit category, where an export is journalled,
+     * to verify an export; otherwise, with the encrypted fields revealed, the
+     * subject's activity, as the actor or the subject of an entry, or every
+     * entry while finding the subject's fragments, which can be in an entry
+     * about anyone. Nothing for anyone else.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable|\SineMacula\Laravel\AuditLog\Records\Reference  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose  $purpose
@@ -57,9 +63,12 @@ final readonly class SubjectAccessPolicy implements AuditAccessPolicy
             return AccessScope::none();
         }
 
-        return match ($purpose) {
-            ReadPurpose::VERIFY => AccessScope::all()->onlyCategories('audit'),
-            default             => AccessScope::all()->onlyAbout($this->subject),
-        };
+        if ($purpose === ReadPurpose::VERIFY) {
+            return AccessScope::all()->onlyCategories('audit');
+        }
+
+        $scope = $this->fragments ? AccessScope::all() : AccessScope::all()->onlyAbout($this->subject);
+
+        return $scope->revealingEncryptedFields();
     }
 }

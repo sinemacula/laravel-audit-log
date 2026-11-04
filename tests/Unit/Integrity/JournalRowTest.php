@@ -248,6 +248,81 @@ final class JournalRowTest extends TestCase
     }
 
     /**
+     * Rows of `[kind]`: the kinds an owner's keys journal, each asked for by an
+     * operator.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind}>
+     */
+    public static function providePrivacyKinds(): iterable
+    {
+        yield from [
+            'an erasure'           => [JournalKind::ERASURE],
+            'a reinstatement'      => [JournalKind::REINSTATE],
+            'a rewrap batch'       => [JournalKind::REWRAP],
+            'a reconciled restore' => [JournalKind::RESTORE_RECONCILED],
+        ];
+    }
+
+    /**
+     * A privacy kind's row holds the authority that asked for it, its reason
+     * and its reference, and no hold, through its draft, its signed fields, its
+     * insert row and the stored row read back.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind  $kind
+     * @return void
+     */
+    #[DataProvider('providePrivacyKinds')]
+    public function testEachPrivacyKindKeepsItsAuthorityThroughItsRow(JournalKind $kind): void
+    {
+        $signed = self::draft(['kind' => $kind, 'hold_id' => null, 'payload' => ['owner_fingerprint' => str_repeat('c', 64)]])->withSignature('k2026', self::HMAC);
+        $stored = $signed->toRow();
+        $read   = JournalRow::fromRow($stored, true);
+
+        self::assertTrue($kind->carriesAuthority());
+        self::assertSame($kind->value, $signed->signedFields()['kind']);
+        self::assertSame([$kind->value, 'App\Models\User', '7', 'case.review', 'CASE-2026-001', null], [
+            $stored['kind'], $stored['authority_type'], $stored['authority_id'], $stored['reason'], $stored['external_reference'], $stored['hold_id'],
+        ]);
+        self::assertSame($kind, $read->kind);
+        self::assertSame(['App\Models\User', '7'], [$read->authorityType, $read->authorityId]);
+        self::assertSame($signed->signedFields(), $read->signedFields());
+        self::assertSame($signed->payload, $read->payload);
+    }
+
+    /**
+     * A privacy kind's row is refused with half an authority: an empty
+     * authority type when drafted, and a stored type without its id or an id
+     * without its type, each naming the column and never its value. That every
+     * privacy kind must carry a whole authority is the journal's check, made
+     * from the kind's `carriesAuthority()`.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind  $kind
+     * @return void
+     */
+    #[DataProvider('providePrivacyKinds')]
+    public function testEachPrivacyKindIsRefusedWithoutAWholeAuthority(JournalKind $kind): void
+    {
+        try {
+            self::draft(['kind' => $kind, 'authority' => ['', '7']]);
+            self::fail(sprintf('Expected the `%s` draft to be refused.', $kind->value));
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringStartsWith('A journal row\'s `authority_type` must be null', $exception->getMessage());
+        }
+
+        $stored = self::draft(['kind' => $kind])->withSignature('k2026', self::HMAC)->toRow();
+
+        foreach (['authority_id' => [...$stored, 'authority_id' => null], 'authority_type' => [...$stored, 'authority_type' => null]] as $missing => $row) {
+            try {
+                JournalRow::fromRow($row, true);
+                self::fail(sprintf('Expected the `%s` row without its `%s` to be refused.', $kind->value, $missing));
+            } catch (\UnexpectedValueException $exception) {
+                self::assertSame('A stored journal row\'s `authority_id` is malformed.', $exception->getMessage(), $missing);
+                self::assertStringNotContainsString('App\Models\User', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
      * Rows of `[column, stored value, what it reads as]`: the forms the engines
      * return, integers as their decimal strings and times with as many
      * fractional digits as an engine keeps.
