@@ -542,8 +542,9 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * References, enums, versions and times are built from the stored
-     * columns; a reference of which only one part is stored is none.
+     * References, enums, versions, times and an imported entry's source fields
+     * and digest are built from the stored columns; a reference of which only
+     * one part is stored is none, and a captured entry has no source digest.
      *
      * @return void
      */
@@ -559,6 +560,8 @@ final class EntryProjectorTest extends TestCase
             'origin'           => null,
             'provenance'       => 'imported',
             'source_record_id' => 'legacy-9',
+            'import_batch_id'  => '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e',
+            'source_digest'    => str_repeat('7e', 32),
         ];
 
         $entry = self::project(self::stored(fields: $fields));
@@ -578,6 +581,10 @@ final class EntryProjectorTest extends TestCase
         self::assertNull($entry->origin);
         self::assertSame(Provenance::IMPORTED, $entry->provenance);
         self::assertSame('legacy-9', $entry->sourceRecordId);
+        self::assertSame('0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e', $entry->importBatchId);
+        self::assertSame(str_repeat('7e', 32), $entry->sourceDigest);
+        self::assertSame(str_repeat('7e', 32), $entry->toArray()['source_digest']);
+        self::assertNull(self::project(self::stored())->sourceDigest);
         self::assertSame('web', $entry->guard);
         self::assertSame('app:ticket-123', $entry->correlationId);
         self::assertSame('app-eu-1', $entry->sourceId);

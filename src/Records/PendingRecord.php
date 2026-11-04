@@ -69,6 +69,9 @@ final class PendingRecord
     /** @var ?\SineMacula\Laravel\AuditLog\Records\Manifest What a bulk operation affected; `null` for any other record. */
     private ?Manifest $manifest = null;
 
+    /** @var ?string The id the package gave its own record; `null` for a fresh one. */
+    private ?string $id = null;
+
     /**
      * Constructor.
      *
@@ -120,6 +123,29 @@ final class PendingRecord
         $this->assertUsable();
 
         $this->code = EventCode::package($activity);
+
+        return $this;
+    }
+
+    /**
+     * Give the record the id given, a lower-case UUID, in place of a fresh one:
+     * one of the package's own records whose id is derived from what it
+     * records, so that record is written at most once. Only the package's
+     * lifecycle records call it.
+     *
+     * @param  string  $id
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function identifiedAs(string $id): self
+    {
+        $this->assertUsable();
+
+        $this->id = self::checkedId($id);
 
         return $this;
     }
@@ -194,6 +220,7 @@ final class PendingRecord
             contextCollisions: $this->contextCollisions,
             contextCollisionCount: $this->contextCollisionCount,
             manifest: $this->manifest,
+            id: $this->id,
         );
     }
 
@@ -244,5 +271,22 @@ final class PendingRecord
         if ($this->consumed) {
             throw new \LogicException('A pending record is recorded once, and this one has already been recorded.');
         }
+    }
+
+    /**
+     * The id given, refused unless it is a lower-case UUID.
+     *
+     * @param  string  $id
+     * @return string
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function checkedId(string $id): string
+    {
+        if (preg_match('/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/', $id) !== 1) {
+            throw new \InvalidArgumentException('A pending record\'s id is a lower-case UUID.');
+        }
+
+        return $id;
     }
 }

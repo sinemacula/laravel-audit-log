@@ -251,7 +251,7 @@ final class AuditTrailTest extends TestCase
         $this->assertThrows(
             static fn () => AuditLog::event('invoice.approved')->forPackage(PackageActivity::TRAIL_READ)->immediately()->record(),
             \LogicException::class,
-            'A code under the reserved prefix is written only by the package\'s own read path.',
+            'A code under the reserved prefix is written only by the package\'s own activity.',
         );
 
         self::assertSame(0, $this->entryCount());

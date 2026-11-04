@@ -75,6 +75,7 @@ final class NamespaceDependenciesTest extends TestCase
                 'Integrity\Enums',
                 'Access\Enums',
                 'Export\Enums',
+                'Lifecycle\Enums',
             ],
             'except'  => [],
             'forbids' => ['*'],
@@ -88,6 +89,7 @@ final class NamespaceDependenciesTest extends TestCase
                 'Integrity\Enums',
                 'Access\Enums',
                 'Export\Enums',
+                'Lifecycle\Enums',
             ],
         ],
         'the support helpers name nothing of the package but the support helpers, references and the clock contract' => [
@@ -150,7 +152,7 @@ final class NamespaceDependenciesTest extends TestCase
             'allows'  => [],
         ],
         'the integrity layer names of the database helpers and the stores only the storage connection, the entries settings, '
-        . 'the integrity tables and progress, the failure classifier and the row codec' => [
+        . 'the integrity tables and progress, the lifecycle tables, the installation identity, the failure classifier and the row codec' => [
             'from'    => ['Integrity'],
             'except'  => [],
             'forbids' => ['Database', 'Stores'],
@@ -159,9 +161,17 @@ final class NamespaceDependenciesTest extends TestCase
                 'Database\EntrySettings',
                 'Database\IntegrityTables',
                 'Database\IntegrityProgress',
+                'Database\LifecycleTables',
+                'Database\InstallationIdentity',
                 'Database\FailureClassifier',
                 'Stores\RowCodec',
             ],
+        ],
+        'the integrity layer names nothing of the lifecycle' => [
+            'from'    => ['Integrity'],
+            'except'  => [],
+            'forbids' => ['Lifecycle'],
+            'allows'  => [],
         ],
         'the anchors name nothing of the database, the stores or the console' => [
             'from'    => ['Integrity\Anchors'],
@@ -287,9 +297,9 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Stores', 'Console', 'Delivery'],
             'allows'  => [],
         ],
-        'only the capture coordinator, the recorder and the access recorder write through the record pipeline' => [
+        'only the capture coordinator, the recorder, the access recorder and the lifecycle recorder write through the record pipeline' => [
             'from'    => ['*'],
-            'except'  => ['Capture\CaptureCoordinator', 'Recorder', 'Querying\AccessRecorder', 'RecordPipeline'],
+            'except'  => ['Capture\CaptureCoordinator', 'Recorder', 'Querying\AccessRecorder', 'Lifecycle\LifecycleRecorder', 'RecordPipeline'],
             'forbids' => ['RecordPipeline'],
             'allows'  => [],
         ],
@@ -298,6 +308,12 @@ final class NamespaceDependenciesTest extends TestCase
             'except'  => [],
             'forbids' => ['Console', 'Models', 'Casts', 'Testing', 'Facades', 'Stores'],
             'allows'  => ['Stores\RowCodec', 'Stores\AuditWriteFailedException'],
+        ],
+        'the lifecycle names nothing of the console, the read model, the testing helpers or the facade' => [
+            'from'    => ['Lifecycle'],
+            'except'  => [],
+            'forbids' => ['Console', 'Models', 'Casts', 'Testing', 'Facades'],
+            'allows'  => [],
         ],
         'access control names nothing of the package but references, the read path\'s filters and positions, the definitions\' grammar '
         . 'and the canonical encoder' => [
@@ -758,7 +774,7 @@ final class NamespaceDependenciesTest extends TestCase
         $capture   = 'the capture layer names nothing of the stores, the read model, the console or the testing helpers';
         $enums     = 'the capture enums name nothing of the package but other enums, the definitions and the defining contract';
         $listeners = 'the listeners name nothing of the stores, the console or the delivery';
-        $pipeline  = 'only the capture coordinator, the recorder and the access recorder write through the record pipeline';
+        $pipeline  = 'only the capture coordinator, the recorder, the access recorder and the lifecycle recorder write through the record pipeline';
 
         yield from [
             'a watch naming the read model'           => [$capture, 'Capture\ModelWatch', 'Models\AuditEntry', true],
@@ -781,6 +797,8 @@ final class NamespaceDependenciesTest extends TestCase
             'the coordinator naming the pipeline'     => [$pipeline, 'Capture\CaptureCoordinator', 'RecordPipeline', false],
             'the recorder naming the pipeline'        => [$pipeline, 'Recorder', 'RecordPipeline', false],
             'the access recorder naming the pipeline' => [$pipeline, 'Querying\AccessRecorder', 'RecordPipeline', false],
+            'the lifecycle recorder naming it'        => [$pipeline, 'Lifecycle\LifecycleRecorder', 'RecordPipeline', false],
+            'another lifecycle class naming it'       => [$pipeline, 'Lifecycle\LifecycleEvidence', 'RecordPipeline', true],
             'the trail reader naming the pipeline'    => [$pipeline, 'Querying\TrailReader', 'RecordPipeline', true],
         ];
     }

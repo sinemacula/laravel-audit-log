@@ -10,9 +10,10 @@ use SineMacula\Laravel\AuditLog\Stores\RecordConflictException;
 
 /**
  * Unit tests for the record conflict exception: the messages naming the id of
- * an entry with different content, of one that fails verification and of a bulk
- * record stored with another artifact or without its own, the id it keeps for a
- * caller, and the class it specialises.
+ * an entry with different content, of one that fails verification, of a bulk
+ * record stored with another artifact or without its own and of a record
+ * retention has already pruned, the id it keeps for a caller, and the class it
+ * specialises.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,6 +74,22 @@ final class RecordConflictExceptionTest extends TestCase
         self::assertSame(0, $exception->getCode());
         self::assertNull($exception->getPrevious());
         self::assertInstanceOf(\RuntimeException::class, $exception);
+    }
+
+    /**
+     * The exception for a record retention has already pruned names only the id
+     * in its message, says it is not stored again, and keeps the id.
+     *
+     * @return void
+     */
+    public function testAPrunedRecordNamesTheIdAndKeepsIt(): void
+    {
+        $exception = RecordConflictException::alreadyPruned(self::ID);
+
+        self::assertSame('The record `01932b4e-8a40-7000-8000-000000000001` was pruned; it is not stored again.', $exception->getMessage());
+        self::assertSame(self::ID, $exception->id);
+        self::assertSame(0, $exception->getCode());
+        self::assertNull($exception->getPrevious());
     }
 
     /**

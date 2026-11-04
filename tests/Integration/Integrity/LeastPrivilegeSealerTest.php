@@ -11,9 +11,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Integrity\Anchorer;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Sealer;
@@ -32,13 +35,16 @@ use Tests\TestCase;
  * MySQL and PostgreSQL: a writer granted those privileges and nothing else
  * records, seals, anchors, verifies strictly and completes a sweep, which
  * forgets its cursor; a bundle's artifact is verified by a user granted only
- * `SELECT` on it; it cannot change an immutable checkpoint column, update or
- * delete a member, delete a seal, truncate any of the package's tables or run
- * any DDL; and the maintenance user may delete an entry and read the evidence,
- * and nothing more.
+ * `SELECT` on it; it reads the lifecycle journal and the holds and writes
+ * neither; it cannot change an immutable checkpoint column, update or delete a
+ * member, delete a seal, truncate any of the package's tables or run any DDL;
+ * and the maintenance user may delete an entry, read the evidence and the
+ * state, insert a journal row, place and remove a hold and take the lock, and
+ * nothing more.
  *
- * Each worker creates logins of its own, `audit_writer_<token>` and
- * `audit_maintenance_<token>`, and drops them when the test ends. No trigger is
+ * Each worker creates logins of its own, `audit_writer_<token>`,
+ * `audit_maintenance_<token>` and `audit_verifier_<token>`, which the
+ * documented grants name, and drops them when the test ends. No trigger is
  * installed: the grants alone refuse each of these. SQLite has no privileges,
  * so these tests are skipped there.
  *
@@ -92,6 +98,7 @@ final class LeastPrivilegeSealerTest extends TestCase
 
         self::createLogin($root, $this->names['audit_writer']);
         self::createLogin($root, $this->names['audit_maintenance']);
+        self::createLogin($root, $this->names['audit_verifier']);
         self::runDocumentedSql($root, $root->getDriverName() . '-grants', $this->names);
         self::connectAs(self::WRITER, self::CONNECTION, $this->names['audit_writer']);
         self::connectAs(self::MAINTENANCE, self::CONNECTION, $this->names['audit_maintenance']);
@@ -122,14 +129,16 @@ final class LeastPrivilegeSealerTest extends TestCase
 
             self::dropLogin($this->root(), $this->names['audit_writer']);
             self::dropLogin($this->root(), $this->names['audit_maintenance']);
+            self::dropLogin($this->root(), $this->names['audit_verifier']);
         }
 
         parent::tearDown();
     }
 
     /**
-     * The writer records through the store, `audit-log:seal` seals and anchors
-     * what it recorded, and a strict `audit-log:verify` passes and records its
+     * The writer records through the store, `audit-log:seal` writes the
+     * installation's id, then seals and anchors what it recorded, and a strict
+     * `audit-log:verify`, which reads the journal, passes and records its
      * completion in the integrity state table.
      *
      * @return void
@@ -149,6 +158,7 @@ final class LeastPrivilegeSealerTest extends TestCase
 
         $progress = [
             IntegrityProgress::ANCHOR_LAST,
+            InstallationIdentity::NAME,
             IntegrityProgress::SEAL_LAST,
             IntegrityProgress::SEAL_LAST_RUN,
             IntegrityProgress::SEAL_RECENT,
@@ -183,7 +193,7 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * The writer can change none of the 15 immutable checkpoint columns, each
+     * The writer can change none of the 17 immutable checkpoint columns, each
      * refused by the column grants, while an anchor column stays writable; the
      * seal is left as it was.
      *
@@ -287,14 +297,47 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * The maintenance user reads the entries, the seals and the members and
-     * deletes an entry, as a prune does; it can insert or update no entry,
-     * delete no member or seal, write no anchor column, truncate no table and
-     * read no progress.
+     * The writer reads the lifecycle journal and the holds, which sealing,
+     * verification and the checks read, and can write neither, nor touch the
+     * lock.
      *
      * @return void
      */
-    public function testTheMaintenanceUserIsGrantedOnlyTheEntriesDelete(): void
+    public function testTheWriterReadsTheJournalAndTheHolds(): void
+    {
+        $writer = $this->writer();
+        $driver = $writer->getDriverName();
+
+        $this->root()->table(LifecycleTables::journalTable())->insert(self::journalRow());
+
+        self::assertSame(1, $writer->table(LifecycleTables::journalTable())->count());
+        self::assertSame(0, $writer->table(LifecycleTables::holdsTable())->count());
+
+        $refusals = [
+            'insert a journal row' => static fn () => $writer->table(LifecycleTables::journalTable())->insert(self::journalRow(2)),
+            'delete a journal row' => static fn () => $writer->table(LifecycleTables::journalTable())->delete(),
+            'insert a hold'        => static fn () => $writer->table(LifecycleTables::holdsTable())->insert(['hold_id' => '01932b4e-9000-7000-8000-00000000f0f3']),
+            'read the lock'        => static fn () => $writer->table(LifecycleTables::lockTable())->count(),
+        ];
+
+        foreach ($refusals as $what => $refusal) {
+            self::assertRefusedByTheGrants($refusal, $driver, "The writer's attempt to {$what}");
+        }
+
+        self::assertSame(1, $this->root()->table(LifecycleTables::journalTable())->count());
+    }
+
+    /**
+     * The maintenance user reads the entries, the seals, the members and the
+     * integrity state, deletes an entry and a receipt, as a prune does, inserts
+     * a journal row, places and removes a hold and takes the lock; it can
+     * insert or update no entry, delete no member or seal, write no anchor
+     * column, update or delete no journal row, insert no lock row and truncate
+     * no table.
+     *
+     * @return void
+     */
+    public function testTheMaintenanceUserIsGrantedExactlyItsDocumentedPrivileges(): void
     {
         $ids = $this->storeEntries(2);
 
@@ -303,11 +346,20 @@ final class LeastPrivilegeSealerTest extends TestCase
         $maintenance = DB::connection(self::MAINTENANCE);
         $driver      = $maintenance->getDriverName();
         $entries     = $maintenance->table(EntrySettings::table());
+        $journal     = $maintenance->table(LifecycleTables::journalTable());
         $copy        = ['id' => '01932b4e-8a40-7000-8000-00000000f0f0'] + (array) $this->root()->table(EntrySettings::table())->where('id', $ids[1])->first();
 
         self::assertSame(1, $maintenance->table(IntegrityTables::checkpointsTable())->count());
         self::assertSame(2, $maintenance->table(IntegrityTables::membersTable())->count());
+        self::assertGreaterThan(0, $maintenance->table(IntegrityTables::stateTable())->count());
         self::assertSame(1, $entries->clone()->where('id', $ids[0])->delete());
+        self::assertSame(0, $maintenance->table(DeliveryTables::deliveriesTable())->where('entry_id', $ids[0])->delete());
+        self::assertTrue($journal->clone()->insert(self::journalRow()));
+        self::assertTrue($maintenance->table(LifecycleTables::holdsTable())->insert(self::holdRow()));
+        self::assertSame(1, $maintenance->table(LifecycleTables::holdsTable())->delete());
+        $lock = ['token' => 'upkeep:0123456789abcdef', 'locked_at' => '2026-11-01 13:00:00.000000'];
+
+        self::assertSame(1, $maintenance->table(LifecycleTables::lockTable())->where('id', 1)->update($lock));
 
         $refusals = [
             'insert an entry'      => static fn () => $entries->clone()->insert($copy),
@@ -315,8 +367,11 @@ final class LeastPrivilegeSealerTest extends TestCase
             'delete a member'      => static fn () => $maintenance->table(IntegrityTables::membersTable())->delete(),
             'delete a seal'        => static fn () => $maintenance->table(IntegrityTables::checkpointsTable())->delete(),
             'write an anchor'      => static fn () => $maintenance->table(IntegrityTables::checkpointsTable())->update(['anchor_error_class' => \RuntimeException::class]),
+            'update a journal row' => static fn () => $journal->clone()->update(['reason' => 'rewritten']),
+            'delete a journal row' => static fn () => $journal->clone()->delete(),
+            'insert a lock row'    => static fn () => $maintenance->table(LifecycleTables::lockTable())->insert(['id' => 2]),
             'truncate the entries' => static fn () => $maintenance->statement(sprintf('TRUNCATE TABLE %s', EntrySettings::table())),
-            'read the progress'    => static fn () => $maintenance->table(IntegrityTables::stateTable())->count(),
+            'write the state'      => static fn () => $maintenance->table(IntegrityTables::stateTable())->delete(),
         ];
 
         foreach ($refusals as $what => $refusal) {
@@ -325,6 +380,7 @@ final class LeastPrivilegeSealerTest extends TestCase
 
         self::assertSame([$ids[1]], $this->root()->table(EntrySettings::table())->pluck('id')->all());
         self::assertSame(2, $this->root()->table(IntegrityTables::membersTable())->count());
+        self::assertSame(1, $this->root()->table(LifecycleTables::journalTable())->count());
     }
 
     /**
@@ -360,6 +416,50 @@ final class LeastPrivilegeSealerTest extends TestCase
         self::assertSame(IntegrityStatus::VALID, $report->integrity);
         self::assertNull($report->finding);
         self::assertSame(2, $report->members);
+    }
+
+    /**
+     * A journal row with every column a row must have, numbered so its id and
+     * sequence are its own.
+     *
+     * @param  int  $number
+     * @return array<string, int|string>
+     */
+    private static function journalRow(int $number = 1): array
+    {
+        return [
+            'id'             => sprintf('01932b4e-9000-7000-8000-%012d', $number),
+            'sequence'       => $number,
+            'log_id'         => 'app-eu-1',
+            'kind'           => 'policy',
+            'operation_id'   => '01932b4e-9000-7000-8000-00000000aaaa',
+            'occurred_at'    => '2026-11-01 13:00:00.000000',
+            'payload'        => '{}',
+            'payload_digest' => str_repeat('a', 64),
+            'key_id'         => 'k2026',
+            'hmac'           => str_repeat('b', 64),
+        ];
+    }
+
+    /**
+     * A hold with every column a hold must have.
+     *
+     * @return array<string, int|string>
+     */
+    private static function holdRow(): array
+    {
+        return [
+            'hold_id'          => '01932b4e-9000-7000-8000-00000000f0f4',
+            'scope'            => '{}',
+            'scope_digest'     => str_repeat('a', 64),
+            'basis'            => 'litigation',
+            'placed_at'        => '2026-11-01 13:00:00.000000',
+            'authority_type'   => 'operator',
+            'authority_id'     => '7',
+            'reason'           => 'legal_hold',
+            'operation_id'     => '01932b4e-9000-7000-8000-00000000aaaa',
+            'journal_sequence' => 1,
+        ];
     }
 
     /**

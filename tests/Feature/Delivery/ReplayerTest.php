@@ -193,8 +193,8 @@ final class ReplayerTest extends TestCase
     }
 
     /**
-     * An imported record keeps its provenance, its source and its batch, so a
-     * replay never turns it into something captured here.
+     * An imported record keeps its provenance, its source, its batch and its
+     * source digest, so a replay never turns it into something captured here.
      *
      * @return void
      */
@@ -204,6 +204,7 @@ final class ReplayerTest extends TestCase
             'provenance'       => 'imported',
             'source_record_id' => 'legacy-0042',
             'import_batch_id'  => self::IMPORT_BATCH_ID,
+            'source_digest'    => str_repeat('4a', 32),
             'origin'           => null,
         ]));
 
@@ -214,6 +215,7 @@ final class ReplayerTest extends TestCase
         self::assertSame('imported', $stored['provenance']);
         self::assertSame('legacy-0042', $stored['source_record_id']);
         self::assertSame(self::IMPORT_BATCH_ID, $stored['import_batch_id']);
+        self::assertSame(str_repeat('4a', 32), $stored['source_digest']);
         self::assertNull($stored['origin']);
     }
 

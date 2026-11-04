@@ -15,9 +15,11 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\CheckpointWriter;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\SealBatch;
 use SineMacula\Laravel\AuditLog\Integrity\SealChainException;
 use SineMacula\Laravel\AuditLog\Integrity\SealCursor;
@@ -26,6 +28,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\Concerns\SealsEntries;
+use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
@@ -39,7 +42,9 @@ use Tests\TestCase;
  * from a select, without locking what it reads; it leaves out a candidate it
  * cannot seal; and a conflict leaves nothing of the attempt. The sweep's window
  * reads at most its limit of entries, sealed or not, and seals those that are
- * no seal's member.
+ * no seal's member. Every seal commits to the lifecycle journal's head, read
+ * inside its own transaction after the last seal, or to none, and a head that
+ * cannot be read refuses the seal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,13 +54,16 @@ use Tests\TestCase;
 #[CoversClass(CheckpointWriter::class)]
 final class CheckpointWriterTest extends TestCase
 {
-    use SealsEntries;
+    use SealsEntries, WritesTheJournal;
 
     /** @var string When the writer seals, in the package's form. */
     private const string SEALED_AT = '2026-11-01T13:00:00.000000Z';
 
     /** @var string The bound every attempt seals up to, unless a test gives another. */
     private const string UNTIL = '2026-11-01T13:00:00.000000Z';
+
+    /** @var string The id of a hold the journal places. */
+    private const string HOLD_ID = '01932b4e-d000-7000-8000-000000000001';
 
     /** @var string A secret of the first key of an explicit ring. */
     private const string SECRET_2025 = 'audit-log seal test key 2025 0123456789';
@@ -252,6 +260,230 @@ final class CheckpointWriterTest extends TestCase
 
         self::assertCount(1, $this->seals());
         self::assertSame(2, $this->members()->count());
+    }
+
+    /**
+     * A seal commits to the journal's head: the sequence and HMAC of its last
+     * row, stored with the seal and covered by its digest and signature.
+     *
+     * @return void
+     */
+    public function testASealCommitsToTheJournalHead(): void
+    {
+        $this->journalHold(self::HOLD_ID);
+
+        $head = $this->journalRow(JournalKind::RELEASE, ['hold_id' => self::HOLD_ID], self::HOLD_ID);
+
+        $this->storeEntries(2);
+
+        $batch = $this->writer()->write(null, self::UNTIL, 100);
+        $seal  = $this->seals()[0];
+
+        self::assertNotNull($batch->seal);
+        self::assertSame(2, $batch->seal->journalSequence);
+        self::assertSame($head->hmac, $batch->seal->journalHead);
+        self::assertSame(2, (int) $seal['journal_sequence']);
+        self::assertSame($head->hmac, $seal['journal_head']);
+        self::assertSame($batch->digest, SealEnvelope::fromRow($seal)->digest());
+        self::assertTrue(app(SealSigner::class)->verifies(SealEnvelope::fromRow($seal), (string) $seal['signature']));
+    }
+
+    /**
+     * A seal of an empty journal commits to none: both its journal columns are
+     * `null`, and a row stored outside the chain, at a sequence below 1, is
+     * never taken for the head.
+     *
+     * @return void
+     */
+    public function testASealOfAnEmptyJournalCommitsToNone(): void
+    {
+        $this->storeEntries(1);
+
+        $first = $this->writer()->write(null, self::UNTIL, 100)->seal;
+
+        self::assertNotNull($first);
+        self::assertNull($first->journalSequence);
+        self::assertNull($first->journalHead);
+        self::assertNull($this->seals()[0]['journal_sequence']);
+        self::assertNull($this->seals()[0]['journal_head']);
+
+        $this->journalHold(self::HOLD_ID);
+        $this->tamperJournal(1, ['sequence' => 0]);
+        $this->storeEntries(1, '2026-11-01 12:30:00');
+
+        $second = $this->writer()->write(null, self::UNTIL, 100)->seal;
+
+        self::assertNotNull($second);
+        self::assertNull($second->journalSequence);
+        self::assertNull($second->journalHead);
+    }
+
+    /**
+     * Rows of `[column, malformed value]`: a journal head whose HMAC no key
+     * could have made.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideMalformedJournalHeads(): iterable
+    {
+        yield from [
+            'an upper-case HMAC' => ['hmac', str_repeat('A', 64)],
+            'a short HMAC'       => ['hmac', str_repeat('a', 63)],
+            'an empty HMAC'      => ['hmac', ''],
+        ];
+    }
+
+    /**
+     * A journal head whose HMAC cannot be read refuses the seal, naming no
+     * value, and nothing is written: a seal never commits to a row it cannot
+     * name.
+     *
+     * @param  string  $column
+     * @param  string  $value
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    #[DataProvider('provideMalformedJournalHeads')]
+    public function testAMalformedJournalHeadRefusesTheSeal(string $column, string $value): void
+    {
+        $this->journalHold(self::HOLD_ID);
+        $this->tamperJournal(1, [$column => $value]);
+        $this->storeEntries(2);
+
+        try {
+            $this->writer()->write(null, self::UNTIL, 100);
+
+            self::fail('Expected the journal head to be refused.');
+        } catch (SealChainException $exception) {
+            self::assertNull($exception->sealId);
+            self::assertSame(Finding::JOURNAL_MALFORMED, $exception->finding);
+            self::assertSame('The lifecycle journal\'s last row has a malformed sequence or HMAC, so no seal commits to it; run audit-log:verify.', $exception->getMessage());
+        }
+
+        self::assertSame([], $this->seals());
+        self::assertSame(0, $this->members()->count());
+        self::assertSame(0, DB::connection(StorageConnection::name())->transactionLevel());
+    }
+
+    /**
+     * Rows of `[how the journal goes behind the last seal's commitment]`: its
+     * committed tail removed, the whole journal emptied, and its committed row
+     * replaced by another at the same sequence.
+     *
+     * @return iterable<string, array{0: \Closure(self): void}>
+     */
+    public static function provideJournalsBehindTheSeal(): iterable
+    {
+        yield from [
+            'its tail removed' => [static function (self $test): void {
+                $test->journalTable()->where('sequence', 2)->delete();
+            }],
+            'emptied' => [static function (self $test): void {
+                $test->journalTable()->delete();
+            }],
+            'its head replaced' => [static function (self $test): void {
+                $test->journalTable()->where('sequence', 2)->delete();
+                $test->journalHold('01932b4e-d000-7000-8000-000000000009');
+            }],
+        ];
+    }
+
+    /**
+     * A journal behind the last seal's commitment refuses the seal, naming the
+     * last seal and the commitment it contradicts, and nothing is written:
+     * commitments never run backwards, so a truncated or replaced journal is
+     * never sealed over.
+     *
+     * @param  \Closure(self): void  $behind
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    #[DataProvider('provideJournalsBehindTheSeal')]
+    public function testAJournalBehindTheLastCommitmentRefusesTheSeal(\Closure $behind): void
+    {
+        $this->journalHold(self::HOLD_ID);
+        $this->journalRow(JournalKind::RELEASE, ['hold_id' => self::HOLD_ID], self::HOLD_ID);
+        $this->storeEntries(1);
+        $this->writer()->write(null, self::UNTIL, 100);
+        $this->storeEntries(1, '2026-11-01 12:30:00');
+
+        $sealId = (string) $this->seals()[0]['id'];
+
+        self::assertSame(2, (int) $this->seals()[0]['journal_sequence']);
+
+        $behind($this);
+
+        try {
+            $this->writer()->write(null, self::UNTIL, 100);
+
+            self::fail('Expected the journal behind the seal to be refused.');
+        } catch (SealChainException $exception) {
+            self::assertSame($sealId, $exception->sealId);
+            self::assertSame(Finding::JOURNAL_COMMITMENT, $exception->finding);
+            self::assertStringStartsWith('The lifecycle journal\'s head is behind the last seal\'s commitment to it', $exception->getMessage());
+        }
+
+        self::assertCount(1, $this->seals());
+        self::assertSame(1, $this->members()->count());
+        self::assertSame(0, DB::connection(StorageConnection::name())->transactionLevel());
+    }
+
+    /**
+     * A journal that moved on past the last seal's commitment, its committed
+     * row kept, is sealed: rows may follow a seal.
+     *
+     * @return void
+     */
+    public function testAJournalPastTheLastCommitmentIsSealed(): void
+    {
+        $this->journalHold(self::HOLD_ID);
+        $this->storeEntries(1);
+        $this->writer()->write(null, self::UNTIL, 100);
+
+        $head = $this->journalRow(JournalKind::RELEASE, ['hold_id' => self::HOLD_ID], self::HOLD_ID);
+
+        $this->storeEntries(1, '2026-11-01 12:30:00');
+
+        $seal = $this->writer()->write(null, self::UNTIL, 100)->seal;
+
+        self::assertNotNull($seal);
+        self::assertSame([2, $head->hmac], [$seal->journalSequence, $seal->journalHead]);
+    }
+
+    /**
+     * The journal's head is read inside the seal's own transaction, after the
+     * last seal, and on the writer.
+     *
+     * @return void
+     */
+    public function testTheHeadIsReadInsideTheSealsTransaction(): void
+    {
+        $this->journalHold(self::HOLD_ID);
+        $this->storeEntries(1);
+
+        $reads = [];
+
+        DB::connection(StorageConnection::name())->beforeExecuting(static function (string $query, array $bindings, Connection $connection) use (&$reads): void {
+            $journal = str_contains($query, LifecycleTables::journalTable());
+            $seal    = str_contains($query, IntegrityTables::checkpointsTable()) && str_starts_with($query, 'select');
+            $reads[] = [$journal, $seal, $connection->transactionLevel()];
+        });
+
+        DB::connection(StorageConnection::name())->setReadPdo(static function (): never {
+            throw new \LogicException('Sealing read the replica.');
+        });
+
+        $this->writer()->write(null, self::UNTIL, 100);
+
+        $journal = array_keys(array_filter($reads, static fn (array $read): bool => $read[0]));
+        $seal    = array_keys(array_filter($reads, static fn (array $read): bool => $read[1]));
+
+        self::assertCount(1, $journal);
+        self::assertCount(1, $seal);
+        self::assertGreaterThan($seal[0], $journal[0]);
+        self::assertSame(1, $reads[$journal[0]][2]);
     }
 
     /**
@@ -470,7 +702,8 @@ final class CheckpointWriterTest extends TestCase
 
     /**
      * Within the attempt, the last seal is read first, then the candidates,
-     * then the checkpoint is inserted, and only then its members.
+     * then the journal's head, then the checkpoint is inserted, and only then
+     * its members.
      *
      * @return void
      */
@@ -482,12 +715,13 @@ final class CheckpointWriterTest extends TestCase
         $checkpoint = $this->indexOf($statements, '/^insert into \S*' . IntegrityTables::checkpointsTable() . '\b/');
         $members    = $this->indexOf($statements, '/^insert into \S*' . IntegrityTables::membersTable() . '\b/');
 
-        self::assertCount(4, $statements);
+        self::assertCount(5, $statements);
         self::assertMatchesRegularExpression('/^select \* from \S*' . IntegrityTables::checkpointsTable() . '\b/', $statements[0]);
         self::assertMatchesRegularExpression('/^select .* from \S*' . EntrySettings::table() . '\b/', $statements[1]);
         self::assertStringContainsString(' where e.recorded_at <= ? and m.entry_id is null order by e.recorded_at asc, e.id asc limit 100', $statements[1]);
-        self::assertSame(2, $checkpoint);
-        self::assertSame(3, $members);
+        self::assertMatchesRegularExpression('/^select \S*sequence\S*, \S*hmac\S* from \S*' . LifecycleTables::journalTable() . '\b/', $statements[2]);
+        self::assertSame(3, $checkpoint);
+        self::assertSame(4, $members);
     }
 
     /**
@@ -932,6 +1166,16 @@ final class CheckpointWriterTest extends TestCase
         self::assertNotNull($batch->seal);
         self::assertSame(1, $batch->read);
         self::assertSame([$at], $this->membersOf($batch->seal->id));
+    }
+
+    /**
+     * A query of the journal table on the storage connection's writer.
+     *
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private function journalTable(): Builder
+    {
+        return DB::connection(StorageConnection::name())->table(LifecycleTables::journalTable())->useWritePdo();
     }
 
     /**

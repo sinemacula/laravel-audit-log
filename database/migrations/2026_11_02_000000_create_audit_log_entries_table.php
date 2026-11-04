@@ -81,6 +81,12 @@ return new class extends Migration {
             $blueprint->string('source_record_id', 191)->nullable();
             $blueprint->uuid('import_batch_id')->nullable();
 
+            // The keyed digest of an imported record's source assertion, which
+            // tells a repeated import from a conflicting one; null on every
+            // captured record. Not indexed: duplicates are found through the
+            // source's unique index.
+            $blueprint->string('source_digest', 64)->nullable();
+
             // 255 characters, so a truncated, hashed or encrypted address fits
             // as well as a full one.
             $blueprint->string('ip', 255)->nullable();

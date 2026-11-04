@@ -15,10 +15,10 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * Unit tests for the codes the package records of its own read path: the stored
+ * Unit tests for the codes the package records of its own activity: the stored
  * values, each under the reserved prefix, every definition version 1 in the
- * `audit` category keeping exactly its evidence and dropping the rest, and
- * which of them is a read.
+ * `audit` category keeping exactly its evidence and dropping the rest, which of
+ * them is a read, and which retention never prunes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,6 +42,10 @@ final class PackageActivityTest extends TestCase
             'TRAIL_EXPORTED'        => 'audit_log.trail_exported',
             'EXPORT_VERIFIED'       => 'audit_log.export_verified',
             'EXPORT_PUBLISH_FAILED' => 'audit_log.export_publish_failed',
+            'PRUNED'                => 'audit_log.pruned',
+            'HELD'                  => 'audit_log.held',
+            'RELEASED'              => 'audit_log.released',
+            'IMPORTED'              => 'audit_log.imported',
         ], array_column(array_map(static fn (PackageActivity $case): array => [$case->name, $case->value], PackageActivity::cases()), 1, 0));
     }
 
@@ -106,6 +110,7 @@ final class PackageActivityTest extends TestCase
                 PackageActivity::EXPORT_PUBLISH_FAILED,
                 ['export_entry', 'outcome'],
             ],
+            ...self::lifecycleRetained(),
         ];
     }
 
@@ -168,12 +173,66 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Every activity but the failed publication reads the trail, an export's
-     * verification included.
+     * Rows of `[case, the properties its record keeps, in the order it gives
+     * them]`: the lifecycle's prunes, holds, releases and imports.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
+     */
+    public static function provideLifecycleRetained(): iterable
+    {
+        yield from self::lifecycleRetained();
+    }
+
+    /**
+     * Each lifecycle definition keeps exactly its properties, in the order its
+     * record gives them, and drops everything else: a property of another code,
+     * a tenant's identity and a hold's scope included.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
+     * @param  list<string>  $retained
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    #[DataProvider('provideLifecycleRetained')]
+    public function testEachLifecycleDefinitionKeepsExactlyItsProperties(PackageActivity $case, array $retained): void
+    {
+        $definition = $case->definition();
+
+        self::assertSame($retained, (new \ReflectionMethod(PackageActivity::class, 'retained'))->invoke($case));
+        self::assertSame('audit', $definition->category);
+        self::assertSame(1, $definition->version);
+
+        foreach ($retained as $property) {
+            self::assertSame(FieldHandling::RETAIN, $definition->handlingFor([$property]), $property);
+        }
+
+        foreach (['purpose', 'policy', 'export_entry', 'tenant', 'scope', 'reason', 'tenant_id'] as $property) {
+            self::assertSame(FieldHandling::DROP, $definition->handlingFor([$property]), $property);
+        }
+    }
+
+    /**
+     * A map the prune record keeps, its categories, is kept whole, so a
+     * category's count survives as given.
      *
      * @return void
      */
-    public function testOnlyThePublishFailureIsNotARead(): void
+    public function testThePrunesCategoriesAreKeptWhole(): void
+    {
+        $definition = PackageActivity::PRUNED->definition();
+
+        self::assertSame(FieldHandling::RETAIN, $definition->handlingFor(['categories', 'security']));
+        self::assertSame(FieldHandling::RETAIN, $definition->handlingFor(['categories', '_other']));
+    }
+
+    /**
+     * The trail's reads, counts, exports and their verification are reads; a
+     * failed publication is not.
+     *
+     * @return void
+     */
+    public function testTheReadPathsReadsAreReads(): void
     {
         $reads = array_values(array_filter(PackageActivity::cases(), static fn (PackageActivity $case): bool => $case->isRead()));
 
@@ -184,5 +243,62 @@ final class PackageActivityTest extends TestCase
             PackageActivity::EXPORT_VERIFIED,
         ], $reads);
         self::assertFalse(PackageActivity::EXPORT_PUBLISH_FAILED->isRead());
+    }
+
+    /**
+     * No lifecycle code is a read: a prune, a hold, a release and an import
+     * each change what the trail keeps, and none discloses an entry.
+     *
+     * @return void
+     */
+    public function testNoLifecycleCodeIsARead(): void
+    {
+        foreach ([PackageActivity::PRUNED, PackageActivity::HELD, PackageActivity::RELEASED, PackageActivity::IMPORTED] as $case) {
+            self::assertFalse($case->isRead(), $case->value);
+        }
+    }
+
+    /**
+     * Only the export is protected from retention, so its journal outlives
+     * every policy; every other code, the other package codes included, follows
+     * its category's policy.
+     *
+     * @return void
+     */
+    public function testOnlyTheExportIsProtected(): void
+    {
+        $protected = array_values(array_filter(PackageActivity::cases(), static fn (PackageActivity $case): bool => $case->isProtected()));
+
+        self::assertSame([PackageActivity::TRAIL_EXPORTED], $protected);
+    }
+
+    /**
+     * Rows of the lifecycle's codes and the properties each keeps, in order.
+     *
+     * @return array<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
+     */
+    private static function lifecycleRetained(): array
+    {
+        return [
+            'a prune' => [
+                PackageActivity::PRUNED,
+                ['operation_id', 'status', 'policy_version', 'deleted', 'seals', 'held', 'pending_delivery', 'skipped_seals', 'categories', 'tenants_affected', 'outcome'],
+            ],
+            'a hold' => [
+                PackageActivity::HELD,
+                ['operation_id', 'hold_id', 'basis', 'scope_digest', 'review_by', 'authority_reason', 'outcome'],
+            ],
+            'a release' => [
+                PackageActivity::RELEASED,
+                ['operation_id', 'hold_id', 'authority_reason', 'outcome'],
+            ],
+            'an import' => [
+                PackageActivity::IMPORTED,
+                [
+                    'operation_id', 'batch_id', 'source_id', 'format', 'status', 'lines_read', 'imported', 'duplicates', 'conflicts',
+                    'rejected', 'hold_id', 'authority_reason', 'outcome',
+                ],
+            ],
+        ];
     }
 }

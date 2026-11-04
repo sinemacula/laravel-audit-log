@@ -24,6 +24,8 @@ use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
+use Tests\Concerns\PrunesByHand;
+use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -33,10 +35,10 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `audit-log:drain`: it passes its limit and `--until-empty`
- * on, refuses a limit outside 1 to 10000 as invalid, prints the drain's tally
- * and exits non-zero only when a row failed, names whatever stops the run by
- * its class alone, prints no payload or message, and is neither scheduled nor
- * run through a job by the package.
+ * on, refuses a limit outside 1 to 10000 as invalid, prints the drain's tally,
+ * a row completed as pruned among it, and exits non-zero only when a row
+ * failed, names whatever stops the run by its class alone, prints no payload or
+ * message, and is neither scheduled nor run through a job by the package.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,7 +48,7 @@ use Tests\TestCase;
 #[CoversClass(DrainCommand::class)]
 final class DrainCommandTest extends TestCase
 {
-    use InteractsWithAuditStore, InteractsWithOutbox, SearchesForSecrets, SeedsTheOutbox;
+    use InteractsWithAuditStore, InteractsWithOutbox, PrunesByHand, SealsEntries, SearchesForSecrets, SeedsTheOutbox;
 
     /**
      * Stop the clock and register the command with the console kernel, which
@@ -100,7 +102,7 @@ final class DrainCommandTest extends TestCase
         $this->enqueue($this->finalisedRecord());
 
         self::assertSame(0, $this->drain());
-        self::assertSame("Delivered 2, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 2, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
     }
 
     /**
@@ -113,7 +115,7 @@ final class DrainCommandTest extends TestCase
         $this->seedOutboxRow(RecordFactory::captured()->id, 'not-an-encrypted-payload');
 
         self::assertSame(1, $this->drain());
-        self::assertSame("Delivered 0, retried 0, failed 1, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 0, pruned 0, retried 0, failed 1, stale 0, missed 0.\n", $this->printed());
     }
 
     /**
@@ -128,7 +130,31 @@ final class DrainCommandTest extends TestCase
         $this->enqueue($this->finalisedRecord());
 
         self::assertSame(0, $this->drain());
-        self::assertSame("Delivered 0, retried 1, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 0, pruned 0, retried 1, failed 0, stale 0, missed 0.\n", $this->printed());
+    }
+
+    /**
+     * A row whose record retention pruned is printed as pruned, and exits zero:
+     * a pruned row is complete.
+     *
+     * @return void
+     */
+    public function testAPrunedRowIsPrintedAndExitsZero(): void
+    {
+        $record = $this->finalisedRecord();
+        $id     = $record->record->id;
+
+        $this->store()->store($record);
+        $this->sealAt('2026-11-02 12:00:00');
+
+        self::assertSame(1, $this->sealAll()->entries());
+
+        $this->pruneByHand($id);
+        $this->enqueue($record);
+        $this->enqueue($this->finalisedRecord());
+
+        self::assertSame(0, $this->drain());
+        self::assertSame("Delivered 1, pruned 1, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
     }
 
     /**
@@ -192,7 +218,7 @@ final class DrainCommandTest extends TestCase
         $this->enqueue($this->finalisedRecord());
 
         self::assertSame(0, $this->drain(['--limit' => $limit]));
-        self::assertSame("Delivered 1, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 1, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
     }
 
     /**
@@ -208,7 +234,7 @@ final class DrainCommandTest extends TestCase
 
         $this->drain(['--limit' => '2']);
 
-        self::assertSame("Delivered 2, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 2, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
         self::assertSame(1, $this->outboxCount());
     }
 
@@ -227,7 +253,7 @@ final class DrainCommandTest extends TestCase
 
         $this->drain();
 
-        self::assertSame("Delivered 100, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 100, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
         self::assertSame(1, $this->outboxCount());
     }
 
@@ -245,7 +271,7 @@ final class DrainCommandTest extends TestCase
 
         $this->drain(['--limit' => '1', '--until-empty' => true]);
 
-        self::assertSame("Delivered 3, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 3, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
         self::assertSame(0, $this->outboxCount());
     }
 
@@ -277,7 +303,7 @@ final class DrainCommandTest extends TestCase
         DB::connection(self::CONNECTION)->beginTransaction();
 
         self::assertSame(1, $this->drain());
-        self::assertSame("The drain stopped with LogicException.\nDelivered 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("The drain stopped with LogicException.\nDelivered 0, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
     }
 
     /**
@@ -291,7 +317,7 @@ final class DrainCommandTest extends TestCase
         app(ConfigRepository::class)->set('audit-log.delivery.outbox.table', 'audit_missing_outbox');
 
         self::assertSame(1, $this->drain());
-        self::assertSame("The drain stopped with Illuminate\\Database\\QueryException.\nDelivered 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("The drain stopped with Illuminate\\Database\\QueryException.\nDelivered 0, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
     }
 
     /**
@@ -355,7 +381,7 @@ final class DrainCommandTest extends TestCase
         });
 
         self::assertSame(1, $this->drain(['--limit' => '1', '--until-empty' => true]));
-        self::assertSame("The drain stopped with DomainException.\nDelivered 1, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("The drain stopped with DomainException.\nDelivered 1, pruned 0, retried 0, failed 0, stale 0, missed 0.\n", $this->printed());
     }
 
     /**
@@ -384,7 +410,7 @@ final class DrainCommandTest extends TestCase
         $this->enqueue($this->finalisedRecord());
 
         self::assertSame(1, $this->drain());
-        self::assertSame("Delivered 0, retried 1, failed 1, stale 0, missed 0.\n", $this->printed());
+        self::assertSame("Delivered 0, pruned 0, retried 1, failed 1, stale 0, missed 0.\n", $this->printed());
 
         Queue::assertNothingPushed();
     }

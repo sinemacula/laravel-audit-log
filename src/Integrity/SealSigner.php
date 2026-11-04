@@ -5,14 +5,17 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * Signs a seal and a prune record, and verifies either, under seal version 1.
+ * Signs a seal, under seal version 1, and a prune record, under prune record
+ * version 2, and verifies either.
  *
  * The seal key is HKDF-SHA256 over the secret of a ring key, with an empty salt
  * and an info string of its own, so it is never the key that signs rows, and a
  * row's HMAC is never a seal's signature. A seal's signature is HMAC-SHA256, as
  * lower-case hex, under the seal key of the key the envelope names, over a seal
- * label and the seal digest; a prune record's is the same over a prune label
- * and the record's digest, so neither is ever taken for the other.
+ * label and the seal digest; a prune record's is the same over a prune label of
+ * version 2 and the record's digest, which covers the bitmap of the members it
+ * deleted, so neither is ever taken for the other, and a record signed for one
+ * set of members never verifies for another.
  *
  * Verification selects the key by the id the seal or record stores, never the
  * current key, so a seal signed before a rotation verifies while its key stays
@@ -35,7 +38,7 @@ final readonly class SealSigner
     public const string SEAL_LABEL = "audit-log:seal:v1\n";
 
     /** @var string What a prune record's signature covers before the record's digest. */
-    public const string PRUNE_LABEL = "audit-log:prune:v1\n";
+    public const string PRUNE_LABEL = "audit-log:prune:v2\n";
 
     /** @var int Length of every seal key, in bytes. */
     private const int SEAL_KEY_BYTES = 32;
@@ -113,13 +116,15 @@ final readonly class SealSigner
     }
 
     /**
-     * The prune record of a seal's entries, signed under the seal key of the
-     * ring's signing key.
+     * The prune record of the members of a seal the bitmap sets, signed under
+     * the seal key of the ring's signing key.
      *
      * @param  string  $logId
      * @param  string  $sealId
      * @param  string  $sealDigest
      * @param  int  $memberCount
+     * @param  string  $pruned
+     * @param  int  $prunedCount
      * @param  string  $operationId
      * @param  string  $prunedAt
      * @return \SineMacula\Laravel\AuditLog\Integrity\PruneRecord
@@ -127,16 +132,27 @@ final readonly class SealSigner
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
+     *
+     * @SuppressWarnings("php:S107")
      */
-    public function signPrune(string $logId, string $sealId, string $sealDigest, int $memberCount, string $operationId, string $prunedAt): PruneRecord
-    {
+    public function signPrune(
+        string $logId,
+        string $sealId,
+        string $sealDigest,
+        int $memberCount,
+        string $pruned,
+        int $prunedCount,
+        string $operationId,
+        string $prunedAt,
+    ): PruneRecord {
         $key = $this->keys->signingKey();
 
         // The record is built unsigned first, so its fields are checked and its
         // digest, which leaves the signature out, can be taken
-        $unsigned = new PruneRecord($logId, $sealId, $sealDigest, $memberCount, $operationId, $prunedAt, $key->id, self::UNSIGNED);
+        $unsigned  = new PruneRecord($logId, $sealId, $sealDigest, $memberCount, $pruned, $prunedCount, $operationId, $prunedAt, $key->id, self::UNSIGNED);
+        $signature = self::signature(self::PRUNE_LABEL, $unsigned->digest(), $key);
 
-        return new PruneRecord($logId, $sealId, $sealDigest, $memberCount, $operationId, $prunedAt, $key->id, self::signature(self::PRUNE_LABEL, $unsigned->digest(), $key));
+        return new PruneRecord($logId, $sealId, $sealDigest, $memberCount, $pruned, $prunedCount, $operationId, $prunedAt, $key->id, $signature);
     }
 
     /**

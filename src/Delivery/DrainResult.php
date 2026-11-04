@@ -5,7 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Delivery;
 
 /**
- * The tally of one drain: the rows delivered and deleted, released for a later
+ * The tally of one drain: the rows delivered and deleted, completed as pruned
+ * because retention has already pruned their record, released for a later
  * retry, failed and kept, given up because another drain took them over, and
  * missed because another drain claimed them first.
  *
@@ -18,6 +19,9 @@ final class DrainResult
 {
     /** @var int Rows every destination received, then deleted. */
     private int $delivered = 0;
+
+    /** @var int Rows deleted undelivered because retention has already pruned their record. */
+    private int $pruned = 0;
 
     /** @var int Rows released for a later attempt after a destination failed. */
     private int $retried = 0;
@@ -39,6 +43,16 @@ final class DrainResult
     public function addDelivered(): void
     {
         $this->delivered++;
+    }
+
+    /**
+     * Count a row deleted undelivered because its record was pruned.
+     *
+     * @return void
+     */
+    public function addPruned(): void
+    {
+        $this->pruned++;
     }
 
     /**
@@ -92,6 +106,16 @@ final class DrainResult
     }
 
     /**
+     * The rows deleted undelivered because their record was pruned.
+     *
+     * @return int
+     */
+    public function pruned(): int
+    {
+        return $this->pruned;
+    }
+
+    /**
      * The rows released for a later attempt.
      *
      * @return int
@@ -134,7 +158,7 @@ final class DrainResult
     /**
      * Whether any row failed, which is the only tally that makes a drain
      * unsuccessful: a retry, a takeover and a miss are each another attempt
-     * still to come.
+     * still to come, and a pruned row is complete.
      *
      * @return bool
      */

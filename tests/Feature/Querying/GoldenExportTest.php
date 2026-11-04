@@ -37,9 +37,9 @@ final class GoldenExportTest extends TestCase
 
     /** @var array<string, string> The SHA-256 of each golden file, by its name. */
     private const array DIGESTS = [
-        'export.ndjson'               => '7e7259d2dedab5134bf98db319720fe01359c57df11be4f01d525a3c67ad759f',
-        'export.ndjson.manifest.json' => '175065dec74df1692571956bc72ae802049f9b036435a3ff20d719fe10d5b219',
-        'journal.json'                => '8a63660cae746a206ef3f12d6974d744e030cff548c84fc3b482aac3d238f4f3',
+        'export.ndjson'               => '8c02a6133aebc6a630fedbfee4bdcda4d3d3ba679a237d2bbbcfd4efc10254a7',
+        'export.ndjson.manifest.json' => '5d1e870420edeb0bc48f0092890ff76e97b5438508c751380f107f8543c58560',
+        'journal.json'                => 'ccb536080839d57eab39bc61ffb9161b0b5315998d19916cf1c3c51032a90f97',
     ];
 
     /**
@@ -74,6 +74,30 @@ final class GoldenExportTest extends TestCase
         }
 
         self::assertSame(GoldenExport::FILE . ExportFile::MANIFEST_SUFFIX, array_keys(self::DIGESTS)[1]);
+    }
+
+    /**
+     * Each line of the golden export is a stored entry's 37 columns, the source
+     * digest among them, `null` on these captured entries.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testEveryLineCarriesEveryColumn(): void
+    {
+        $lines = file(self::DIRECTORY . '/' . GoldenExport::FILE, FILE_IGNORE_NEW_LINES) ?: [];
+
+        self::assertCount(3, $lines);
+
+        foreach ($lines as $line) {
+            $columns = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+
+            self::assertIsArray($columns);
+            self::assertCount(37, $columns);
+            self::assertArrayHasKey('source_digest', $columns);
+            self::assertNull($columns['source_digest']);
+        }
     }
 
     /**

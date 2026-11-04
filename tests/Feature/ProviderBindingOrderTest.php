@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Container\Container as ContainerContract;
 use Illuminate\Support\ServiceProvider;
+use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use Orchestra\Testbench\TestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -17,10 +18,13 @@ use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
+use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
+use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
@@ -43,6 +47,8 @@ use Tests\Fixtures\Support\FrozenClock;
 #[CoversClass(AuditLogServiceProvider::class)]
 final class ProviderBindingOrderTest extends TestCase
 {
+    use MockeryPHPUnitIntegration;
+
     /**
      * Rows of `[abstract]`: every abstract the package's provider binds.
      *
@@ -54,6 +60,7 @@ final class ProviderBindingOrderTest extends TestCase
             Clock::class,
             AuditStore::class,
             FieldEncrypter::class,
+            RetentionPolicy::class,
             PruneLedger::class,
             CheckpointAnchor::class,
             KeyRing::class,
@@ -127,6 +134,37 @@ final class ProviderBindingOrderTest extends TestCase
         $app->singleton(Clock::class, static fn (): FrozenClock => FrozenClock::at('2026-11-01 12:00:00'));
 
         self::assertInstanceOf(FrozenClock::class, $app->make(Clock::class));
+    }
+
+    /**
+     * With nothing bound before it, the package's provider binds the configured
+     * retention policy and the journal's prune ledger, each once per
+     * application; an application's own policy and ledger, bound before it, are
+     * what the container resolves instead.
+     *
+     * @return void
+     */
+    public function testAPolicyAndALedgerBoundEarlierAreKept(): void
+    {
+        $app = $this->app;
+
+        assert($app !== null);
+
+        self::assertInstanceOf(ConfiguredRetentionPolicy::class, $app->make(RetentionPolicy::class));
+        self::assertInstanceOf(JournalPruneLedger::class, $app->make(PruneLedger::class));
+        self::assertSame($app->make(RetentionPolicy::class), $app->make(RetentionPolicy::class));
+        self::assertSame($app->make(PruneLedger::class), $app->make(PruneLedger::class));
+
+        $policy    = \Mockery::mock(RetentionPolicy::class);
+        $ledger    = \Mockery::mock(PruneLedger::class);
+        $container = self::container();
+
+        self::siblingBinding($container, RetentionPolicy::class, $policy)->register();
+        self::siblingBinding($container, PruneLedger::class, $ledger)->register();
+        (new AuditLogServiceProvider($container))->register();
+
+        self::assertSame($policy, $container->make(RetentionPolicy::class));
+        self::assertSame($ledger, $container->make(PruneLedger::class));
     }
 
     /**

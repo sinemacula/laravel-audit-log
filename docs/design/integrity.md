@@ -123,9 +123,9 @@ never an edit of the old one. What none of this promises is in `threat-model.md`
 - An anchor's head beyond the local tail, another digest at its sequence, or a head with no local log is `tampered` and
   `contradicted`. An empty remote with a non-empty local log is `unanchored`, and an empty remote with an empty log
   agree.
-- Pruning deletes entries only, of whole sealed segments, and keeps every checkpoint and member row. Missing entries are
-  `pruned` only under a signed prune record that binds exactly that seal. Pruning never excuses a bad signature, a
-  broken chain or an anchor contradiction.
+- Pruning deletes sealed entries only, and keeps every checkpoint and member row. Missing entries are `pruned` only
+  under signed prune records that bind exactly that seal and set exactly those members. Pruning never excuses a bad
+  signature, a broken chain or an anchor contradiction.
 - Every verification reports the exact range it checked and the head it observed, and each segment has two separate
   fields, integrity and anchoring, so `pruned` cannot hide an anchoring failure. A ranged run never establishes the
   integrity of the whole log.
@@ -193,10 +193,18 @@ never an edit of the old one. What none of this promises is in `threat-model.md`
 
 ## Seals
 
-The envelope (`Integrity\SealEnvelope`) has 14 fields, every immutable column of a seal row: `v` (1), `log_id`, `id` (a
+The envelope (`Integrity\SealEnvelope`) has 16 fields, every immutable column of a seal row: `v` (1), `log_id`, `id` (a
 UUID v7), `sequence`, `previous_id`, `previous_digest`, `member_count`, `members_digest`, `first_recorded_at`,
-`last_recorded_at`, `sealed_at`, `signer` (`hmac`), `key_id` and `algorithm_version` (1). The stored `seal_digest` and
-`signature` are not part of it, and neither are the four anchor columns.
+`last_recorded_at`, `sealed_at`, `signer` (`hmac`), `key_id`, `algorithm_version` (1), `journal_sequence` and
+`journal_head`. The stored `seal_digest` and `signature` are not part of it, and neither are the four anchor columns.
+
+- `journal_sequence` and `journal_head` are the sequence and the HMAC of the lifecycle journal's head when the seal was
+  written, read inside the seal's transaction after the previous seal, and both `null` exactly when the journal was
+  empty; a head that cannot be read as a sequence and an HMAC refuses the seal (`SealChainException::forJournal()`), so
+  a seal never commits to a row it cannot name. A head behind the previous seal's commitment, a lower sequence, none
+  after a commitment to a row, or another HMAC at the committed sequence, refuses the seal too
+  (`SealChainException::forJournalBehind()`, `journal_commitment`), so commitments never run backwards and a journal
+  whose tail was removed or replaced is never sealed over.
 
 - `members_digest` is the lower-case hex SHA-256 of the canonical encoding of the list `[[entry_id, hmac], …]`, sorted
   bytewise by `entry_id` whatever order the members came in. A seal holds 1 to 50000 members.
@@ -212,7 +220,9 @@ UUID v7), `sequence`, `previous_id`, `previous_digest`, `member_count`, `members
   underscores or hyphens starting with a letter or a digit, since it is a path segment of the disk anchor. It is set
   before the first seal and never changed.
 - `tests/Fixtures/Integrity/seal-v1.json` holds the golden vectors: the seal key, a members digest, two chained seals'
-  canonical forms, digests and signatures, a prune record and a disk anchor object, all reproduced byte for byte.
+  canonical forms, digests and signatures and a disk anchor object, and `tests/Fixtures/Integrity/prune-v2.json` a
+  seal of three members, its two disjoint prune records' bitmaps, canonical forms, digests and signatures, and the
+  length of a bitmap of 50000 members, all reproduced byte for byte.
 
 `Integrity\Sealer` runs batches until one reads fewer entries than a batch, each batch one attempt loop and at most one
 seal; only a batch that writes a seal counts towards `integrity.seal.max_batches`, and every batch reads on strictly
@@ -360,13 +370,15 @@ writes each line as one JSON object, the summary last. Nothing is accumulated, s
   by a key holder, is never excused, nor is an `unavailable` or `contradicted` seal. With `NullAnchor`, `--strict`
   changes nothing.
 - Every statement reads the writer, so a replica's lag never reads as a missing row, and a segment is read in one
-  statement, so a prune committing beside it is seen whole or not at all.
+  statement, so a prune committing beside it is seen whole or not at all. The prune ledger is asked after that read,
+  for every segment, and the present members a valid record covers are read again after the ledger, so a prune that
+  commits between the reads is `pruned`, and a member still there is `resurrected`.
 
 | Integrity      | What it means                                                                                          |
 |----------------|--------------------------------------------------------------------------------------------------------|
 | `valid`        | Every check of the segment passed                                                                      |
-| `pruned`       | Entries are missing and a valid prune record for exactly this seal accounts for them; it passes        |
-| `incomplete`   | Entries are missing with no prune record, or unsealed entries are overdue or far ahead; it fails       |
+| `pruned`       | Entries are missing and valid prune records of exactly this seal set every one of them; it passes      |
+| `incomplete`   | Entries are missing or pruned ones present again, or unsealed entries are overdue or far ahead; fails  |
 | `unverifiable` | A check could not be made: something is malformed, of an unknown version or under an unknown key       |
 | `tampered`     | The log was altered: a digest, a signature, the chain, the members or the anchor disagrees             |
 
@@ -377,70 +389,132 @@ writes each line as one JSON object, the summary last. Nothing is accumulated, s
 | `unavailable`  | The anchor failed when asked, or failed earlier in the run, so the seal could not be confirmed |
 | `contradicted` | The anchor holds another digest for the seal, or a head the local log does not reach           |
 
-| Finding                | Integrity      | What it means                                                                     |
-|------------------------|----------------|-----------------------------------------------------------------------------------|
-| `seal_malformed`       | `unverifiable` | A seal row is not a well-formed seal, or its signature is malformed               |
-| `seal_version`         | `unverifiable` | A seal is of an algorithm version or a signer this release does not read          |
-| `seal_key`             | `unverifiable` | A seal is signed under a key the ring does not hold                               |
-| `log_mismatch`         | `unverifiable` | A seal names another log than the one configured                                  |
-| `seal_digest`          | `tampered`     | A seal's stored digest is not the digest of its fields                            |
-| `seal_signature`       | `tampered`     | A seal's signature does not match its digest                                      |
-| `genesis`              | `tampered`     | The first seal links to a previous one, or a later seal links to none             |
-| `sequence_gap`         | `tampered`     | A seal the walk needs is missing, or a seal is stored outside the chain           |
-| `chain_broken`         | `tampered`     | A seal does not link to the id and recomputed digest of a readable seal before it |
-| `member_count`         | `tampered`     | A seal's member rows are not as many as it counts                                 |
-| `members_digest`       | `tampered`     | A seal's member rows are not the members it sealed                                |
-| `anchor_contradiction` | `tampered`     | The anchor holds another digest for a seal, or a seal it holds is missing locally |
-| `anchor_conflict`      | `tampered`     | The anchor refused a seal because it holds another digest for the seal's sequence |
-| `missing_tail`         | `tampered`     | The anchor holds seals past the local log's head, or holds a head of an empty log |
-| `orphan_member`        | `tampered`     | A member row belongs to no seal in the chain                                      |
-| `prune_record`         | `tampered`     | A prune record is forged, or does not bind the seal it names                      |
-| `member_hmac`          | `tampered`     | An entry's stored HMAC is not the one its seal recorded                           |
-| `entry_hmac`           | `tampered`     | An entry's HMAC does not match its content                                        |
-| `manifest_missing`     | `tampered`     | A verified entry's manifest names an artifact that is not stored                  |
-| `manifest_mismatch`    | `tampered`     | An artifact stores another count or digest than its manifest signed               |
-| `manifest_swapped`     | `tampered`     | An artifact is stored under another id than signed, or names another entry        |
-| `manifest_wrong_kind`  | `tampered`     | An artifact is stored as another kind than its manifest signed                    |
-| `manifest_malformed`   | `tampered`     | A manifest is no descriptor, or its members are no canonical form of its kind     |
-| `manifest_tampered`    | `tampered`     | An artifact's members are a canonical form of its kind other than the one signed  |
-| `prune_key`            | `unverifiable` | A prune record is signed under a key the ring does not hold                       |
-| `entry_malformed`      | `unverifiable` | An entry is not a well-formed record, so it cannot be verified or sealed          |
-| `entry_key`            | `unverifiable` | An entry is signed under a key the ring does not hold                             |
-| `manifest_unreadable`  | `unverifiable` | An artifact's members cannot be decrypted with `app.key` or `app.previous_keys`   |
-| `missing_entry`        | `incomplete`   | A sealed entry is missing, with no prune record to account for it                 |
-| `overdue_unsealed`     | `incomplete`   | Entries older than `integrity.verify.max_unsealed_age_seconds` are still unsealed |
-| `future_unsealed`      | `incomplete`   | Unsealed entries are recorded further ahead of the clock than the lookback        |
+| Finding                | Integrity      | What it means                                                                                                                                                                                                                                                                                                                                                              |
+|------------------------|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `seal_malformed`       | `unverifiable` | A seal row is not a well-formed seal, or its signature is malformed                                                                                                                                                                                                                                                                                                        |
+| `seal_version`         | `unverifiable` | A seal is of an algorithm version or a signer this release does not read                                                                                                                                                                                                                                                                                                   |
+| `seal_key`             | `unverifiable` | A seal is signed under a key the ring does not hold                                                                                                                                                                                                                                                                                                                        |
+| `log_mismatch`         | `unverifiable` | A seal names another log than the one configured                                                                                                                                                                                                                                                                                                                           |
+| `seal_digest`          | `tampered`     | A seal's stored digest is not the digest of its fields                                                                                                                                                                                                                                                                                                                     |
+| `seal_signature`       | `tampered`     | A seal's signature does not match its digest                                                                                                                                                                                                                                                                                                                               |
+| `genesis`              | `tampered`     | The first seal links to a previous one, or a later seal links to none                                                                                                                                                                                                                                                                                                      |
+| `sequence_gap`         | `tampered`     | A seal the walk needs is missing, or a seal is stored outside the chain                                                                                                                                                                                                                                                                                                    |
+| `chain_broken`         | `tampered`     | A seal does not link to the id and recomputed digest of a readable seal before it                                                                                                                                                                                                                                                                                          |
+| `member_count`         | `tampered`     | A seal's member rows are not as many as it counts                                                                                                                                                                                                                                                                                                                          |
+| `members_digest`       | `tampered`     | A seal's member rows are not the members it sealed                                                                                                                                                                                                                                                                                                                         |
+| `anchor_contradiction` | `tampered`     | The anchor holds another digest for a seal, or a seal it holds is missing locally                                                                                                                                                                                                                                                                                          |
+| `anchor_conflict`      | `tampered`     | The anchor refused a seal because it holds another digest for the seal's sequence                                                                                                                                                                                                                                                                                          |
+| `missing_tail`         | `tampered`     | The anchor holds seals past the local log's head, or holds a head of an empty log                                                                                                                                                                                                                                                                                          |
+| `orphan_member`        | `tampered`     | A member row belongs to no seal in the chain                                                                                                                                                                                                                                                                                                                               |
+| `prune_record`         | `tampered`     | A prune record is forged, does not bind the seal it names or cannot be read, or two records set one member                                                                                                                                                                                                                                                                 |
+| `member_hmac`          | `tampered`     | An entry's stored HMAC is not the one its seal recorded                                                                                                                                                                                                                                                                                                                    |
+| `entry_hmac`           | `tampered`     | An entry's HMAC does not match its content                                                                                                                                                                                                                                                                                                                                 |
+| `manifest_missing`     | `tampered`     | A verified entry's manifest names an artifact that is not stored                                                                                                                                                                                                                                                                                                           |
+| `manifest_mismatch`    | `tampered`     | An artifact stores another count or digest than its manifest signed                                                                                                                                                                                                                                                                                                        |
+| `manifest_swapped`     | `tampered`     | An artifact is stored under another id than signed, or names another entry                                                                                                                                                                                                                                                                                                 |
+| `manifest_wrong_kind`  | `tampered`     | An artifact is stored as another kind than its manifest signed                                                                                                                                                                                                                                                                                                             |
+| `manifest_malformed`   | `tampered`     | A manifest is no descriptor, or its members are no canonical form of its kind                                                                                                                                                                                                                                                                                              |
+| `manifest_tampered`    | `tampered`     | An artifact's members are a canonical form of its kind other than the one signed                                                                                                                                                                                                                                                                                           |
+| `journal_gap`          | `tampered`     | A journal sequence is missing, repeated or out of order, a row's `previous_hmac` is not its predecessor's `hmac`, or a row names another log                                                                                                                                                                                                                               |
+| `journal_signature`    | `tampered`     | A journal row's HMAC, or its payload's digest, does not match                                                                                                                                                                                                                                                                                                              |
+| `journal_commitment`   | `tampered`     | A seal's `journal_sequence` and `journal_head` do not name a row of the chain, run backwards, or are null after a seal that committed to a row                                                                                                                                                                                                                             |
+| `journal_transition`   | `tampered`     | A release of a hold that is not active, a hold id placed twice (released or not), a prune row whose `seal_id` is not its record's, and, where the payloads are read (`audit-log:verify`): a `prune` or `prune_run` finish row whose `run_id` has no open start, an `import_finished` whose `batch_id` has no open `import_started`, or a second finish of one run or batch |
+| `prune_key`            | `unverifiable` | A prune record is signed under a key the ring does not hold                                                                                                                                                                                                                                                                                                                |
+| `entry_malformed`      | `unverifiable` | An entry is not a well-formed record, so it cannot be verified or sealed                                                                                                                                                                                                                                                                                                   |
+| `entry_key`            | `unverifiable` | An entry is signed under a key the ring does not hold                                                                                                                                                                                                                                                                                                                      |
+| `manifest_unreadable`  | `unverifiable` | An artifact's members cannot be decrypted with `app.key` or `app.previous_keys`                                                                                                                                                                                                                                                                                            |
+| `journal_key`          | `unverifiable` | A journal row is signed under a key the ring does not hold                                                                                                                                                                                                                                                                                                                 |
+| `journal_malformed`    | `unverifiable` | A journal row cannot be read as a journal row                                                                                                                                                                                                                                                                                                                              |
+| `missing_entry`        | `incomplete`   | A sealed entry is missing, and no valid prune record of its seal sets it                                                                                                                                                                                                                                                                                                   |
+| `overdue_unsealed`     | `incomplete`   | Entries older than `integrity.verify.max_unsealed_age_seconds` are still unsealed                                                                                                                                                                                                                                                                                          |
+| `future_unsealed`      | `incomplete`   | Unsealed entries are recorded further ahead of the clock than the lookback                                                                                                                                                                                                                                                                                                 |
+| `resurrected`          | `incomplete`   | A member a valid prune record covers is still, or again, present                                                                                                                                                                                                                                                                                                           |
 
 ## Pruning And Erasure
 
-Pruning ships with lifecycle; what it must do to keep the log verifiable is fixed here.
+`audit-log:prune` (`Lifecycle\Pruner`) deletes entries one by one, as retention no longer keeps them; what it must do to
+keep the log verifiable, and what makes its deletions accountable, is fixed here.
 
-- A prune deletes entries only, of whole sealed segments, on the maintenance connection, and keeps every checkpoint and
-  member row, so each seal's members digest can still be recomputed and the chain still runs through it. It commits
-  atomically with its prune record.
-- The prune record (`Integrity\PruneRecord`) binds `v` (1), `log_id`, `seal_id`, `seal_digest`, `member_count`, the
-  operation's `operation_id`, its `pruned_at` and the `key_id` it is signed under. Its signature is the lower-case hex
-  HMAC-SHA256 under the seal key of that ring key of the label `audit-log:prune:v1`, a line feed and the SHA-256 of the
-  canonical encoding of every other field (`SealSigner::signPrune()`), so it is never a seal's signature.
-- Verification asks `Contracts\PruneLedger::recordFor()` for a seal only when one of its entries is missing. Missing
-  entries are `pruned` only with a record whose signature verifies and whose log id, seal id, seal digest and member
-  count are the seal's. A record that fails is `tampered` with `prune_record`, and one under a key the ring does not
-  hold is `unverifiable` with `prune_key`. The entries still present in a pruned segment are verified as any others.
-- The default ledger, `Integrity\NullPruneLedger`, has pruned nothing, so a missing entry is always `incomplete`.
+- A prune deletes sealed entries only, per entry and never per segment, on the maintenance connection, with their
+  artifacts and receipts, and keeps every checkpoint and member row, so each seal's members digest can still be
+  recomputed and the chain still runs through it. An unsealed entry is never a candidate. Each chunk of a prune is one
+  transaction behind the lifecycle lock: it reads its candidates' full rows again after the lock, verifies each row's
+  HMAC, the HMAC its seal recorded and the seal's authenticated membership, decides each row's eligibility again from
+  that verified row, and commits atomically with one prune record of the seal it touched, setting exactly the members
+  it deleted. A row that fails a check deletes nothing of its seal and skips the seal for the run, so a prune never
+  erases evidence of tampering. A seal pruned by several chunks or runs has several records, whose bitmaps share no
+  member.
+- The prune record (`Integrity\PruneRecord`, version 2) binds `v` (2), `log_id`, `seal_id`, `seal_digest`,
+  `member_count`, `pruned`, `pruned_count`, the operation's `operation_id`, its `pruned_at` and the `key_id` it is
+  signed under. `pruned` is the bitmap of the members deleted (`Integrity\PruneBitmap`): members are ordered by their
+  canonical lower-case entry ids compared bytewise, never by the engine's collation, position `i` is the `i`-th from 0,
+  and its bit is bit `i % 8` of byte `i / 8`, least significant first; the bitmap is exactly `ceil(member_count / 8)`
+  bytes, every padding bit is zero, it is written as strict base64url with no padding and must re-encode to the stored
+  text, and `pruned_count` is how many bits it sets, at least 1, so 50000 members take 6250 bytes. Its signature is
+  the lower-case hex HMAC-SHA256 under the seal key of that ring key of the label `audit-log:prune:v2`, a line feed and
+  the SHA-256 of the canonical encoding of every other field (`SealSigner::signPrune()`), so it is never a seal's
+  signature, and a record of one set of members never verifies for another. A record sets only members the chunk read,
+  verified and deleted, with the affected count compared, so coverage is never issued for a member already missing.
+- Verification reads a seal's members and their entries first, keeping every missing id, authenticates the membership
+  against `members_digest`, and only then asks `Contracts\PruneLedger::recordsFor()`, for every seal it verifies, even
+  one with no member missing, so a seal whose pruned members are all present again is found (`Integrity\PruneCoverage`).
+  A record counts only when its signature verifies and its log id, seal id, seal digest and member count are the
+  seal's; one that fails, that the ledger cannot read, or two that set one member are `tampered` with `prune_record`,
+  and one under a key the ring does not hold is `unverifiable` with `prune_key`. No position is assigned unless the
+  members are the sealed ones. A missing entry is `pruned` only when a valid record sets it, and is
+  `missing_entry` otherwise. A member a valid record covers that is present is `resurrected`, once it is read again
+  after the ledger: gone by then, it was pruned meanwhile and is `pruned`, and still there it is `resurrected`, which
+  makes the segment `incomplete`. The entries still present in a pruned segment are verified as any others.
+- The package binds `Lifecycle\JournalPruneLedger`, which reads the lifecycle journal's `prune` rows of a seal on the
+  storage connection's writer, so verification needs no credentials that can delete. `Integrity\NullPruneLedger`, for
+  an application that never prunes, has pruned nothing, so under it a missing entry is always `incomplete`.
+- Every maintenance operation is journalled in `lifecycle.journal_table` (`audit_log_lifecycle`): one row per event, in
+  a chain of `sequence` 1, 2, 3 and so on with no gap, each row's `previous_hmac` the `hmac` of the row before and the
+  first row's `null`, every row naming the log id. A row's kind is one of `Integrity\Enums\JournalKind`: `policy` (a
+  retention policy version, the first time a run is under it), `prune_run` (a prune run's start and its finish),
+  `prune` (one committed chunk, holding its prune record), `hold` (a hold placed), `release` (a hold released),
+  `import_started` (an import, before its first entry) and `import_finished` (an import's end, or its closing). Its
+  payload is the canonical JSON text of a map, kept as text and never in a JSON column, and its `payload_digest` the
+  SHA-256 of that text. Its `hmac` is the lower-case hex HMAC-SHA256, under
+  `hash_hkdf('sha256', $secret, 32, 'sinemacula/audit-log:lifecycle:v1', '')` of the signing ring key, of the label
+  `audit-log:lifecycle:<kind>:v1`, a line feed and the SHA-256 of the canonical encoding of every column but the
+  payload and the HMAC (`Integrity\JournalSigner`), so a row signed as one kind never verifies as another, and the
+  payload is covered through its digest. Rows are appended only inside the lifecycle lock, onto the head the operation
+  verified there (`Lifecycle\Journal`).
+- Every seal commits to the lifecycle journal's head, so the journal is anchored exactly as the entries are: a journal
+  row deleted, edited or cut off after a seal committed to it contradicts that seal, which the anchor holds in turn.
+  The commitment shows the journal is as it was when sealed; it does not stop anyone holding the maintenance
+  credentials from deleting rows, it makes that detectable.
+- Every run of `audit-log:verify`, a ranged one included, verifies the whole journal after its walk
+  (`Integrity\JournalVerifier`) and prints its own line: the rows, the head, and the sequence the latest seal commits
+  to. It reads every seal's commitment first, then every row with its payload, a page at a time, through one
+  `Integrity\JournalChain`. A missing, repeated or reordered sequence, a broken link or a row of another log is
+  `journal_gap`; a row whose HMAC or payload digest fails is `journal_signature`; a release of a hold that is not
+  active, a hold id placed twice, a prune row naming another seal than its record's, a finish with no open start and a
+  second finish of one run or batch are `journal_transition`; a seal's commitment that names no row of the chain, runs
+  backwards or is `null` after a committed one is `journal_commitment`; each is `tampered`. A row signed under a key
+  the ring does not hold is `unverifiable` with `journal_key`, and one that cannot be read `journal_malformed`. Each
+  finding fails the run as any finding of its status does. Memory grows with the seals, never with the journal.
 - Erasure destroys keys, never a row: an encrypted value's HMAC was computed over its ciphertext, so the row and its
   seal still verify once the key that could decrypt it is gone.
 
 ## Alerting And Progress
 
-- `Console\IntegritySchedule` registers three runs on Laravel's scheduler: `audit-log:seal` on `integrity.seal.schedule`
-  (`*/5 * * * *`), `audit-log:seal --sweep` on `integrity.seal.sweep_schedule` (`15 3 * * *`) and
+- `Console\IntegritySchedule` registers four runs on Laravel's scheduler: `audit-log:seal` on `integrity.seal.schedule`
+  (`*/5 * * * *`), `audit-log:seal --sweep` on `integrity.seal.sweep_schedule` (`15 3 * * *`),
   `audit-log:verify --strict --sweep-first` on `integrity.verify.schedule` (`45 3 * * *`), which sweeps first so an
-  entry inserted late since the daily sweep, a replayed record say, is sealed before it can be found overdue. Each runs
-  in the background, so it never holds up the application's tasks due in the same minute, and is kept from overlapping
+  entry inserted late since the daily sweep, a replayed record say, is sealed before it can be found overdue, and
+  `audit-log:prune` on `retention.schedule` (`30 3 * * *`). The prune is registered only when it can delete something:
+  when the bound `Contracts\RetentionPolicy` is not `Lifecycle\ConfiguredRetentionPolicy`, or when the configuration
+  keeps anything for less than forever; a policy left unbound counts as the configured one, and a bound one that cannot
+  be resolved is reported and the prune still registered, so the run itself refuses it and records that. Each runs in
+  the background, so it never holds up the application's tasks due in the same minute, and is kept from overlapping
   itself by a lock that lapses well inside its period (15 minutes for sealing, 23 hours for the daily runs). Each runs
   on one server only when the cache store the scheduler's locks are taken in, the one its mutex was given by
   `Schedule::useCache()`, or else the default store, has a driver every server shares (`redis`, `memcached`, `database`
-  or `dynamodb`). A schedule that is `null` or empty registers nothing for that run.
+  or `dynamodb`). A schedule that is `null` or empty registers nothing for that run, and one that is malformed, or a
+  malformed retention setting the prune's condition reads, registers nothing for it and is reported, never thrown.
+  Registering issues no query, resolves no store and names each command by its string.
 - `audit-log:seal` takes a cache lock for at most 900 seconds when the default store can lock: `audit-log:seal` for the
   recent pass and `audit-log:seal:sweep` for the sweep, which are safe beside each other, so a long sweep never holds
   up the recent pass. A run that finds its own lock held prints "Another sealer holds the lock." and succeeds. The lock
@@ -455,16 +529,16 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `Integrity\SealFailedException` alone. The events guide shows a listener.
 - `Database\IntegrityProgress` keeps the progress in `integrity.state_table`, one named map per row with the time it was
   written: `seal.last_run`, `seal.last`, `seal.recent`, `sweep.cursor`, `sweep.completed`, `anchor.last`,
-  `anchor.last_failure` and `verify.last_full`. Progress is operational, never evidence: verification reads none of
-  it, sealing and anchoring read it only to start where they left off and fall back to the log without it, and a row
-  lost or rewritten hides no change to the log.
+  `anchor.last_failure`, `verify.last_full` and `retention.last_run`. Progress is operational, never evidence:
+  verification reads none of it, sealing and anchoring read it only to start where they left off and fall back to the
+  log without it, a prune writes it and resumes from the journal instead, and a row lost or rewritten hides no change
+  to the log.
 - A run that never happens raises nothing, so the progress is what monitoring reads: no timer bounds the time an entry
   waits to be sealed or a seal waits to be anchored, since a stopped scheduler or a backlog extends it.
 
 ## Seams Left
 
 - Carrying derived keys into a managed ring, and listing the ring's ids for reports.
-- Lifecycle's prune and its journal, which implements `Contracts\PruneLedger`.
 - The health snapshot, which reads the progress.
 - The enterprise check profile, which requires the scheduled verification to be `--strict`.
 
@@ -497,11 +571,20 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `src/Integrity/VerificationSummary.php`.
 - `src/Integrity/Enums/IntegrityStatus.php`, `src/Integrity/Enums/AnchorStatus.php`, `src/Integrity/Enums/Finding.php`,
   `src/Integrity/Enums/AnchorDriver.php`.
-- `src/Contracts/PruneLedger.php`; `src/Integrity/PruneRecord.php`, `src/Integrity/NullPruneLedger.php`.
+- `src/Contracts/PruneLedger.php`: `recordsFor()`; `src/Integrity/PruneRecord.php`: `fromArray()`, `positions()`,
+  `covers()`; `src/Integrity/PruneBitmap.php`: `encode()`, `decode()`; `src/Integrity/PruneCoverage.php`: `of()`;
+  `src/Integrity/PruneCoverageResult.php`; `src/Integrity/NullPruneLedger.php`; `src/Lifecycle/JournalPruneLedger.php`.
+- `src/Integrity/Enums/JournalKind.php`: `label()`, `carriesAuthority()`, `readsPayloadToReplay()`;
+  `src/Integrity/JournalRow.php`: `draft()`, `fromRow()`, `withSignature()`, `signedFields()`, `digest()`,
+  `payloadMap()`, `toRow()`; `src/Integrity/JournalSigner.php`: `key()`, `sign()`, `verifies()`, `DERIVATION_INFO`.
+- `src/Integrity/JournalChain.php`: `accept()`, `acceptMalformed()`, `head()`, `activeHoldIds()`;
+  `src/Integrity/JournalVerifier.php`: `verify()`, `PAGE`; `src/Integrity/JournalSummary.php`;
+  `src/Integrity/SealChainException.php`: `forJournal()`.
+- `src/Lifecycle/Pruner.php`, `src/Lifecycle/PruneChunk.php`, `src/Lifecycle/Journal.php`.
 - `src/Events/IntegrityCheckFailed.php`; `src/Integrity/IntegrityCheckFailedException.php`: `of()`, `stopped()`;
   `src/Console/IntegrityAlarm.php`: `raise()`, `report()`.
 - `src/Console/SealCommand.php`: `LOCK`, `SWEEP_LOCK`, `LOCK_SECONDS`; `src/Console/VerifyCommand.php`;
-  `src/Console/IntegritySchedule.php`: `SHARED_CACHE_DRIVERS`; `src/Console/IntegrityChecks.php`.
+  `src/Console/IntegritySchedule.php`: `register()`, `SHARED_CACHE_DRIVERS`; `src/Console/IntegrityChecks.php`.
 - `src/Database/IntegrityProgress.php`; `src/Database/IntegrityTables.php`.
 - `database/migrations/2026_11_02_000300_create_audit_log_checkpoints_table.php`,
   `database/migrations/2026_11_02_000400_create_audit_log_checkpoint_members_table.php`,
@@ -542,14 +625,63 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
 - `tests/Feature/Delivery/OutboxDrainerTest.php` `testAnEnvelopeUnderARemovedSigningKeyIsFailedAndNeverResigned`
 - `tests/Unit/Integrity/SealEnvelopeTest.php` `testTheGoldenMembersDigestIsReproduced`,
   `testTheGoldenSealCanonicalAndDigestAreReproduced`, `testTheSecondGoldenSealChainsOntoTheFirst`,
-  `testMembersAreSortedBytewiseWhateverTheirOrder`, `testChangingAnyFieldChangesTheDigest`
+  `testTheSecondGoldenSealCommitsToTheJournalsFirstRow`, `testMembersAreSortedBytewiseWhateverTheirOrder`,
+  `testChangingAnyFieldChangesTheDigest`, `testDoesNotEnforceTheJournalsPairing`
 - `tests/Unit/Integrity/SealSignerTest.php` `testTheDerivationAndLabelsArePinned`, `testTheGoldenSealKeyIsReproduced`,
   `testTheDerivedRingsSealKeyIsReproduced`, `testTheGoldenSignaturesAreReproduced`, `testARowHmacIsNeverASealSignature`,
-  `testVerificationSelectsTheKeyByTheStoredId`, `testTheGoldenPruneRecordIsReproduced`, `testAForgedPruneRecordFails`
+  `testVerificationSelectsTheKeyByTheStoredId`, `testTheGoldenPruneSignaturesReproduce`,
+  `testThePruneLabelIsVersionTwo`, `testARecordSignedForOneSubsetNeverVerifiesForAnother`, `testAForgedPruneRecordFails`
 - `tests/Unit/Integrity/SealSettingsTest.php` `testAnEmptyLogIdIsTheSourceId`, `testRefusesAMalformedLogId`,
   `testRefusesAMalformedSchedule`
 - `tests/Unit/Integrity/SealSummaryTest.php` `testTheCanonicalFormIsPinned`
-- `tests/Unit/Integrity/PruneRecordTest.php` `testTheGoldenDigestIsReproduced`, `testEveryBoundFieldChangesTheDigest`
+- `tests/Unit/Integrity/PruneRecordTest.php` `testTheGoldenRecordsReproduce`, `testEveryBoundFieldChangesTheDigest`,
+  `testThePrunedCountMustBeThePopcount`, `testFromArrayRefusesAnotherVersion`, `testPositionsAndCovers`
+- `tests/Unit/Integrity/PruneBitmapTest.php` `testEncodesTheGoldenBitmaps`, `testBitIIsBitIModEightOfByteIDivEight`,
+  `testTheLengthIsExactlyTheMembersInBytes`, `testRefusesAPaddingBitSet`, `testRefusesANonCanonicalEncoding`,
+  `testFiftyThousandMembersIsSixThousandTwoHundredFiftyBytes`
+- `tests/Unit/Integrity/PruneCoverageTest.php` `testOverlappingRecordsAreTampered`,
+  `testARecordOfAnotherSealCoversNothing`, `testWithoutAuthenticMembershipNothingIsCovered`,
+  `testACoveredPresentMemberIsRechecked`, `testSeveralDisjointRecordsCoverTogether`
+- `tests/Feature/Lifecycle/JournalPruneLedgerTest.php` `testItReturnsEveryRecordOfTheSealInOrder`,
+  `testItReadsTheStorageConnectionsWriter`
+- `tests/Feature/Lifecycle/PruneChunkTest.php` `testItDeletesOnlyWhatItReadUnderTheLock`,
+  `testAnIdAlreadyGoneIsNeverCovered`, `testTheRecordCoversExactlyTheDeletedPositions`,
+  `testAnAffectedCountMismatchRollsBack`, `testEligibilityIsDecidedFromTheVerifiedRow`,
+  `testATamperedCandidateDeletesNothing`
+- `tests/Feature/Lifecycle/PrunerTest.php` `testAnUnsealedRowSurvives`, `testTwoCategoriesPruneIndependentlyInsideOneSeal`,
+  `testEachChunkWritesOneSignedPruneRow`, `testASealThatFailsAuthenticationIsSkippedAndReported`
+- `tests/Integration/Lifecycle/PruneEnginesTest.php` `testVerifyAfterARealPrunePasses`
+- `tests/Integration/Lifecycle/PruneRacesTest.php` `testTwoPrunesNeverCoverOneMemberTwice`
+- `tests/Unit/Integrity/Enums/JournalKindTest.php` `testTheStoredValues`, `testEachLabelNamesItsKind`,
+  `testWhichKindsCarryAnAuthority`, `testOnlyPoliciesHoldsAndReleasesAreReplayedFromTheirPayloads`
+- `tests/Unit/Integrity/JournalRowTest.php` `testADraftCarriesItsCanonicalPayloadAndItsDigest`,
+  `testTheSignedFieldsHoldThePayloadDigestNotThePayload`, `testRefusesEachMalformedField`,
+  `testTheFirstRowHasNoPreviousAndEveryOtherHasOne`, `testFromRowReadsEveryEngineForm`,
+  `testFromRowRefusesAMissingColumnNamingIt`, `testANonCanonicalPayloadIsMalformed`, `testAListPayloadIsMalformed`,
+  `testTheGoldenRowsReproduce`
+- `tests/Unit/Integrity/JournalSignerTest.php` `testTheGoldenHmacsReproduce`, `testTheKeyIsDerivedUnderItsOwnInfo`,
+  `testARowSignedAsOneKindNeverVerifiesAsAnother`, `testAnUnknownKeyIsRefused`, `testAMalformedHmacIsRefused`,
+  `testAnyChangedFieldFailsVerification`, `testThePayloadIsCoveredThroughItsDigest`
+- `tests/Unit/Integrity/JournalChainTest.php` `testAContiguousChainHasNoFinding`, `testAMissingRowIsAGap`,
+  `testAReorderedRowIsAGap`, `testARelinkedRowIsAGap`, `testARowOfAnotherLogIsAGap`,
+  `testAForgedRowIsASignatureFinding`, `testAnEditedPayloadIsASignatureFinding`,
+  `testAnUnknownKeyIsAJournalKeyFinding`, `testAReleaseOfAnUnknownHoldIsATransition`, `testADoubleReleaseIsATransition`,
+  `testAHoldIdPlacedTwiceIsATransition`, `testAReleasedHoldIdPlacedAgainIsATransition`,
+  `testAPruneRowNamingAnotherSealIsATransition`, `testAFinishWithoutItsStartIsATransition`,
+  `testASecondFinishIsATransition`, `testPairingIsNotCheckedWithoutPayloads`, `testABadRowIsNotAppliedAndCountsOnce`,
+  `testTheActiveHoldsFollowTheChain`, `testACloneIsIndependent`
+- `tests/Feature/Integrity/JournalVerifierTest.php` `testAnEmptyJournalAndNoSealsPass`,
+  `testEachSealCommitsToTheHeadWhenSealed`, `testAnEditedRowIsTampered`, `testADeletedRowIsAGap`,
+  `testATruncatedJournalContradictsTheSealsCommitment`, `testACommitmentRunningBackwardsIsTampered`,
+  `testACommitmentDroppedAfterOneWasMadeIsTampered`, `testAnUnpairedCommitmentIsTampered`,
+  `testEveryFindingIsARunFindingWithItsFirstId`, `testMemoryDoesNotGrowWithTheJournal`, `testItReadsTheWriter`
+- `tests/Unit/Integrity/JournalSummaryTest.php` `testKeepsItsFields`, `testToArray`
+- `tests/Feature/Integrity/JournalTamperingTest.php` `testAnUntamperedJournalPasses`,
+  `testEachTamperingIsFoundAndExitsNonZero`
+- `tests/Integration/Lifecycle/JournalCommitmentEnginesTest.php` `testRestoringAnOlderJournalContradictsTheSeals`,
+  `testAJournalRowEditedOnTheEngineIsFound`, `testTheCommitmentSurvivesEachEnginesTypes`
+- `tests/Unit/Integrity/SealChainExceptionTest.php` `testTheJournalMessageIsPinned`,
+  `testTheJournalRefusalNamesNoSealAndIsMalformed`
 - `tests/Unit/Integrity/Enums/FindingTest.php` `testTheValuesArePinnedInPrecedenceOrder`,
   `testEachFindingMapsToItsStatus`
 - `tests/Unit/Integrity/Enums/IntegrityStatusTest.php` `testSeverityOrdersTheStatuses`,
@@ -560,7 +692,9 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testRefusesToExtendAHeadOfAnotherLog`, `testExtendsAHeadSignedUnderARetiredKey`,
   `testTheCheckpointIsInsertedBeforeItsMembers`, `testNeverInsertsFromASelect`, `testNeverLocksWhatItSelects`,
   `testAMemberConflictFailsTheWholeAttempt`, `testAMalformedCandidateIsSkippedNotSealed`,
-  `testAWindowReadsAtMostItsLimitWhateverIsSealed`
+  `testAWindowReadsAtMostItsLimitWhateverIsSealed`, `testASealCommitsToTheJournalHead`,
+  `testASealOfAnEmptyJournalCommitsToNone`, `testAMalformedJournalHeadRefusesTheSeal`,
+  `testTheHeadIsReadInsideTheSealsTransaction`
 - `tests/Feature/Integrity/SealerTest.php` `testRefusesToRunInsideATransaction`,
   `testTheRecentPassStartsAtTheLookbackBeforeTheHead`, `testTheSweepResumesFromItsCursor`,
   `testACompleteSweepClearsItsCursor`, `testASweepWindowThatSealsNothingStillMovesTheCursor`,
@@ -568,7 +702,7 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testASealNeverHoldsARowRecordedAfterTheSettleBound`, `testADuplicateIsRetriedFromAFreshHead`,
   `testEachRetryWaitsAJitteredBoundedDelay`, `testExhaustionThrowsContention`, `testALostConnectionIsNeverRetried`,
   `testNoSavepointIsEverUsed`, `testStopsAtMaxBatches`, `testAMixedKeySegmentSeals`,
-  `testRotationBetweenSealsSignsEachWithItsKey`
+  `testRotationBetweenSealsSignsEachWithItsKey`, `testARunWritesTheInstallationIdOnce`
 - `tests/Integration/Integrity/SealerEnginesTest.php` `testSealsAndChainsOnEachEngine`,
   `testUuidOrderIsNeverAHighWaterMark`, `testATransactionCommittingOutOfOrderJoinsALaterSeal`,
   `testSealingReadsTheWriter`
@@ -603,7 +737,12 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testOneStatementReadsTheMembersAndTheirEntries`, `testTheMemberOrderIsSortedNotTrusted`,
   `testASegmentWithAValidBundleIsValid`, `testATamperedArtifactMakesTheSegmentTampered`,
   `testAnUnreadableArtifactMakesTheSegmentUnverifiable`, `testAMemberThatFailsItsHmacIsNotTrustedForItsDescriptor`,
-  `testAPrunedBundleEntryNeedsNoArtifact`, `testEachNewArtifactFindingMakesTheSegmentTampered`
+  `testAPrunedBundleEntryNeedsNoArtifact`, `testEachNewArtifactFindingMakesTheSegmentTampered`,
+  `testMembersAreOrderedBytewiseNotByTheEngine`, `testEveryMissingIdIsKept`,
+  `testTwoCategoriesPrunedInOneSealArePruned`, `testAMemberCoveredButPresentIsResurrected`,
+  `testAMemberGoneBetweenTheReadsIsPruned`,
+  `testAFullyResurrectedSealIsResurrected`, `testAnUnreadableLedgerRecordIsTampered`,
+  `testTheLedgerIsAskedAfterTheMembersAreRead`
 - `tests/Unit/Integrity/ArtifactInspectorTest.php` `testIsDescriptor`, `testEachColumnsFinding`,
   `testEachPlaintextFinding`
 - `tests/Feature/Integrity/ManifestVerifierTest.php` `testAMissingArtifactIsManifestMissing`,
@@ -617,7 +756,8 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testTheMaximumManifestVerifies`, `testASwappedArtifactIsFoundOnEveryEngine`,
   `testADisclosureAndAnExportVerifyOnEveryEngine`
 - `tests/Performance/VerifyQueryBudgetTest.php` `testManifestChecksAddTwoQueriesPerBatch`,
-  `testASegmentWithoutBundlesAddsNoQuery`
+  `testASegmentWithoutBundlesAddsNoQuery`, `testEachSealAsksTheLedgerOnce`,
+  `testACoveredPresentMemberIsReadAgainInBatches`
 - `tests/Feature/Integrity/VerifierTest.php` `testADeletedGenesisSealIsTampered`, `testAMissingBoundarySealIsAGap`,
   `testAFailingAnchorIsAskedOnce`, `testAnEmptyRemoteWithALocalLogIsUnanchored`, `testAnEmptyRemoteAndAnEmptyLogAgree`,
   `testARemoteHeadBeyondTheTailIsTampered`, `testTailTruncationIsFoundWithLocalReceiptsCleared`,
@@ -627,7 +767,8 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testAStrictRunRecordsWhetherItPassedStrictly`, `testAMissingLastSealOfARangeIsAGap`, `testARangeWithNoSealIsAGap`,
   `testASealOutsideTheChainIsFound`, `testAnUnsealedEntryFarAheadOfTheClockIsAFinding`,
   `testAnUnreadableSealAtTheAnchorsHeadIsComparedByItsStoredDigest`, `testTheAnchorsHeadSettlesAnchoringWithOneCall`,
-  `testNothingIsAccumulated`, `testEveryQueryReadsTheWriter`
+  `testNothingIsAccumulated`, `testEveryQueryReadsTheWriter`, `testEveryRunVerifiesTheJournal`,
+  `testAJournalFindingFailsTheRun`
 - `tests/Unit/Integrity/VerificationSummaryTest.php` `testStrictExcusesOnlyASealWithinTheGrace`,
   `testStrictFailsWithoutDiscovery`, `testStrictChangesNothingWithTheNullAnchor`
 - `tests/Feature/Console/VerifyCommandTest.php` `testTheCoverageIsAlwaysPrinted`,
@@ -635,7 +776,8 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testATamperedLogFailsNonZeroNamingTheFirstBadId`, `testStrictFailsOnAnUnanchoredSegmentWhenAnAnchorIsConfigured`,
   `testStrictPassesBesideASealNotYetAnchored`, `testUnanchoredIsInformationalWithTheNullAnchor`,
   `testAStoppedRunAlarms`, `testAMalformedAnchorSettingAlarms`, `testSweepFirstSealsALateEntryBeforeVerifying`,
-  `testOutputHoldsNoValueOfAnEntry`
+  `testOutputHoldsNoValueOfAnEntry`, `testItPrintsTheJournalLine`, `testTheJsonSummaryHoldsTheJournal`,
+  `testAJournalFindingExitsNonZero`
 - `tests/Feature/Console/SealCommandTest.php` `testAHeldLockSkipsTheRun`, `testTheSweepHoldsItsOwnLock`,
   `testACacheThatFailsDoesNotStopSealing`, `testAnUnavailableAnchorWarnsAndStillSucceeds`,
   `testAMalformedAnchorSettingStillSeals`, `testAConflictAlarmsAndFails`, `testASkippedEntryAlarms`
@@ -644,20 +786,25 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
 - `tests/Feature/Console/IntegrityScheduleTest.php` `testTheThreeRunsAreScheduledByDefault`,
   `testEachRunCanBeTurnedOff`, `testOnOneServerOnlyOnASharedCache`, `testTheSchedulersStoreDecidesOneServer`,
   `testEveryRunIsInTheBackground`, `testEachRunIsWithoutOverlapping`,
-  `testAMalformedScheduleSchedulesNothingAndIsReported`
+  `testAMalformedScheduleSchedulesNothingAndIsReported`, `testThePruneIsScheduledOnlyWhenSomethingIsRetainedForLess`,
+  `testAnUnboundPolicyCountsAsTheConfiguredOne`, `testACustomPolicyIsAlwaysScheduled`,
+  `testAPolicyThatCannotBeResolvedIsReportedAndThePruneScheduled`, `testANullScheduleRegistersNoPrune`,
+  `testAMalformedScheduleIsReportedAndRegistersNothing`, `testThePruneRunsInTheBackgroundWithoutOverlapOnOneServer`,
+  `testRegisteringThePruneMakesNoQuery`
 - `tests/Feature/Integrity/IntegrityAlertingTest.php` `testTheEventIsPayloadFree`, `testEveryMapHoldsEveryStatus`
 - `tests/Integration/Database/IntegrityProgressTest.php` `testAMalformedValueReadsAsAbsent`,
   `testReadsAndWritesTheWriter`
 - `tests/Integration/Integrity/VerifyConcurrencyTest.php` `testAPruneCommittingDuringVerificationIsNeverHalfSeen`,
   `testSealsCreatedDuringVerificationAreSkipped`, `testAStrictVerificationBesideASealRunPasses`
 - `tests/Integration/Integrity/PruneBoundariesTest.php` `testACrashBeforeThePruneCommitsLeavesTheSegmentValid`,
-  `testACommittedPruneIsPruned`
-- `tests/Unit/Integrity/NullPruneLedgerTest.php` `testNothingIsEverPruned`
+  `testACommittedPruneIsPruned`, `testARecordWithoutItsDeletionIsResurrected`, `testTwoPrunesOfOneSegmentArePruned`
+- `tests/Unit/Integrity/NullPruneLedgerTest.php` `testItHasNoRecords`
 - `tests/Feature/Integrity/TamperingTest.php` `testAJointSealAndMemberRewriteWithoutTheKeyIsTampered`,
   `testAJointRewriteWithTheKeyBreaksTheChainToTheNextSeal`, `testEditingTheAnchorColumnsChangesNothing`,
   `testTailTruncationWithLocalReceiptsClearedIsTampered`, `testAPreSealDeletionIsUndetectable`,
   `testAPhantomSealAtSequenceZeroIsFound`, `testAFarFutureEntryIsNeverPendingForGood`,
-  `testADeletedSealAtTheEndOfARangeIsAGap`, `testMarkingASealUnreadableNeverHidesItsDeletedSegment`
+  `testADeletedSealAtTheEndOfARangeIsAGap`, `testMarkingASealUnreadableNeverHidesItsDeletedSegment`,
+  `testAResurrectedPrunedRowIsIncomplete`
 - `tests/Unit/Integrity/IntegritySensitiveParametersTest.php` `testEveryKeyOrRowParameterIsMarkedSensitive`,
   `testNothingChainsAFailure`, `testNothingReadsAFailuresText`
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheIntegrityNoteHasARowForEveryStatusAndFinding`
@@ -680,5 +827,8 @@ Update this note when any of the following change:
 - an integrity or anchoring status, a finding, or the status a finding gives
 - what the manifest check binds, its batches, or the key an artifact's members are encrypted under
 - what a strict run fails on, or the anchoring grace
-- the prune record's fields or what a prune keeps
-- the schedule, the cache lock, the event or the progress names
+- the prune record's fields, its bitmap's form or what a prune keeps
+- the order in which verification reads the members, the ledger and the covered members again
+- the journal's columns, kinds, label or derivation, or what a seal commits to of it
+- what the journal section of a verification checks, or the finding each check gives
+- the schedule, the condition the prune is scheduled on, the cache lock, the event or the progress names

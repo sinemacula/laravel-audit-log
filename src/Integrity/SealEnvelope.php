@@ -11,19 +11,22 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * The immutable fields of one seal and their canonical digest, under seal
  * version 1.
  *
- * The digest is SHA-256 over the canonical encoding of all fourteen fields, so
+ * The digest is SHA-256 over the canonical encoding of all sixteen fields, so
  * the log, the place in the chain, the link to the seal before, the members,
- * the times and how the seal is signed are all covered, and none can change
- * without changing it. The members digest is SHA-256 over the canonical
- * encoding of the members' entry ids and HMACs, sorted bytewise by entry id, so
- * it never depends on the order rows were read in.
+ * the times, how the seal is signed and the lifecycle journal's head it commits
+ * to are all covered, and none can change without changing it. The members
+ * digest is SHA-256 over the canonical encoding of the members' entry ids and
+ * HMACs, sorted bytewise by entry id, so it never depends on the order rows
+ * were read in. The journal's head is its last row's sequence and HMAC, both
+ * `null` when the journal had no row, so the journal is anchored exactly as the
+ * entries are.
  *
  * Every field is checked as it is built, and a stored seal is read through
  * `fromRow()`, which refuses a missing or malformed column with an
  * `UnexpectedValueException` naming the column and never its value. Neither
- * enforces the genesis rule nor the pairing of the previous fields: a stored
- * seal that breaks them is evidence that verification must report, not a row it
- * may refuse to load.
+ * enforces the genesis rule nor the pairing of the previous fields or of the
+ * journal's: a stored seal that breaks them is evidence that verification must
+ * report, not a row it may refuse to load.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,10 +68,11 @@ final readonly class SealEnvelope
         'members_digest'  => self::DIGEST_PATTERN,
         'signer'          => '/\A' . self::SIGNER . '\z/',
         'key_id'          => IntegrityKey::ID_PATTERN,
+        'journal_head'    => self::DIGEST_PATTERN,
     ];
 
-    /** @var list<string> The fields that may be `null`: the link to the seal before, which genesis has not. */
-    private const array NULLABLE = ['previous_id', 'previous_digest'];
+    /** @var list<string> The fields that may be `null`: the link to the seal before, which genesis has not, and the journal's head, which an empty journal has not. */
+    private const array NULLABLE = ['previous_id', 'previous_digest', 'journal_sequence', 'journal_head'];
 
     /** @var list<string> The fields that are instants. */
     private const array TIMES = ['first_recorded_at', 'last_recorded_at', 'sealed_at'];
@@ -99,6 +103,8 @@ final readonly class SealEnvelope
         'algorithm_version' => 'A seal\'s `algorithm_version` is not supported by this release.',
         'seal_digest'       => 'A seal\'s `seal_digest`' . self::DIGEST,
         'signature'         => 'A seal\'s `signature`' . self::DIGEST,
+        'journal_sequence'  => 'A seal\'s `journal_sequence` must be null or at least 1.',
+        'journal_head'      => 'A seal\'s `journal_head` must be null or 64 lower-case hexadecimal characters.',
     ];
 
     /** @var string Why a stored column is refused, by the column it names. */
@@ -120,6 +126,8 @@ final readonly class SealEnvelope
      * @param  string  $keyId
      * @param  int  $algorithmVersion
      * @param  string  $signer
+     * @param  ?int  $journalSequence
+     * @param  ?string  $journalHead
      *
      * @throws \InvalidArgumentException
      */
@@ -163,6 +171,12 @@ final readonly class SealEnvelope
 
         /** How the seal is signed. */
         public string $signer = self::SIGNER,
+
+        /** The sequence of the lifecycle journal's last row when the seal was made, or `null` when it had none. */
+        public ?int $journalSequence = null,
+
+        /** The HMAC of the lifecycle journal's last row when the seal was made, or `null` when it had none. */
+        public ?string $journalHead = null,
     ) {
         $fields = $this->toArray();
 
@@ -211,10 +225,11 @@ final readonly class SealEnvelope
 
     /**
      * The envelope of a decoded stored seal: each of the thirteen envelope
-     * columns is required, times are read in any form an engine returns and
-     * integers as an integer or its decimal string. A missing or malformed
-     * column is refused naming the column, never quoting its value; the digest
-     * and the signature are the caller's to read.
+     * columns is required, and the journal's two are read as `null` when they
+     * are not given; times are read in any form an engine returns and integers
+     * as an integer or its decimal string. A missing or malformed column is
+     * refused naming the column, never quoting its value; the digest and the
+     * signature are the caller's to read.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -239,6 +254,8 @@ final readonly class SealEnvelope
             'signer'            => self::storedText($stored, 'signer'),
             'key_id'            => self::storedText($stored, 'key_id'),
             'algorithm_version' => self::storedInteger($stored, 'algorithm_version'),
+            'journal_sequence'  => array_key_exists('journal_sequence', $stored) && $stored['journal_sequence'] !== null ? self::storedInteger($stored, 'journal_sequence') : null,
+            'journal_head'      => array_key_exists('journal_head', $stored) ? self::storedOptionalText($stored, 'journal_head') : null,
         ];
 
         $malformed = self::malformedField($fields);
@@ -261,18 +278,20 @@ final readonly class SealEnvelope
             $fields['key_id'],
             $fields['algorithm_version'],
             $fields['signer'],
+            $fields['journal_sequence'],
+            $fields['journal_head'],
         );
     }
 
     /**
-     * The fourteen fields the digest covers, each under its canonical key. The
+     * The sixteen fields the digest covers, each under its canonical key. The
      * order is irrelevant: the canonical encoding sorts the keys.
      *
      * @formatter:off
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{v: int, log_id: string, id: string, sequence: int, previous_id: ?string, previous_digest: ?string, member_count: int, members_digest: string, first_recorded_at: string, last_recorded_at: string, sealed_at: string, signer: string, key_id: string, algorithm_version: int}
+     * @return array{v: int, log_id: string, id: string, sequence: int, previous_id: ?string, previous_digest: ?string, member_count: int, members_digest: string, first_recorded_at: string, last_recorded_at: string, sealed_at: string, signer: string, key_id: string, algorithm_version: int, journal_sequence: ?int, journal_head: ?string}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -295,12 +314,14 @@ final readonly class SealEnvelope
             'signer'            => $this->signer,
             'key_id'            => $this->keyId,
             'algorithm_version' => $this->algorithmVersion,
+            'journal_sequence'  => $this->journalSequence,
+            'journal_head'      => $this->journalHead,
         ];
     }
 
     /**
      * The seal digest: SHA-256, in hex, over the canonical encoding of the
-     * fourteen fields.
+     * sixteen fields.
      *
      * @return string
      *
@@ -313,8 +334,9 @@ final readonly class SealEnvelope
 
     /**
      * The row that stores the seal, in table order: the thirteen envelope
-     * columns, with times in the form the database stores, and the digest and
-     * signature given. The anchor columns are left out, so they start `null`.
+     * columns and the journal's two, with times in the form the database
+     * stores, and the digest and signature given. The anchor columns are left
+     * out, so they start `null`.
      *
      * @formatter:off
      *
@@ -322,7 +344,7 @@ final readonly class SealEnvelope
      *
      * @param  string  $sealDigest
      * @param  string  $signature
-     * @return array{id: string, sequence: int, log_id: string, previous_id: ?string, previous_digest: ?string, member_count: int, members_digest: string, seal_digest: string, first_recorded_at: string, last_recorded_at: string, sealed_at: string, signer: string, key_id: string, algorithm_version: int, signature: string}
+     * @return array{id: string, sequence: int, log_id: string, previous_id: ?string, previous_digest: ?string, member_count: int, members_digest: string, seal_digest: string, first_recorded_at: string, last_recorded_at: string, sealed_at: string, signer: string, key_id: string, algorithm_version: int, journal_sequence: ?int, journal_head: ?string, signature: string}
      *
      * @throws \InvalidArgumentException
      *
@@ -353,6 +375,8 @@ final readonly class SealEnvelope
             'signer'            => $this->signer,
             'key_id'            => $this->keyId,
             'algorithm_version' => $this->algorithmVersion,
+            'journal_sequence'  => $this->journalSequence,
+            'journal_head'      => $this->journalHead,
             'signature'         => $signature,
         ];
     }
@@ -396,8 +420,8 @@ final readonly class SealEnvelope
 
     /**
      * Whether the integer field's value is in its range: a supported algorithm
-     * version, a member count from 1 to the most members, or a sequence of at
-     * least 1.
+     * version, a member count from 1 to the most members, or a sequence, the
+     * seal's or the journal's, of at least 1.
      *
      * @param  string  $field
      * @param  int  $value

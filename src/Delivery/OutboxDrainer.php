@@ -13,6 +13,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryOutcome;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
+use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
@@ -31,6 +32,13 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
  * always ends. A row another drain claimed first is missed, and one another
  * drain took over while this one worked it is stale: this drain changes nothing
  * of it further. A row is never re-signed or finalised again.
+ *
+ * A row whose record retention has already pruned is deleted and counted
+ * pruned, and nothing else: no destination is called and `AuditRecorded` is not
+ * dispatched, so a pruned record is never stored again. Every row whose record
+ * is read is checked against the tombstones, one statement each, since a row
+ * requeued by `audit-log:replay --outbox` starts its attempts again and may
+ * hold a record that was stored, sealed and pruned since.
  *
  * A row holding a bundle, a record with its attachment, is delivered whole:
  * each destination that keeps attachments stores the entry and its artifact
@@ -85,6 +93,7 @@ final readonly class OutboxDrainer
      * @param  \SineMacula\Laravel\AuditLog\Delivery\DeliverySettings  $settings
      * @param  \SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
      * @param  \SineMacula\Laravel\AuditLog\Delivery\RecordedNotifier  $notifier
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones  $tombstones
      */
     public function __construct(
 
@@ -105,6 +114,9 @@ final readonly class OutboxDrainer
 
         /** The notifier that dispatches `AuditRecorded` for a delivered record. */
         private RecordedNotifier $notifier,
+
+        /** The tombstones that say whether retention has already pruned a row's record. */
+        private PruneTombstones $tombstones,
     ) {}
 
     /**
@@ -249,7 +261,8 @@ final readonly class OutboxDrainer
 
     /**
      * Work the claimed row: abandon it past its attempts, and otherwise read
-     * its record and deliver it.
+     * its record, then complete it as pruned when retention has pruned that
+     * record, and deliver it when not.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \Illuminate\Contracts\Encryption\StringEncrypter  $encrypter
@@ -273,6 +286,12 @@ final readonly class OutboxDrainer
         $record = $this->recordOf($claim, $encrypter, $codec, $result);
 
         if ($record === null) {
+            return;
+        }
+
+        if ($this->tombstones->isPruned($claim->id)) {
+            $this->completePruned($claim, $result);
+
             return;
         }
 
@@ -355,6 +374,28 @@ final readonly class OutboxDrainer
         $result->addDelivered();
 
         $this->notifier->notify($record->record->id, $record->record->event, $record->record->category);
+    }
+
+    /**
+     * Delete the row whose record retention has pruned, delivering it nowhere
+     * and dispatching nothing; stale when the claim no longer owns the row.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\DrainResult  $result
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    private function completePruned(#[\SensitiveParameter] OutboxClaim $claim, DrainResult $result): void
+    {
+        if (!$this->outbox->delete($claim)) {
+            $result->addStale();
+
+            return;
+        }
+
+        $result->addPruned();
     }
 
     /**

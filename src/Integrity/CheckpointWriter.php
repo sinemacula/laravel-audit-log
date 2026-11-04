@@ -8,9 +8,11 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
@@ -26,18 +28,29 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * here: a seal signed under a key since retired is extended, and verification
  * reports any seal whose signature fails.
  *
+ * Every seal commits to the lifecycle journal's head, so the journal is
+ * anchored exactly as the entries are. The head, the sequence and HMAC of the
+ * journal's last row, is read after the last seal inside the seal's own
+ * transaction, so a seal that wins its sequence sees every row committed before
+ * the seal it extends. A head whose sequence or HMAC cannot be read is refused
+ * with a `SealChainException`, so a seal never commits to a row it cannot
+ * name; an empty journal is committed to as none. A head behind the last
+ * seal's commitment, a lower sequence, none after a commitment to a row, or
+ * another HMAC at the committed sequence, is refused the same way, so
+ * commitments never run backwards and a journal whose tail was removed or
+ * replaced is never sealed over.
+ *
  * The selection is a plain `SELECT`, never a locking read, of the entries
- * recorded no later than the bound, after the position given, in
- * `(recorded_at, id)` order so batches are deterministic: membership, not the
- * order, is what is sealed. The recent pass reads entries that are no seal's
- * member; the sweep reads a window of entries whether sealed or not, so one
- * statement never reads more than its limit of rows, and seals those of them
- * that are no seal's member. A candidate whose id is not a lower-case UUID,
- * whose HMAC is not 64 lower-case hex, or whose time cannot be read is left out
- * and counted, never sealed and never fatal; the position still moves past it,
- * from its time and id exactly as stored, however long or malformed, so a
- * malformed row at the end of a batch never stops the batch's seal or sealing
- * after it.
+ * recorded no later than the bound, after the position given, in `(recorded_at,
+ * id)` order so batches are deterministic: membership, not the order, is what
+ * is sealed. The recent pass reads entries that are no seal's member; the sweep
+ * reads a window of entries whether sealed or not, so one statement never reads
+ * more than its limit of rows, and seals those of them that are no seal's
+ * member. A candidate whose id is not a lower-case UUID, whose HMAC is not 64
+ * lower-case hex, or whose time cannot be read is left out and counted, never
+ * sealed and never fatal; the position still moves past it, from its time and
+ * id exactly as stored, however long or malformed, so a malformed row at the
+ * end of a batch never stops the batch's seal or sealing after it.
  *
  * Every row is written with a parameterised `INSERT … VALUES`, never one from a
  * `SELECT` and never one that ignores a conflict: the checkpoint first, then
@@ -176,7 +189,7 @@ final readonly class CheckpointWriter
                 return new SealBatch(null, null, count($rows), $skipped, $last, $limit);
             }
 
-            $seal   = $this->envelope($head, $members, $times);
+            $seal   = $this->envelope($head, $members, $times, self::journalHeadAfter($head[0] ?? null, $connection));
             $digest = $seal->digest();
 
             $this->insert($connection, $seal, $digest, $members);
@@ -220,19 +233,79 @@ final readonly class CheckpointWriter
     }
 
     /**
+     * The lifecycle journal's head, once it is known not to be behind the last
+     * seal's commitment: at or after the committed sequence, and holding the
+     * committed HMAC at that sequence when it has not moved.
+     *
+     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $previous
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return ?array{0: int, 1: string}
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Integrity\SealChainException
+     */
+    private static function journalHeadAfter(?SealEnvelope $previous, Connection $connection): ?array
+    {
+        $journal = self::journalHead($connection);
+
+        if ($previous?->journalSequence === null) {
+            return $journal;
+        }
+
+        $behind = $journal === null
+            || $journal[0] < $previous->journalSequence
+            || ($journal[0] === $previous->journalSequence && !hash_equals((string) $previous->journalHead, $journal[1]));
+
+        if ($behind) {
+            throw SealChainException::forJournalBehind($previous->id);
+        }
+
+        return $journal;
+    }
+
+    /**
+     * The sequence and HMAC of the lifecycle journal's last row, the greatest
+     * sequence from 1, or `null` when the journal has none; one whose sequence
+     * or HMAC cannot be read is refused.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return ?array{0: int, 1: string}
+     *
+     * @throws \SineMacula\Laravel\AuditLog\Integrity\SealChainException
+     */
+    private static function journalHead(Connection $connection): ?array
+    {
+        $stored = $connection->table(LifecycleTables::journalTable())->useWritePdo()->where('sequence', '>=', 1)->orderByDesc('sequence')->first(['sequence', 'hmac']);
+
+        if ($stored === null) {
+            return null;
+        }
+
+        $sequence = IntegerSetting::parse($stored->sequence ?? null);
+        $hmac     = $stored->hmac ?? null;
+
+        if ($sequence === null || !self::matches(SealEnvelope::DIGEST_PATTERN, $hmac)) {
+            throw SealChainException::forJournal();
+        }
+
+        return [$sequence, $hmac];
+    }
+
+    /**
      * The envelope of the next seal: one more than the last seal's sequence,
      * chained onto its recomputed digest, holding the members, between the
-     * earliest and latest of their times, made now under the signing key.
+     * earliest and latest of their times, made now under the signing key, and
+     * committing to the journal's head, if it has one.
      *
      * @param  ?array{0: \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope, 1: string}  $head
      * @param  non-empty-list<array{0: string, 1: string}>  $members
      * @param  non-empty-list<string>  $times
+     * @param  ?array{0: int, 1: string}  $journal
      * @return \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope
      *
      * @throws \InvalidArgumentException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
      */
-    private function envelope(?array $head, array $members, array $times): SealEnvelope
+    private function envelope(?array $head, array $members, array $times, ?array $journal): SealEnvelope
     {
         $now                         = $this->clock->now();
         [$previous, $previousDigest] = $head ?? [null, null];
@@ -249,6 +322,8 @@ final readonly class CheckpointWriter
             max($times),
             StoredTime::format($now),
             $this->signer->signingKeyId(),
+            journalSequence: $journal[0] ?? null,
+            journalHead: $journal[1]     ?? null,
         );
     }
 

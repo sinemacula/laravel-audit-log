@@ -65,6 +65,7 @@ final readonly class TrailEntry implements Arrayable
      * @param  ?string  $sourceRegion
      * @param  ?string  $sourceRecordId
      * @param  ?string  $importBatchId
+     * @param  ?string  $sourceDigest
      * @param  ?string  $ip
      * @param  ?string  $userAgent
      * @param  array<array-key, mixed>  $context
@@ -154,6 +155,9 @@ final readonly class TrailEntry implements Arrayable
         /** The import batch the entry came in, for an imported entry. */
         public ?string $importBatchId,
 
+        /** The keyed digest of an imported entry's source assertion; `null` on every captured entry. */
+        public ?string $sourceDigest,
+
         /** The client's IP address as stored, or what the field reader answered for an encrypted one. */
         public ?string $ip,
 
@@ -220,6 +224,7 @@ final readonly class TrailEntry implements Arrayable
             'source_region'     => $this->sourceRegion,
             'source_record_id'  => $this->sourceRecordId,
             'import_batch_id'   => $this->importBatchId,
+            'source_digest'     => $this->sourceDigest,
             'ip'                => $this->ip,
             'user_agent'        => $this->userAgent,
             'context'           => $this->context,

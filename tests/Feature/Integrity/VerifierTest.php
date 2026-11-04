@@ -25,6 +25,8 @@ use SineMacula\Laravel\AuditLog\Integrity\CheckpointWriter;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Integrity\JournalVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
@@ -42,6 +44,7 @@ use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
+use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
@@ -57,7 +60,8 @@ use Tests\TestCase;
  * log checks for orphaned members and unsealed entries and records its
  * completion; seals written after the run began are never read; keys rotated
  * between seals and within one verify; a bundle's artifact is checked with its
- * seal; and every statement reads the writer.
+ * seal; every run, a ranged one included, verifies the whole journal, and a
+ * journal finding fails it; and every statement reads the writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,7 +71,7 @@ use Tests\TestCase;
 #[CoversClass(Verifier::class)]
 final class VerifierTest extends TestCase
 {
-    use SealsEntries, SeedsArtifacts;
+    use SealsEntries, SeedsArtifacts, WritesTheJournal;
 
     /** @var string When every seal of a test is made. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -466,8 +470,8 @@ final class VerifierTest extends TestCase
 
     /**
      * Entries no seal holds that are older than the allowed age are overdue,
-     * which makes the run incomplete, naming the first by time and id;
-     * younger ones are counted apart as pending.
+     * which makes the run incomplete, naming the first by time and id; younger
+     * ones are counted apart as pending.
      *
      * @return void
      */
@@ -1310,6 +1314,51 @@ final class VerifierTest extends TestCase
     }
 
     /**
+     * Every run verifies the whole lifecycle journal and each seal's commitment
+     * to it, a ranged run included, and summarises what it read.
+     *
+     * @return void
+     */
+    public function testEveryRunVerifiesTheJournal(): void
+    {
+        $this->storeSeals(1);
+        $this->journalHold('01932b4e-d000-7000-8000-000000000001');
+        $this->storeSeals(1);
+        $this->journalHold('01932b4e-d000-7000-8000-000000000002');
+
+        foreach (['the whole log' => VerificationRange::whole(), 'a range' => new VerificationRange(2, 2)] as $what => $range) {
+            $summary = $this->verifyLog($range);
+
+            self::assertSame(['rows' => 2, 'head' => 2, 'committed' => 1], $summary->journal?->toArray(), $what);
+            self::assertSame([], $summary->findings, $what);
+            self::assertFalse($summary->fails(false), $what);
+        }
+    }
+
+    /**
+     * A journal finding is a finding of the run and fails it, ranged or whole,
+     * whatever the seals' own integrity, and is the run's first failure.
+     *
+     * @return void
+     */
+    public function testAJournalFindingFailsTheRun(): void
+    {
+        $this->storeSeals(2);
+
+        $release = $this->journalRow(JournalKind::RELEASE, ['hold_id' => '01932b4e-d000-7000-8000-000000000001'], '01932b4e-d000-7000-8000-000000000001');
+
+        foreach (['the whole log' => VerificationRange::whole(), 'a range' => new VerificationRange(1, 1)] as $what => $range) {
+            $summary = $this->verifyLog($range);
+
+            self::assertEquals([new RunFinding(Finding::JOURNAL_TRANSITION, $release->id)], $summary->findings, $what);
+            self::assertSame(0, $summary->integrity['tampered'], $what);
+            self::assertTrue($summary->fails(false), $what);
+            self::assertSame(Finding::JOURNAL_TRANSITION, $summary->firstFinding, $what);
+            self::assertSame($release->id, $summary->firstBadId, $what);
+        }
+    }
+
+    /**
      * Every statement of a run reads the writer, so a replica's lag can never
      * read as a missing row: with a reader that refuses to be used, a complete
      * run under an anchor still passes.
@@ -1426,7 +1475,7 @@ final class VerifierTest extends TestCase
         $manifest = app(ManifestVerifier::class);
         $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, new NullPruneLedger, $anchor, $database, $manifest);
 
-        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), $clock ?? FrozenClock::at(self::VERIFIED_AT), $database);
+        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), $clock ?? FrozenClock::at(self::VERIFIED_AT), $database, app(JournalVerifier::class));
     }
 
     /**

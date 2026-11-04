@@ -9,7 +9,9 @@ namespace SineMacula\Laravel\AuditLog\Stores;
  * entry is not the same record: its captured content differs, or its stored row
  * fails verification. A bulk record conflicts too when its entry is stored with
  * another artifact or without its own, or its artifact without its entry. What
- * is stored is kept as it is; the record is never written over it.
+ * is stored is kept as it is; the record is never written over it. A record
+ * retention has already pruned conflicts too, when its insert violates a unique
+ * index: a pruned record is not stored again.
  *
  * @api
  *
@@ -29,7 +31,7 @@ final class RecordConflictException extends \RuntimeException
         // What is wrong.
         string $message,
 
-        /** The id the record and the existing entry share. */
+        /** The id the record and the existing entry share, or the pruned record's. */
         public readonly string $id,
     ) {
         parent::__construct($message);
@@ -58,6 +60,18 @@ final class RecordConflictException extends \RuntimeException
     public static function differentArtifact(string $id): self
     {
         return new self(sprintf('The record %s is stored with another artifact, or without its own.', $id), $id);
+    }
+
+    /**
+     * The exception for a record retention has already pruned: a seal holds it
+     * as a member, and its entry is gone.
+     *
+     * @param  string  $id
+     * @return self
+     */
+    public static function alreadyPruned(string $id): self
+    {
+        return new self(sprintf('The record `%s` was pruned; it is not stored again.', $id), $id);
     }
 
     /**

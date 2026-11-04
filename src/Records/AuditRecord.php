@@ -6,7 +6,9 @@ namespace SineMacula\Laravel\AuditLog\Records;
 
 use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Privacy\Minimised;
+use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
+use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
@@ -20,7 +22,16 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  * order they were captured. It carries the current record version, the event
  * version and category of its code's definition, and `captured` provenance,
  * which says the application asserted the activity, not that the claim is true;
- * the import fields are `null`.
+ * the import fields and the source digest are `null`.
+ *
+ * An imported record is this installation's acceptance of another source's
+ * assertion, with `imported` provenance: its id is a UUID version 7 of the time
+ * it was imported, so imported ids sort near their recording, while the time
+ * the activity happened is kept as the source gave it. It names the source that
+ * asserted it, the record's id there, the batch it came in and the keyed digest
+ * of the assertion, has no artifact, and may have no origin, when the source
+ * did not know it. It carries no credential, guard, session, request, trace or
+ * user agent: an import carries no ambient context.
  *
  * It holds only minimised values: its IP address, context and properties are
  * what `RecordMinimiser` left of the builder's, and the note, the identifier
@@ -94,6 +105,7 @@ final readonly class AuditRecord
      * @param  ?string  $sourceRegion
      * @param  ?string  $sourceRecordId
      * @param  ?string  $importBatchId
+     * @param  ?string  $sourceDigest
      * @param  ?string  $ip
      * @param  ?string  $userAgent
      * @param  ?array<array-key, mixed>  $context
@@ -170,10 +182,10 @@ final readonly class AuditRecord
         /** Where the activity ran: `http`, `console` or `queue`; never `null` for a captured record. */
         public ?string $origin,
 
-        /** Who asserts the record: `captured` for every record built here. */
+        /** Who asserts the record: `captured`, or `imported` for a record another source asserted. */
         public string $provenance,
 
-        /** The source the record was captured on. */
+        /** The source the record was captured on, or, for an imported record, the source that asserted it. */
         public string $sourceId,
 
         /** The source's region, if configured. */
@@ -184,6 +196,9 @@ final readonly class AuditRecord
 
         /** The import batch the record came in; `null` for a captured record. */
         public ?string $importBatchId,
+
+        /** The keyed digest of an imported record's source assertion; `null` on every captured record. */
+        public ?string $sourceDigest,
 
         /** The client's IP address in the configured mode, if known and kept. */
         public ?string $ip,
@@ -260,6 +275,7 @@ final readonly class AuditRecord
             sourceRegion: self::nullableOf($fields, 'source_region'),
             sourceRecordId: self::nullableOf($fields, 'source_record_id'),
             importBatchId: self::nullableOf($fields, 'import_batch_id'),
+            sourceDigest: self::nullableOf($fields, 'source_digest'),
             ip: self::nullableOf($fields, 'ip'),
             userAgent: self::nullableOf($fields, 'user_agent'),
             context: self::arrayOf($fields, 'context'),
@@ -324,7 +340,7 @@ final readonly class AuditRecord
         [$tenantType, $tenantId]       = self::pair($snapshot->tenant);
 
         return new self(
-            id: Str::uuid7($occurredAt)->toString(),
+            id: $snapshot->id ?? Str::uuid7($occurredAt)->toString(),
             recordVersion: RecordVersion::CURRENT,
             event: $snapshot->code->value,
             eventVersion: $eventVersion,
@@ -351,12 +367,104 @@ final readonly class AuditRecord
             sourceRegion: $sourceRegion,
             sourceRecordId: null,
             importBatchId: null,
+            sourceDigest: null,
             ip: $minimised->ip,
             userAgent: $snapshot->userAgent,
             context: $minimised->context,
             properties: $minimised->properties,
             occurredAt: self::utc($occurredAt),
             attachment: $attachment,
+        );
+    }
+
+    /**
+     * The imported record of the pending record, which this uses up: built
+     * once, with `imported` provenance, from the references, outcome, reason,
+     * correlation id and what minimising left of the IP address, context and
+     * properties of the pending record, the event version and category of its
+     * code's definition, and the source fields given. Its id is a UUID version
+     * 7 of the time it is imported; the time the activity happened is kept as
+     * given, which must be an instant in the package's form, and its origin, if
+     * the source knew it, must be one this package names. It carries no
+     * credential, guard, session, request, trace or user agent, and no
+     * artifact: a pending record with a manifest is refused.
+     *
+     * Its parameters are the record's parts, each from its own stage of the
+     * import, so none groups naturally with another.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
+     * @param  int  $eventVersion
+     * @param  string  $category
+     * @param  string  $occurredAt
+     * @param  ?string  $origin
+     * @param  \SineMacula\Laravel\AuditLog\Records\ImportedSource  $source
+     * @param  \DateTimeInterface  $importedAt
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     *
+     * @SuppressWarnings("php:S107")
+     */
+    public static function fromImport(
+        #[\SensitiveParameter]
+        PendingRecord $pending,
+        Minimised $minimised,
+        int $eventVersion,
+        string $category,
+        string $occurredAt,
+        ?string $origin,
+        ImportedSource $source,
+        \DateTimeInterface $importedAt,
+    ): self {
+        $snapshot = $pending->consume();
+
+        assert($snapshot->code instanceof EventCode);
+
+        self::checkImport($snapshot, $minimised, $occurredAt, $origin);
+
+        [$actorType, $actorId]         = self::pair($snapshot->actor);
+        [$subjectType, $subjectId]     = self::pair($snapshot->subject);
+        [$principalType, $principalId] = self::pair($snapshot->principal);
+        [$tenantType, $tenantId]       = self::pair($snapshot->tenant);
+
+        return new self(
+            id: Str::uuid7($importedAt)->toString(),
+            recordVersion: RecordVersion::CURRENT,
+            event: $snapshot->code->value,
+            eventVersion: $eventVersion,
+            category: $category,
+            outcome: $snapshot->outcome->value,
+            reason: $snapshot->reason,
+            actorType: $actorType,
+            actorId: $actorId,
+            subjectType: $subjectType,
+            subjectId: $subjectId,
+            principalType: $principalType,
+            principalId: $principalId,
+            tenantType: $tenantType,
+            tenantId: $tenantId,
+            credentialId: null,
+            guard: null,
+            sessionId: null,
+            requestId: null,
+            traceId: null,
+            correlationId: $snapshot->correlationId,
+            origin: $origin,
+            provenance: Provenance::IMPORTED->value,
+            sourceId: $source->sourceId,
+            sourceRegion: $source->sourceRegion,
+            sourceRecordId: $source->sourceRecordId,
+            importBatchId: $source->importBatchId,
+            sourceDigest: $source->sourceDigest,
+            ip: $minimised->ip,
+            userAgent: null,
+            context: $minimised->context,
+            properties: $minimised->properties,
+            occurredAt: $occurredAt,
         );
     }
 
@@ -370,7 +478,7 @@ final readonly class AuditRecord
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @return array{id: string, record_version: int, event: string, event_version: int, category: string, outcome: string, reason: ?string, actor_type: ?string, actor_id: ?string, subject_type: ?string, subject_id: ?string, principal_type: ?string, principal_id: ?string, tenant_type: ?string, tenant_id: ?string, credential_id: ?string, guard: ?string, session_id: ?string, request_id: ?string, trace_id: ?string, correlation_id: ?string, origin: ?string, provenance: string, source_id: string, source_region: ?string, source_record_id: ?string, import_batch_id: ?string, ip: ?string, user_agent: ?string, context: ?array<array-key, mixed>, properties: ?array<array-key, mixed>, occurred_at: string}
+     * @return array{id: string, record_version: int, event: string, event_version: int, category: string, outcome: string, reason: ?string, actor_type: ?string, actor_id: ?string, subject_type: ?string, subject_id: ?string, principal_type: ?string, principal_id: ?string, tenant_type: ?string, tenant_id: ?string, credential_id: ?string, guard: ?string, session_id: ?string, request_id: ?string, trace_id: ?string, correlation_id: ?string, origin: ?string, provenance: string, source_id: string, source_region: ?string, source_record_id: ?string, import_batch_id: ?string, source_digest: ?string, ip: ?string, user_agent: ?string, context: ?array<array-key, mixed>, properties: ?array<array-key, mixed>, occurred_at: string}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -406,6 +514,7 @@ final readonly class AuditRecord
             'source_region'    => $this->sourceRegion,
             'source_record_id' => $this->sourceRecordId,
             'import_batch_id'  => $this->importBatchId,
+            'source_digest'    => $this->sourceDigest,
             'ip'               => $this->ip,
             'user_agent'       => $this->userAgent,
             'context'          => $this->context,
@@ -430,6 +539,36 @@ final readonly class AuditRecord
     {
         if ($snapshot->manifest?->id !== $attachment?->id || !self::isBound($minimised->properties, $attachment)) {
             throw new \LogicException('A record with an artifact is built with the attachment of its own manifest, and any other record with none.');
+        }
+    }
+
+    /**
+     * Refuse an import of a snapshot with a manifest, or of properties holding
+     * a manifest descriptor, since an imported record carries no artifact; a
+     * time that is not an instant in the package's form; and an origin this
+     * package does not name.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
+     * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
+     * @param  string  $occurredAt
+     * @param  ?string  $origin
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    private static function checkImport(#[\SensitiveParameter] PendingSnapshot $snapshot, Minimised $minimised, string $occurredAt, ?string $origin): void
+    {
+        if ($snapshot->manifest !== null || !self::isBound($minimised->properties, null)) {
+            throw new \LogicException('An imported record carries no artifact.');
+        }
+
+        if (!StoredTime::isInstant($occurredAt)) {
+            throw new \InvalidArgumentException('An imported record\'s occurrence time must be ISO-8601 UTC with microseconds, such as 2026-11-01T12:00:00.123456Z.');
+        }
+
+        if ($origin !== null && Origin::tryFrom($origin) === null) {
+            throw new \InvalidArgumentException(sprintf('An imported record\'s origin must be one of `%s`, or null.', implode('`, `', array_column(Origin::cases(), 'value'))));
         }
     }
 

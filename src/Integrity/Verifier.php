@@ -58,8 +58,10 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * those older than the allowed age are overdue, and those recorded further
  * ahead of the run's clock than the lookback are never sealed and are a
  * finding, never pending. It records its completion, with whether it passed at
- * the strictness it ran at. Every statement reads the writer, so a replica's
- * lag never reads as a missing row.
+ * the strictness it ran at. Every run, a ranged one included, then verifies the
+ * whole lifecycle journal and each seal's commitment to it, and a journal
+ * finding fails the run as any finding of its status does. Every statement
+ * reads the writer, so a replica's lag never reads as a missing row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,6 +85,7 @@ final readonly class Verifier
      * @param  \SineMacula\Laravel\AuditLog\Database\IntegrityProgress  $progress
      * @param  \SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
      * @param  \Illuminate\Database\DatabaseManager  $database
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalVerifier  $journal
      */
     public function __construct(
 
@@ -103,6 +106,9 @@ final readonly class Verifier
 
         /** The connections the storage connection is resolved from on every run. */
         private DatabaseManager $database,
+
+        /** The verifier of the lifecycle journal and the seals' commitments to it. */
+        private JournalVerifier $journal,
     ) {}
 
     /**
@@ -138,7 +144,8 @@ final readonly class Verifier
             $this->checkUnsealed($now, $tally);
         }
 
-        $summary = VerificationSummary::of($bounds, $head, $remote?->sequence, $status, $range->isComplete(), $this->discovers(), $tally);
+        $journal = $this->journal->verify($tally);
+        $summary = VerificationSummary::of($bounds, $head, $remote?->sequence, $status, $range->isComplete(), $this->discovers(), $tally)->withJournal($journal);
 
         if ($range->isComplete()) {
             $last = ['at' => StoredTime::format($now), 'head' => $head, 'passed' => !$summary->fails($strict), 'strict' => $strict];

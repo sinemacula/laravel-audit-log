@@ -77,6 +77,10 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
   verification looks the entry and its artifact up on the writer, never a lagging replica. The manifest is versioned and
   names the file and membership digests, the first and last positions, the fingerprints, the snapshot's consistency and
   the viewer.
+- **Export evidence is kept.** `audit_log.trail_exported` entries are protected from retention, so `--verify` keeps
+  working while the database and `app.key` live: `audit-log:prune` never deletes one, whatever its category's policy,
+  and its `export` artifact goes only with its entry. The artifact's members are encrypted under `app.key`, so a key
+  rotated away must stay in `app.previous_keys` for as long as an export's verification is promised.
 
 ## Success Path
 
@@ -118,8 +122,6 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
 - The decrypting `Contracts\FieldReader`, which reads a field sealed under its owner's key and answers its value, or
   `erased` once an erasure has destroyed the owner's keys. The package binds `Privacy\SealedFieldReader`, which answers
   `encrypted` for every field.
-- The lifecycle journal, which has not shipped yet, must keep the export evidence, the `audit_log.trail_exported` entry
-  and its `export` artifact, or durably reference it, and must never prune it as an ordinary event.
 - Owner discovery and erasure for a subject access request, which `onlyAbout()` does not find.
 
 ## Implementation Anchors
@@ -137,7 +139,7 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
   `src/Querying/TrailPage.php`; `src/Contracts/FieldReader.php`, `src/Privacy/SealedFieldReader.php`,
   `src/Privacy/Enums/FieldState.php`.
 - `src/Querying/AccessRecorder.php`: `record()`; `src/Querying/AccessEvidence.php`; `src/Delivery/PackageWrite.php`;
-  `src/Querying/Enums/PackageActivity.php`; `src/Records/DisclosureManifest.php`.
+  `src/Querying/Enums/PackageActivity.php`: `isProtected()`; `src/Records/DisclosureManifest.php`.
 - `src/Querying/Exporter.php`: `export()`; `src/Querying/ExportSnapshot.php`, `src/Querying/ExportFile.php`,
   `src/Querying/MembershipDigest.php`, `src/Querying/ExportBundle.php`, `src/Records/ExportManifest.php`,
   `src/Querying/ExportResult.php`, `src/Querying/Enums/Acknowledgement.php`.
@@ -215,6 +217,8 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
   `testRowReadFailedWrite`
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheReadingGuideHasItsSections`,
   `testEachReadingStatementIsMade`, `testTheReadingNoteNamesTheSeamsLeft`
+- `tests/Unit/Querying/Enums/PackageActivityTest.php` `testOnlyTheExportIsProtected`
+- `tests/Feature/Lifecycle/PrunerTest.php` `testAProtectedExportSurvivesAndStillVerifies`
 
 ## Change Triggers
 
@@ -227,5 +231,6 @@ Update this note when any of the following change:
 - what the gate refuses, or what the read guard spans
 - what a shown entry holds, or how an encrypted field is read
 - the export's protocol, snapshot, order, manifest, bundle or publication
+- which codes retention never prunes, or what verifying an export needs kept
 - the verification's chain or a finding
 - the seams the read path leaves

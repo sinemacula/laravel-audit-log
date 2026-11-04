@@ -189,8 +189,16 @@ one, a dedicated file:
   the row completes.
 - A receipt says what the package called: a successful call to a remote destination is not proof that it ingested the
   record. It holds the attempts, the times and the last error's class, and nothing of the record.
-- Receipts are kept. The drain never deletes one, and a later replay relies on them, so they outlive their rows until
-  the lifecycle work, which has not shipped yet, prunes them.
+- Receipts are kept. The drain never deletes one, and a later replay relies on them, so they outlive their rows. They
+  are pruned with their entries once terminal: `audit-log:prune` keeps an entry while it has an outbox row or a receipt
+  not yet delivered, read after the prune's lock, and deletes an entry's receipts with it once every one is delivered.
+- Every row a drain claims is checked against the tombstones (`Lifecycle\PruneTombstones`) once its record is read: an
+  id a seal holds as a member whose entry is no longer stored, and whose position a valid prune record of the seal sets,
+  was pruned by retention; an absent member no valid record covers was removed some other way, and its row is delivered,
+  so the store keeps the authentic row again. A pruned row is deleted and counted `pruned`, no destination is called and
+  no `AuditRecorded` is dispatched, so a pruned record is never stored again. The check is one indexed statement per
+  row, since a row requeued by `audit-log:replay --outbox` starts its attempts again and may hold a record stored,
+  sealed and pruned since. A row whose tombstones cannot be read is retried as any failure is.
 
 ## Replay
 
@@ -219,8 +227,20 @@ non-zero when anything was skipped or failed.
 - A removed signing key means the record is unverifiable: restore the key or leave the record quarantined. It is never
   re-signed, because a new signature would vouch for bytes nobody can now check.
 - An unsigned line is counted and left, and there is no option to replay one, because signing editable bytes cannot
-  establish where they came from. The importer, which has not shipped yet, is where an unsigned record goes, marked as
-  asserted by its source.
+  establish where they came from. The importer, `audit-log:import`, takes third-party evidence, marked as asserted by
+  its source: it refuses this installation's own source, so its own records come back through a replay, never as an
+  import. An imported row is signed and sealed here as this installation's acceptance of what the source asserted; it
+  is never dispatched as `AuditRecorded` and never delivered to a destination.
+- A spill replay checks every line's id against the tombstones before the store, and a dry run does too: a record
+  retention pruned is counted `pruned` and never stored again. Outside a dry run the check and the store run in one
+  lifecycle transaction, behind the lock every prune takes first, so a prune never deletes the record between its check
+  and its insert, and the replay needs the maintenance connection a prune needs. An outbox replay's rows are checked by
+  the drain, whose outbox row keeps its entry from any prune until it is drained.
+- The store's conflict path checks the id it could not insert: a unique violation under the id of a pruned record is
+  `RecordConflictException::alreadyPruned()`, never the raw exception. A fresh insert of a pruned id violates no index,
+  so a record an application stores again by hand through `AuditStore::store()` is not refused: the drain and the spill
+  replay are the paths that hand the store an id it did not mint now, and they check it. Verification reports such a
+  record `resurrected`, so it is detected, not prevented.
 - `--outbox` resets the receipts of the destinations without the record, then requeues the failed rows, then drains. A
   crash between the two leaves the rows failed and a rerun is safe, and a crash after the requeue leaves them due, for
   any drain. Delivered receipts are kept, so a replay reaches only what failed, and the drain also takes any other row
@@ -376,7 +396,10 @@ else does yet. A projection is never the integrity artefact.
   `deliver()`, `STORE_DESTINATION`; `src/Delivery/DeliveryResult.php`: `failure()`; `src/Console/DrainCommand.php`.
 - `src/Delivery/CommitQueue.php`: `defer()`, `reserve()`, `probe()`; `src/Delivery/CommitFlush.php`: `run()`.
 - `src/Delivery/Replayer.php`: `spill()`, `outbox()`; `src/Delivery/SpillReader.php`: `lines()`, `extract()`;
-  `src/Delivery/SpillLine.php`, `src/Delivery/ReplayResult.php`, `src/Console/ReplayCommand.php`.
+  `src/Delivery/SpillLine.php`, `src/Delivery/ReplayResult.php`: `pruned()`, `src/Console/ReplayCommand.php`.
+- `src/Lifecycle/PruneTombstones.php`; `src/Delivery/DrainResult.php`: `pruned()`;
+  `src/Stores/RecordConflictException.php`: `alreadyPruned()`; `src/Lifecycle/PendingDeliveries.php`;
+  `src/Lifecycle/AuditImporter.php`.
 - `src/Records/EnvelopeCodec.php`: `encode()`, `decode()`, `MAX_BYTES`, `MAX_ENCODED_BYTES`;
   `src/Records/EnvelopeRejectedException.php`, `src/Records/Enums/EnvelopeFailure.php`.
 - `src/Stores/FailureSpill.php`: `MARKER`, `line()`; `src/Stores/FailureSettings.php`,
@@ -539,6 +562,22 @@ else does yet. A projection is never the integrity artefact.
 - `tests/Unit/Stores/StackAuditStoreTest.php` `testAStackAcceptsAttachmentsOnlyWhenEveryDestinationDoes`
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheDocumentedChannelIsTheTestedOne`,
   `testTheSpillAndOutboxArePersonalData`
+- `tests/Feature/Delivery/PrunedRedeliveryTest.php` `testTheDrainCompletesAPrunedRowAsPruned`,
+  `testNoDestinationIsCalledForAPrunedRow`, `testNoAuditRecordedIsDispatchedForAPrunedRow`,
+  `testARowWhoseTombstonesCannotBeReadIsRetried`, `testASpillReplayCountsAPrunedLineAndStoresNothing`,
+  `testADryRunCountsAPrunedLine`, `testAnOutboxReplayOfAPrunedRowCompletesItAsPruned`,
+  `testAFreshCaptureIsNeverChecked`, `testADirectStoreOfAPrunedRecordIsReportedResurrected`
+- `tests/Integration/Stores/PrunedRecordConflictTest.php` `testAUniqueViolationOfAPrunedIdIsAlreadyPruned`,
+  `testAFreshInsertOfAPrunedIdIsNotRefused`
+- `tests/Integration/Lifecycle/PruneTombstonesTest.php` `testASealedMemberAbsentFromTheEntriesIsPruned`,
+  `testAnUnsealedIdIsNot`
+- `tests/Performance/DrainQueryBudgetTest.php` `testEachRowCostsOneTombstoneCheck`
+- `tests/Feature/Console/DrainCommandTest.php` `testAPrunedRowIsPrintedAndExitsZero`
+- `tests/Feature/Console/ReplayCommandTest.php` `testPrintsThePrunedAndExitsZero`
+- `tests/Feature/Lifecycle/PendingDeliveriesTest.php` `testAnUndeliveredReceiptIsPending`, `testADeliveredReceiptIsNot`
+- `tests/Feature/Lifecycle/PrunerTest.php` `testAPendingDeliverySurvivesAndIsCounted`,
+  `testArtifactsAndReceiptsGoWithTheirEntries`, `testAFailedDeliveryKeepsItsEntryUntilReplayed`
+- `tests/Feature/Lifecycle/AuditImporterTest.php` `testImportedRowsAreNotDispatchedOrDelivered`, `testItRefusesItsOwnSource`
 
 ## Change Triggers
 
@@ -547,7 +586,8 @@ Update this note when any of the following change:
 - a stored value of `FailureMode`, `DeliveryMode`, `FailedOperation` or `EnvelopeFailure`
 - what the outbox row holds, how it is encrypted, or the envelope's bound
 - how a row is claimed, fenced or renewed, or when it is retried, failed or deleted
-- what a receipt holds, when it is written, or whether it is kept
+- what a receipt holds, when it is written, whether it is kept, or when a prune deletes it
+- which paths check the tombstones, or what a pruned record is completed as
 - the documented spill channel, how a line reaches it, the line's format or what the reader accepts
 - what a replay verifies, what it skips or what it may change
 - what a store says of itself, or how a stack answers for its destinations

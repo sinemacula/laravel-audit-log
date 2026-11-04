@@ -13,6 +13,7 @@ use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use Tests\Concerns\RunsDocumentedSql;
 use Tests\Concerns\TampersWithTheLog;
 use Tests\Fixtures\Support\FrozenClock;
@@ -27,14 +28,14 @@ use Tests\TestCase;
  * maintenance user (on SQLite by anyone), let the maintenance user delete one,
  * refuse a `TRUNCATE` on PostgreSQL, leave the integrity state table alone, and
  * leave sealing, anchoring, the sweep and verification working; the documented
- * SQLite prune deletes and restores its triggers, an entry's artifact with it,
- * and a failed one rolled back keeps them.
+ * SQLite prune takes the lifecycle lock, deletes and restores its triggers, an
+ * entry's artifact with it, and a failed one rolled back keeps them.
  *
  * On MySQL and PostgreSQL the documented grants are run too, for the logins
- * this worker creates, `audit_writer_<token>` and `audit_maintenance_<token>`,
- * which are dropped when the test ends, as the triggers are, and they limit
- * what each login does to an artifact. The tests cover documented SQL, not a
- * class of the package.
+ * this worker creates, `audit_writer_<token>`, `audit_maintenance_<token>` and
+ * `audit_verifier_<token>`, which are dropped when the test ends, as the
+ * triggers are, and they limit what each login does to an artifact. The tests
+ * cover documented SQL, not a class of the package.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,6 +52,9 @@ final class AppendOnlyTriggersTest extends TestCase
 
     /** @var string The connection the maintenance user's login uses. */
     private const string MAINTENANCE = 'audit_maintenance';
+
+    /** @var string The connection the verifier's login uses. */
+    private const string VERIFIER = 'audit_verifier';
 
     /** @var string When the log is sealed. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -110,8 +114,9 @@ final class AppendOnlyTriggersTest extends TestCase
         if ($this->names !== []) {
             DB::purge(self::WRITER);
             DB::purge(self::MAINTENANCE);
+            DB::purge(self::VERIFIER);
 
-            foreach ([$this->names['audit_writer'], $this->names['audit_maintenance'], ...$this->logins] as $login) {
+            foreach ([$this->names['audit_writer'], $this->names['audit_maintenance'], $this->names['audit_verifier'], ...$this->logins] as $login) {
                 self::dropLogin($root, $login);
             }
         }
@@ -471,8 +476,9 @@ final class AppendOnlyTriggersTest extends TestCase
 
     /**
      * On SQLite the documented prune, with a delete where the prune's own
-     * statements go, deletes the entry and leaves the delete trigger as it was,
-     * so the next delete is refused; members and seals stay.
+     * statements go, takes the lifecycle lock first, deletes the entry and
+     * leaves the delete trigger as it was, so the next delete is refused;
+     * members and seals stay, and the lock's one row holds the prune's token.
      *
      * @return void
      */
@@ -483,7 +489,12 @@ final class AppendOnlyTriggersTest extends TestCase
         $entries = $this->sealedLog();
         $root    = $this->root();
 
+        self::assertNull($root->table(LifecycleTables::lockTable())->value('token'));
+
         $root->unprepared($this->pruneOf(sprintf('DELETE FROM %s WHERE id = \'%s\';', EntrySettings::table(), $entries[0])));
+
+        self::assertSame(['manual'], $root->table(LifecycleTables::lockTable())->where('id', 1)->pluck('token')->all());
+        self::assertNotNull($root->table(LifecycleTables::lockTable())->value('locked_at'));
 
         self::assertFalse($root->table(EntrySettings::table())->where('id', $entries[0])->exists());
         self::assertSame(3, $root->table(EntrySettings::table())->count());
@@ -525,8 +536,9 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * On SQLite a prune that fails after dropping the trigger and deleting an
-     * entry, rolled back, keeps the entry and the trigger.
+     * On SQLite a prune that fails after taking the lock, dropping the trigger
+     * and deleting an entry, rolled back, keeps the entry, the trigger and the
+     * lock's row as it was.
      *
      * @return void
      */
@@ -543,6 +555,7 @@ final class AppendOnlyTriggersTest extends TestCase
         $root->unprepared('ROLLBACK');
 
         self::assertSame(4, $root->table(EntrySettings::table())->count());
+        self::assertNull($root->table(LifecycleTables::lockTable())->value('token'));
         self::assertSame($this->installedTriggers($root), $this->documentedTriggerNames());
         self::assertRefusedByATrigger(static fn () => $root->table(EntrySettings::table())->where('id', $entries[0])->delete(), EntrySettings::table(), 'DELETE');
     }
@@ -644,9 +657,11 @@ final class AppendOnlyTriggersTest extends TestCase
 
         self::createLogin($root, $this->names['audit_writer']);
         self::createLogin($root, $this->names['audit_maintenance']);
+        self::createLogin($root, $this->names['audit_verifier']);
         self::runDocumentedSql($root, $root->getDriverName() . '-grants', $this->names);
         self::connectAs(self::WRITER, self::CONNECTION, $this->names['audit_writer']);
         self::connectAs(self::MAINTENANCE, self::CONNECTION, $this->names['audit_maintenance']);
+        self::connectAs(self::VERIFIER, self::CONNECTION, $this->names['audit_verifier']);
     }
 
     /**

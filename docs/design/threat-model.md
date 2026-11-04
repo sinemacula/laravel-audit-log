@@ -174,6 +174,22 @@ limit below holds however the package is configured.
   be rewritten by whoever holds the database and the key. No timer bounds that exposure: a stopped scheduler or a
   backlog extends it. The package records the progress of sealing, the sweep, anchoring and verification instead, for
   monitoring to alert on when it goes stale.
+- **Two guarantees.** Database credentials can still destroy rows; the package's cryptographic evidence makes
+  unauthorised destruction detectable, never impossible. The two are stated apart because they are not the same: the
+  maintenance credentials can delete rows and the journal makes it detectable. Whoever holds them can delete entries,
+  holds and journal rows outside the package as readily as a prune can, but a sealed entry missing without a valid
+  prune record is `missing_entry`, a pruned one present again is `resurrected`, and a journal row edited, deleted or
+  cut off after a seal committed to it contradicts that seal. A hold, a retention policy and the journal decide what the
+  package deletes; none of them stops anyone holding those credentials, and the limits above still apply to what
+  happened before a seal or after the anchored head.
+- **Asserted authority.** `--by-type` and `--by-id` prove nothing: they record whom the caller says the operator is,
+  and the same holds for every `Authority` an application passes. The boundary is the maintenance connection's
+  credentials and the application's own authorisation before it calls; the journal shows what was asserted and when,
+  never that it was true.
+- **Imported evidence.** Imported rows assert what was accepted, not the truth of the event. An imported row is signed
+  and sealed by this installation, so it shows the row has not changed since the import accepted it from its source,
+  never that the source witnessed the event or recorded it truthfully. Its batch is marked as not externally verified,
+  and its source digest binds the source's assertion as it was given, not the event behind it.
 - **Compliance.** Installing the package is not compliance. It supplies evidence and the checks of it; deciding what is
   recorded, how long it is kept, who can read it and its keys, how the anchor is configured, and who answers an alert
   remain the operator's.
@@ -217,6 +233,8 @@ limit below holds however the policy is written.
 - `src/Records/Concerns/DescribesTheActivity.php`: `withProperties()`, `withNote()`, `withIdentifier()`.
 - `src/Integrity/SealSigner.php`: `sealKey()`; `src/Integrity/Verifier.php`: `verify()`;
   `src/Contracts/CheckpointAnchor.php`: `latest()`; `src/Database/IntegrityProgress.php`.
+- `src/Lifecycle/Authority.php`; `src/Lifecycle/Pruner.php`; `src/Integrity/JournalVerifier.php`: `verify()`;
+  `src/Integrity/PruneCoverage.php`: `of()`; `src/Lifecycle/AuditImporter.php`; `src/Lifecycle/SourceDigest.php`.
 - `src/Contracts/AuditAccessPolicy.php`: `scope()`; `src/Access/ScopeCompiler.php`: `isEmpty()`;
   `src/Querying/AccessRecorder.php`: `record()`; `src/Models/AuditEntry.php`.
 
@@ -264,6 +282,12 @@ limit below holds however the policy is written.
   `testMarkingASealUnreadableNeverHidesItsDeletedSegment`, `testEditingTheAnchorColumnsChangesNothing`
 - `tests/Feature/Integrity/IntegrityAlertingTest.php` `testTheEventIsPayloadFree`
 - `tests/Feature/Integrity/SealerTest.php` `testTheLastRunIsRecordedEvenWithNothingToSeal`
+- `tests/Feature/Integrity/JournalTamperingTest.php` `testEachTamperingIsFoundAndExitsNonZero`
+- `tests/Integration/Lifecycle/JournalCommitmentEnginesTest.php` `testRestoringAnOlderJournalContradictsTheSeals`
+- `tests/Feature/Delivery/PrunedRedeliveryTest.php` `testADirectStoreOfAPrunedRecordIsReportedResurrected`
+- `tests/Integration/Integrity/PruneBoundariesTest.php` `testARecordWithoutItsDeletionIsResurrected`
+- `tests/Feature/Lifecycle/AuditImporterTest.php` `testTheBatchIsNotExternallyVerified`
+- `tests/Unit/Lifecycle/SourceDigestTest.php` `testMinimisationDoesNotChangeIt`
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheThreatModelStatesTheLimitsOfAPhpPolicy`
 - `tests/Feature/Querying/AccessControlTest.php` `testAGuessedTenantGivesTheSameEmptyResultAsAnUnknownOne`
 - `tests/Feature/Querying/TrailReaderTest.php` `testADeniedScopeMakesNoQuery`
@@ -281,4 +305,6 @@ Update this note when any of the following change:
 - what the spill or the outbox holds, or how either is protected
 - what signing a line establishes
 - what sealing, anchoring or verification leaves undetectable, or what a held key can forge
+- what the maintenance credentials can do, what the journal makes detectable, or what an authority proves
+- what an imported row asserts, or what binds it to its source
 - what the access policy can see, what bypasses it, or what a read's timing can tell

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\TestCase;
 
 /**
@@ -121,6 +122,8 @@ final class EntriesMigrationCollisionTest extends TestCase
         self::assertTrue(Schema::hasTable(self::TABLE));
         self::assertTrue(Schema::hasColumn(self::TABLE, 'hmac'));
         self::assertTrue(Schema::hasColumn(self::TABLE, 'source_record_id'));
+        self::assertTrue(Schema::hasColumn(self::TABLE, 'source_digest'));
+        self::assertSame(array_keys(RowCodec::COLUMNS), array_column(Schema::getColumns(self::TABLE), 'name'));
     }
 
     /**

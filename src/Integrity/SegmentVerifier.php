@@ -36,14 +36,25 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  * whole or not at all, and streamed: each member's entry must exist, hold the
  * HMAC the seal recorded and verify under its own key, the rows must be as many
  * as the seal counts, and their entry ids and HMACs, sorted bytewise and never
- * in the order the database returned them, must give the members digest.
- * Missing entries are pruned only under a prune record whose signature verifies
- * and which binds exactly this seal; anything else is reported. A sealed
+ * in the order the database returned them, must give the members digest. Every
+ * missing member is kept, and every present one that verified. A sealed
  * bundle's manifest is checked with its seal: each entry that verified and
  * signs a manifest has its artifact checked by the manifest verifier, in
  * batches, never one statement per entry. An entry pruned under a verified
  * prune record is missing, so it has no descriptor to check, and its artifact
  * goes with it.
+ *
+ * The prune ledger is asked for every segment, after its members and entries
+ * were read, even when none is missing, so a seal whose pruned members were all
+ * inserted again is found. The order is what tells a prune from a resurrection:
+ * the members are read first, then the records, then each present member a
+ * valid record covers is read again, by id, on the writer. One gone by then was
+ * pruned by a transaction that committed between the reads, and its record
+ * accounts for it; one still there was restored or inserted again, and is
+ * `resurrected`. A missing member is pruned only when exactly one valid record
+ * of exactly this seal, read after the member was, covers it, positions taken
+ * from the authenticated members alone; anything else is reported. A ledger
+ * that cannot read a stored record is a forged record of the seal.
  *
  * Anchoring comes from the anchor, never from the receipt kept beside the seal.
  * An anchor's head at this sequence with another digest is `contradicted`; no
@@ -64,6 +75,12 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  */
 final readonly class SegmentVerifier
 {
+    /** @var int Most present members read again in one statement. */
+    private const int RECHECK_BATCH = 500;
+
+    /** @var string The key the present members that verified are kept under, beside the missing ones' finding: that of no finding. */
+    private const string PRESENT = '';
+
     /**
      * Constructor.
      *
@@ -90,7 +107,7 @@ final readonly class SegmentVerifier
         /** The settings the log id is read from. */
         private SealSettings $settings,
 
-        /** The ledger asked for the prune record of a seal whose entries are missing. */
+        /** The ledger asked for the prune records of every segment. */
         private PruneLedger $prunes,
 
         /** The anchor asked whether it confirms each seal's receipt. */
@@ -129,11 +146,10 @@ final readonly class SegmentVerifier
             return $this->boundary($seal, $gap);
         }
 
-        [$members, $memberFindings, $firstMissing] = $this->members($envelope);
-        [$anchoring, $awaiting, $anchorFindings]   = $this->anchoring($seal, $envelope, $digest, $context);
+        [$members, $memberFindings, $sorted, $missing, $present, $authentic] = $this->members($envelope);
+        [$anchoring, $awaiting, $anchorFindings]                             = $this->anchoring($seal, $envelope, $digest, $context);
 
-        $pruneFindings                      = $this->prune($envelope, $digest, $firstMissing);
-        $pruned                             = $firstMissing !== null && $pruneFindings === [];
+        [$pruneFindings, $pruned]           = $this->coverage($envelope, $digest, $sorted, $missing, $present, $authentic);
         $all                                = [...$gap, ...$findings, ...self::chain($envelope, $previous), ...$memberFindings, ...$pruneFindings, ...$anchorFindings];
         [$integrity, $finding, $firstBadId] = SegmentReport::verdict($all, $pruned);
 
@@ -238,10 +254,13 @@ final readonly class SegmentVerifier
 
     /**
      * How many member rows the seal has, the findings of its members, of the
-     * manifests its verified entries sign and of the set of members, and the
-     * first missing entry's id in member order, if any entry is missing. Only
-     * as many member pairs as the seal counts are kept, so a seal given extra
-     * member rows costs no more memory than its own.
+     * manifests its verified entries sign and of the set of members, the member
+     * entry ids sorted bytewise, every missing member's id, every present
+     * member's that verified, and whether the membership is authentic: the rows
+     * as many as the seal counts and giving its members digest. Only as many
+     * member rows as the seal counts are kept, so a seal given extra member
+     * rows costs no more memory than its own; such a seal is never authentic,
+     * so nothing it leaves out could be found pruned.
      *
      * Only an entry that verified is trusted for its manifest descriptor, and
      * the manifests are checked together, in batches, never one statement per
@@ -254,7 +273,7 @@ final readonly class SegmentVerifier
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
-     * @return array{0: int, 1: list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>, 2: ?string}
+     * @return array{0: int, 1: list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>, 2: list<string>, 3: list<string>, 4: list<string>, 5: bool}
      *
      * @throws \InvalidArgumentException
      *
@@ -268,19 +287,18 @@ final readonly class SegmentVerifier
         $pairs     = [];
         $first     = [];
         $manifests = [];
+        $kept      = [Finding::MISSING_ENTRY->value => [], self::PRESENT => []];
 
         foreach ($this->memberRows($seal->id) as $row) {
-            $entry  = (array) $row;
-            $member = self::textOf($entry['member_entry_id'] ?? null) ?? '';
-            $hmac   = self::textOf($entry['member_hmac'] ?? null)     ?? '';
-
-            $count++;
-
-            if ($count <= $seal->memberCount) {
-                $pairs[] = [$member, $hmac];
-            }
-
+            $entry   = (array) $row;
+            $member  = self::textOf($entry['member_entry_id'] ?? null) ?? '';
+            $hmac    = self::textOf($entry['member_hmac'] ?? null)     ?? '';
             $finding = $this->memberFinding($entry, $hmac);
+
+            if (++$count <= $seal->memberCount) {
+                $pairs[]                           = [$member, $hmac];
+                $kept[(string) $finding?->value][] = $member;
+            }
 
             if ($finding === null) {
                 $manifests[$member] = $this->manifests->descriptorOf($entry);
@@ -291,14 +309,16 @@ final readonly class SegmentVerifier
             $first[$finding->value] = self::earliest($first[$finding->value] ?? null, $member);
         }
 
-        $missing = $first[Finding::MISSING_ENTRY->value] ?? null;
-
         unset($first[Finding::MISSING_ENTRY->value]);
 
-        $found     = array_map(static fn (string $finding, string $id): array => [Finding::from($finding), $id], array_keys($first), $first);
-        $manifests = $this->manifests->findings(array_filter($manifests, is_array(...)));
+        $found      = array_map(static fn (string $finding, string $id): array => [Finding::from($finding), $id], array_keys($first), $first);
+        $manifests  = $this->manifests->findings(array_filter($manifests, is_array(...)));
+        $membership = self::membership($seal, $count, $pairs);
+        $sorted     = array_column($pairs, 0);
 
-        return [$count, [...$found, ...$manifests, ...self::membership($seal, $count, $pairs)], $missing];
+        usort($sorted, strcmp(...));
+
+        return [$count, [...$found, ...$manifests, ...$membership], $sorted, $kept[Finding::MISSING_ENTRY->value], $kept[self::PRESENT], $membership === []];
     }
 
     /**
@@ -365,56 +385,67 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The finding of the seal's missing entries, if any is missing and no valid
-     * prune record that binds exactly this seal accounts for them: the first
-     * missing entry with no record, or the seal when its record does not
-     * account for them. Missing entries with no finding are pruned.
+     * The findings of the seal's prune records and of what they cover, and
+     * whether the segment is pruned: at least one member missing, or gone when
+     * read again, and every missing member covered. The ledger is asked once,
+     * after the members were read; each present member a valid record covers is
+     * then read again, so one gone by then was pruned meanwhile and one still
+     * there is `resurrected`, at each such member.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @param  string  $digest
-     * @param  ?string  $firstMissing
-     * @return list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>
+     * @param  list<string>  $sorted
+     * @param  list<string>  $missing
+     * @param  list<string>  $present
+     * @param  bool  $authentic
+     * @return array{0: list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>, 1: bool}
+     *
+     * @throws \InvalidArgumentException
      */
-    private function prune(SealEnvelope $seal, string $digest, ?string $firstMissing): array
+    private function coverage(SealEnvelope $seal, string $digest, array $sorted, array $missing, array $present, bool $authentic): array
     {
-        if ($firstMissing === null) {
-            return [];
+        try {
+            $records    = $this->prunes->recordsFor($seal->id);
+            $unreadable = [];
+        } catch (\UnexpectedValueException) {
+            $records    = [];
+            $unreadable = [[Finding::PRUNE_RECORD, $seal->id]];
         }
 
-        $record  = $this->prunes->recordFor($seal->id);
-        $finding = $record === null ? Finding::MISSING_ENTRY : $this->pruneFinding($record, $seal, $digest);
+        $result      = (new PruneCoverage($this->seals))->of($seal, $digest, $sorted, $missing, $present, $authentic, $records);
+        $resurrected = array_map(static fn (string $id): array => [Finding::RESURRECTED, $id], $this->stillPresent($result->recheck));
+        $findings    = [...$unreadable, ...$result->findings, ...$resurrected];
 
-        if ($finding === null) {
-            return [];
-        }
-
-        return [[$finding, $finding === Finding::MISSING_ENTRY ? $firstMissing : $seal->id]];
+        // A member read again is either gone or `resurrected`, which outweighs
+        // pruned, so one read again counts towards pruned as a missing one does
+        return [$findings, ($missing !== [] || $result->recheck !== []) && count($result->covered) === count($missing)];
     }
 
     /**
-     * The finding of the seal's prune record, or `null` when it accounts for
-     * the missing entries: it binds exactly this seal (its log, id, recomputed
-     * digest and member count) and its signature verifies. One that does not
-     * bind the seal or whose signature fails is forged; one signed under a key
-     * the ring does not hold cannot be checked.
+     * Which of the ids are still entries: one statement on the writer for each
+     * 500 of them, and none for no id.
      *
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\PruneRecord  $record
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
-     * @param  string  $digest
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
+     * @param  list<string>  $ids
+     * @return list<string>
+     *
+     * @throws \InvalidArgumentException
      */
-    private function pruneFinding(PruneRecord $record, SealEnvelope $seal, string $digest): ?Finding
+    private function stillPresent(array $ids): array
     {
-        $binds = $record->logId     === $seal->logId
-            && $record->sealId      === $seal->id
-            && $record->sealDigest  === $digest
-            && $record->memberCount === $seal->memberCount;
+        $still = [];
 
-        try {
-            return $binds && $this->seals->verifiesPrune($record) ? null : Finding::PRUNE_RECORD;
-        } catch (UnknownKeyException) {
-            return Finding::PRUNE_KEY;
+        foreach (array_chunk($ids, self::RECHECK_BATCH) as $batch) {
+            $found = $this->database->connection(StorageConnection::name())
+                ->table(EntrySettings::table())
+                ->whereIn('id', $batch)
+                ->useWritePdo()
+                ->pluck('id')
+                ->all();
+
+            array_push($still, ...array_values(array_filter($found, is_string(...))));
         }
+
+        return $still;
     }
 
     /**

@@ -14,6 +14,7 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
@@ -42,8 +43,10 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * rolled back, and what is stored under the record's ids is read from the
  * writer; on MySQL inside a transaction, with a shared locking read, a current
  * read past the snapshot that needs only `SELECT`. With nothing stored under
- * them (the violation was on another index, or the rows are beyond the host's
- * snapshot) the original exception propagates; an entry that fails
+ * them, a record retention has already pruned, which a seal holds as a member
+ * though its entry is gone, is a `RecordConflictException` and is not stored
+ * again; otherwise (the violation was on another index, or the rows are beyond
+ * the host's snapshot) the original exception propagates. An entry that fails
  * verification, or whose captured content differs, is a
  * `RecordConflictException`; an entry that verifies with the same captured
  * content is the record, stored already, and is kept as it is, its time and key
@@ -56,10 +59,17 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * is unknown, its version unsupported, or it is malformed) propagates the
  * signer's or the codec's exception. Nothing else is caught.
  *
+ * A fresh insert of a pruned record's id violates no index, so it is not
+ * refused here: the store would need a statement on every write to see it. The
+ * paths that hand the store an id it did not mint now, the outbox drain and the
+ * spill replay, check every id first; a record an application kept and stores
+ * again directly is inserted, and verification reports its seal `resurrected`.
+ *
  * A record costs one statement, and inside a transaction Laravel's savepoint
  * too; a duplicate costs one more, the read, and inside a transaction the
- * savepoint's rollback. A bundle's duplicate costs the two reads, and the
- * rollback of its transaction or savepoint.
+ * savepoint's rollback; a violation with nothing stored costs the read of the
+ * tombstones too. A bundle's duplicate costs the two reads, and the rollback of
+ * its transaction or savepoint.
  *
  * Laravel never releases a savepoint that succeeds, and releasing it would not
  * help: on PostgreSQL every savepoint is a subtransaction, and one that wrote
@@ -92,6 +102,7 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
      * @param  \Illuminate\Database\ConnectionResolverInterface  $connections
      * @param  \SineMacula\Laravel\AuditLog\Stores\RowCodec  $codec
      * @param  \SineMacula\Laravel\AuditLog\Integrity\RecordSigner  $signer
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones  $tombstones
      */
     public function __construct(
 
@@ -103,6 +114,9 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
 
         /** The signer that verifies an existing row and digests captured content. */
         private RecordSigner $signer,
+
+        /** The tombstones that say whether retention has already pruned a record whose insert conflicted. */
+        private PruneTombstones $tombstones,
     ) {}
 
     /**
@@ -276,8 +290,8 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
     /**
      * Resolve a unique violation of the record's insert: succeed only when the
      * writer holds a row under the record's id that verifies and has the same
-     * captured content; otherwise throw, the original exception when no such
-     * row is visible.
+     * captured content; otherwise throw, the conflict of a pruned record or the
+     * original exception when no such row is visible.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $table
@@ -285,6 +299,7 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
      * @param  \Illuminate\Database\UniqueConstraintViolationException  $exception
      * @return void
      *
+     * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      * @throws \Illuminate\Database\UniqueConstraintViolationException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
@@ -301,7 +316,7 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
         $existing = self::lookup($connection, $table, $record->record->id);
 
         if ($existing === null) {
-            throw $exception;
+            $this->refuseUnstored($record->record->id, $exception);
         }
 
         $conflict = $this->conflictWith($record, $this->codec->decode((array) $existing));
@@ -315,8 +330,8 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
      * Resolve a unique violation of the bundle's inserts: succeed only when the
      * writer holds an entry under the record's id that verifies and has the
      * same captured content, and an artifact under the attachment's id that is
-     * the same artifact; throw the original exception when neither is visible,
-     * and a conflict otherwise.
+     * the same artifact; throw the conflict of a pruned record or the original
+     * exception when neither is visible, and a conflict otherwise.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $table
@@ -326,6 +341,7 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
      * @param  \Illuminate\Database\UniqueConstraintViolationException  $exception
      * @return void
      *
+     * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      * @throws \Illuminate\Database\UniqueConstraintViolationException
      * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
@@ -346,7 +362,7 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
         $stored = self::lookup($connection, $artifacts, $artifact['id']);
 
         if ($entry === null && $stored === null) {
-            throw $exception;
+            $this->refuseUnstored($record->record->id, $exception);
         }
 
         $conflict = $this->bundleConflictWith($record, $artifact, $entry, $stored);
@@ -354,6 +370,24 @@ final readonly class DatabaseAuditStore implements AcceptsAttachments, DurableAu
         if ($conflict !== null) {
             throw $conflict;
         }
+    }
+
+    /**
+     * Refuse a record whose insert violated a unique index though nothing is
+     * stored under its ids: as already pruned when retention has pruned it, and
+     * with the original exception otherwise.
+     *
+     * @param  string  $id
+     * @param  \Illuminate\Database\UniqueConstraintViolationException  $exception
+     * @return never
+     *
+     * @throws \InvalidArgumentException
+     * @throws \Illuminate\Database\UniqueConstraintViolationException
+     * @throws \SineMacula\Laravel\AuditLog\Stores\RecordConflictException
+     */
+    private function refuseUnstored(string $id, #[\SensitiveParameter] UniqueConstraintViolationException $exception): never
+    {
+        throw $this->tombstones->isPruned($id) ? RecordConflictException::alreadyPruned($id) : $exception;
     }
 
     /**

@@ -46,13 +46,14 @@ use SineMacula\Laravel\AuditLog\Records\SourceSettings;
  * a Gate check it denies is never lost.
  *
  * A code under the reserved `audit_log.` prefix is written only with a package
- * write, which only the package's own read path makes, and a package write only
- * with such a code, fail-closed, immediate and never a capture; anything else
- * is refused before anything is consumed. Naming a package code on a builder is
- * no way to record one, since the facade's builders are written without a
- * package write. A package write's check runs on the built record before it is
- * delivered, and what it throws propagates with nothing delivered; the delivery
- * hands it the finalised record once that is acknowledged.
+ * write, which only the package's own activity (its read path and its
+ * lifecycle) makes, and a package write only with such a code, fail-closed,
+ * immediate and never a capture; anything else is refused before anything is
+ * consumed. Naming a package code on a builder is no way to record one, since
+ * the facade's builders are written without a package write. A package write's
+ * check runs on the built record before it is delivered, and what it throws
+ * propagates with nothing delivered; the delivery hands it the finalised record
+ * once that is acknowledged.
  *
  * It writes with the definitions and contributors it was made with, and
  * resolves everything else from the current container on every write, so it
@@ -72,7 +73,7 @@ final readonly class RecordPipeline
     private const string NO_CODE = 'A pending record needs an event code before it is recorded; set one with `event()`.';
 
     /** @var string Why a reserved code without a package write is refused. */
-    private const string RESERVED_CODE = 'A code under the reserved prefix is written only by the package\'s own read path.';
+    private const string RESERVED_CODE = 'A code under the reserved prefix is written only by the package\'s own activity.';
 
     /** @var string Why a package write of any other code is refused. */
     private const string PACKAGE_WRITE_OF_ANOTHER_CODE = 'A package write records a code under the reserved prefix, and no other.';

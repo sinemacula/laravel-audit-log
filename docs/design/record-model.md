@@ -59,7 +59,22 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
 - A captured record always has an origin: `http`, `console` or `queue` (`Origin`). Its provenance is always `captured`
   (`Provenance::CAPTURED`), which says the application asserted the activity, not that the claim is true; `imported`
   belongs to records another source asserted. No public method takes a provenance, and the import fields
-  (`source_record_id`, `import_batch_id`) of a captured record are `null`.
+  (`source_record_id`, `import_batch_id`, `source_digest`) of a captured record are `null`.
+- The imported record is built by `AuditRecord::fromImport()`, which is `@internal` and called by the importer alone,
+  from a pending record it uses up, what minimising left of it, the event version and category of its code's
+  definition, the time the source says the activity happened, an origin the source may not know, and its source
+  (`Records\ImportedSource`): the source's id and region, the record's id there, the batch it came in and its
+  `source_digest`. Its provenance is `imported`. Its id is a UUID version 7 of the time it is imported, not of when it
+  happened, so imported ids sort near their recording; `occurred_at` is kept as given. It carries no credential, guard,
+  session, request, trace or user agent, nothing a contributor fills, and no artifact.
+- `source_digest` is the lower-case hex HMAC-SHA256 of the canonical encoding of the source's assertion as the line gave
+  it (`{v: 1, event, occurred_at, outcome, actor, subject, principal, tenant, reason, correlation_id, properties,
+  context, origin, ip}`, references as type and id pairs), before minimising or encryption, under
+  `hash_hkdf('sha256', $secret, 32, 'sinemacula/audit-log:source-digest:v1', '')` of the signing ring key
+  (`Lifecycle\SourceDigest`). It tells a repeated import of one source record, a duplicate, from a different assertion
+  under the same source id and record id, a conflict, and it is signed with the row, so it cannot be edited unseen. An
+  imported record is this installation's acceptance of what its source asserted, never a claim that the event
+  happened as asserted.
 - `properties._audit` belongs to the package: it holds `note`, `identifier_hash` and `omitted`, in that order and only
   as present, and it is the last key of the properties. A caller's key beginning `_audit`, at any depth and after its
   key is cleaned, is refused.
@@ -135,7 +150,7 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
 
 ## Envelope
 
-`AuditRecord::toArray()` gives exactly these 32 keys, in this order, which is the order of the entries table without
+`AuditRecord::toArray()` gives exactly these 33 keys, in this order, which is the order of the entries table without
 its finalisation columns. `tests/Fixtures/Records/audit-record-v1.json` is the golden version 1 record.
 
 | Key                | Type    | Meaning                                                    | `null` when                  |
@@ -161,12 +176,13 @@ its finalisation columns. `tests/Fixtures/Records/audit-record-v1.json` is the g
 | `request_id`       | ?string | the request's id                                           | none was filled              |
 | `trace_id`         | ?string | the W3C trace id                                           | none was filled              |
 | `correlation_id`   | ?string | a namespaced id, such as `app:ticket-123`                  | none was given               |
-| `origin`           | ?string | `http`, `console` or `queue`                               | never for a captured record  |
+| `origin`           | ?string | `http`, `console` or `queue`                               | an import that names none    |
 | `provenance`       | string  | `captured` or `imported`                                   | never                        |
 | `source_id`        | string  | the application that captured it                           | never                        |
 | `source_region`    | ?string | the region it was captured in                              | none is configured           |
 | `source_record_id` | ?string | the id an imported record had at its source                | always for a captured record |
 | `import_batch_id`  | ?string | the import an imported record came in                      | always for a captured record |
+| `source_digest`    | ?string | the keyed digest of what the source asserted               | always for a captured record |
 | `ip`               | ?string | the client's IP address, under `redaction.ip`              | none was filled or kept      |
 | `user_agent`       | ?string | the client's user agent, cleaned and capped                | none was filled              |
 | `context`          | ?map    | where it happened (route, command, job), minimised         | nothing remains              |
@@ -207,8 +223,10 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 
 ## Implementation Anchors
 
-- `src/Records/AuditRecord.php`: `fromPending()`, `fromEnvelope()`, `toArray()`; `src/Records/FinalisedRecord.php`:
-  `decoded()`.
+- `src/Records/AuditRecord.php`: `fromPending()`, `fromImport()`, `fromEnvelope()`, `toArray()`;
+  `src/Records/FinalisedRecord.php`: `decoded()`; `src/Records/ImportedSource.php`.
+- `src/Lifecycle/SourceDigest.php`; `src/Lifecycle/ImportRecordBuilder.php`; `src/Integrity/RecordSigner.php`:
+  `CAPTURED_COLUMNS`.
 - `src/Records/EnvelopeCodec.php`: `encode()`, `decode()`; `src/Records/EnvelopeRejectedException.php`,
   `src/Records/Enums/EnvelopeFailure.php`.
 - `src/Records/PendingRecord.php`: `record()`, `NOTE_MAX_BYTES`; `src/Records/PendingSnapshot.php`.
@@ -233,7 +251,15 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
   `testTheNoteIsStoredUnderTheReservedMetadata`, `testAnOwnedNoteIsNeverStoredInPlaintext`,
   `testABuilderWithoutAnOriginIsALogicError`, `testTheRecordStoresTheMinimisedValues`, `testAnEnvelopeKeepsEveryField`,
   `testAnEnvelopeKeepsItsProvenance`, `testAnEnvelopeOfAnotherTypeIsRefused`, `testAnEnvelopeWithoutAFieldIsRefused`,
-  `testTheEnvelopeParameterIsSensitive`
+  `testTheEnvelopeParameterIsSensitive`, `testACapturedRecordHasNoSourceDigest`,
+  `testFromImportIsImportedWithItsSourceFields`, `testAnImportedRecordCarriesNoAmbientFields`,
+  `testAnImportedRecordsIdIsDrawnAtImport`, `testAnImportedRecordKeepsItsOccurrenceTime`,
+  `testAnImportedRecordMayHaveNoOrigin`, `testAnImportedRecordRefusesAnAttachment`
+- `tests/Unit/Lifecycle/SourceDigestTest.php` `testTheDigestIsKeyedUnderItsOwnInfo`,
+  `testTheSameAssertionUnderTheSameKeyIsEqual`, `testAnyChangedFieldChangesIt`, `testMinimisationDoesNotChangeIt`
+- `tests/Unit/Integrity/RecordSignerTest.php` `testTheSourceDigestIsSigned`
+- `tests/Unit/Records/EnvelopeCodecTest.php` `testAnImportedRecordRoundTripsByteForByte`
+- `tests/Feature/Lifecycle/ImportRecordBuilderTest.php` `testTheRecordIsTheLineImported`, `testNoContributorRuns`
 - `tests/Unit/Records/FinalisedRecordTest.php` `testADecodedRecordReturnsItsColumnsAsDecoded`,
   `testADecodedRecordKeepsTableOrder`, `testADecodedRecordIsCheckedLikeAnyOther`
 - `tests/Unit/Records/EnvelopeCodecTest.php` `testDecodingGivesTheSameCanonicalBytes`, `testDecodingKeepsEveryColumn`,
@@ -292,3 +318,4 @@ Update this note when any of the following change:
 - what the builder refuses, or when it is used up
 - what a `Contribution` can fill or read
 - how a record is rebuilt from its envelope, or what that keeps
+- how an imported record is built, its id, or what its source digest covers

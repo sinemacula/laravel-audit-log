@@ -67,6 +67,12 @@ trait InteractsWithOutbox
     /** @var string Absolute path to the shipped deliveries migration file. */
     private const string DELIVERIES_MIGRATION = __DIR__ . '/../../database/migrations/2026_11_02_000200_create_audit_log_deliveries_table.php';
 
+    /** @var string Absolute path to the shipped checkpoints migration file, whose seals a drain's tombstones read. */
+    private const string CHECKPOINTS_MIGRATION = __DIR__ . '/../../database/migrations/2026_11_02_000300_create_audit_log_checkpoints_table.php';
+
+    /** @var string Absolute path to the shipped checkpoint members migration file, whose members a drain's tombstones read. */
+    private const string MEMBERS_MIGRATION = __DIR__ . '/../../database/migrations/2026_11_02_000400_create_audit_log_checkpoint_members_table.php';
+
     /** @var ?string The outbox table configured before the probe table took its place. */
     private ?string $outboxTableBeforeProbe = null;
 
@@ -280,9 +286,10 @@ trait InteractsWithOutbox
     }
 
     /**
-     * Create the outbox and the deliveries table on each connection given, as
-     * the shipped migrations would with the storage connection there, then put
-     * the storage and the outbox connections back as they were.
+     * Create the outbox and the deliveries table on each connection given, and
+     * the seals and their members a drain's tombstones read, as the shipped
+     * migrations would with the storage connection there, then put the storage
+     * and the outbox connections back as they were.
      *
      * @param  list<string>  $connections
      * @return void
@@ -299,6 +306,8 @@ trait InteractsWithOutbox
 
             self::runMigration(self::OUTBOX_MIGRATION);
             self::runMigration(self::DELIVERIES_MIGRATION);
+            self::runMigration(self::CHECKPOINTS_MIGRATION);
+            self::runMigration(self::MEMBERS_MIGRATION);
         }
 
         $config->set('audit-log.storage.connection', $storage);

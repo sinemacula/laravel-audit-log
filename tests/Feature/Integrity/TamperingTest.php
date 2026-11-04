@@ -22,6 +22,7 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException;
+use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
@@ -44,7 +45,8 @@ use Tests\TestCase;
  * the package, through raw `DB::table()` calls, by someone who can write to its
  * database: every alteration of an entry, a member row, a seal or the chain is
  * found with the state and finding it is pinned to, naming the first bad id,
- * and fails the run non-zero; editing the anchor columns can at most leave a
+ * and fails the run non-zero; a pruned entry inserted again is found
+ * resurrected; editing the anchor columns can at most leave a
  * seal unanchored; a key holder's forgery is caught by an anchor that holds the
  * seals; and the limits the threat model states are pinned as they are: a
  * deletion before the first seal, a truncated tail with no anchor, and a chain
@@ -794,6 +796,29 @@ final class TamperingTest extends TestCase
     }
 
     /**
+     * A pruned entry inserted again, as it was, by someone who kept it, is
+     * covered by a valid record and present: its seal is `resurrected` at that
+     * entry, which is incomplete and fails the run, never valid or pruned.
+     *
+     * @return void
+     */
+    public function testAResurrectedPrunedRowIsIncomplete(): void
+    {
+        $seals   = $this->sealLog(2);
+        $members = $this->membersOf((string) $seals[0]['id']);
+        $kept    = (array) $this->entries()->where('id', $members[1])->first();
+
+        $this->pruneSeal($seals[0], forged: false);
+        $this->entries()->insert($kept);
+
+        [$exit, $output] = $this->verify();
+
+        self::assertSame(1, $exit);
+        self::assertStringContainsString(self::line(1, (string) $seals[0]['id'], 'incomplete', 2, 'resurrected', $members[1]), $output);
+        self::assertStringContainsString("Integrity: 1 valid, 0 pruned, 1 incomplete, 0 unverifiable, 0 tampered.\n", $output);
+    }
+
+    /**
      * A valid prune record never excuses a seal whose signature fails.
      *
      * @return void
@@ -1353,9 +1378,9 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Delete every entry of the seal and keep a prune record of it in the
-     * ledger: one signed with the key, or, when forged, the same record under a
-     * signature that is not the key's.
+     * Delete every entry of the seal and keep a prune record of all of them in
+     * the ledger: one signed with the key, or, when forged, the same record
+     * under a signature that is not the key's.
      *
      * @param  array<string, scalar|null>  $seal
      * @param  bool  $forged
@@ -1365,14 +1390,23 @@ final class TamperingTest extends TestCase
     {
         $this->entries()->whereIn('id', $this->membersOf((string) $seal['id']))->delete();
 
-        $bound  = [(string) $seal['log_id'], (string) $seal['id'], (string) $seal['seal_digest'], (int) $seal['member_count'], self::OPERATION_ID, self::PRUNED_AT];
-        $record = app(SealSigner::class)->signPrune(...$bound);
+        $count  = (int) $seal['member_count'];
+        $record = app(SealSigner::class)->signPrune(
+            (string) $seal['log_id'],
+            (string) $seal['id'],
+            (string) $seal['seal_digest'],
+            $count,
+            PruneBitmap::encode(range(0, $count - 1), $count),
+            $count,
+            self::OPERATION_ID,
+            self::PRUNED_AT,
+        );
 
         if ($forged) {
-            $record = new PruneRecord(...[...$bound, $record->keyId, self::OTHER_DIGEST]);
+            $record = PruneRecord::fromArray([...$record->toArray(), 'signature' => self::OTHER_DIGEST]);
         }
 
-        $this->prunes->record($record);
+        $this->prunes->add($record);
     }
 
     /**

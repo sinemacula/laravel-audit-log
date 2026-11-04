@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\EventMutex;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -15,15 +16,19 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\IntegritySchedule;
+use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
+use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
+use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use Tests\TestCase;
 
 /**
  * Feature tests for the runs the package schedules: sealing every five minutes,
- * the sweep and the strict verification daily by default, each at the
- * expression its setting gives or not at all, each kept from overlapping
- * itself, on one server only when the cache store is shared, and a malformed
- * schedule left out and reported without stopping the others or the schedule.
+ * the sweep, the strict verification and the prune daily by default, each at
+ * the expression its setting gives or not at all, the prune only when it can
+ * delete something, each kept from overlapping itself, on one server only when
+ * the cache store is shared, and a malformed schedule left out and reported
+ * without stopping the others or the schedule.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,6 +42,15 @@ final class IntegrityScheduleTest extends TestCase
 
     /** @var string The message a malformed sealing schedule is reported with. */
     private const string MALFORMED_SEAL = '`audit-log.integrity.seal.schedule` must be a cron expression, or null or empty to schedule nothing.';
+
+    /** @var string The message a malformed prune schedule is reported with. */
+    private const string MALFORMED_PRUNE = '`audit-log.retention.schedule` must be a cron expression, or null or empty to schedule nothing.';
+
+    /** @var string The message a category map that is not a map is reported with. */
+    private const string MALFORMED_CATEGORIES = '`audit-log.retention.categories` must be a map of categories to days, each from 0 to 36500, 0 meaning forever.';
+
+    /** @var string The prune's default expression. */
+    private const string PRUNE_DEFAULT = '30 3 * * *';
 
     /** @var list<string> The messages of what the handler was given to report, in order. */
     private array $reported = [];
@@ -224,9 +238,8 @@ final class IntegrityScheduleTest extends TestCase
         ]);
 
         $schedule = (new Schedule)->useCache('scheduler-store');
-        $config   = $this->config();
 
-        (new IntegritySchedule(new SealSettings($config), $config, $this->handler()))->register($schedule);
+        $this->schedule()->register($schedule);
 
         foreach (self::events($schedule) as $command => $event) {
             self::assertSame($shared, $event->onOneServer, $command);
@@ -433,6 +446,270 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
+     * Rows of `[the retention settings, whether the prune is scheduled]`: the
+     * configured policy is pruned only when the default retention, or a
+     * category's, is a number of days.
+     *
+     * @return iterable<string, array{0: array<string, array<string, int>|int>, 1: bool}>
+     */
+    public static function provideRetentions(): iterable
+    {
+        yield from [
+            'nothing set'                                => [[], false],
+            'everything kept forever'                    => [['after_days' => 0, 'categories' => ['security' => 0]], false],
+            'a preservation alone'                       => [['preserve' => ['security' => 0]], false],
+            'a default retention'                        => [['after_days' => 365], true],
+            'one category kept for less'                 => [['categories' => ['security' => 30]], true],
+            'a category kept for less, the rest forever' => [['after_days' => 0, 'categories' => ['audit' => 0, 'security' => 1]], true],
+        ];
+    }
+
+    /**
+     * The configured policy's prune is scheduled, at its default expression,
+     * exactly when something is retained for less than forever.
+     *
+     * @param  array<string, array<string, int>|int>  $retention
+     * @param  bool  $scheduled
+     * @return void
+     */
+    #[DataProvider('provideRetentions')]
+    public function testThePruneIsScheduledOnlyWhenSomethingIsRetainedForLess(array $retention, bool $scheduled): void
+    {
+        $this->useConfiguredPolicy();
+
+        foreach ($retention as $setting => $value) {
+            $this->config()->set('audit-log.retention.' . $setting, $value);
+        }
+
+        $runs = self::runs($this->register());
+
+        self::assertSame($scheduled ? self::PRUNE_DEFAULT : null, $runs['audit-log:prune'] ?? null);
+        self::assertCount($scheduled ? 4 : 3, $runs);
+        self::assertSame([], $this->reported);
+    }
+
+    /**
+     * A policy left unbound counts as the configured one: it is scheduled
+     * exactly when the configuration keeps something for less than forever.
+     *
+     * @return void
+     */
+    public function testAnUnboundPolicyCountsAsTheConfiguredOne(): void
+    {
+        $this->app?->offsetUnset(RetentionPolicy::class);
+
+        self::assertArrayNotHasKey('audit-log:prune', self::runs($this->register()));
+
+        $this->config()->set('audit-log.retention.after_days', 90);
+
+        self::assertSame(self::PRUNE_DEFAULT, self::runs($this->register())['audit-log:prune'] ?? null);
+        self::assertSame([], $this->reported);
+    }
+
+    /**
+     * A custom policy's prune is always scheduled, whatever the configuration
+     * keeps, since its answers cannot be known ahead; the policy is resolved
+     * but never asked.
+     *
+     * @return void
+     */
+    public function testACustomPolicyIsAlwaysScheduled(): void
+    {
+        $policy = \Mockery::mock(RetentionPolicy::class);
+
+        $policy->shouldNotReceive('version', 'retainFor', 'preserveFor');
+
+        $this->app?->instance(RetentionPolicy::class, $policy);
+        $this->config()->set(['audit-log.retention.after_days' => 0, 'audit-log.retention.schedule' => '0 2 * * 6']);
+
+        self::assertSame('0 2 * * 6', self::runs($this->register())['audit-log:prune'] ?? null);
+        self::assertSame([], $this->reported);
+    }
+
+    /**
+     * A bound policy that cannot be resolved is reported and the prune is still
+     * scheduled, so the run refuses the policy and records it; the other runs
+     * are registered and nothing is thrown.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testAPolicyThatCannotBeResolvedIsReportedAndThePruneScheduled(): void
+    {
+        $this->app?->bind(RetentionPolicy::class, static fn (): RetentionPolicy => throw new \RuntimeException('The policy cannot be built.'));
+
+        $runs = self::runs($this->register());
+
+        self::assertSame(self::PRUNE_DEFAULT, $runs['audit-log:prune'] ?? null);
+        self::assertCount(4, $runs);
+        self::assertSame(['The policy cannot be built.'], $this->reported);
+    }
+
+    /**
+     * Rows of `[the policy bound, the schedule setting]`: `null` and the empty
+     * string an empty env line gives, under the configured policy keeping
+     * something for less and under a custom one.
+     *
+     * @return iterable<string, array{0: bool, 1: ?string}>
+     */
+    public static function provideNullSchedules(): iterable
+    {
+        yield from [
+            'the configured policy at null' => [false, null],
+            'the configured policy empty'   => [false, ''],
+            'a custom policy at null'       => [true, null],
+            'a custom policy empty'         => [true, ''],
+        ];
+    }
+
+    /**
+     * A prune schedule of `null` or empty registers no prune, whatever the
+     * policy, reports nothing and leaves the other runs registered.
+     *
+     * @param  bool  $custom
+     * @param  ?string  $value
+     * @return void
+     */
+    #[DataProvider('provideNullSchedules')]
+    public function testANullScheduleRegistersNoPrune(bool $custom, ?string $value): void
+    {
+        $custom ? $this->app?->instance(RetentionPolicy::class, \Mockery::mock(RetentionPolicy::class)) : $this->useConfiguredPolicy();
+
+        $this->config()->set(['audit-log.retention.after_days' => 30, 'audit-log.retention.schedule' => $value]);
+
+        $runs = self::runs($this->register());
+
+        self::assertArrayNotHasKey('audit-log:prune', $runs);
+        self::assertCount(3, $runs);
+        self::assertSame([], $this->reported);
+    }
+
+    /**
+     * Rows of `[the setting, its malformed value, the message reported]`: the
+     * schedule itself, and a retention the configured policy's decision reads
+     * with every other retention kept forever.
+     *
+     * @return iterable<string, array{0: string, 1: int|list<int|string>|string, 2: string}>
+     */
+    public static function provideMalformedPruneSettings(): iterable
+    {
+        yield from [
+            'a schedule that is no cron'    => ['schedule', 'nightly', self::MALFORMED_PRUNE],
+            'a schedule out of range'       => ['schedule', '30 25 * * *', self::MALFORMED_PRUNE],
+            'a schedule that is a list'     => ['schedule', ['30 3 * * *'], self::MALFORMED_PRUNE],
+            'a retention out of range'      => ['after_days', 36501, '`audit-log.retention.after_days` must be an integer from 0 to 36500.'],
+            'a category map that is a list' => ['categories', [30], self::MALFORMED_CATEGORIES],
+        ];
+    }
+
+    /**
+     * A malformed prune setting registers no prune and is reported, by its key
+     * and never its value; the other runs are registered and nothing is thrown.
+     *
+     * @param  string  $setting
+     * @param  int|list<int|string>|string  $value
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideMalformedPruneSettings')]
+    public function testAMalformedScheduleIsReportedAndRegistersNothing(string $setting, array|int|string $value, string $message): void
+    {
+        $this->useConfiguredPolicy();
+        $this->config()->set('audit-log.retention.' . $setting, $value);
+
+        if ($setting === 'schedule') {
+            $this->config()->set('audit-log.retention.after_days', 30);
+        }
+
+        $runs = self::runs($this->register());
+
+        self::assertArrayNotHasKey('audit-log:prune', $runs);
+        self::assertCount(3, $runs);
+        self::assertSame([$message], $this->reported);
+    }
+
+    /**
+     * The prune starts in the background, is kept from overlapping itself for
+     * 23 hours, inside the day between runs, and on a shared cache runs on one
+     * server only.
+     *
+     * @return void
+     */
+    public function testThePruneRunsInTheBackgroundWithoutOverlapOnOneServer(): void
+    {
+        $this->useConfiguredPolicy();
+        $this->config()->set([
+            'audit-log.retention.after_days' => 365,
+            'cache.default'                  => 'audit-cache',
+            'cache.stores.audit-cache'       => ['driver' => 'redis'],
+        ]);
+
+        $prune = self::events($this->register())['audit-log:prune'] ?? null;
+
+        self::assertInstanceOf(ScheduledEvent::class, $prune);
+        self::assertTrue($prune->runInBackground);
+        self::assertTrue($prune->withoutOverlapping);
+        self::assertSame(1380, $prune->expiresAt);
+        self::assertTrue($prune->onOneServer);
+
+        $this->config()->set('cache.stores.audit-cache.driver', 'file');
+
+        $prune = self::events($this->register())['audit-log:prune'] ?? null;
+
+        self::assertInstanceOf(ScheduledEvent::class, $prune);
+        self::assertFalse($prune->onOneServer);
+    }
+
+    /**
+     * Registering the prune, under the configured policy or a custom one,
+     * issues no query.
+     *
+     * @return void
+     */
+    public function testRegisteringThePruneMakesNoQuery(): void
+    {
+        $this->config()->set([
+            'audit-log.retention.after_days' => 30,
+            'cache.default'                  => 'audit-cache',
+            'cache.stores.audit-cache'       => ['driver' => 'database'],
+        ]);
+
+        $statements = 0;
+
+        DB::listen(static function () use (&$statements): void {
+            $statements++;
+        });
+
+        $this->useConfiguredPolicy();
+        self::assertArrayHasKey('audit-log:prune', self::runs($this->register()));
+
+        $this->app?->instance(RetentionPolicy::class, \Mockery::mock(RetentionPolicy::class));
+        self::assertArrayHasKey('audit-log:prune', self::runs($this->register()));
+
+        self::assertSame(0, $statements);
+    }
+
+    /**
+     * `schedule:list` lists the prune beside the other runs once something is
+     * kept for less than forever.
+     *
+     * @return void
+     */
+    public function testScheduleListShowsThePrune(): void
+    {
+        $this->config()->set('audit-log.retention.after_days', 365);
+        $this->app?->forgetInstance(Schedule::class);
+
+        $exit   = Artisan::call('schedule:list');
+        $output = Artisan::output();
+
+        self::assertSame(0, $exit);
+        self::assertStringContainsString('audit-log:prune', $output);
+        self::assertStringContainsString('audit-log:seal --sweep', $output);
+    }
+
+    /**
      * Register the package's runs on a schedule of their own, with a handler
      * that keeps what it is given to report.
      *
@@ -440,12 +717,24 @@ final class IntegrityScheduleTest extends TestCase
      */
     private function register(): Schedule
     {
-        $config   = $this->config();
         $schedule = new Schedule;
 
-        (new IntegritySchedule(new SealSettings($config), $config, $this->handler()))->register($schedule);
+        $this->schedule()->register($schedule);
 
         return $schedule;
+    }
+
+    /**
+     * The package's schedule over the application's configuration and
+     * container, with a handler that keeps what it is given to report.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Console\IntegritySchedule
+     */
+    private function schedule(): IntegritySchedule
+    {
+        $config = $this->config();
+
+        return new IntegritySchedule(new SealSettings($config), new RetentionSettings($config), app(Container::class), $config, $this->handler());
     }
 
     /**
@@ -496,6 +785,16 @@ final class IntegrityScheduleTest extends TestCase
         }
 
         return $events;
+    }
+
+    /**
+     * Bind the policy the package binds, the configured one.
+     *
+     * @return void
+     */
+    private function useConfiguredPolicy(): void
+    {
+        $this->app?->bind(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
     }
 
     /**

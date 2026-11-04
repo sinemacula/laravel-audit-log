@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Integrity\Anchorer;
 use SineMacula\Laravel\AuditLog\Integrity\AnchorResult;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
@@ -35,20 +36,23 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Statement-budget contract for sealing and anchoring: an empty recent pass
- * reads the head twice and its candidates once and writes its last run; a batch
- * reads the head and its candidates and writes its checkpoint, a member insert
- * per chunk and the last seal, in one transaction with no savepoint; a full
- * batch asks once more; a run of batches costs each batch's share plus the
- * run's constant; an attempt lost to a concurrent writer costs one rollback and
- * the whole attempt again; a sweep window reads at most its batch and writes
- * only its cursor; a skipped candidate costs nothing; the candidates are read
- * without their payload; and anchoring costs a fixed number of indexed reads
- * for the pass, whatever the size of the log, and an update for each seal, and
- * nothing at all with no anchor configured.
+ * Statement-budget contract for sealing and anchoring: every run reads the
+ * installation's id once, written by the first run of a fresh install and read
+ * alone by every run after it; an empty recent pass reads the head twice and
+ * its candidates once and writes its last run; a batch reads the head, its
+ * candidates and, when it seals, the journal's head once, and writes its
+ * checkpoint, a member insert per chunk and the last seal, in one transaction
+ * with no savepoint; a full batch asks once more; a run of batches costs each
+ * batch's share plus the run's constant; an attempt lost to a concurrent writer
+ * costs one rollback and the whole attempt again; a sweep window reads at most
+ * its batch and writes only its cursor; a skipped candidate costs nothing; the
+ * candidates are read without their payload; and anchoring costs a fixed number
+ * of indexed reads for the pass, whatever the size of the log, and an update
+ * for each seal, and nothing at all with no anchor configured.
  *
  * The least batch the settings accept is 100, so every batch here is at least
- * that.
+ * that. Each test starts with the installation's id written, as every run but a
+ * fresh install's first finds it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,14 +69,17 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     /** @var int The batch most tests seal in: the least the settings accept. */
     private const int BATCH = 100;
 
-    /** @var int The reads each batch of the recent pass makes: the head and its candidates. */
-    private const int BATCH_READS = 2;
+    /** @var int The reads each batch of the recent pass that seals makes: the head, its candidates and the journal's head. */
+    private const int BATCH_READS = 3;
+
+    /** @var int The reads each batch that seals nothing makes: the head and its candidates. */
+    private const int EMPTY_BATCH_READS = 2;
 
     /** @var int The writes each batch of the recent pass of fewer members than a chunk makes: its checkpoint, its members, the last seal and the high-water mark it moves forward. */
     private const int BATCH_WRITES = 4;
 
-    /** @var int The reads a recent pass makes once, whatever it seals, with no high-water mark kept yet: the mark, and where the head says it starts. */
-    private const int RUN_READS = 2;
+    /** @var int The reads a recent pass makes once, whatever it seals, with no high-water mark kept yet: the installation's id, the mark, and where the head says it starts. */
+    private const int RUN_READS = 3;
 
     /** @var int The writes a run makes once, whatever it seals: its last run. */
     private const int RUN_WRITES = 1;
@@ -110,39 +117,42 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * A recent pass that finds nothing, with no high-water mark kept yet, reads
-     * the mark and where the head says it starts, then the head and its
-     * candidates, and writes only its last run, in one transaction.
+     * the installation's id, the mark and where the head says it starts, then
+     * the head and its candidates, never the journal's head, and writes only
+     * its last run, in one transaction.
      *
      * @return void
      */
-    public function testAnEmptyRunIsFourReadsAndOneWrite(): void
+    public function testAnEmptyRunIsFiveReadsAndOneWrite(): void
     {
-        $result = $this->assertTransactionBudget(1, 1, fn (): SealResult => $this->assertStatementBudget(4, 1, 0, 0, fn (): SealResult => $this->sealer()->seal()));
+        $reads  = self::RUN_READS + self::EMPTY_BATCH_READS;
+        $result = $this->assertTransactionBudget(1, 1, fn (): SealResult => $this->assertStatementBudget($reads, 1, 0, 0, fn (): SealResult => $this->sealer()->seal()));
 
         self::assertSame(0, $result->seals());
         self::assertSame([IntegrityTables::stateTable()], self::tablesWritten($this->capturedWrites()));
     }
 
     /**
-     * A sweep that finds nothing reads its cursor, the head and its window, and
-     * writes its completion, forgets its cursor and writes its last run.
+     * A sweep that finds nothing reads the installation's id, its cursor, the
+     * head and its window, and writes its completion, forgets its cursor and
+     * writes its last run.
      *
      * @return void
      */
     public function testAnEmptySweepIsPinned(): void
     {
-        $result = $this->assertTransactionBudget(1, 1, fn (): SealResult => $this->assertStatementBudget(3, 3, 0, 0, fn (): SealResult => $this->sealer()->sweep()));
+        $result = $this->assertTransactionBudget(1, 1, fn (): SealResult => $this->assertStatementBudget(4, 3, 0, 0, fn (): SealResult => $this->sealer()->sweep()));
 
         self::assertTrue($result->isSweepComplete());
         self::assertSame([IntegrityTables::stateTable()], self::tablesWritten($this->capturedWrites()));
     }
 
     /**
-     * Five rows in a batch of a hundred are one seal: four reads (the
-     * high-water mark, where the head says the pass starts, the head and the
-     * candidates) and five writes (the checkpoint, its members, the last seal,
-     * the high-water mark and the last run), in one transaction with no
-     * savepoint.
+     * Five rows in a batch of a hundred are one seal: six reads (the
+     * installation's id, the high-water mark, where the head says the pass
+     * starts, the head, the candidates and the journal's head) and five writes
+     * (the checkpoint, its members, the last seal, the high-water mark and the
+     * last run), in one transaction with no savepoint.
      *
      * @return void
      */
@@ -151,7 +161,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
         $this->useBatch(self::BATCH);
         $this->storeEntries(5);
 
-        $result = $this->assertTransactionBudget(1, 1, fn (): SealResult => $this->assertStatementBudget(4, 5, 0, 0, fn (): SealResult => $this->sealer()->seal()));
+        $result = $this->assertTransactionBudget(1, 1, fn (): SealResult => $this->assertStatementBudget(6, 5, 0, 0, fn (): SealResult => $this->sealer()->seal()));
 
         self::assertSame(1, $result->seals());
         self::assertSame(5, $result->entries());
@@ -161,7 +171,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     /**
      * A batch that fills the limit cannot know it reached the end, so it asks
      * once more: two more reads, the head and the candidates, in one more
-     * transaction that writes nothing.
+     * transaction that writes nothing and reads no journal head.
      *
      * @return void
      */
@@ -170,7 +180,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
         $this->useBatch(self::BATCH);
         $this->insertEntries(self::BATCH);
 
-        $result = $this->assertTransactionBudget(2, 2, fn (): SealResult => $this->assertStatementBudget(6, 5, 0, 0, fn (): SealResult => $this->sealer()->seal()));
+        $result = $this->assertTransactionBudget(2, 2, fn (): SealResult => $this->assertStatementBudget(8, 5, 0, 0, fn (): SealResult => $this->sealer()->seal()));
 
         self::assertSame(1, $result->seals());
         self::assertSame(self::BATCH, $result->entries());
@@ -187,7 +197,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     {
         $this->insertEntries(CheckpointWriter::MEMBER_CHUNK + 1);
 
-        $this->assertStatementBudget(4, 6, 0, 0, fn (): SealResult => $this->sealer()->seal());
+        $this->assertStatementBudget(6, 6, 0, 0, fn (): SealResult => $this->sealer()->seal());
 
         $members = array_filter(self::tablesWritten($this->capturedWrites(), false), static fn (string $table): bool => $table === IntegrityTables::membersTable());
 
@@ -197,9 +207,9 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Ten batches cost ten times what one does, and the run's constant once:
-     * each batch reads the head and its candidates and writes its checkpoint,
-     * its members, the last seal and the high-water mark, each in its own
-     * transaction.
+     * each batch reads the head, its candidates and the journal's head and
+     * writes its checkpoint, its members, the last seal and the high-water
+     * mark, each in its own transaction.
      *
      * @return void
      */
@@ -330,10 +340,9 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Rows of
-     * `[run, the select lists of the candidate statement, outer first]`: the
-     * recent pass, which reads its candidates directly, and the sweep, whose
-     * window is a derived table.
+     * Rows of `[run, the select lists of the candidate statement, outer
+     * first]`: the recent pass, which reads its candidates directly, and the
+     * sweep, whose window is a derived table.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Integrity\Sealer): \SineMacula\Laravel\AuditLog\Integrity\SealResult, 1: list<string>}>
      */
@@ -390,7 +399,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
         $this->sealAll();
 
         $windows = $this->recordWindows();
-        $result  = $this->assertStatementBudget(1 + 5 * self::BATCH_READS, 4 + 3, 0, 0, fn (): SealResult => $this->sealer()->sweep());
+        $result  = $this->assertStatementBudget(2 + 5 * self::EMPTY_BATCH_READS, 4 + 3, 0, 0, fn (): SealResult => $this->sealer()->sweep());
 
         self::assertSame(0, $result->seals());
         self::assertTrue($result->isSweepComplete());
@@ -414,7 +423,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
 
         DB::connection()->table(EntrySettings::table())->where('id', $ids[0])->update(['hmac' => self::MALFORMED_HMAC]);
 
-        $result = $this->assertStatementBudget(4, 5, 0, 0, fn (): SealResult => $this->sealer()->seal());
+        $result = $this->assertStatementBudget(6, 5, 0, 0, fn (): SealResult => $this->sealer()->seal());
 
         self::assertSame(1, $result->skippedEntries());
         self::assertSame(2, $result->entries());
@@ -433,10 +442,48 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
 
         DB::connection()->table(EntrySettings::table())->where('id', $ids[0])->update(['hmac' => self::MALFORMED_HMAC]);
 
-        $result = $this->assertStatementBudget(4, 1, 0, 0, fn (): SealResult => $this->sealer()->seal());
+        $result = $this->assertStatementBudget(5, 1, 0, 0, fn (): SealResult => $this->sealer()->seal());
 
         self::assertSame(1, $result->skippedEntries());
         self::assertSame(0, $result->seals());
+    }
+
+    /**
+     * Each seal reads the journal's head once, inside its own transaction, and
+     * a seal that writes nothing never does; the installation's id is read once
+     * a run, however many seals it writes.
+     *
+     * @return void
+     */
+    public function testEachSealReadsTheJournalHeadOnceAndEachRunTheIdentityOnce(): void
+    {
+        $this->useBatch(self::BATCH);
+        $this->insertEntries(3 * self::BATCH);
+
+        $reads      = 3 * self::BATCH_READS  + self::EMPTY_BATCH_READS + self::RUN_READS;
+        $writes     = 3 * self::BATCH_WRITES + self::RUN_WRITES;
+        $result     = $this->assertStatementBudget($reads, $writes, 0, 0, fn (): SealResult => $this->sealer()->seal());
+        $statements = $this->capturedStatements();
+        $journal    = array_filter($statements, static fn (string $statement): bool => str_contains($statement, LifecycleTables::journalTable()));
+        $state      = array_filter($statements, static fn (string $statement): bool => self::readsTheState($statement));
+
+        // The run reads the state table twice, once for the installation's id,
+        // its first statement, and once for the high-water mark
+        self::assertSame(3, $result->seals());
+        self::assertCount(3, $journal);
+        self::assertCount(2, $state);
+        self::assertStringContainsString(IntegrityTables::stateTable(), $statements[0] ?? '');
+    }
+
+    /**
+     * Whether the statement reads the integrity state table.
+     *
+     * @param  string  $statement
+     * @return bool
+     */
+    private static function readsTheState(string $statement): bool
+    {
+        return str_contains($statement, IntegrityTables::stateTable()) && str_starts_with(strtolower($statement), 'select');
     }
 
     /**

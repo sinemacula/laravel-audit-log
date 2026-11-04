@@ -13,17 +13,21 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Delivery\DeliveryCoordinator;
 use SineMacula\Laravel\AuditLog\Delivery\DrainResult;
 use SineMacula\Laravel\AuditLog\Delivery\Outbox;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Delivery\Receipts;
 use SineMacula\Laravel\AuditLog\Export\NdjsonFormatter;
+use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\LogAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
+use Tests\Concerns\PrunesByHand;
+use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
@@ -31,10 +35,11 @@ use Tests\Fixtures\Stores\CallbackStore;
 
 /**
  * Statement-budget contract for the drain: an empty run is one read of ids; a
- * row delivered to the database costs its claim, its payload, its receipts, a
- * renewal before and after the store, its attempt, its insert in a savepoint of
- * the transaction it shares with its receipt, and its delete; each further row
- * costs the same again; a duplicate adds one read and the savepoint's rollback;
+ * row delivered to the database costs its claim, its payload, its tombstone
+ * check, its receipts, a renewal before and after the store, its attempt, its
+ * insert in a savepoint of the transaction it shares with its receipt, and its
+ * delete; each further row costs the same again, one tombstone check each; a
+ * pruned row costs its claim, its payload, its check and its delete; a duplicate adds one read and the savepoint's rollback;
  * a further destination adds its renewals and its receipt; a bundle adds its
  * artifact's insert to the same savepoint, and one refused costs a failure; a
  * failure and a lost claim are pinned as well, and no run reads a payload
@@ -49,9 +54,10 @@ use Tests\Fixtures\Stores\CallbackStore;
 #[CoversClass(DeliveryCoordinator::class)]
 #[CoversClass(Outbox::class)]
 #[CoversClass(Receipts::class)]
+#[CoversClass(PruneTombstones::class)]
 final class DrainQueryBudgetTest extends PerformanceContractTestCase
 {
-    use InteractsWithAuditStore, InteractsWithOutbox, SeedsTheOutbox;
+    use InteractsWithAuditStore, InteractsWithOutbox, PrunesByHand, SealsEntries, SeedsTheOutbox;
 
     /**
      * Move the frozen clock on by a millisecond before every statement, because
@@ -83,9 +89,10 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * One row to the database reads its candidates, its payload and its
-     * receipts, and writes its claim, a renewal, its attempt, its insert, a
-     * renewal, its receipt and its delete, with a savepoint around the insert.
+     * One row to the database reads its candidates, its payload, its tombstones
+     * and its receipts, and writes its claim, a renewal, its attempt, its
+     * insert, a renewal, its receipt and its delete, with a savepoint around
+     * the insert.
      *
      * @return void
      */
@@ -93,7 +100,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     {
         $this->enqueue($this->finalisedRecord());
 
-        $result = $this->assertStatementBudget(3, 7, 1, 0, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(4, 7, 1, 0, fn (): DrainResult => $this->drain());
 
         self::assertSame(1, $result->delivered());
         self::assertSame(1, $this->entryCount());
@@ -143,7 +150,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
             $this->enqueue($this->finalisedRecord());
         }
 
-        $result = $this->assertStatementBudget(21, 70, 10, 0, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(31, 70, 10, 0, fn (): DrainResult => $this->drain());
 
         self::assertSame(10, $result->delivered());
         self::assertSame(10, $this->entryCount());
@@ -160,7 +167,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     {
         $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled()));
 
-        $result = $this->assertTransactionBudget(1, 1, fn (): DrainResult => $this->assertStatementBudget(3, 8, 1, 0, fn (): DrainResult => $this->drain()));
+        $result = $this->assertTransactionBudget(1, 1, fn (): DrainResult => $this->assertStatementBudget(4, 8, 1, 0, fn (): DrainResult => $this->drain()));
 
         $deliveries = DeliveryTables::deliveriesTable();
         $isRowWrite = static fn (string $write): bool => str_starts_with($write, 'insert into ') && !str_contains($write, $deliveries);
@@ -187,7 +194,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
 
         $this->enqueue($this->finalisedRecord(RecordFactory::bundled()));
 
-        $result = $this->assertStatementBudget(3, 6, 0, 0, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(4, 6, 0, 0, fn (): DrainResult => $this->drain());
 
         self::assertSame(1, $result->retried());
         self::assertSame(0, $this->entryCount());
@@ -208,7 +215,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
         $this->store()->store($record);
         $this->enqueue($record);
 
-        $result = $this->assertStatementBudget(4, 7, 1, 1, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(5, 7, 1, 1, fn (): DrainResult => $this->drain());
 
         self::assertSame(1, $result->delivered());
         self::assertSame(1, $this->entryCount());
@@ -230,7 +237,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
 
         $this->enqueue($this->finalisedRecord());
 
-        $result = $this->assertStatementBudget(3, 11, 1, 0, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(4, 11, 1, 0, fn (): DrainResult => $this->drain());
 
         self::assertSame(1, $result->delivered());
         self::assertSame(2, $this->receiptCount());
@@ -238,8 +245,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * A destination that joins no transaction and fails reads the candidates,
-     * the payload and the receipts, and writes the claim, a renewal, the
-     * attempt, a renewal, the failed receipt and the retry.
+     * the payload, the tombstones and the receipts, and writes the claim, a
+     * renewal, the attempt, a renewal, the failed receipt and the retry.
      *
      * @return void
      */
@@ -249,7 +256,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
 
         $this->enqueue($this->finalisedRecord());
 
-        $result = $this->assertStatementBudget(3, 6, 0, 0, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(4, 6, 0, 0, fn (): DrainResult => $this->drain());
 
         self::assertSame(1, $result->retried());
         self::assertSame(1, $this->outboxCount());
@@ -271,7 +278,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
         $this->enqueue($this->finalisedRecord());
         $this->takeTheClaimWhenTheReceiptsAreRead();
 
-        $result = $this->assertStatementBudget(4, 2, 0, 0, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(5, 2, 0, 0, fn (): DrainResult => $this->drain());
 
         self::assertSame(1, $result->stale());
         self::assertSame(0, $this->receiptCount());
@@ -310,7 +317,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
         $receipts->attempting($id, DeliveryCoordinator::STORE_DESTINATION, null);
         $receipts->delivered($id, DeliveryCoordinator::STORE_DESTINATION);
 
-        $result = $this->assertStatementBudget(3, 2, 0, 0, fn (): DrainResult => $this->drain());
+        $result = $this->assertStatementBudget(4, 2, 0, 0, fn (): DrainResult => $this->drain());
 
         self::assertSame(1, $result->delivered());
         self::assertSame(0, $this->entryCount());
@@ -318,7 +325,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * A row past its attempts costs its claim, the read of its payload and the
-     * write that fails it, and no delivery is begun.
+     * write that fails it, and no delivery is begun: its record is never read,
+     * so its tombstones are not either.
      *
      * @return void
      */
@@ -332,6 +340,67 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
 
         self::assertSame(1, $result->failed());
         self::assertSame(0, $this->receiptCount());
+    }
+
+    /**
+     * Each row whose record is read costs exactly one read of the tombstones,
+     * whatever happens to it next, and no other statement names the members
+     * table.
+     *
+     * @return void
+     */
+    public function testEachRowCostsOneTombstoneCheck(): void
+    {
+        foreach (range(1, 3) as $ignored) {
+            $this->enqueue($this->finalisedRecord());
+        }
+
+        $this->capture(fn (): DrainResult => $this->drain());
+
+        $three = count($this->tombstoneChecks());
+
+        foreach (range(1, 4) as $ignored) {
+            $this->enqueue($this->finalisedRecord());
+        }
+
+        $this->capture(fn (): DrainResult => $this->drain());
+
+        self::assertSame([3, 4], [$three, count($this->tombstoneChecks())]);
+    }
+
+    /**
+     * A pruned row costs its claim, the read of its payload, its tombstone
+     * check, the reads of its seal and the seal's members that tell its prune a
+     * valid record covers, and its delete, and nothing of a delivery.
+     *
+     * @return void
+     */
+    public function testAPrunedRowCostsItsClaimItsCheckAndItsDelete(): void
+    {
+        $record = $this->finalisedRecord();
+
+        $this->store()->store($record);
+        $this->sealAll();
+        $this->pruneByHand($record->record->id);
+        $this->enqueue($record);
+
+        $result = $this->assertStatementBudget(5, 2, 0, 0, fn (): DrainResult => $this->drain());
+
+        self::assertSame(1, $result->pruned());
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame(0, $this->receiptCount());
+    }
+
+    /**
+     * The captured statements that read the tombstones.
+     *
+     * @return list<string>
+     */
+    private function tombstoneChecks(): array
+    {
+        $members = IntegrityTables::membersTable();
+
+        return array_values(array_filter($this->capturedStatements(), static fn (string $statement): bool => str_contains($statement, $members)));
     }
 
     /**

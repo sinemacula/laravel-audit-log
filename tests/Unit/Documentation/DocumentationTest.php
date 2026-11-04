@@ -30,6 +30,12 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
@@ -62,39 +68,40 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
  * A drift guard for the README, the guides in docs/guides and the design notes
  * in docs/design: every outcome, origin, provenance, field handling, key owner,
  * IP mode, identifier mode, failure mode, delivery mode, failed operation,
- * envelope failure, integrity status, anchoring status, finding and anchor
- * driver, every configuration key and every method of the recorder is
+ * envelope failure, integrity status, anchoring status, finding, anchor driver,
+ * journal kind, hold basis, prune status, import status, import format and
+ * import rejection, every configuration key and every method of the recorder is
  * documented; every package event has a row in the events table and in the
  * events guide; every `AuditLog::` call shown exists or is planned; every
  * design note, the redaction note, the threat model, the delivery note and the
- * integrity note among them, exists, has the standard sections and is listed in
- * the index, which ends with the standard sentence; the notes state what they
- * must, and the threat model opens with the limits of key matching and states
- * each limit of integrity; the redaction note lists every entry of the matcher
- * and every IP mode, and never calls key matching fail-closed; the integrity
- * note has a row for every status and finding; every redaction, failure,
- * delivery and integrity setting's environment variable is in the README; the
- * operations guide has its sections, names every integrity command, option and
- * progress name, and claims nothing beyond its measurements; the outcomes table
- * has exactly its rows, and no document says a failed record is not true; the
- * documented spill channel is the one the tests use, and the spill and the
- * outbox are called personal data; every test a note cites and every file it
- * anchors exists, and no document cites a file kept out of the repository, a
- * milestone or another package of the suite, or describes a transition from a
- * release that does not exist; the vocabulary reserves every prefix and every
- * shipped code sits under one; and every example is valid and neutral, naming
- * no other package of the suite. The automatic-capture guide has its sections,
- * names every package code and states every gap in capture, the extending guide
- * has its sections and documents the correlation id format, which the builder
- * holds to, every capture setting's environment variable is in the README, and
- * the segments a watched model may not use are the vocabulary's prefixes. The
- * reading guide has its sections, makes each of its statements, names every
- * value of the read path, every export option and both read settings'
- * environment variables, and shows no call that does not exist; the threat
- * model states the limits of a PHP access policy; the reading note names the
- * seams it leaves; each package code's row in the vocabulary keeps what its
- * definition retains; and no document says the immediate path is outside the
- * caller's transaction.
+ * integrity and lifecycle notes among them, exists, has the standard sections
+ * and is listed in the index, which ends with the standard sentence; the notes
+ * state what they must, and the threat model opens with the limits of key
+ * matching and states each limit of integrity; the redaction note lists every
+ * entry of the matcher and every IP mode, and never calls key matching
+ * fail-closed; the integrity note has a row for every status and finding; every
+ * redaction, failure, delivery and integrity setting's environment variable is
+ * in the README; the operations guide has its sections, names every integrity
+ * command, option and progress name, and claims nothing beyond its
+ * measurements; the outcomes table has exactly its rows, and no document says a
+ * failed record is not true; the documented spill channel is the one the tests
+ * use, and the spill and the outbox are called personal data; every test a note
+ * cites and every file it anchors exists, and no document cites a file kept out
+ * of the repository, a milestone or another package of the suite, or describes
+ * a transition from a release that does not exist; the vocabulary reserves
+ * every prefix and every shipped code sits under one; and every example is
+ * valid and neutral, naming no other package of the suite. The
+ * automatic-capture guide has its sections, names every package code and states
+ * every gap in capture, the extending guide has its sections and documents the
+ * correlation id format, which the builder holds to, every capture setting's
+ * environment variable is in the README, and the segments a watched model may
+ * not use are the vocabulary's prefixes. The reading guide has its sections,
+ * makes each of its statements, names every value of the read path, every
+ * export option and both read settings' environment variables, and shows no
+ * call that does not exist; the threat model states the limits of a PHP access
+ * policy; the reading note names the seams it leaves; each package code's row
+ * in the vocabulary keeps what its definition retains; and no document says the
+ * immediate path is outside the caller's transaction.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -130,6 +137,12 @@ final class DocumentationTest extends TestCase
         ExportFinding::class,
         Acknowledgement::class,
         ReadRefusal::class,
+        JournalKind::class,
+        HoldBasis::class,
+        PruneStatus::class,
+        ImportStatus::class,
+        ImportFormat::class,
+        ImportRejection::class,
     ];
 
     /** @var list<string> The sections of every design note, in order. */
@@ -150,6 +163,7 @@ final class DocumentationTest extends TestCase
         'threat-model.md',
         'testing-helpers.md',
         'reading.md',
+        'lifecycle.md',
     ];
 
     /** @var string The sentence the threat model opens with. */
@@ -206,6 +220,10 @@ final class DocumentationTest extends TestCase
         'Anchoring bounds exposure without removing it',
         'No timer bounds that exposure: a stopped scheduler or a backlog extends it',
         'Installing the package is not compliance',
+        'Database credentials can still destroy rows; the package\'s cryptographic evidence makes unauthorised destruction detectable, never impossible',
+        'the maintenance credentials can delete rows and the journal makes it detectable',
+        '`--by-type` and `--by-id` prove nothing',
+        'Imported rows assert what was accepted, not the truth of the event',
     ];
 
     /** @var string The automatic-capture guide. */
@@ -398,10 +416,11 @@ final class DocumentationTest extends TestCase
     private const array READING_SEAMS = [
         'The decrypting `Contracts\FieldReader`',
         '`erased` once an erasure has destroyed the owner\'s keys',
-        'must keep the export evidence',
-        'or durably reference it',
-        'must never prune it as an ordinary event',
+        'Owner discovery and erasure for a subject access request',
     ];
+
+    /** @var string The rule that keeps the export evidence verifiable, which the reading note and the reading guide both state. */
+    private const string EXPORT_EVIDENCE = '`audit_log.trail_exported` entries are protected from retention, so `--verify` keeps working while the database and `app.key` live';
 
     /** @var list<class-string> The classes whose methods the reading guide's examples call. */
     private const array READING_CLASSES = [
@@ -1097,7 +1116,14 @@ final class DocumentationTest extends TestCase
             'a decrypt failure'                   => [self::DELIVERY_NOTE, 'A decrypt failure means a removed key or corruption, and the row is kept'],
             'never signed again'                  => [self::DELIVERY_NOTE, 'never re-signed'],
             'a removed key'                       => [self::DELIVERY_NOTE, 'restore the key or leave the record quarantined'],
-            'where an unsigned record goes'       => [self::DELIVERY_NOTE, 'The importer, which has not shipped yet, is where an unsigned record goes, marked as asserted'],
+            'where third-party evidence goes'     => [self::DELIVERY_NOTE, 'The importer, `audit-log:import`, takes third-party evidence, marked as asserted by its source'],
+            'the importer refuses its own'        => [self::DELIVERY_NOTE, 'it refuses this installation\'s own source'],
+            'receipts are pruned when terminal'   => [self::DELIVERY_NOTE, 'They are pruned with their entries once terminal'],
+            'the drain checks the tombstones'     => [self::DELIVERY_NOTE, 'Every row a drain claims is checked against the tombstones'],
+            'a direct store is not refused'       => [self::DELIVERY_NOTE, 'a record an application stores again by hand through `AuditStore::store()` is not refused'],
+            'a direct store is resurrected'       => [self::DELIVERY_NOTE, 'Verification reports such a record `resurrected`, so it is detected, not prevented'],
+            'export evidence is kept'             => [self::READING_NOTE, self::EXPORT_EVIDENCE],
+            'the guide keeps export evidence'     => [self::READING_GUIDE, self::EXPORT_EVIDENCE],
             'a repeated log line'                 => [self::DELIVERY_NOTE, 'a replay can repeat a log destination\'s line'],
             'a rewritten token'                   => [self::DELIVERY_NOTE, 'A `LineFormatter` substitutes `%context%`'],
             'a commit that is really a rollback'  => [self::OUTCOMES_NOTE, 'A commit that is really a rollback writes nothing.'],
@@ -1541,7 +1567,7 @@ final class DocumentationTest extends TestCase
         $names   = array_values(array_filter((new \ReflectionClass(IntegrityProgress::class))->getConstants(\ReflectionClassConstant::IS_PUBLIC), is_string(...)));
         $section = self::section(self::read(self::OPERATIONS_GUIDE), 'Monitor');
 
-        self::assertCount(8, $names, 'The progress names are not the ones the guide was written for.');
+        self::assertCount(9, $names, 'The progress names are not the ones the guide was written for.');
 
         foreach ($names as $name) {
             self::assertStringContainsString('`' . $name . '`', $section, sprintf('The operations guide does not name the progress `%s`.', $name));
@@ -2218,8 +2244,8 @@ final class DocumentationTest extends TestCase
 
     /**
      * The reading note names, in its own section, the seams the read path
-     * leaves: the decrypting field reader, and the export evidence the
-     * lifecycle journal must keep and never prune as an ordinary event.
+     * leaves: the decrypting field reader, and owner discovery and erasure for
+     * a subject access request.
      *
      * @return void
      */
@@ -2307,10 +2333,18 @@ final class DocumentationTest extends TestCase
             'the derivation\'s salt'      => [$note, 'an empty salt'],
             'the derivation\'s length'    => [$note, 'a length of 32 bytes'],
             'the seal label'              => [$note, 'the label `audit-log:seal:v1`, a line feed and the 64 hex characters of the seal digest'],
-            'the prune label'             => [$note, 'the label `audit-log:prune:v1`, a line feed'],
+            'the prune label'             => [$note, 'the label `audit-log:prune:v2`, a line feed'],
+            'the bitmap'                  => [$note, 'bit `i % 8` of byte `i / 8`'],
             'the digest\'s encoding'      => [$note, 'the lower-case hex SHA-256 of the canonical encoding of the envelope'],
             'the members digest\'s order' => [$note, 'sorted bytewise by `entry_id`'],
             'the golden vectors'          => [$note, '`tests/Fixtures/Integrity/seal-v1.json`'],
+            'the journal commitment'      => [$note, 'Every seal commits to the lifecycle journal\'s head'],
+            'the resurrected finding'     => [$note, 'A member a valid record covers that is present is `resurrected`'],
+            'pruning is per entry'        => [$note, 'per entry and never per segment'],
+            'the journal label'           => [$note, 'the label `audit-log:lifecycle:<kind>:v1`, a line feed'],
+            'the journal derivation'      => [$note, '`hash_hkdf(\'sha256\', $secret, 32, \'sinemacula/audit-log:lifecycle:v1\', \'\')`'],
+            'the ledger is always asked'  => [$note, 'even one with no member missing'],
+            'the prune is conditional'    => [$note, 'The prune is registered only when it can delete something'],
         ];
     }
 
@@ -2347,6 +2381,10 @@ final class DocumentationTest extends TestCase
             'the alert'                  => [$guide, '`IntegrityCheckFailed`'],
             'the guide\'s key lifetimes' => [$guide, 'a key id is never reused for different material'],
             'the guide\'s compliance'    => [$guide, 'Installing the package is not compliance'],
+            'four runs'                  => [$guide, 'The package registers four runs on Laravel\'s scheduler'],
+            'the prune\'s condition'     => [$guide, 'The prune is registered only when it can delete something'],
+            'the export key'             => [$guide, 'Export artifacts need `app.key` kept, or listed in `app.previous_keys`, for as long as their verification is promised.'],
+            'the journal\'s key'         => [$guide, 'As long as the journal, which nothing prunes'],
         ];
     }
 

@@ -14,7 +14,7 @@ use Tests\Fixtures\Records\RecordFactory;
 
 /**
  * Unit tests for the finalised record: the captured record and finalisation it
- * carries, its 36-column envelope in table order, and each value it refuses
+ * carries, its 37-column envelope in table order, and each value it refuses
  * because its column cannot hold it or an engine would store it differently, in
  * the order they are checked; and a record rebuilt from an envelope, which
  * returns its JSON columns as they were decoded and is checked like any other.
@@ -54,6 +54,12 @@ final class FinalisedRecordTest extends TestCase
     /** @var string Why a malformed HMAC is refused. */
     private const string HMAC_MESSAGE = 'An HMAC must be 64 lower-case hexadecimal characters.';
 
+    /** @var string Why an import batch id that is not a lower-case UUID is refused. */
+    private const string BATCH_MESSAGE = 'A finalised record\'s `import_batch_id` must be a lower-case UUID, the form every engine stores and returns.';
+
+    /** @var string Why a source digest the column cannot hold is refused. */
+    private const string DIGEST_MESSAGE = 'A finalised record\'s `source_digest` must be 64 lower-case hexadecimal characters.';
+
     /** @var string Why a UUID column's value is refused, by the column it names. */
     private const string UUID_MESSAGE = 'A finalised record\'s `%s` must be a lower-case UUID, the form every engine stores and returns.';
 
@@ -62,8 +68,8 @@ final class FinalisedRecordTest extends TestCase
         'id', 'record_version', 'event', 'event_version', 'category', 'outcome', 'reason', 'actor_type', 'actor_id',
         'subject_type', 'subject_id', 'principal_type', 'principal_id', 'tenant_type', 'tenant_id', 'credential_id',
         'guard', 'session_id', 'request_id', 'trace_id', 'correlation_id', 'origin', 'provenance', 'source_id',
-        'source_region', 'source_record_id', 'import_batch_id', 'ip', 'user_agent', 'context', 'properties',
-        'occurred_at', 'recorded_at', 'integrity_version', 'key_id', 'hmac',
+        'source_region', 'source_record_id', 'import_batch_id', 'source_digest', 'ip', 'user_agent', 'context',
+        'properties', 'occurred_at', 'recorded_at', 'integrity_version', 'key_id', 'hmac',
     ];
 
     /**
@@ -99,8 +105,8 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * The envelope is the captured record's 32 fields as they are, then
-     * `recorded_at`, `integrity_version`, `key_id` and `hmac`: the 36 columns
+     * The envelope is the captured record's 33 fields as they are, then
+     * `recorded_at`, `integrity_version`, `key_id` and `hmac`: the 37 columns
      * of the entries table, in its order.
      *
      * @return void
@@ -115,8 +121,9 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * A record of the imported shape, which has a source record id and an
-     * import batch, is finalised with its envelope kept as given.
+     * A record of the imported shape, which has a source record id, an import
+     * batch and a source digest, is finalised with its envelope kept as given,
+     * and so is a record built by the import.
      *
      * @return void
      */
@@ -126,13 +133,19 @@ final class FinalisedRecordTest extends TestCase
             'provenance'       => 'imported',
             'source_record_id' => 'legacy-0042',
             'import_batch_id'  => '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e',
+            'source_digest'    => str_repeat('0f', 32),
         ]);
 
         $envelope = (new FinalisedRecord($record, self::RECORDED_AT, 1, self::KEY_ID, self::HMAC))->toArray();
+        $imported = RecordFactory::imported();
+        $import   = new FinalisedRecord($imported, RecordFactory::IMPORTED_AT, 1, self::KEY_ID, self::HMAC);
+        $expected = [...$imported->toArray(), 'recorded_at' => RecordFactory::IMPORTED_AT, 'integrity_version' => 1, 'key_id' => self::KEY_ID, 'hmac' => self::HMAC];
 
         self::assertSame('legacy-0042', $envelope['source_record_id']);
         self::assertSame('0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e', $envelope['import_batch_id']);
+        self::assertSame(str_repeat('0f', 32), $envelope['source_digest']);
         self::assertSame('imported', $envelope['provenance']);
+        self::assertSame($expected, $import->toArray());
     }
 
     /**
@@ -251,7 +264,7 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * A decoded record's envelope keeps the 36 columns of the entries table in
+     * A decoded record's envelope keeps the 37 columns of the entries table in
      * their order: the decoded columns replace the record's in place, before
      * the finalisation's columns.
      *
@@ -262,7 +275,7 @@ final class FinalisedRecordTest extends TestCase
         $decoded = FinalisedRecord::decoded(RecordFactory::captured(id: self::ID), self::RECORDED_AT, 3, self::KEY_ID, self::HMAC, new \stdClass, new \stdClass);
 
         self::assertSame(self::COLUMNS, array_keys($decoded->toArray()));
-        self::assertSame([self::RECORDED_AT, 3, self::KEY_ID, self::HMAC], array_values(array_slice($decoded->toArray(), 32)));
+        self::assertSame([self::RECORDED_AT, 3, self::KEY_ID, self::HMAC], array_values(array_slice($decoded->toArray(), 33)));
         self::assertSame([self::RECORDED_AT, 3, self::KEY_ID, self::HMAC], [$decoded->recordedAt, $decoded->integrityVersion, $decoded->keyId, $decoded->hmac]);
     }
 
@@ -284,6 +297,7 @@ final class FinalisedRecordTest extends TestCase
             'an upper-case HMAC'         => [[], self::RECORDED_AT, 1, self::KEY_ID, strtoupper(self::HMAC), self::HMAC_MESSAGE],
             'an upper-case id'           => [['id' => $upper], self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, sprintf(self::UUID_MESSAGE, 'id')],
             'an upper-case import batch' => [['import_batch_id' => $upper], self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, sprintf(self::UUID_MESSAGE, 'import_batch_id')],
+            'an upper-case digest'       => [['source_digest' => strtoupper(self::HMAC)], self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, self::DIGEST_MESSAGE],
         ];
     }
 
@@ -570,6 +584,53 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
+     * Rows of `[source digest]`: values the `source_digest` column cannot hold
+     * as the 64 lower-case hexadecimal characters of a digest.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideRefusedSourceDigests(): iterable
+    {
+        yield from [
+            'empty'              => [''],
+            'upper case'         => [str_repeat('AB', 32)],
+            'one short'          => [str_repeat('a', 63)],
+            'one long'           => [str_repeat('a', 65)],
+            'not hexadecimal'    => [str_repeat('z', 64)],
+            'a trailing newline' => [str_repeat('a', 64) . "\n"],
+        ];
+    }
+
+    /**
+     * A source digest that is not 64 lower-case hexadecimal characters fails
+     * closed, since its column would truncate, refuse or keep a value the
+     * importer never compares equal.
+     *
+     * @param  string  $sourceDigest
+     * @return void
+     */
+    #[DataProvider('provideRefusedSourceDigests')]
+    public function testRefusesASourceDigestTheColumnCannotHold(string $sourceDigest): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(self::DIGEST_MESSAGE);
+
+        self::finalise(RecordFactory::withFields(['source_digest' => $sourceDigest]));
+    }
+
+    /**
+     * A captured record has no source digest, which is accepted, and a digest
+     * of 64 lower-case hexadecimal characters is accepted too.
+     *
+     * @return void
+     */
+    public function testAcceptsANullOrLowerCaseHexSourceDigest(): void
+    {
+        self::assertNull(self::finalise()->record->sourceDigest);
+        self::assertSame(self::HMAC, self::finalise(RecordFactory::withFields(['source_digest' => self::HMAC]))->record->sourceDigest);
+    }
+
+    /**
      * Rows of `[fields, recorded at, integrity version, key id, hmac, the
      * message]`: two refused values at once, and the refusal of the one checked
      * first.
@@ -585,13 +646,14 @@ final class FinalisedRecordTest extends TestCase
             'the key id before the HMAC'      => [[], self::RECORDED_AT, 1, '', '', self::KEY_ID_MESSAGE],
             'the HMAC before the id'          => [['id' => 'X'], self::RECORDED_AT, 1, self::KEY_ID, '', self::HMAC_MESSAGE],
             'the id before the import batch'  => [['id' => 'X', 'import_batch_id' => 'X'], self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, sprintf(self::UUID_MESSAGE, 'id')],
+            'the import batch before digest'  => [['import_batch_id' => 'X', 'source_digest' => 'X'], self::RECORDED_AT, 1, self::KEY_ID, self::HMAC, self::BATCH_MESSAGE],
         ];
     }
 
     /**
      * With two refused values, the one checked first is the one named, in the
      * order time, occurrence, integrity version, key id, HMAC, id, import batch
-     * id.
+     * id, source digest.
      *
      * @param  array<string, string>  $fields
      * @param  string  $recordedAt

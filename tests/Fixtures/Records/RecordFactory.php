@@ -29,6 +29,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\ExportManifest;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -38,8 +39,9 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
  * Records for tests: captured records built through the public builder, as an
  * application builds them, records carrying a sealed artifact of any kind, a
  * bulk operation's subjects, a disclosure or an export's manifest, with the
- * canonical forms each kind's builder makes, and records of a shape capture
- * never produces.
+ * canonical forms each kind's builder makes, imported records built as the
+ * importer builds them, and records of a shape neither capture nor import ever
+ * produces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,6 +55,12 @@ final class RecordFactory
 
     /** @var string When a finalised bundle was recorded: after its activity occurred. */
     public const string RECORDED_AT = '2026-11-01T12:00:01.654321Z';
+
+    /** @var string When an imported record was imported, unless a test gives another time. */
+    public const string IMPORTED_AT = '2026-11-03T09:30:00.000000Z';
+
+    /** @var string The batch every imported record comes in, unless a test gives another source. */
+    public const string IMPORT_BATCH_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
 
     /** @var string The type of every member of a bulk record's manifest. */
     public const string MEMBER_TYPE = 'App\Models\Invoice';
@@ -259,9 +267,9 @@ final class RecordFactory
      * given (under their stored, snake_case keys) in place of its own, built
      * through the record's private constructor.
      *
-     * It stands in for the importer, the only producer of `source_record_id`,
-     * and for values capture would never produce, such as an upper-case id;
-     * tests use it for nothing else.
+     * It stands in for an imported record's fields set one by one, and for
+     * values neither capture nor import would ever produce, such as an
+     * upper-case id; tests use it for nothing else.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -283,6 +291,61 @@ final class RecordFactory
         $construct = \Closure::bind(static fn (array $named): AuditRecord => new AuditRecord(...$named), null, AuditRecord::class);
 
         return $construct($named);
+    }
+
+    /**
+     * An imported record of an approved invoice, built as the importer builds
+     * it, through the record's named constructor for imports: by a user, on an
+     * invoice, for an organisation, with the properties, origin, occurrence
+     * time and source given, imported at the time given.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\ImportedSource  $source
+     * @param  ?string  $origin
+     * @param  string  $occurredAt
+     * @param  string  $importedAt
+     * @param  array<array-key, mixed>  $properties
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public static function imported(
+        ?ImportedSource $source = null,
+        ?string $origin = 'http',
+        string $occurredAt = self::OCCURRED_AT,
+        string $importedAt = self::IMPORTED_AT,
+        array $properties = ['amount' => '1200.00'],
+    ): AuditRecord {
+        $builder = (new PendingRecord)
+            ->event('invoice.approved')
+            ->on(Reference::of('invoice', 'inv_0042'))
+            ->by(Reference::of('user', '42'))
+            ->forTenant(Reference::of('organisation', 'org_01'))
+            ->correlatedWith('legacy:ticket-7')
+            ->withProperties($properties);
+
+        $builder->fillClient('198.51.100.4', null);
+        $builder->fillContext(['route' => 'invoices.approve']);
+
+        return AuditRecord::fromImport($builder, self::minimisedOf($builder), 1, 'finance', $occurredAt, $origin, $source ?? self::source(), self::instant($importedAt));
+    }
+
+    /**
+     * The source of an imported record: a legacy application in a region, the
+     * record's id there, the batch it came in and the digest given, or one of
+     * its id.
+     *
+     * @param  string  $sourceRecordId
+     * @param  ?string  $sourceDigest
+     * @return \SineMacula\Laravel\AuditLog\Records\ImportedSource
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function source(string $sourceRecordId = 'legacy-0042', ?string $sourceDigest = null): ImportedSource
+    {
+        return new ImportedSource('legacy-app', 'eu-west-1', $sourceRecordId, self::IMPORT_BATCH_ID, $sourceDigest ?? hash('sha256', $sourceRecordId));
     }
 
     /**

@@ -41,6 +41,7 @@ final class EntriesTableShape
         'source_id'        => 64,
         'source_region'    => 32,
         'source_record_id' => 191,
+        'source_digest'    => 64,
         'ip'               => 255,
         'user_agent'       => 512,
         'key_id'           => 32,

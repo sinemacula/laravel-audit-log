@@ -10,12 +10,14 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversNothing;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use Tests\TestCase;
 
 /**
  * Integration tests for the shape of the table the shipped integrity state
- * migration creates, on whichever engine the suite runs against.
+ * migration creates, on whichever engine the suite runs against, and for the
+ * installation id it seeds.
  *
  * The migration runs for the longest table name the setting accepts and with
  * the schema builder's default time precision lowered to whole seconds, so the
@@ -38,6 +40,9 @@ final class IntegrityStateTableSchemaTest extends TestCase
 
     /** @var string Configured table name the migration runs for: the longest one accepted, 47 characters. */
     private const string TABLE = 'audit_log_integrity_state_for_a_long_table_name';
+
+    /** @var string A lower-case UUID version 7. */
+    private const string UUID_V7 = '/\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/';
 
     /**
      * Run the shipped migration for `TABLE`, with the schema builder's default
@@ -138,7 +143,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
 
         DB::table(self::TABLE)->insert(self::row('sweep.cursor', ['value' => $value]));
 
-        self::assertSame($value, DB::table(self::TABLE)->value('value'));
+        self::assertSame($value, DB::table(self::TABLE)->where('name', 'sweep.cursor')->value('value'));
     }
 
     /**
@@ -155,7 +160,48 @@ final class IntegrityStateTableSchemaTest extends TestCase
 
         DB::table(self::TABLE)->insert(self::row('seal.last', ['updated_at' => '2026-11-01 12:00:00.123456']));
 
-        self::assertSame('2026-11-01 12:00:00.123456', DB::table(self::TABLE)->value('updated_at'));
+        self::assertSame('2026-11-01 12:00:00.123456', DB::table(self::TABLE)->where('name', 'seal.last')->value('updated_at'));
+    }
+
+    /**
+     * The migration seeds exactly one row, the installation id: a JSON object
+     * `{id}` of a lower-case UUID version 7, drawn at the time it is written,
+     * which is stored in UTC to the microsecond.
+     *
+     * @return void
+     */
+    public function testTheMigrationSeedsTheInstallationIdOnce(): void
+    {
+        $rows = DB::table(self::TABLE)->get(['name', 'value', 'updated_at'])->all();
+
+        self::assertCount(1, $rows);
+        self::assertSame(InstallationIdentity::NAME, $rows[0]->name);
+
+        $value = json_decode((string) $rows[0]->value, true);
+
+        self::assertIsArray($value);
+        self::assertSame(['id'], array_keys($value));
+        self::assertIsString($value['id']);
+        self::assertMatchesRegularExpression(self::UUID_V7, $value['id']);
+        self::assertMatchesRegularExpression('/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}\z/', (string) $rows[0]->updated_at);
+
+        $at = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s.u', (string) $rows[0]->updated_at, new \DateTimeZone('UTC'));
+
+        self::assertInstanceOf(\DateTimeImmutable::class, $at);
+        self::assertSame((int) $at->format('Uv'), hexdec(substr(str_replace('-', '', $value['id']), 0, 12)));
+    }
+
+    /**
+     * The seeded id is kept once: a second row under its name is refused, so a
+     * later write can never replace it.
+     *
+     * @return void
+     */
+    public function testTheSeededIdIsNeverWrittenTwice(): void
+    {
+        $this->expectException(UniqueConstraintViolationException::class);
+
+        DB::table(self::TABLE)->insert(self::row(InstallationIdentity::NAME));
     }
 
     /**
@@ -240,6 +286,8 @@ final class IntegrityStateTableSchemaTest extends TestCase
     {
         DB::table(self::TABLE)->insert(self::row('seal.last'));
 
+        $rows = DB::table(self::TABLE)->orderBy('name')->get()->all();
+
         try {
             $this->loadMigration()->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
@@ -251,7 +299,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
             );
         }
 
-        self::assertSame(1, DB::table(self::TABLE)->count());
+        self::assertEquals($rows, DB::table(self::TABLE)->orderBy('name')->get()->all());
     }
 
     /**

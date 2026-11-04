@@ -6,9 +6,11 @@ namespace Tests\Integration\Database;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use Tests\Concerns\InteractsWithReadWriteSplit;
@@ -19,7 +21,8 @@ use Tests\TestCase;
  * verification, on whichever engine the suite runs against: what a name reads
  * as when it is missing or malformed, what a write stores and replaces, the
  * time it keeps, the names it refuses, and that every statement reaches the
- * writer.
+ * writer. The installation id the migrations seed shares the state table but is
+ * never progress, so the rows a test reads leave it out.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,7 +79,7 @@ final class IntegrityProgressTest extends TestCase
 
         self::assertSame($value, $this->progress()->get(IntegrityProgress::SEAL_LAST));
 
-        $row = DB::table(IntegrityTables::stateTable())->first(['name', 'value', 'updated_at']);
+        $row = $this->progressRows()->first(['name', 'value', 'updated_at']);
 
         self::assertNotNull($row);
         self::assertSame(IntegrityProgress::SEAL_LAST, $row->name);
@@ -95,7 +98,7 @@ final class IntegrityProgressTest extends TestCase
         $this->progress()->put(IntegrityProgress::SWEEP_COMPLETED, [], self::at());
 
         self::assertSame([], $this->progress()->get(IntegrityProgress::SWEEP_COMPLETED));
-        self::assertSame('{}', DB::table(IntegrityTables::stateTable())->value('value'));
+        self::assertSame('{}', $this->progressRows()->value('value'));
     }
 
     /**
@@ -115,11 +118,11 @@ final class IntegrityProgressTest extends TestCase
         self::assertSame(['recorded_at' => '2026-11-01T00:00:00.000002Z'], $progress->get(IntegrityProgress::SWEEP_CURSOR));
         self::assertSame(['sequence' => 1], $progress->get(IntegrityProgress::ANCHOR_LAST));
 
-        $rows = DB::table(IntegrityTables::stateTable())->where('name', IntegrityProgress::SWEEP_CURSOR)->get(['updated_at'])->all();
+        $rows = $this->progressRows()->where('name', IntegrityProgress::SWEEP_CURSOR)->get(['updated_at'])->all();
 
         self::assertCount(1, $rows);
         self::assertSame('2026-11-01 12:05:00.654321', $rows[0]->updated_at);
-        self::assertSame(2, DB::table(IntegrityTables::stateTable())->count());
+        self::assertSame(2, $this->progressRows()->count());
     }
 
     /**
@@ -136,7 +139,7 @@ final class IntegrityProgressTest extends TestCase
 
         $this->progress()->put(IntegrityProgress::VERIFY_LAST_FULL, ['head' => 3, 'passed' => true], $at);
 
-        self::assertSame('2026-11-01 12:00:00.000007', DB::table(IntegrityTables::stateTable())->value('updated_at'));
+        self::assertSame('2026-11-01 12:00:00.000007', $this->progressRows()->value('updated_at'));
         self::assertSame('Asia/Kolkata', $at->getTimezone()->getName());
     }
 
@@ -203,7 +206,7 @@ final class IntegrityProgressTest extends TestCase
 
         self::assertNull($progress->get(IntegrityProgress::SWEEP_CURSOR));
         self::assertSame(['seals' => 0], $progress->get(IntegrityProgress::SEAL_LAST_RUN));
-        self::assertSame([IntegrityProgress::SEAL_LAST_RUN], DB::table(IntegrityTables::stateTable())->pluck('name')->all());
+        self::assertSame([IntegrityProgress::SEAL_LAST_RUN], $this->progressRows()->pluck('name')->all());
     }
 
     /**
@@ -221,6 +224,7 @@ final class IntegrityProgressTest extends TestCase
             IntegrityProgress::ANCHOR_LAST         => 'anchor.last',
             IntegrityProgress::ANCHOR_LAST_FAILURE => 'anchor.last_failure',
             IntegrityProgress::VERIFY_LAST_FULL    => 'verify.last_full',
+            IntegrityProgress::RETENTION_LAST_RUN  => 'retention.last_run',
         ];
 
         $progress = $this->progress();
@@ -233,7 +237,7 @@ final class IntegrityProgressTest extends TestCase
             self::assertSame(['name' => $name], $progress->get($name), $name);
         }
 
-        self::assertSame(7, DB::table(IntegrityTables::stateTable())->count());
+        self::assertSame(8, $this->progressRows()->count());
     }
 
     /**
@@ -282,7 +286,7 @@ final class IntegrityProgressTest extends TestCase
             }
         }
 
-        self::assertSame(0, DB::table(IntegrityTables::stateTable())->count());
+        self::assertSame(0, $this->progressRows()->count());
     }
 
     /**
@@ -297,7 +301,7 @@ final class IntegrityProgressTest extends TestCase
             $this->progress()->put(IntegrityProgress::SEAL_LAST_RUN, ['ratio' => NAN], self::at());
             self::fail('Expected the value to be refused.');
         } catch (\JsonException) {
-            self::assertSame(0, DB::table(IntegrityTables::stateTable())->count());
+            self::assertSame(0, $this->progressRows()->count());
         }
     }
 
@@ -317,8 +321,8 @@ final class IntegrityProgressTest extends TestCase
         try {
             $this->progress()->put(IntegrityProgress::SEAL_LAST, ['sequence' => 9], self::at());
 
-            self::assertSame(1, DB::table('audit_progress_elsewhere')->count());
-            self::assertSame(0, DB::table(IntegrityTables::DEFAULT_STATE)->count());
+            self::assertSame(1, $this->progressRows('audit_progress_elsewhere')->count());
+            self::assertSame(0, $this->progressRows(IntegrityTables::DEFAULT_STATE)->count());
             self::assertSame(['sequence' => 9], $this->progress()->get(IntegrityProgress::SEAL_LAST));
         } finally {
             $this->stateMigration()->down(); // @phpstan-ignore method.notFound
@@ -368,6 +372,18 @@ final class IntegrityProgressTest extends TestCase
     private function progress(): IntegrityProgress
     {
         return app(IntegrityProgress::class);
+    }
+
+    /**
+     * A query of the progress rows of the state table named, the configured one
+     * by default: every row but the installation id the migrations seed.
+     *
+     * @param  ?string  $table
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private function progressRows(?string $table = null): Builder
+    {
+        return DB::table($table ?? IntegrityTables::stateTable())->where('name', '!=', InstallationIdentity::NAME);
     }
 
     /**

@@ -65,6 +65,7 @@ final readonly class RowCodec
         'source_region'     => 'nullable',
         'source_record_id'  => 'nullable',
         'import_batch_id'   => 'nullable',
+        'source_digest'     => 'nullable',
         'ip'                => 'nullable',
         'user_agent'        => 'nullable',
         'context'           => 'json',

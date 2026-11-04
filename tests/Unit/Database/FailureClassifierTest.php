@@ -363,6 +363,27 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
+     * Rethrowing masked throws the failure as `masked()` gives it: the same
+     * class and connection, with no binding in its message.
+     *
+     * @return void
+     */
+    public function testRethrowingMaskedThrowsTheMaskedFailure(): void
+    {
+        $driver  = self::pdoFailure('SQLSTATE[HY000]: no such table', ['HY000', 1, ''], 'HY000');
+        $failure = new QueryException('main', 'insert into entries (note) values (?)', ['secret-note'], $driver);
+
+        try {
+            FailureClassifier::rethrowMasked($failure);
+        } catch (QueryException $masked) {
+            self::assertSame(QueryException::class, $masked::class);
+            self::assertSame('main', $masked->connectionName);
+            self::assertSame([], $masked->getBindings());
+            self::assertStringNotContainsString('secret-note', $masked->getMessage());
+        }
+    }
+
+    /**
      * A masked unique violation stays one, so the store still resolves it, and
      * a value the driver quoted is gone from its message too.
      *

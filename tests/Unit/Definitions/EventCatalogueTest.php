@@ -491,7 +491,7 @@ final class EventCatalogueTest extends TestCase
         self::assertIsArray($held);
         self::assertSame(array_map(static fn (PackageActivity $activity): string => $activity->value, PackageActivity::cases()), array_keys($held));
         self::assertFalse($catalogue->isRegistered(EventCode::of('invoice.approved')));
-        self::assertFalse($catalogue->isRegistered(EventCode::forReading('audit_log.pruned')));
+        self::assertFalse($catalogue->isRegistered(EventCode::forReading('audit_log.unknown')));
     }
 
     /**

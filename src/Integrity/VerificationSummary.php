@@ -13,8 +13,9 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
  * What one verification run established: the exact range of seals it checked
  * and the head it observed, the anchor's head and how it compared, whether the
  * run covered the whole log, the segments in each integrity and anchoring
- * status, the findings of the run as a whole, the unsealed entries, and the
- * first failure.
+ * status, the findings of the run as a whole, the unsealed entries, what it
+ * read of the lifecycle journal, and the first failure. A journal finding is a
+ * finding of the run, and fails it as any other does.
  *
  * A run fails on any integrity failure, of a segment or of the run. A strict
  * run with an anchor configured also fails on any segment short of `anchored`,
@@ -51,6 +52,7 @@ final readonly class VerificationSummary
      * @param  int  $overdue
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $firstFinding
      * @param  ?string  $firstBadId
+     * @param  ?\SineMacula\Laravel\AuditLog\Integrity\JournalSummary  $journal
      */
     public function __construct(
 
@@ -101,6 +103,9 @@ final readonly class VerificationSummary
 
         /** The id the first failure was found at, or `null` when there is none to name. */
         public ?string $firstBadId,
+
+        /** What the run read of the lifecycle journal, or `null` when it read none. */
+        public ?JournalSummary $journal = null,
     ) {}
 
     /**
@@ -139,6 +144,36 @@ final readonly class VerificationSummary
     }
 
     /**
+     * The summary with what the run read of the lifecycle journal, everything
+     * else as it is.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalSummary  $journal
+     * @return self
+     */
+    public function withJournal(JournalSummary $journal): self
+    {
+        return new self(
+            $this->from,
+            $this->to,
+            $this->head,
+            $this->remoteHead,
+            $this->remote,
+            $this->complete,
+            $this->anchorConfigured,
+            $this->discovers,
+            $this->integrity,
+            $this->anchoring,
+            $this->awaiting,
+            $this->findings,
+            $this->pending,
+            $this->overdue,
+            $this->firstFinding,
+            $this->firstBadId,
+            $journal,
+        );
+    }
+
+    /**
      * Whether the run fails: on any integrity failure, and when strict, with an
      * anchor configured, on anything short of what the anchor confirms.
      *
@@ -156,15 +191,15 @@ final readonly class VerificationSummary
 
     /**
      * The summary as the last line of output: the range checked and the heads
-     * observed, how the anchor compared, the counts, the first failure, and
-     * whether the run passed.
+     * observed, how the anchor compared, the counts, what was read of the
+     * journal, the first failure, and whether the run passed.
      *
      * @formatter:off
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
      * @param  bool  $strict
-     * @return array{type: 'summary', from: int, to: int, head: ?int, remote_head: ?int, remote: ?string, complete: bool, strict: bool, integrity: array<string, int>, anchoring: array<string, int>, awaiting_anchor: int, pending: int, overdue: int, first_finding: ?string, first_bad_id: ?string, passed: bool}
+     * @return array{type: 'summary', from: int, to: int, head: ?int, remote_head: ?int, remote: ?string, complete: bool, strict: bool, integrity: array<string, int>, anchoring: array<string, int>, awaiting_anchor: int, pending: int, overdue: int, journal: ?array{rows: int, head: ?int, committed: ?int}, first_finding: ?string, first_bad_id: ?string, passed: bool}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -186,6 +221,7 @@ final readonly class VerificationSummary
             'awaiting_anchor' => $this->awaiting,
             'pending'         => $this->pending,
             'overdue'         => $this->overdue,
+            'journal'         => $this->journal?->toArray(),
             'first_finding'   => $this->firstFinding?->value,
             'first_bad_id'    => $this->firstBadId,
             'passed'          => !$this->fails($strict),

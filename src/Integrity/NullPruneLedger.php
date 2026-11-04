@@ -7,9 +7,9 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 
 /**
- * The prune ledger the package binds by default: nothing has been pruned, so
- * every seal is asked for its members, and a missing member is reported as
- * missing rather than excused.
+ * A prune ledger that has pruned nothing, for an application that never prunes:
+ * every seal is asked for its records and has none, so a missing member is
+ * reported as missing rather than excused.
  *
  * @api
  *
@@ -19,15 +19,15 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 final readonly class NullPruneLedger implements PruneLedger
 {
     /**
-     * The record of the prune of the seal's entries: never one, since nothing
+     * The records of the prunes of the seal's entries: never one, since nothing
      * has been pruned.
      *
      * @param  string  $sealId
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\PruneRecord
+     * @return list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>
      */
     #[\Override]
-    public function recordFor(string $sealId): ?PruneRecord
+    public function recordsFor(string $sealId): array
     {
-        return null;
+        return [];
     }
 }

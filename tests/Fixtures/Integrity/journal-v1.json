@@ -1,0 +1,113 @@
+{
+    "secret": "audit-log golden key 0123456789!",
+    "key_id": "k2026",
+    "log_id": "app-eu-1",
+    "derivation_info": "sinemacula/audit-log:lifecycle:v1",
+    "journal_key": "ccaa60ccf004e8ab9835c91577d837a16b9957931fd2d9338ac9ca97008f92ea",
+    "rows": [
+        {
+            "input": {
+                "id": "01932b4e-b000-7000-8000-000000000001",
+                "sequence": 1,
+                "kind": "hold",
+                "operation_id": "01932b4e-c000-7000-8000-000000000001",
+                "occurred_at": "2026-10-31T23:42:00.000000Z",
+                "authority": [
+                    "App\\Models\\User",
+                    "7"
+                ],
+                "reason": "case.review",
+                "external_reference": "CASE-2026-001",
+                "seal_id": null,
+                "hold_id": "01932b4e-d000-7000-8000-000000000001",
+                "payload": {
+                    "hold_id": "01932b4e-d000-7000-8000-000000000001",
+                    "scope": {
+                        "v": 1,
+                        "tenants": null,
+                        "tenantless": true,
+                        "about": null,
+                        "categories": [
+                            "security"
+                        ],
+                        "from": null,
+                        "to": null,
+                        "import_batch": null
+                    },
+                    "basis": "legal_claim",
+                    "review_by": null
+                }
+            },
+            "previous_hmac": null,
+            "payload": "{\"basis\":\"legal_claim\",\"hold_id\":\"01932b4e-d000-7000-8000-000000000001\",\"review_by\":null,\"scope\":{\"about\":null,\"categories\":[\"security\"],\"from\":null,\"import_batch\":null,\"tenantless\":true,\"tenants\":null,\"to\":null,\"v\":1}}",
+            "payload_digest": "d08cec9f316e209a762d090e39569b41e7086565766348c076f7ce8d030345ba",
+            "signed_fields": {
+                "v": 1,
+                "id": "01932b4e-b000-7000-8000-000000000001",
+                "sequence": 1,
+                "log_id": "app-eu-1",
+                "kind": "hold",
+                "operation_id": "01932b4e-c000-7000-8000-000000000001",
+                "occurred_at": "2026-10-31T23:42:00.000000Z",
+                "authority_type": "App\\Models\\User",
+                "authority_id": "7",
+                "reason": "case.review",
+                "external_reference": "CASE-2026-001",
+                "seal_id": null,
+                "hold_id": "01932b4e-d000-7000-8000-000000000001",
+                "payload_digest": "d08cec9f316e209a762d090e39569b41e7086565766348c076f7ce8d030345ba",
+                "previous_hmac": null,
+                "key_id": "k2026"
+            },
+            "canonical": "{\"authority_id\":\"7\",\"authority_type\":\"App\\\\Models\\\\User\",\"external_reference\":\"CASE-2026-001\",\"hold_id\":\"01932b4e-d000-7000-8000-000000000001\",\"id\":\"01932b4e-b000-7000-8000-000000000001\",\"key_id\":\"k2026\",\"kind\":\"hold\",\"log_id\":\"app-eu-1\",\"occurred_at\":\"2026-10-31T23:42:00.000000Z\",\"operation_id\":\"01932b4e-c000-7000-8000-000000000001\",\"payload_digest\":\"d08cec9f316e209a762d090e39569b41e7086565766348c076f7ce8d030345ba\",\"previous_hmac\":null,\"reason\":\"case.review\",\"seal_id\":null,\"sequence\":1,\"v\":1}",
+            "digest": "eaf0360bc18cdda7ad6f518e976017aa2e52d5e84914fcab372fad723dce71af",
+            "label": "audit-log:lifecycle:hold:v1\n",
+            "hmac": "b7569d64198e4df1c121883d6a23213915ecb232d574c31a3e2b50daae590429"
+        },
+        {
+            "input": {
+                "id": "01932b4e-b000-7000-8000-000000000002",
+                "sequence": 2,
+                "kind": "release",
+                "operation_id": "01932b4e-c000-7000-8000-000000000002",
+                "occurred_at": "2026-10-31T23:50:00.000000Z",
+                "authority": [
+                    "App\\Models\\User",
+                    "7"
+                ],
+                "reason": "case.closed",
+                "external_reference": null,
+                "seal_id": null,
+                "hold_id": "01932b4e-d000-7000-8000-000000000001",
+                "payload": {
+                    "hold_id": "01932b4e-d000-7000-8000-000000000001"
+                }
+            },
+            "previous_hmac": "b7569d64198e4df1c121883d6a23213915ecb232d574c31a3e2b50daae590429",
+            "payload": "{\"hold_id\":\"01932b4e-d000-7000-8000-000000000001\"}",
+            "payload_digest": "2bb69de2fe6641945d9c5bd36876e8069a671216a493e9cd4b743a17a5a29577",
+            "signed_fields": {
+                "v": 1,
+                "id": "01932b4e-b000-7000-8000-000000000002",
+                "sequence": 2,
+                "log_id": "app-eu-1",
+                "kind": "release",
+                "operation_id": "01932b4e-c000-7000-8000-000000000002",
+                "occurred_at": "2026-10-31T23:50:00.000000Z",
+                "authority_type": "App\\Models\\User",
+                "authority_id": "7",
+                "reason": "case.closed",
+                "external_reference": null,
+                "seal_id": null,
+                "hold_id": "01932b4e-d000-7000-8000-000000000001",
+                "payload_digest": "2bb69de2fe6641945d9c5bd36876e8069a671216a493e9cd4b743a17a5a29577",
+                "previous_hmac": "b7569d64198e4df1c121883d6a23213915ecb232d574c31a3e2b50daae590429",
+                "key_id": "k2026"
+            },
+            "canonical": "{\"authority_id\":\"7\",\"authority_type\":\"App\\\\Models\\\\User\",\"external_reference\":null,\"hold_id\":\"01932b4e-d000-7000-8000-000000000001\",\"id\":\"01932b4e-b000-7000-8000-000000000002\",\"key_id\":\"k2026\",\"kind\":\"release\",\"log_id\":\"app-eu-1\",\"occurred_at\":\"2026-10-31T23:50:00.000000Z\",\"operation_id\":\"01932b4e-c000-7000-8000-000000000002\",\"payload_digest\":\"2bb69de2fe6641945d9c5bd36876e8069a671216a493e9cd4b743a17a5a29577\",\"previous_hmac\":\"b7569d64198e4df1c121883d6a23213915ecb232d574c31a3e2b50daae590429\",\"reason\":\"case.closed\",\"seal_id\":null,\"sequence\":2,\"v\":1}",
+            "digest": "2d51df3ac41f1b8edefa2132be9c0a5fd7fe215e1f842b5c4f3d109d22f6c0cb",
+            "label": "audit-log:lifecycle:release:v1\n",
+            "hmac": "05bc916b6c19850c25d27f21a62d23479bc5e84c17b6bbb54d9aaf1bfb841c9f"
+        }
+    ]
+}

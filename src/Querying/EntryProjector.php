@@ -159,6 +159,7 @@ final readonly class EntryProjector
             sourceRegion: self::nullable($envelope, 'source_region'),
             sourceRecordId: self::nullable($envelope, 'source_record_id'),
             importBatchId: self::nullable($envelope, 'import_batch_id'),
+            sourceDigest: self::nullable($envelope, 'source_digest'),
             ip: $ip,
             userAgent: self::nullable($envelope, 'user_agent'),
             context: $context,

@@ -13,7 +13,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 /**
  * The one conversion between a finalised record and the envelope it is kept in
  * outside the entries table, in the outbox or a spill line: the canonical
- * encoding of its 36 columns, or of the bundle a record with an attachment is
+ * encoding of its 37 columns, or of the bundle a record with an attachment is
  * kept as, and the finalised record a verified envelope holds, rebuilt without
  * loss.
  *
@@ -98,7 +98,7 @@ final readonly class EnvelopeCodec
             'nullable' => [
                 'reason', 'actor_type', 'actor_id', 'subject_type', 'subject_id', 'principal_type', 'principal_id', 'tenant_type',
                 'tenant_id', 'credential_id', 'guard', 'session_id', 'request_id', 'trace_id', 'correlation_id', 'origin',
-                'source_region', 'source_record_id', 'import_batch_id', 'ip', 'user_agent',
+                'source_region', 'source_record_id', 'import_batch_id', 'source_digest', 'ip', 'user_agent',
             ],
         ],
     ];

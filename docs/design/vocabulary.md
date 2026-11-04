@@ -75,29 +75,39 @@ is defined by `Capture\Enums\CapturedActivity`, version 1, in the `security` cat
 not list. The actor and the subject are read from the event, never from the authenticated user: "none, explicitly" means
 no actor is recorded and no contributor fills one in.
 
-The package records the five `audit_log.` codes on its read path, as [the reading guide](../guides/reading.md) sets out.
-Each is defined by `Querying\Enums\PackageActivity`, version 1, in the `audit` category, and drops every property it
-does not list, so each row's properties are exactly the ones its definition retains, in the order its record gives
-them. Each is recorded by the viewer, in the tenant of a scope that sees exactly one and otherwise in none.
+The package records the nine `audit_log.` codes of its own activity: five on its read path, as [the reading
+guide](../guides/reading.md) sets out, and four of its lifecycle's prunes, holds, releases and imports. Each is defined
+by `Querying\Enums\PackageActivity`, version 1, in the `audit` category, and drops every property it does not list, so
+each row's properties are exactly the ones its definition retains, in the order its record gives them. None of the
+lifecycle's codes is a read. A read path's code is recorded by the viewer, in the tenant of a scope that sees exactly
+one and otherwise in none; a lifecycle code is recorded once its operation has committed, by the operator the
+operation's authority names, none for a prune, and in no tenant, explicitly.
 
-| Code                                      | Source                                                                | Outcome                        | Actor                                 | Subject                        | Properties kept                                                                                                                  |
-|-------------------------------------------|-----------------------------------------------------------------------|--------------------------------|---------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
-| `authentication.signed_in`                | `Login`                                                               | `success`                      | the user                              | the user                       | `remember`                                                                                                                       |
-| `authentication.session_restored`         | `Login`, when the named guard is a `SessionGuard` and `viaRemember()` | `success`                      | the user                              | the user                       | `remember`                                                                                                                       |
-| `authentication.sign_in_failed`           | `Failed`                                                              | `failure`                      | none, explicitly                      | the user when found, else none | none; the identifier is hashed                                                                                                   |
-| `authentication.signed_out`               | `Logout`, `CurrentDeviceLogout`                                       | `success`                      | the user, or none                     | the user, or none              | none                                                                                                                             |
-| `authentication.signed_out_other_devices` | `OtherDeviceLogout`                                                   | `success`                      | the user, or none                     | the user, or none              | none                                                                                                                             |
-| `authentication.locked_out`               | `Lockout`                                                             | `denied`                       | none, explicitly                      | none                           | none; the IP, and the identifier hashed                                                                                          |
-| `account.registered`                      | `Registered`                                                          | `success`                      | the user                              | the user                       | none                                                                                                                             |
-| `account.email_verified`                  | `Verified`                                                            | `success`                      | the user                              | the user                       | none                                                                                                                             |
-| `account.password_reset`                  | `PasswordReset`                                                       | `success`                      | the user                              | the user                       | none                                                                                                                             |
-| `account.password_reset_requested`        | `PasswordResetLinkSent`                                               | `success`                      | none, explicitly                      | the user                       | none                                                                                                                             |
-| `authorization.gate_denied`               | `GateEvaluated`, for a denial                                         | `denied`                       | the event's user, or none, explicitly | none                           | `ability`, `arguments`, `argument_count`                                                                                         |
-| `audit_log.trail_read`                    | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `page`, `per_page`, `returned`, `outcome`      |
-| `audit_log.trail_counted`                 | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `returned`, `outcome`                          |
-| `audit_log.trail_exported`                | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `format`, `returned`, `file_sha256`, `outcome` |
-| `audit_log.export_verified`               | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `scope_fingerprint`, `fingerprint_key`, `policy`, `export_entry`, `verdict`, `findings`, `outcome`                    |
-| `audit_log.export_publish_failed`         | the read path                                                         | `failure`                      | the viewer                            | none                           | `export_entry`, `outcome`                                                                                                        |
+`audit_log.trail_exported` is protected: retention never prunes it. Every other code, the other `audit_log.` codes
+included, follows its category's retention.
+
+| Code                                      | Source                                                                | Outcome                        | Actor                                 | Subject                        | Properties kept                                                                                                                                                        |
+|-------------------------------------------|-----------------------------------------------------------------------|--------------------------------|---------------------------------------|--------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `authentication.signed_in`                | `Login`                                                               | `success`                      | the user                              | the user                       | `remember`                                                                                                                                                             |
+| `authentication.session_restored`         | `Login`, when the named guard is a `SessionGuard` and `viaRemember()` | `success`                      | the user                              | the user                       | `remember`                                                                                                                                                             |
+| `authentication.sign_in_failed`           | `Failed`                                                              | `failure`                      | none, explicitly                      | the user when found, else none | none; the identifier is hashed                                                                                                                                         |
+| `authentication.signed_out`               | `Logout`, `CurrentDeviceLogout`                                       | `success`                      | the user, or none                     | the user, or none              | none                                                                                                                                                                   |
+| `authentication.signed_out_other_devices` | `OtherDeviceLogout`                                                   | `success`                      | the user, or none                     | the user, or none              | none                                                                                                                                                                   |
+| `authentication.locked_out`               | `Lockout`                                                             | `denied`                       | none, explicitly                      | none                           | none; the IP, and the identifier hashed                                                                                                                                |
+| `account.registered`                      | `Registered`                                                          | `success`                      | the user                              | the user                       | none                                                                                                                                                                   |
+| `account.email_verified`                  | `Verified`                                                            | `success`                      | the user                              | the user                       | none                                                                                                                                                                   |
+| `account.password_reset`                  | `PasswordReset`                                                       | `success`                      | the user                              | the user                       | none                                                                                                                                                                   |
+| `account.password_reset_requested`        | `PasswordResetLinkSent`                                               | `success`                      | none, explicitly                      | the user                       | none                                                                                                                                                                   |
+| `authorization.gate_denied`               | `GateEvaluated`, for a denial                                         | `denied`                       | the event's user, or none, explicitly | none                           | `ability`, `arguments`, `argument_count`                                                                                                                               |
+| `audit_log.trail_read`                    | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `page`, `per_page`, `returned`, `outcome`                                            |
+| `audit_log.trail_counted`                 | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `returned`, `outcome`                                                                |
+| `audit_log.trail_exported`                | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `format`, `returned`, `file_sha256`, `outcome`                                       |
+| `audit_log.export_verified`               | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `scope_fingerprint`, `fingerprint_key`, `policy`, `export_entry`, `verdict`, `findings`, `outcome`                                                          |
+| `audit_log.export_publish_failed`         | the read path                                                         | `failure`                      | the viewer                            | none                           | `export_entry`, `outcome`                                                                                                                                              |
+| `audit_log.pruned`                        | a prune run                                                           | `success`, `failure`           | none, explicitly                      | none                           | `operation_id`, `status`, `policy_version`, `deleted`, `seals`, `held`, `pending_delivery`, `skipped_seals`, `categories`, `tenants_affected`, `outcome`               |
+| `audit_log.held`                          | a hold placed                                                         | `success`                      | the authority's operator              | none                           | `operation_id`, `hold_id`, `basis`, `scope_digest`, `review_by`, `authority_reason`, `outcome`                                                                         |
+| `audit_log.released`                      | a hold released                                                       | `success`, `denied`            | the authority's operator              | none                           | `operation_id`, `hold_id`, `authority_reason`, `outcome`                                                                                                               |
+| `audit_log.imported`                      | an import                                                             | `success`, `failure`           | the authority's operator              | none                           | `operation_id`, `batch_id`, `source_id`, `format`, `status`, `lines_read`, `imported`, `duplicates`, `conflicts`, `rejected`, `hold_id`, `authority_reason`, `outcome` |
 
 `Attempting`, `Validated` and `Authenticated` are never captured.
 
@@ -116,11 +126,20 @@ code is defined for the watch, version 1, in the `change` category.
 | `{as}.restored`      | a soft-deleted model is restored: an update that clears its deleted-at column |
 | `{as}.force_deleted` | the model is deleted for good, past its soft delete                           |
 
+## Terminology
+
+| Term      | Meaning                                                                                                                                                 |
+|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| journal   | the lifecycle's chained, signed rows of every policy, prune run, prune, hold, release and import; every seal commits to its head                        |
+| hold      | a scope of entries retention never prunes while the hold is active, placed and released through the journal                                             |
+| prune run | one run of `audit-log:prune`: its start row, the prune row of each chunk it committed, and its finish row                                               |
+| tombstone | a sealed member whose entry is gone and whose prune a valid record covers: a pruned id, which a re-delivery completes as pruned and never inserts again |
+
 ## Implementation Anchors
 
 - `src/Records/EventCode.php`: `of()`, `package()`, `forReading()`, `RESERVED_PREFIX`.
 - `src/Capture/Enums/CapturedActivity.php`: `definition()`.
-- `src/Querying/Enums/PackageActivity.php`: `definition()`, `isRead()`.
+- `src/Querying/Enums/PackageActivity.php`: `definition()`, `isRead()`, `isProtected()`.
 - `src/Definitions/EventCatalogue.php`: `__construct()`.
 - `src/Capture/Enums/ModelEvent.php`: `codeFor()`, `eloquentEvent()`.
 
@@ -131,7 +150,9 @@ code is defined for the watch, version 1, in the `change` category.
   `testPackageMintsAReservedCode`, `testOfStillRefusesTheReservedPrefix`, `testForReadingAcceptsAReservedCode`,
   `testForReadingStillChecksTheGrammarAndLength`
 - `tests/Unit/Querying/Enums/PackageActivityTest.php` `testTheStoredValues`, `testEachIsUnderTheReservedPrefix`,
-  `testEachDefinitionIsVersionOneInTheAuditCategoryDroppingWhatItDoesNotList`, `testOnlyThePublishFailureIsNotARead`
+  `testEachDefinitionIsVersionOneInTheAuditCategoryDroppingWhatItDoesNotList`,
+  `testEachLifecycleDefinitionKeepsExactlyItsProperties`, `testTheReadPathsReadsAreReads`, `testNoLifecycleCodeIsARead`,
+  `testOnlyTheExportIsProtected`
 - `tests/Unit/Definitions/EventCatalogueTest.php` `testThePackageDefinitionsAreThereFromTheStart`,
   `testANewCatalogueHoldsOnlyThePackageDefinitions`, `testThePackageDefinitionsSurviveTheFreeze`
 - `tests/Unit/Capture/Enums/CapturedActivityTest.php` `testTheCodesAreTheVocabularys`, `testEveryCaseDefinesItsOwnCode`,
@@ -154,4 +175,6 @@ Update this note when any of the following change:
 - a code the package ships, its title, or the OWASP names a prefix maps to
 - how the package's own codes are minted, or what may look one up
 - what a package code is captured from, its outcome, its actor or subject, or the properties it keeps
+- which package code retention never prunes
+- a term the terminology defines
 - a model code's suffix, the grammar of the segment a model is watched as, or the segments it may not be

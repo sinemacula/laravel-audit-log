@@ -20,8 +20,11 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
+use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\PruneCoverage;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
+use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\RecordConflictException;
@@ -38,7 +41,8 @@ use Tests\TestCase;
  * conflict when it does not, and propagated when it cannot be verified or no
  * row holds the id; a record without an attachment written as before, never
  * touching the artifacts table; and a host transaction left usable by one
- * failed audit statement, on SQLite, MySQL and PostgreSQL alike.
+ * failed audit statement; and an imported record stored with its source digest,
+ * on SQLite, MySQL and PostgreSQL alike.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -131,6 +135,33 @@ final class DatabaseAuditStoreTest extends TestCase
         self::assertSame(CanonicalEncoder::encode($envelope), CanonicalEncoder::encode($stored));
         self::assertSame(array_diff_key($envelope, ['context' => true, 'properties' => true]), array_diff_key($stored, ['context' => true, 'properties' => true]));
         self::assertTrue(app(RecordSigner::class)->verifies($stored));
+    }
+
+    /**
+     * An imported record is stored as one row with its source fields and its
+     * source digest, which the engine returns as written and the row's
+     * signature covers; storing it again is the same row, never a conflict.
+     *
+     * @return void
+     */
+    public function testStoresAnImportedRecordWithItsSourceDigest(): void
+    {
+        $finalised = $this->finaliser()->finalise(RecordFactory::imported(origin: null));
+        $id        = $finalised->record->id;
+
+        $this->store()->store($finalised);
+        $this->store()->store($finalised);
+
+        $stored = $this->storedRow($id);
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(RecordFactory::source()->sourceDigest, $stored['source_digest']);
+        self::assertSame(['imported', 'legacy-app', 'eu-west-1', 'legacy-0042', RecordFactory::IMPORT_BATCH_ID, null], [
+            $stored['provenance'], $stored['source_id'], $stored['source_region'], $stored['source_record_id'], $stored['import_batch_id'], $stored['origin'],
+        ]);
+        self::assertSame(CanonicalEncoder::encode($finalised->toArray()), CanonicalEncoder::encode($stored));
+        self::assertTrue(app(RecordSigner::class)->verifies($stored));
+        self::assertFalse(app(RecordSigner::class)->verifies(['source_digest' => str_repeat('0', 64)] + $stored));
     }
 
     /**
@@ -741,7 +772,7 @@ final class DatabaseAuditStoreTest extends TestCase
 
         $connections->shouldReceive('connection')->once()->with(null)->andReturn(\Mockery::mock(ConnectionInterface::class));
 
-        $store = new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class));
+        $store = new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class), new PruneTombstones($connections, new NullPruneLedger, app(PruneCoverage::class)));
 
         $this->expectException(\LogicException::class);
         $this->expectExceptionMessage('The storage connection [testing] is not a database connection that supports transactions.');
@@ -800,7 +831,9 @@ final class DatabaseAuditStoreTest extends TestCase
 
         $connections->shouldReceive('connection')->with(null)->andReturn($connection);
 
-        (new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class)))->store($finalised);
+        $tombstones = new PruneTombstones($connections, new NullPruneLedger, app(PruneCoverage::class));
+
+        (new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class), $tombstones))->store($finalised);
     }
 
     /**

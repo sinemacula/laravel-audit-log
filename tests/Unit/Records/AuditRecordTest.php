@@ -28,13 +28,15 @@ use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for the captured record: its shape and its two named constructors,
- * the pinned envelope and the golden v1 record, the UUID version 7 id and its
- * order, the UTC instant, the versions, provenance and source it carries, the
- * reference pairs, that it stores only what minimising left, where a note is
- * stored and that an owned note never is, and the refusals of building one; and
- * a record rebuilt from an envelope, every field kept as given, and the
- * envelopes it refuses.
+ * Unit tests for the captured record: its shape and its three named
+ * constructors, the pinned envelope and the golden v1 record, the UUID version
+ * 7 id and its order, the UTC instant, the versions, provenance and source it
+ * carries, the reference pairs, that it stores only what minimising left, where
+ * a note is stored and that an owned note never is, and the refusals of
+ * building one; an imported record, its source fields, its id drawn at import,
+ * its kept occurrence time, its optional origin and its refusals; and a record
+ * rebuilt from an envelope, every field kept as given, and the envelopes it
+ * refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,9 +63,18 @@ final class AuditRecordTest extends TestCase
         'id', 'record_version', 'event', 'event_version', 'category', 'outcome', 'reason', 'actor_type', 'actor_id',
         'subject_type', 'subject_id', 'principal_type', 'principal_id', 'tenant_type', 'tenant_id', 'credential_id',
         'guard', 'session_id', 'request_id', 'trace_id', 'correlation_id', 'origin', 'provenance', 'source_id',
-        'source_region', 'source_record_id', 'import_batch_id', 'ip', 'user_agent', 'context', 'properties',
-        'occurred_at',
+        'source_region', 'source_record_id', 'import_batch_id', 'source_digest', 'ip', 'user_agent', 'context',
+        'properties', 'occurred_at',
     ];
+
+    /** @var string The refusal of an imported record with an artifact. */
+    private const string NO_ARTIFACT = 'An imported record carries no artifact.';
+
+    /** @var string When the imported records are imported: two days after the golden record's activity. */
+    private const string IMPORTED_AT = '2026-11-02T08:15:30.250000Z';
+
+    /** @var string When an imported record's activity happened, as its source gave it. */
+    private const string SOURCE_OCCURRED_AT = '2019-03-04T05:06:07.080910Z';
 
     /**
      * Raise every PHP warning as an exception, so each record is also built
@@ -100,8 +111,9 @@ final class AuditRecordTest extends TestCase
     /**
      * The record is final and readonly, its constructor is private, and its
      * only public methods are `fromPending()`, the one named constructor that
-     * captures a record, `fromEnvelope()`, which only the codec calls to
-     * rebuild one, and `toArray()`.
+     * captures a record, `fromImport()`, the one that imports one,
+     * `fromEnvelope()`, which only the codec calls to rebuild one, and
+     * `toArray()`.
      *
      * @return void
      */
@@ -118,10 +130,11 @@ final class AuditRecordTest extends TestCase
         $methods = array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $reflection->getMethods(\ReflectionMethod::IS_PUBLIC));
         $static  = array_filter($reflection->getMethods(\ReflectionMethod::IS_STATIC), static fn (\ReflectionMethod $method): bool => $method->isPublic());
 
-        self::assertSame(['fromEnvelope', 'fromPending', 'toArray'], $methods);
-        self::assertSame(['fromEnvelope', 'fromPending'], array_values(array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $static)));
+        self::assertSame(['fromEnvelope', 'fromPending', 'fromImport', 'toArray'], $methods);
+        self::assertSame(['fromEnvelope', 'fromPending', 'fromImport'], array_values(array_map(static fn (\ReflectionMethod $method): string => $method->getName(), $static)));
         // PHP 8.5 reports a `self` return type by the class it names.
         self::assertContains((string) $reflection->getMethod('fromPending')->getReturnType(), ['self', AuditRecord::class]);
+        self::assertContains((string) $reflection->getMethod('fromImport')->getReturnType(), ['self', AuditRecord::class]);
         self::assertContains((string) $reflection->getMethod('fromEnvelope')->getReturnType(), ['self', AuditRecord::class]);
     }
 
@@ -152,8 +165,8 @@ final class AuditRecordTest extends TestCase
 
     /**
      * A record rebuilt from an envelope keeps its provenance and import fields
-     * as given: an imported record stays imported, with its source record and
-     * its batch.
+     * as given: an imported record stays imported, with its source record, its
+     * batch and its source digest.
      *
      * @return void
      */
@@ -165,15 +178,17 @@ final class AuditRecordTest extends TestCase
             'source_region'    => null,
             'source_record_id' => 'legacy-0042',
             'import_batch_id'  => '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e',
+            'source_digest'    => str_repeat('ab', 32),
             'origin'           => null,
         ]);
 
         $record = AuditRecord::fromEnvelope($fields);
 
         self::assertSame('imported', $record->provenance);
-        self::assertSame(['legacy-app', null, 'legacy-0042', '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e', null], [
-            $record->sourceId, $record->sourceRegion, $record->sourceRecordId, $record->importBatchId, $record->origin,
+        self::assertSame(['legacy-app', null, 'legacy-0042', '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e', str_repeat('ab', 32), null], [
+            $record->sourceId, $record->sourceRegion, $record->sourceRecordId, $record->importBatchId, $record->sourceDigest, $record->origin,
         ]);
+        self::assertSame($fields, $record->toArray());
     }
 
     /**
@@ -191,6 +206,7 @@ final class AuditRecordTest extends TestCase
             'a string field holding an integer' => ['occurred_at', 1, 'An envelope\'s `occurred_at` must be a string.'],
             'a nullable field holding an int'   => ['reason', 1, 'An envelope\'s `reason` must be a string or null.'],
             'a nullable field holding a list'   => ['actor_id', ['42'], 'An envelope\'s `actor_id` must be a string or null.'],
+            'a source digest holding an int'    => ['source_digest', 1, 'An envelope\'s `source_digest` must be a string or null.'],
             'an integer field holding a string' => ['record_version', '1', 'An envelope\'s `record_version` must be an integer.'],
             'an integer field holding null'     => ['event_version', null, 'An envelope\'s `event_version` must be an integer.'],
             'an array field holding a string'   => ['context', '{}', 'An envelope\'s `context` must be an array or null.'],
@@ -285,7 +301,7 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The envelope has exactly the 32 keys of the entries table, without the
+     * The envelope has exactly the 33 keys of the entries table, without the
      * finalisation columns, in that order.
      *
      * @return void
@@ -414,6 +430,262 @@ final class AuditRecordTest extends TestCase
         self::assertSame('captured', $record->provenance);
         self::assertNull($record->sourceRecordId);
         self::assertNull($record->importBatchId);
+    }
+
+    /**
+     * A captured record has no source digest, in its envelope as on the record:
+     * only an import computes one.
+     *
+     * @return void
+     */
+    public function testACapturedRecordHasNoSourceDigest(): void
+    {
+        foreach ([self::build(self::fullBuilder()), self::build(self::minimalBuilder())] as $record) {
+            self::assertNull($record->sourceDigest);
+            self::assertArrayHasKey('source_digest', $record->toArray());
+            self::assertNull($record->toArray()['source_digest']);
+        }
+    }
+
+    /**
+     * An imported record is `imported`, with the current record version, the
+     * event version and category given, the references, outcome, reason,
+     * correlation id, IP, context and properties of its builder, and every
+     * source field of its source: the source that asserted it, its region, the
+     * record's id there, the batch and the digest.
+     *
+     * @return void
+     */
+    public function testFromImportIsImportedWithItsSourceFields(): void
+    {
+        $pending = self::importBuilder();
+        $source  = RecordFactory::source('legacy-0042', str_repeat('c0', 32));
+        $record  = AuditRecord::fromImport($pending, RecordFactory::minimisedOf($pending), 3, 'finance', self::SOURCE_OCCURRED_AT, 'queue', $source, self::importedAt());
+
+        self::assertSame('imported', $record->provenance);
+        self::assertSame(RecordVersion::CURRENT, $record->recordVersion);
+        self::assertSame(['invoice.approved', 3, 'finance', 'denied', 'policy'], [$record->event, $record->eventVersion, $record->category, $record->outcome, $record->reason]);
+        self::assertSame(['user', '42', 'invoice', 'inv_0042', 'team', '7', 'organisation', 'org_01'], [
+            $record->actorType, $record->actorId, $record->subjectType, $record->subjectId,
+            $record->principalType, $record->principalId, $record->tenantType, $record->tenantId,
+        ]);
+        self::assertSame(['legacy:ticket-7', 'queue', '198.51.100.4'], [$record->correlationId, $record->origin, $record->ip]);
+        self::assertSame(['route' => 'invoices.approve'], $record->context);
+        self::assertSame(['amount' => '1200.00'], $record->properties);
+        self::assertSame(['legacy-app', 'eu-west-1', 'legacy-0042', RecordFactory::IMPORT_BATCH_ID, str_repeat('c0', 32)], [
+            $record->sourceId, $record->sourceRegion, $record->sourceRecordId, $record->importBatchId, $record->sourceDigest,
+        ]);
+        self::assertNull($record->attachment);
+        self::assertSame(self::KEYS, array_keys($record->toArray()));
+        self::assertTrue($pending->isConsumed());
+    }
+
+    /**
+     * An imported record carries none of the ambient fields only capture fills:
+     * no credential, guard, session, request, trace or user agent, even when
+     * its builder was given them.
+     *
+     * @return void
+     */
+    public function testAnImportedRecordCarriesNoAmbientFields(): void
+    {
+        $pending = self::importBuilder()->usingCredential('key_01');
+
+        $pending->fillGuard('web');
+        $pending->fillSession('sess_ref_1');
+        $pending->fillRequest('01932b4e-8a40-7000-8000-0000000000aa', '4bf92f3577b34da6a3ce929d0e0e4736');
+        $pending->fillClient('198.51.100.4', 'Mozilla/5.0');
+
+        $record = self::import($pending);
+
+        self::assertSame([null, null, null, null, null, null], [
+            $record->credentialId, $record->guard, $record->sessionId, $record->requestId, $record->traceId, $record->userAgent,
+        ]);
+        self::assertSame('198.51.100.4', $record->ip);
+    }
+
+    /**
+     * An imported record's id is a UUID version 7 whose leading 48 bits are the
+     * instant it was imported, never the instant its activity happened, so
+     * imported ids sort near their recording.
+     *
+     * @return void
+     */
+    public function testAnImportedRecordsIdIsDrawnAtImport(): void
+    {
+        Str::createUuidsNormally();
+
+        $record = self::import(self::importBuilder());
+        $fields = Uuid::fromString($record->id)->getFields();
+        $millis = hexdec(substr(str_replace('-', '', $record->id), 0, 12));
+
+        self::assertInstanceOf(FieldsInterface::class, $fields);
+        self::assertSame(7, $fields->getVersion());
+        self::assertSame((int) self::importedAt()->format('Uv'), $millis);
+        self::assertNotSame((int) (new \DateTimeImmutable(self::SOURCE_OCCURRED_AT))->format('Uv'), $millis);
+    }
+
+    /**
+     * An imported record keeps the time its activity happened exactly as its
+     * source gave it, however long before the import, and never takes the
+     * import's time.
+     *
+     * @return void
+     */
+    public function testAnImportedRecordKeepsItsOccurrenceTime(): void
+    {
+        self::assertSame(self::SOURCE_OCCURRED_AT, self::import(self::importBuilder())->occurredAt);
+        self::assertSame('2026-11-02T08:15:30.250001Z', self::import(self::importBuilder(), '2026-11-02T08:15:30.250001Z')->occurredAt);
+    }
+
+    /**
+     * An imported record whose source did not know where the activity ran has
+     * no origin, and one whose source did keeps it; its builder needs none.
+     *
+     * @return void
+     */
+    public function testAnImportedRecordMayHaveNoOrigin(): void
+    {
+        self::assertNull(self::import(self::importBuilder(), origin: null)->origin);
+        self::assertNull(self::import(self::importBuilder(), origin: null)->toArray()['origin']);
+
+        foreach (Origin::cases() as $origin) {
+            self::assertSame($origin->value, self::import(self::importBuilder(), origin: $origin->value)->origin);
+        }
+    }
+
+    /**
+     * Rows of `[origin]`: values that are not an origin this package names.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideUnknownOrigins(): iterable
+    {
+        yield from [
+            'empty'      => [''],
+            'upper case' => ['HTTP'],
+            'another'    => ['cli'],
+            'padded'     => [' http'],
+        ];
+    }
+
+    /**
+     * An origin this package does not name is refused, never stored as given.
+     *
+     * @param  string  $origin
+     * @return void
+     */
+    #[DataProvider('provideUnknownOrigins')]
+    public function testFromImportRefusesAnUnknownOrigin(string $origin): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('An imported record\'s origin must be one of `http`, `console`, `queue`, or null.');
+
+        self::import(self::importBuilder(), origin: $origin);
+    }
+
+    /**
+     * An imported record carries no artifact: a builder with a manifest is
+     * refused, and so are minimised properties that hold a manifest descriptor.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAnImportedRecordRefusesAnAttachment(): void
+    {
+        $manifest = self::manifest();
+        $refusals = [
+            'a manifest'   => static fn (): AuditRecord => self::import(self::importBuilder()->withManifest($manifest)),
+            'a descriptor' => static fn (): AuditRecord => AuditRecord::fromImport(
+                self::importBuilder(),
+                new Minimised(['_audit' => ['manifest' => ['artifact_id' => $manifest->id]]], null, null),
+                1,
+                'finance',
+                self::SOURCE_OCCURRED_AT,
+                'http',
+                RecordFactory::source(),
+                self::importedAt(),
+            ),
+        ];
+
+        foreach ($refusals as $label => $refusal) {
+            try {
+                $refusal();
+                self::fail(sprintf('Expected an import with %s to be refused.', $label));
+            } catch (\LogicException $exception) {
+                self::assertSame(self::NO_ARTIFACT, $exception->getMessage(), $label);
+            }
+        }
+    }
+
+    /**
+     * Rows of `[occurred at]`: times that are not an instant in the package's
+     * form.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideMalformedTimes(): iterable
+    {
+        yield from [
+            'empty'                  => [''],
+            'no fraction'            => ['2026-11-01T12:00:00Z'],
+            'milliseconds'           => ['2026-11-01T12:00:00.123Z'],
+            'an offset'              => ['2026-11-01T12:00:00.123456+00:00'],
+            'the storage form'       => ['2026-11-01 12:00:00.123456'],
+            'a date that is not one' => ['2026-02-30T12:00:00.000000Z'],
+            'hour 24'                => ['2026-11-01T24:00:00.000000Z'],
+            'lower case'             => ['2026-11-01t12:00:00.123456z'],
+        ];
+    }
+
+    /**
+     * An occurrence time that is not ISO-8601 UTC with microseconds, on a date
+     * and at a time that exist, is refused, never rolled over or repaired.
+     *
+     * @param  string  $occurredAt
+     * @return void
+     */
+    #[DataProvider('provideMalformedTimes')]
+    public function testFromImportRefusesAMalformedTime(string $occurredAt): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('An imported record\'s occurrence time must be ISO-8601 UTC with microseconds, such as 2026-11-01T12:00:00.123456Z.');
+
+        self::import(self::importBuilder(), $occurredAt);
+    }
+
+    /**
+     * Importing a record uses the builder up, as capturing one does: a second
+     * import of one builder is the reuse refusal.
+     *
+     * @return void
+     */
+    public function testImportingConsumesTheBuilder(): void
+    {
+        $pending = self::importBuilder();
+
+        self::import($pending);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('A pending record is recorded once, and this one has already been recorded.');
+
+        self::import($pending);
+    }
+
+    /**
+     * The import's pending parameter is marked sensitive, as the capture's is:
+     * it holds the record's values, and a refusal is thrown with it on the
+     * stack.
+     *
+     * @return void
+     */
+    public function testTheImportsPendingParameterIsSensitive(): void
+    {
+        $parameter = (new \ReflectionMethod(AuditRecord::class, 'fromImport'))->getParameters()[0];
+
+        self::assertSame('pending', $parameter->getName());
+        self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class));
     }
 
     /**
@@ -1260,6 +1532,55 @@ final class AuditRecordTest extends TestCase
         $pending->fillOrigin(Origin::CONSOLE);
 
         return $pending;
+    }
+
+    /**
+     * A builder as the importer makes one: a code, the references, a denial
+     * with its reason, a correlation id, properties, and the IP address and
+     * context of the source's line, and no origin.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
+     */
+    private static function importBuilder(): PendingRecord
+    {
+        $pending = (new PendingRecord)
+            ->event('invoice.approved')
+            ->on(Reference::of('invoice', 'inv_0042'))
+            ->by(Reference::of('user', 42))
+            ->asPrincipal(Reference::of('team', '7'))
+            ->forTenant(Reference::of('organisation', 'org_01'))
+            ->correlatedWith('legacy:ticket-7')
+            ->withProperties(['amount' => '1200.00'])
+            ->denied('policy');
+
+        $pending->fillClient('198.51.100.4', null);
+        $pending->fillContext(['route' => 'invoices.approve']);
+
+        return $pending;
+    }
+
+    /**
+     * The imported record of the builder, of the occurrence time and origin
+     * given, from the factory's source, imported at the import time.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
+     * @param  string  $occurredAt
+     * @param  ?string  $origin
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     */
+    private static function import(PendingRecord $pending, string $occurredAt = self::SOURCE_OCCURRED_AT, ?string $origin = 'http'): AuditRecord
+    {
+        return AuditRecord::fromImport($pending, RecordFactory::minimisedOf($pending), 1, 'finance', $occurredAt, $origin, RecordFactory::source(), self::importedAt());
+    }
+
+    /**
+     * The instant the imported records are imported.
+     *
+     * @return \DateTimeImmutable
+     */
+    private static function importedAt(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable(self::IMPORTED_AT);
     }
 
     /**

@@ -99,7 +99,7 @@ final class EnvelopeSizeBoundTest extends TestCase
     /** @var string The one secret of the ring whose key id is the longest. */
     private const string SECRET = 'a-first-secret-of-32-bytes-long!';
 
-    /** @var array<string, int> Each column of the entries table that holds free text, by the characters it holds at its longest; both UUID columns, the two times and the integers are of fixed length. */
+    /** @var array<string, int> Each column of the entries table that holds free text, by the characters it holds at its longest; both UUID columns, the source digest, the two times and the integers are of fixed length. */
     private const array WIDTHS = [
         'event'            => 191,
         'category'         => 64,
@@ -131,8 +131,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     /** @var list<string> The columns the integrity fields fill, each of a length the signer fixes. */
     private const array SIGNED_COLUMNS = ['key_id', 'hmac'];
 
-    /** @var list<string> The columns of fixed length: both UUIDs, both times, and the three versions. */
-    private const array FIXED_COLUMNS = ['id', 'import_batch_id', 'occurred_at', 'recorded_at', 'record_version', 'event_version', 'integrity_version'];
+    /** @var list<string> The columns of fixed length: both UUIDs, the source digest's 64 hexadecimal characters, both times, and the three versions. */
+    private const array FIXED_COLUMNS = ['id', 'import_batch_id', 'source_digest', 'occurred_at', 'recorded_at', 'record_version', 'event_version', 'integrity_version'];
 
     /** @var list<string> The JSON columns, each with a budget of its own. */
     private const array JSON_COLUMNS = ['context', 'properties'];
@@ -497,6 +497,7 @@ final class EnvelopeSizeBoundTest extends TestCase
         $record = $this->finalisedRecord(RecordFactory::withFields([
             ...$fields,
             'import_batch_id' => '019a4b2e-7c10-7000-8000-00000000abcd',
+            'source_digest'   => str_repeat('f', 64),
             'properties'      => self::paddedMapOfBytes(self::BUDGET_CEILING),
             'context'         => self::paddedMapOfBytes(self::BUDGET_CEILING),
         ], RecordFactory::captured(id: self::ID)));

@@ -1,7 +1,7 @@
 # Design Notes
 
-These notes document the package's record, definition, redaction, storage, integrity, delivery, reading, context and
-testing contracts that are easy to miss if you only read the quick-start material or skim the test suite.
+These notes document the package's record, definition, redaction, storage, integrity, lifecycle, delivery, reading,
+context and testing contracts that are easy to miss if you only read the quick-start material or skim the test suite.
 Task-oriented guides are in `docs/guides`.
 
 Each note is intentionally short and follows the same structure:
@@ -31,6 +31,10 @@ The current note set is:
   managed, what verifying a row answers, and that a replay verifies and never re-signs; the signed membership seals and
   their chain, the recent pass and the sweep, the anchors and their conditions, what verification checks and reports in
   each status and finding, pruning, the schedule, the alert and the progress, and the lifetimes of the keys.
+- `lifecycle.md`: what happens to the log after it is written: the chained, signed journal every seal commits to, the
+  lock every maintenance operation takes first, holds and their projection, retention and preservation, the prune unit,
+  its record and its runs, tombstones on re-delivery, import and its batches, the installation identity, and the two
+  guarantees, stated apart.
 - `outcomes.md`: what storing a record returns or raises for each way a write can end, what the host transaction is left
   as, and what each timing, delivery mode and failure guarantees, captured records and model changes included.
 - `delivery.md`: the pipeline, the outbox and its drain, claims and receipts, the spill channel and replay, the stores

@@ -38,6 +38,7 @@ use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
  * @method static void watch(string $model, string $as, array<int|string, \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling|string> $fields)
  * @method static \SineMacula\Laravel\AuditLog\Records\PendingRecord bulk(\BackedEnum|string $code, iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference> $subjects)
  * @method static \SineMacula\Laravel\AuditLog\Querying\AuditTrail trail()
+ * @method static \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle lifecycle()
  *
  * @phpcs:enable Generic.Files.LineLength.TooLong
  *

@@ -10,6 +10,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Sleep;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
@@ -37,14 +38,17 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * Only entries recorded no later than the run's start, less
  * `integrity.seal.settle_seconds`, are sealed; that bound is fixed when the run
  * starts. Sealing refuses to run inside a transaction on the storage
- * connection, so each seal commits on its own. An attempt lost to a concurrent
- * writer (a duplicate seal or member, a deadlock, a serialisation failure, a
- * lock wait timeout, PostgreSQL's lock timeout or a locked database) is rolled
- * back whole and made again from scratch, after a jittered wait that grows with
- * each attempt, at most `integrity.seal.max_attempts` times; then the run stops
- * with a `SealContentionException`. A lost connection is never retried, because
- * the commit may have happened; the next run sees what it left. Anything else
- * stops the run unchanged.
+ * connection, so each seal commits on its own. Each run then ensures the
+ * installation's id, seeded by the migrations and written again by the first
+ * run or lifecycle operation only if it was lost, never replaced, before its
+ * first batch. An attempt lost to a concurrent writer (a duplicate seal or
+ * member, a deadlock, a serialisation failure, a lock wait timeout,
+ * PostgreSQL's lock timeout or a locked database) is rolled back whole and made
+ * again from scratch, after a jittered wait that grows with each attempt, at
+ * most `integrity.seal.max_attempts` times; then the run stops with a
+ * `SealContentionException`. A lost connection is never retried, because the
+ * commit may have happened; the next run sees what it left. Anything else stops
+ * the run unchanged.
  *
  * Progress records the last seal after each commit, the recent pass's
  * high-water mark after each of its seals, the sweep's cursor after every
@@ -78,6 +82,7 @@ final readonly class Sealer
      * @param  \SineMacula\Laravel\AuditLog\Database\FailureClassifier  $classifier
      * @param  \SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
      * @param  \Illuminate\Database\DatabaseManager  $database
+     * @param  \SineMacula\Laravel\AuditLog\Database\InstallationIdentity  $identity
      */
     public function __construct(
 
@@ -98,6 +103,9 @@ final readonly class Sealer
 
         /** The connections the storage connection is resolved from. */
         private DatabaseManager $database,
+
+        /** The installation's identity, ensured once per run. */
+        private InstallationIdentity $identity,
     ) {}
 
     /**
@@ -119,7 +127,10 @@ final readonly class Sealer
     {
         $this->refuseInsideATransaction();
 
-        $now       = $this->clock->now();
+        $now = $this->clock->now();
+
+        $this->identity->ensure($now);
+
         $until     = $this->untilOf($now);
         $highWater = $this->recentHighWater();
         $lookback  = $this->settings->lookbackSeconds();
@@ -147,7 +158,10 @@ final readonly class Sealer
     {
         $this->refuseInsideATransaction();
 
-        $now   = $this->clock->now();
+        $now = $this->clock->now();
+
+        $this->identity->ensure($now);
+
         $until = $this->untilOf($now);
         $after = SealCursor::fromProgress($this->progress->get(IntegrityProgress::SWEEP_CURSOR));
 

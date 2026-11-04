@@ -16,7 +16,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  * the recorder applies its default), the identifier a sign-in was attempted
  * with, raw until it is hashed at capture, the diagnostics of the property and
  * context keys that collided once cleaned, which hold raw cleaned keys until
- * they are masked, and a bulk operation's manifest, if it has one. Only
+ * they are masked, a bulk operation's manifest, if it has one, and the id one
+ * of the package's own records is given in place of a fresh one. Only
  * `PendingRecord` builds one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -60,6 +61,7 @@ final readonly class PendingSnapshot
      * @param  list<list<int|string>>  $contextCollisions
      * @param  int  $contextCollisionCount
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
+     * @param  ?string  $id
      */
     public function __construct(
 
@@ -157,5 +159,8 @@ final readonly class PendingSnapshot
 
         /** What a bulk operation affected, before it is sealed; `null` for any other record. */
         public ?Manifest $manifest = null,
+
+        /** The id the package gave its own record, a lower-case UUID; `null` for a fresh one. */
+        public ?string $id = null,
     ) {}
 }

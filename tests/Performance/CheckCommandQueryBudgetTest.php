@@ -14,20 +14,34 @@ use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DeliveryChecks;
 use SineMacula\Laravel\AuditLog\Console\EngineChecks;
 use SineMacula\Laravel\AuditLog\Console\IntegrityChecks;
+use SineMacula\Laravel\AuditLog\Console\LifecycleChecks;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
 use SineMacula\Laravel\AuditLog\Console\TableShape;
+use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
+use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
+use SineMacula\Laravel\AuditLog\Lifecycle\HoldKeeper;
+use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\SealsEntries;
+use Tests\Concerns\WritesTheJournal;
 
 /**
  * Statement-budget contract for `audit-log:check`: a run makes a few reads of
  * the schema and, on MySQL, of the session and the table's engine, whatever the
- * tables hold, and never writes, begins a savepoint or rolls back. In sync mode
- * the delivery checks read configuration alone, so a run reads what the engine
- * and schema checks of the entries table, the schema checks of the artifacts
- * table and the integrity checks of the checkpoints, checkpoint members and
- * integrity state tables read; in outbox mode they read the outbox and
- * deliveries tables' schema too, and still write nothing.
+ * tables hold, and writes nothing, not even an installation id that is missing;
+ * it never begins a savepoint or rolls back. In sync mode the delivery checks
+ * read configuration alone, so a run reads what the engine and schema checks of
+ * the entries table, the schema checks of the artifacts table, the integrity
+ * checks of the checkpoints, checkpoint members and integrity state tables, and
+ * the lifecycle checks and notes read; in outbox mode they read the outbox and
+ * deliveries tables' schema too, and still write nothing more. The lifecycle
+ * subject's statements are fixed whatever the journal holds, beyond the pages
+ * of its rows it reads.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,12 +51,16 @@ use Tests\Concerns\SealsEntries;
 #[CoversClass(CheckCommand::class)]
 #[CoversClass(DeliveryChecks::class)]
 #[CoversClass(IntegrityChecks::class)]
+#[CoversClass(LifecycleChecks::class)]
 final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 {
-    use SealsEntries;
+    use SealsEntries, WritesTheJournal;
 
-    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for the entries table, for the artifacts table and for each integrity table. */
-    private const int MAX_STATEMENTS = 20;
+    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for each of the nine tables, the lock row, the installation id, the latest seal, the seal of the highest journal commitment, a page of the journal and the holds projection, and the two notes. */
+    private const int MAX_STATEMENTS = 44;
+
+    /** @var string The table the installation id is kept in. */
+    private const string STATE = 'audit_log_integrity_state';
 
     /** @var int How many times a sync run's statements an outbox run may make. */
     private const int OUTBOX_FACTOR = 2;
@@ -64,18 +82,23 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         assert($kernel instanceof ConsoleKernel);
 
         $kernel->registerCommand(new CheckCommand);
+
+        // The policy the package binds by default, whether or not the provider
+        // has bound it yet
+        app()->bindIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
     }
 
     /**
-     * A passing run makes at most twenty statements, none of them a write, and
-     * begins no savepoint and makes no rollback, on every engine.
+     * A passing run makes at most forty-four statements and writes nothing,
+     * reading the installation id the migrations seed; it begins no savepoint
+     * and makes no rollback, on every engine.
      *
      * @return void
      */
-    public function testTheCheckMakesBoundedReadsAndNoWrites(): void
+    public function testTheCheckWritesNothing(): void
     {
-        $code = $this->capture(fn (): int => $this->check());
-
+        $before     = DB::table(self::STATE)->get()->all();
+        $code       = $this->capture(fn (): int => $this->check());
         $statements = implode(' | ', $this->capturedStatements());
 
         self::assertSame(0, $code);
@@ -84,6 +107,30 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         self::assertSame([], $this->capturedWrites(), "Statements: {$statements}");
         self::assertSame(0, $this->capturedSavepoints());
         self::assertSame(0, $this->capturedRollbacks());
+        self::assertSame([InstallationIdentity::NAME], array_column($before, 'name'));
+        self::assertEquals($before, DB::table(self::STATE)->get()->all());
+    }
+
+    /**
+     * A run that finds no installation id fails, and still writes nothing: the
+     * id is left missing, for the migrations or a seal run to write, and no
+     * savepoint or rollback is made, on every engine.
+     *
+     * @return void
+     */
+    public function testTheCheckWritesNothingWhenTheInstallationIdIsMissing(): void
+    {
+        DB::table(self::STATE)->delete();
+
+        $code       = $this->capture(fn (): int => $this->check());
+        $statements = implode(' | ', $this->capturedStatements());
+
+        self::assertSame(1, $code);
+        self::assertLessThanOrEqual(self::MAX_STATEMENTS, count($this->capturedStatements()), "Statements: {$statements}");
+        self::assertSame([], $this->capturedWrites(), "Statements: {$statements}");
+        self::assertSame(0, $this->capturedSavepoints());
+        self::assertSame(0, $this->capturedRollbacks());
+        self::assertSame(0, DB::table(self::STATE)->count());
     }
 
     /**
@@ -114,9 +161,38 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * The lifecycle subject's statements are the same with a journal of one
+     * hold as with that hold and three hundred more rows: the journal is read a
+     * page of rows to a statement and the hold's payload in one more, so
+     * nothing is read per row.
+     *
+     * @return void
+     */
+    public function testTheLifecycleStatementsAreFixedWhateverTheJournalHolds(): void
+    {
+        $lifecycle = app(LifecycleChecks::class);
+        $authority = new Authority(Reference::of('App\Models\User', '7'), 'case.review');
+
+        app(HoldKeeper::class)->place('01932b4e-9000-7000-8000-0000000000a1', HoldScope::all(), $authority, HoldBasis::LEGAL_CLAIM, null);
+
+        self::assertSame([], $this->capture(static fn (): array => [...$lifecycle->problems(), ...$lifecycle->notes()]));
+
+        $few = $this->capturedStatements();
+
+        foreach (range(1, 300) as $run) {
+            $this->journalRow(JournalKind::PRUNE_RUN, ['run_id' => sprintf('01932b4e-a000-7000-8000-%012d', $run), 'phase' => 'start']);
+        }
+
+        self::assertSame(301, DB::table('audit_log_lifecycle')->count());
+        self::assertSame([], $this->capture(static fn (): array => [...$lifecycle->problems(), ...$lifecycle->notes()]));
+        self::assertSame($few, $this->capturedStatements());
+        self::assertSame([], $this->capturedWrites());
+    }
+
+    /**
      * The integrity checks write nothing, begin no savepoint and make no
-     * rollback, whatever the integrity tables hold, and leave every seal,
-     * member and progress row as it was.
+     * rollback, whatever the integrity tables hold, and a run leaves every
+     * seal, member and state row as it was.
      *
      * @return void
      */
@@ -146,10 +222,9 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * A sync run reads exactly what the engine and schema checks of the entries
-     * table, the schema checks of the artifacts table and the integrity checks
-     * read on their own, so the delivery checks add no statement, and the bound
-     * of twenty still holds: the four statements the artifacts table's schema
-     * check reads on SQLite raised it from sixteen.
+     * table, the schema checks of the artifacts table, the integrity checks and
+     * the lifecycle checks and notes read on their own, so the delivery checks
+     * add no statement, and the bound still holds.
      *
      * @return void
      */
@@ -160,12 +235,15 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         assert($database instanceof DatabaseManager);
 
         $integrity = app(IntegrityChecks::class);
+        $lifecycle = app(LifecycleChecks::class);
 
-        $this->capture(static function () use ($database, $integrity): void {
+        $this->capture(static function () use ($database, $integrity, $lifecycle): void {
             (new EngineChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
             (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_entries');
             (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_artifacts', TableShape::artifacts());
             $integrity->problems();
+            $lifecycle->problems();
+            $lifecycle->notes();
         });
 
         $baseline = $this->capturedStatements();
