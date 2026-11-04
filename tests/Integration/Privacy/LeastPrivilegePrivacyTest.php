@@ -118,8 +118,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
             self::createLogin($root, $this->names[$placeholder]);
         }
 
-        self::runDocumentedSql($root, $driver . '-grants', $this->names);
-        self::runDocumentedSql($root, 'keys-grants:' . $driver, $this->names);
+        self::runDocumentedGrants($root, $this->names);
 
         foreach ([self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {
             self::connectAs($placeholder, self::CONNECTION, $this->names[$placeholder]);
@@ -378,13 +377,9 @@ final class LeastPrivilegePrivacyTest extends TestCase
      */
     private function installTriggers(): void
     {
-        $root   = $this->root();
-        $driver = $root->getDriverName();
-
         $this->triggers = true;
 
-        self::runDocumentedSql($root, $driver . '-triggers', $this->names);
-        self::runDocumentedSql($root, 'keys-triggers:' . $driver, $this->names);
+        self::runDocumentedTriggers($this->root(), $this->names);
     }
 
     /**
@@ -410,32 +405,10 @@ final class LeastPrivilegePrivacyTest extends TestCase
 
         if ($this->triggers) {
             self::dropDocumentedTriggers($root);
-            self::dropKeyTriggers($root);
         }
 
         foreach ([self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {
             self::dropLogin($root, $this->names[$placeholder]);
-        }
-    }
-
-    /**
-     * Drop every trigger the key tables' documented triggers create, by its
-     * documented name, and on PostgreSQL the functions they call too.
-     *
-     * @param  \Illuminate\Database\Connection  $root
-     * @return void
-     */
-    private static function dropKeyTriggers(Connection $root): void
-    {
-        $driver = $root->getDriverName();
-        $sql    = self::documentedSql('keys-triggers:' . $driver);
-
-        foreach (self::documentedTriggers($sql) as $trigger => $table) {
-            $root->unprepared(sprintf($driver === 'pgsql' ? 'DROP TRIGGER IF EXISTS %s ON %s' : 'DROP TRIGGER IF EXISTS %s', $trigger, $table));
-        }
-
-        foreach (self::documentedFunctions($sql) as $function) {
-            $root->unprepared(sprintf('DROP FUNCTION IF EXISTS %s() CASCADE', $function));
         }
     }
 

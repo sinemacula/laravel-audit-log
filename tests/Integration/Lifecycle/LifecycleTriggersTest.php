@@ -78,7 +78,7 @@ final class LifecycleTriggersTest extends TestCase
                 self::createLogin($root, $this->names[$placeholder]);
             }
 
-            self::runDocumentedSql($root, $root->getDriverName() . '-grants', $this->names);
+            self::runDocumentedGrants($root, $this->names);
 
             foreach ([self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {
                 self::connectAs($placeholder, self::CONNECTION, $this->names[$placeholder]);

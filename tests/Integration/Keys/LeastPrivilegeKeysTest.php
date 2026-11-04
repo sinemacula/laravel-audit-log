@@ -91,8 +91,7 @@ final class LeastPrivilegeKeysTest extends TestCase
             self::createLogin($root, $this->names[$placeholder]);
         }
 
-        self::runDocumentedSql($root, $driver . '-grants', $this->names);
-        self::runDocumentedSql($root, 'keys-grants:' . $driver, $this->names);
+        self::runDocumentedGrants($root, $this->names);
 
         foreach ([self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {
             self::connectAs($placeholder, self::CONNECTION, $this->names[$placeholder]);
