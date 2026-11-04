@@ -60,13 +60,13 @@ trait PrunesByHand
 
             usort($members, strcmp(...));
 
-            $positions = array_values(array_map(static fn (string $id): int => (int) array_search($id, $members, true), $pruned));
+            $positions = array_map(static fn (string $id): int => (int) array_search($id, $members, true), $pruned);
 
             sort($positions);
 
             $ledger->add(app(SealSigner::class)->signPrune(
                 (string) $seal->log_id,
-                (string) $sealId,
+                $sealId,
                 (string) $seal->seal_digest,
                 count($members),
                 PruneBitmap::encode($positions, count($members)),

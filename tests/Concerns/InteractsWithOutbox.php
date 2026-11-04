@@ -58,9 +58,6 @@ trait InteractsWithOutbox
     /** @var list<string> The outbox columns that hold a time. */
     private const array OUTBOX_TIMES = ['available_at', 'claimed_until', 'failed_at', 'created_at'];
 
-    /** @var list<string> The deliveries columns that hold a time. */
-    private const array RECEIPT_TIMES = ['first_attempted_at', 'delivered_at'];
-
     /** @var string Absolute path to the shipped outbox migration file. */
     private const string OUTBOX_MIGRATION = __DIR__ . '/../../database/migrations/2026_11_02_000100_create_audit_log_outbox_table.php';
 
@@ -129,7 +126,7 @@ trait InteractsWithOutbox
             ->where('destination', $destination)
             ->first();
 
-        return $row === null ? null : self::normalisedRow((array) $row, self::RECEIPT_TIMES);
+        return $row === null ? null : self::normalisedRow((array) $row, ['first_attempted_at', 'delivered_at']);
     }
 
     /**
