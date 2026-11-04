@@ -511,6 +511,29 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
+     * Whether the prune can delete something reports nothing: what resolving a
+     * bound policy throws is thrown, for the caller to name.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testThePruneCanDeleteThrowsAnUnresolvedPolicyUnreported(): void
+    {
+        $this->app?->bind(RetentionPolicy::class, static fn (): RetentionPolicy => throw new \RuntimeException('The policy cannot be built.'));
+
+        try {
+            $this->schedule()->prunes();
+
+            self::fail('An unresolved policy must be thrown.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The policy cannot be built.', $exception->getMessage());
+        }
+
+        self::assertSame([], $this->reported);
+    }
+
+    /**
      * A policy left unbound counts as the configured one: it is scheduled
      * exactly when the configuration keeps something for less than forever.
      *

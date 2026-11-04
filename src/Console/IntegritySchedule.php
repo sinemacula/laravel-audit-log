@@ -110,21 +110,24 @@ final readonly class IntegritySchedule
     /**
      * Whether the prune can delete something: the bound retention policy is not
      * the configured one, or the configured one keeps anything for less than
-     * forever. A bound policy that cannot be resolved is reported, and counts
-     * as one that can delete.
+     * forever. A bound policy that cannot be resolved is not reported here:
+     * what resolving it threw is thrown, for the caller to name.
      *
      * @return bool
      *
      * @throws \InvalidArgumentException
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
     public function prunes(): bool
     {
-        return !$this->isConfiguredPolicy() || $this->retention->retainsAnythingForLess();
+        return $this->deletesUnder($this->isConfiguredPolicy());
     }
 
     /**
      * When the prune runs: its setting's cron expression, or `null` when the
-     * setting gives none, or when the prune cannot delete anything.
+     * setting gives none, or when the prune cannot delete anything. A bound
+     * policy that cannot be resolved is reported, and counts as one that can
+     * delete.
      *
      * @return ?string
      *
@@ -134,15 +137,45 @@ final readonly class IntegritySchedule
     {
         $cron = $this->retention->schedule();
 
-        return $cron !== null && $this->prunes() ? $cron : null;
+        if ($cron === null) {
+            return null;
+        }
+
+        try {
+            $configured = $this->isConfiguredPolicy();
+        } catch (\Throwable $exception) {
+            // The prune refuses the policy itself and records the refusal; an
+            // exception here would stop every task of the application
+            $this->handler->report($exception);
+
+            $configured = false;
+        }
+
+        return $this->deletesUnder($configured) ? $cron : null;
+    }
+
+    /**
+     * Whether the prune can delete something under a policy that is, or is not,
+     * the configured one.
+     *
+     * @param  bool  $configured
+     * @return bool
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function deletesUnder(bool $configured): bool
+    {
+        return !$configured || $this->retention->retainsAnythingForLess();
     }
 
     /**
      * Whether the retention policy is the one the package binds: true when no
-     * policy is bound, and false for any other class or for a bound policy that
-     * cannot be resolved, which is reported.
+     * policy is bound, and false for any other class; what resolving a bound
+     * policy throws is thrown.
      *
      * @return bool
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
     private function isConfiguredPolicy(): bool
     {
@@ -150,15 +183,7 @@ final readonly class IntegritySchedule
             return true;
         }
 
-        try {
-            return $this->container->make(RetentionPolicy::class) instanceof ConfiguredRetentionPolicy;
-        } catch (\Throwable $exception) {
-            // The prune refuses the policy itself and records the refusal; an
-            // exception here would stop every task of the application
-            $this->handler->report($exception);
-
-            return false;
-        }
+        return $this->container->make(RetentionPolicy::class) instanceof ConfiguredRetentionPolicy;
     }
 
     /**

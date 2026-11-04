@@ -120,17 +120,17 @@ check, so a deploy never fails because a scheduled run is late.
 ```
 
 With `--freshness`, `audit-log:check` runs only these signals, and exits 1 when any is a problem and 0 otherwise. It
-reads the progress below and, in outbox mode, the outbox's oldest row due, a fixed number of reads whatever the tables
+reads the progress below and, in outbox mode, the outbox's oldest row not failed, a fixed number of reads whatever the tables
 hold, and writes nothing.
 
-| Signal         | Reads                                | A problem when                                                                                 | Limit                          |
-|----------------|--------------------------------------|------------------------------------------------------------------------------------------------|--------------------------------|
-| `sealing`      | `seal.last_run`                      | It is older than the limit                                                                     | `monitor.seal_minutes` (30)    |
-| `sweep`        | `sweep.completed`                    | It is older than the limit                                                                     | `monitor.daily_minutes` (1560) |
-| `verification` | `verify.last_full`                   | It is older than the limit, or `passed` is false                                               | `monitor.daily_minutes` (1560) |
-| `retention`    | `retention.last_run`                 | Retention is configured and it is older than the limit, or its `status` is `failed`            | `monitor.daily_minutes` (1560) |
-| `anchoring`    | `anchor.last`, `anchor.last_failure` | An anchor is configured and `anchor.last_failure` is newer than `anchor.last`                  | none                           |
-| `outbox`       | the outbox table                     | The delivery mode is `outbox` and the oldest row not failed fell due longer ago than the limit | `monitor.outbox_minutes` (15)  |
+| Signal         | Reads                                | A problem when                                                                                   | Limit                          |
+|----------------|--------------------------------------|--------------------------------------------------------------------------------------------------|--------------------------------|
+| `sealing`      | `seal.last_run`                      | It is older than the limit                                                                       | `monitor.seal_minutes` (30)    |
+| `sweep`        | `sweep.completed`                    | It is older than the limit                                                                       | `monitor.daily_minutes` (1560) |
+| `verification` | `verify.last_full`                   | It is older than the limit, or `passed` is false                                                 | `monitor.daily_minutes` (1560) |
+| `retention`    | `retention.last_run`                 | Retention is configured and it is older than the limit, or its `status` is `failed`              | `monitor.daily_minutes` (1560) |
+| `anchoring`    | `anchor.last`, `anchor.last_failure` | An anchor is configured and `anchor.last_failure` is newer than `anchor.last`                    | none                           |
+| `outbox`       | the outbox table                     | The delivery mode is `outbox` and the oldest row not failed was queued longer ago than the limit | `monitor.outbox_minutes` (15)  |
 
 - Each signal prints one line, its status and, where it has them, its age and its limit in seconds, such as
   `[freshness] sealing: ok (age 120s, limit 1800s)`. The status is `ok`, `stale` (older than its limit), `failed` (the
@@ -144,6 +144,11 @@ hold, and writes nothing.
 - `monitor.seal_minutes` is 5 to 1440, `monitor.daily_minutes` 60 to 10080 and `monitor.outbox_minutes` 1 to 1440,
   each in minutes. A malformed one fails the freshness run, named under `[config]`, and the ordinary `audit-log:check`
   reports it too. Progress that cannot be read fails the run, named by the class of what was thrown.
+- The outbox's age is when its oldest row not failed was queued (`created_at`), which a retry never moves, so a row
+  that keeps failing and retrying ages until it is delivered or fails for good. It is read through the outbox's index
+  on `failed_at` and `created_at`.
+- A retention policy or an anchor that cannot be resolved makes its signal `failed`, naming the class of what was
+  thrown on its line. The check reports nothing to the exception handler, since that would write to the log.
 
 Route these to alerting as well:
 

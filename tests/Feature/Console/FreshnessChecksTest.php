@@ -6,7 +6,9 @@ namespace Tests\Feature\Console;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -22,6 +24,7 @@ use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\Fixtures\Integrity\RecordingAnchor;
+use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
@@ -269,7 +272,38 @@ final class FreshnessChecksTest extends TestCase
         [$code, $output] = $this->freshness();
 
         self::assertSame(1, $code);
-        self::assertContains('[freshness] anchoring: failed', $output);
+        self::assertContains('[freshness] anchoring: failed (the bound anchor could not be resolved: RuntimeException)', $output);
+    }
+
+    /**
+     * A bound retention policy that cannot be resolved makes retention failed,
+     * named by the class of what was thrown and never its message, and nothing
+     * is reported, since a report writes to the log; registering the schedule
+     * still reports it.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testARetentionPolicyThatCannotBeResolvedFailsWithoutAReport(): void
+    {
+        $reporter = new RecordingExceptionHandler;
+
+        $this->app?->instance(ExceptionHandler::class, $reporter);
+        $this->app?->bind(RetentionPolicy::class, static fn (): never => throw new \RuntimeException('secret detail'));
+
+        [$code, $output] = $this->freshness();
+
+        self::assertSame(1, $code);
+        self::assertContains('[freshness] retention: failed (limit 93600s, the bound retention policy could not be resolved: RuntimeException)', $output);
+        self::assertStringNotContainsString('secret detail', implode("\n", $output));
+        $reports = $reporter->reports();
+
+        self::assertSame([], $reports);
+
+        app(IntegritySchedule::class)->register(new Schedule);
+
+        self::assertCount(1, $reporter->reports());
     }
 
     /**
@@ -343,6 +377,25 @@ final class FreshnessChecksTest extends TestCase
 
         self::assertSame(1, $code);
         self::assertContains('[freshness] outbox: stale (age 901s, limit 900s)', $output);
+    }
+
+    /**
+     * The backlog is aged by when its oldest row was queued, which a retry
+     * never moves: a row queued two hours ago and retried a minute ago, so due
+     * again only now, is stale.
+     *
+     * @return void
+     */
+    public function testARetriedRowIsAgedByWhenItWasQueued(): void
+    {
+        $this->config()->set('audit-log.delivery.mode', 'outbox');
+
+        $this->dueInTheOutbox('0195f4a2-7b1c-7000-8000-000000000001', 0, null, 7200);
+
+        [$code, $output] = $this->freshness();
+
+        self::assertSame(1, $code);
+        self::assertContains('[freshness] outbox: stale (age 7200s, limit 900s)', $output);
     }
 
     /**
@@ -540,14 +593,16 @@ final class FreshnessChecksTest extends TestCase
 
     /**
      * Put a row in the outbox that fell due the seconds given ago, failed the
-     * seconds given ago when given.
+     * seconds given ago when given, and queued the seconds given ago, or when
+     * it fell due when not given.
      *
      * @param  string  $id
      * @param  int  $dueAgo
      * @param  ?int  $failedAgo
+     * @param  ?int  $queuedAgo
      * @return void
      */
-    private function dueInTheOutbox(string $id, int $dueAgo, ?int $failedAgo = null): void
+    private function dueInTheOutbox(string $id, int $dueAgo, ?int $failedAgo = null, ?int $queuedAgo = null): void
     {
         DB::table('audit_log_outbox')->insert([
             'id'           => $id,
@@ -555,7 +610,7 @@ final class FreshnessChecksTest extends TestCase
             'attempts'     => 0,
             'available_at' => self::stored($dueAgo),
             'failed_at'    => $failedAgo === null ? null : self::stored($failedAgo),
-            'created_at'   => self::stored($dueAgo),
+            'created_at'   => self::stored($queuedAgo ?? $dueAgo),
         ]);
     }
 

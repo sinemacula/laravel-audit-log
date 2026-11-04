@@ -34,15 +34,16 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * prune can delete something), each within `monitor.daily_minutes`;
  * `anchoring`, failed when `anchor.last_failure` is newer than `anchor.last`,
  * applicable only when an anchor other than the null one is bound, with no
- * limit; and `outbox`, the oldest row waiting for a drain, by when it fell due,
- * within `monitor.outbox_minutes`, applicable only in outbox mode.
+ * limit; and `outbox`, the oldest row waiting for a drain, by when it was
+ * queued, which a retry never moves, within `monitor.outbox_minutes`,
+ * applicable only in outbox mode.
  *
  * A signal with no progress never ran, which is a problem only when its run is
  * scheduled and the log's oldest entry is older than its limit, so a fresh
  * install is not stale; a run whose schedule is disabled is still judged by
  * what it recorded, since it may run elsewhere. Every read is a point read by
  * name, or the first row of an index (the entries' by the time they were
- * recorded, the outbox's by when a row falls due), on the writer, so the
+ * recorded, the outbox's by when a row was queued), on the writer, so the
  * statements are fixed whatever the tables hold. The checks write nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -52,6 +53,9 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class FreshnessChecks
 {
+    /** @var string The cause of a signal whose collaborator cannot be resolved, by what it is and the class of what was thrown. */
+    private const string UNRESOLVED = 'the bound %s could not be resolved: %s';
+
     /** @var int Seconds in a minute, the unit the limits are configured in. */
     private const int MINUTE = 60;
 
@@ -139,7 +143,9 @@ final readonly class FreshnessChecks
 
     /**
      * The retention signal: not applicable while the prune can delete nothing,
-     * and otherwise judged by the last prune run, failed when that run failed.
+     * and otherwise judged by the last prune run, failed when that run failed;
+     * failed too when the bound policy cannot be resolved, named by the class
+     * of what was thrown and never reported, since a report writes to the log.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @param  int  $limit
@@ -151,7 +157,19 @@ final readonly class FreshnessChecks
      */
     private function retention(CarbonImmutable $now, int $limit, bool $overdue): FreshnessSignal
     {
-        if (!$this->schedule->prunes()) {
+        // Read first, so a malformed retention setting fails the run under
+        // `config` rather than reading as a policy that cannot be resolved
+        (new RetentionSettings($this->config))->retainsAnythingForLess();
+
+        try {
+            $prunes = $this->schedule->prunes();
+        } catch (\Throwable $exception) {
+            // Named, never reported: reporting writes to the log, and the check
+            // writes nothing
+            return new FreshnessSignal('retention', FreshnessSignal::FAILED, null, $limit, true, sprintf(self::UNRESOLVED, 'retention policy', $exception::class));
+        }
+
+        if (!$prunes) {
             return new FreshnessSignal('retention', FreshnessSignal::NOT_APPLICABLE, null, null, false);
         }
 
@@ -176,10 +194,10 @@ final readonly class FreshnessChecks
     {
         try {
             $anchor = $this->container->make(CheckpointAnchor::class);
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
             // An anchor that cannot be resolved anchors nothing; sealing
-            // reports why, by the class of what was thrown
-            return new FreshnessSignal('anchoring', FreshnessSignal::FAILED, null, null, true);
+            // reports why, and the check names the class of what was thrown
+            return new FreshnessSignal('anchoring', FreshnessSignal::FAILED, null, null, true, sprintf(self::UNRESOLVED, 'anchor', $exception::class));
         }
 
         if ($anchor instanceof NullAnchor) {
@@ -201,8 +219,9 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * The outbox signal: the oldest row that has not failed, by when it fell
-     * due, read first from the outbox's due index; an empty outbox is fresh.
+     * The outbox signal: the oldest row that has not failed, by when it was
+     * queued, which a retry never moves, read first from the outbox's queued
+     * index; an empty outbox is fresh.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @param  int  $limit
@@ -213,18 +232,18 @@ final readonly class FreshnessChecks
      */
     private function outbox(CarbonImmutable $now, int $limit): FreshnessSignal
     {
-        $due = $this->database->connection(DeliveryTables::outboxConnection())
+        $queued = $this->database->connection(DeliveryTables::outboxConnection())
             ->table(DeliveryTables::outboxTable())
             ->useWritePdo()
             ->whereNull('failed_at')
-            ->orderBy('available_at')
-            ->value('available_at');
+            ->orderBy('created_at')
+            ->value('created_at');
 
-        if (!is_string($due)) {
+        if (!is_string($queued)) {
             return new FreshnessSignal('outbox', FreshnessSignal::OK, null, $limit, false);
         }
 
-        return self::judged('outbox', max(0, $now->getTimestamp() - StoredTime::instant($due)->getTimestamp()), $limit, false, false);
+        return self::judged('outbox', max(0, $now->getTimestamp() - StoredTime::instant($queued)->getTimestamp()), $limit, false, false);
     }
 
     /**

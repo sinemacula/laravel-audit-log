@@ -24,11 +24,11 @@ use Tests\Fixtures\Integrity\RecordingAnchor;
  * fixed number of reads, whatever the entries and the outbox hold, and writes
  * nothing. With every signal applicable it reads the log's oldest entry, the
  * five progress rows of sealing, the sweep, verification, retention and the
- * last anchoring, the last failure to anchor and the outbox's oldest row due:
- * eight reads, each a point read by name or the first row of an index. With
- * none of the optional signals applicable it reads the oldest entry and the
- * three progress rows of sealing, the sweep and verification alone. It begins
- * no transaction, savepoint or rollback.
+ * last anchoring, the last failure to anchor and the outbox's oldest row
+ * queued: eight reads, each a point read by name or the first row of an index.
+ * With none of the optional signals applicable it reads the oldest entry and
+ * the three progress rows of sealing, the sweep and verification alone. It
+ * begins no transaction, savepoint or rollback.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

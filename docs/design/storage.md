@@ -79,9 +79,10 @@ written and what the store may do to a row are fixed here; a change to any of th
 - `delivery.outbox.table` (`audit_log_outbox` by default) is on `delivery.outbox.connection`, which is the storage
   connection unless it names another. It has `id`, the record's id as its primary key, `payload` (`longText`, the
   encrypted envelope), `attempts`, `available_at`, `claimed_until`, `claimed_by` (the claim's token), `failed_at`,
-  `last_error_class` and `created_at`, with every time `dateTime(6)`. It is indexed for what a drain reads. The row
-  exists only until the record is delivered, and a failed row is kept. On the connection the application's transactions
-  run on, a row commits exactly when they do.
+  `last_error_class` and `created_at`, with every time `dateTime(6)`. It is indexed for what a drain reads, by
+  `failed_at` and `available_at`, and for the backlog's age `audit-log:check --freshness` reads, by `failed_at` and
+  `created_at`. The row exists only until the record is delivered, and a failed row is kept. On the connection the
+  application's transactions run on, a row commits exactly when they do.
 - `delivery.deliveries_table` (`audit_log_deliveries` by default) is always on the storage connection, beside the
   entries it describes. Its primary key is `entry_id` and `destination`, and it has `attempts`, `first_attempted_at`,
   `delivered_at` and `last_error_class`. A receipt holds nothing of the record and is kept once its record is delivered.
@@ -1063,7 +1064,8 @@ COMMIT;
   `testAnExistingTableIsRefusedNamingTheSetting`, `testARollbackDropsIt`
 - `tests/Integration/Migration/OutboxTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
   `testTheIdIsThePrimaryKey`, `testThePayloadIsLongText`, `testStoresEveryTimeToTheMicrosecond`,
-  `testIndexesWhatTheDrainReads`, `testHasNoForeignKeys`, `testAnExistingTableStopsTheMigrationNamingTheSetting`
+  `testIndexesWhatTheDrainAndTheMonitorRead`, `testHasNoForeignKeys`,
+  `testAnExistingTableStopsTheMigrationNamingTheSetting`
 - `tests/Integration/Migration/DeliveriesTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
   `testTheKeyIsTheEntryAndTheDestination`, `testAnEntryHasOneReceiptPerDestination`, `testHasNoForeignKeys`,
   `testAnExistingTableStopsTheMigrationNamingTheSetting`

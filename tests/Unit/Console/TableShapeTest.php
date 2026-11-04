@@ -119,7 +119,7 @@ final class TableShapeTest extends TestCase
             'last_error_class' => ['string', 191, true],
             'created_at'       => ['datetime', 6, false],
         ], $shape->columns);
-        self::assertSame(['_due_index' => [['failed_at', 'available_at'], false]], $shape->indexes);
+        self::assertSame(['_due_index' => [['failed_at', 'available_at'], false], '_queued_index' => [['failed_at', 'created_at'], false]], $shape->indexes);
         self::assertSame(['id'], $shape->primary);
     }
 

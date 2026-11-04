@@ -46,6 +46,9 @@ final class FreshnessSignalTest extends TestCase
         self::assertSame('[freshness] sweep: never_run (limit 93600s)', (new FreshnessSignal('sweep', FreshnessSignal::NEVER_RUN, null, 93600, false))->line());
         self::assertSame('[freshness] anchoring: ok (age 0s)', (new FreshnessSignal('anchoring', FreshnessSignal::OK, 0, null, false))->line());
         self::assertSame('[freshness] outbox: not_applicable', (new FreshnessSignal('outbox', FreshnessSignal::NOT_APPLICABLE, null, null, false))->line());
+        $failed = new FreshnessSignal('anchoring', FreshnessSignal::FAILED, null, null, true, 'the anchor failed');
+
+        self::assertSame('[freshness] anchoring: failed (the anchor failed)', $failed->line());
     }
 
     /**
@@ -58,7 +61,7 @@ final class FreshnessSignalTest extends TestCase
     {
         self::assertSame(
             ['signal' => 'retention', 'status' => 'failed', 'age_seconds' => 60, 'limit_seconds' => 93600],
-            (new FreshnessSignal('retention', FreshnessSignal::FAILED, 60, 93600, true))->toArray(),
+            (new FreshnessSignal('retention', FreshnessSignal::FAILED, 60, 93600, true, 'a cause'))->toArray(),
         );
 
         self::assertSame(

@@ -359,13 +359,17 @@ final readonly class TableShape
 
     /**
      * The shape the shipped migration gives the outbox table: its rows are
-     * claimed by an index over the failure time and the time a row falls due.
+     * claimed by an index over the failure time and the time a row falls due,
+     * and the backlog's age is read by one over the failure time and the time a
+     * row was queued.
      *
      * @return self
      */
     public static function outbox(): self
     {
-        return new self('outbox', self::OUTBOX_COLUMNS, ['_due_index' => [['failed_at', 'available_at'], false]], ['id'], self::UNKNOWN_DELIVERY_COLUMN);
+        $indexes = ['_due_index' => [['failed_at', 'available_at'], false], '_queued_index' => [['failed_at', 'created_at'], false]];
+
+        return new self('outbox', self::OUTBOX_COLUMNS, $indexes, ['id'], self::UNKNOWN_DELIVERY_COLUMN);
     }
 
     /**

@@ -44,6 +44,7 @@ final readonly class FreshnessSignal
      * @param  ?int  $ageSeconds
      * @param  ?int  $limitSeconds
      * @param  bool  $problem
+     * @param  ?string  $cause
      */
     public function __construct(
 
@@ -61,11 +62,14 @@ final readonly class FreshnessSignal
 
         /** Whether the signal fails the run. */
         public bool $problem,
+
+        /** Why it failed without a run to judge, naming the class of what was thrown and never its message, or `null`. */
+        public ?string $cause = null,
     ) {}
 
     /**
      * The signal as a line of text: its name, its status and, when it has them,
-     * its age and its limit.
+     * its age, its limit and its cause.
      *
      * @return string
      */
@@ -74,13 +78,15 @@ final readonly class FreshnessSignal
         $parts = [
             ...($this->ageSeconds === null ? [] : [sprintf('age %ds', $this->ageSeconds)]),
             ...($this->limitSeconds === null ? [] : [sprintf('limit %ds', $this->limitSeconds)]),
+            ...($this->cause === null ? [] : [$this->cause]),
         ];
 
         return sprintf('[freshness] %s: %s', $this->signal, $this->status) . ($parts === [] ? '' : ' (' . implode(', ', $parts) . ')');
     }
 
     /**
-     * The signal's closed list of fields, for `--json`.
+     * The signal's closed list of fields, for `--json`, which leaves out its
+     * cause.
      *
      * @return array{signal: string, status: string, age_seconds: ?int, limit_seconds: ?int}
      */
