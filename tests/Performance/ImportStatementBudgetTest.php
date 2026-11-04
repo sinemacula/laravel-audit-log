@@ -65,6 +65,9 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     /** @var list<string> The files this test wrote. */
     private array $files = [];
 
+    /** @var ?\SineMacula\Laravel\AuditLog\Lifecycle\ImportTally The one tally the chunks count into. */
+    private ?ImportTally $tally = null;
+
     /**
      * Name this installation and bind the configured retention policy.
      *
@@ -298,14 +301,17 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
 
     /**
      * Write the chunk of lines and return the statements it ran, checking it
-     * was one transaction, committed once.
+     * was one transaction, committed once. Every chunk counts into the one
+     * tally, as an import does, so each chunk's progress changes the batch row:
+     * MySQL counts an update that changes nothing as no row.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
      * @return list<string>
      */
     private function chunkStatements(array $lines): array
     {
-        $tally = new ImportTally;
+        $tally  = $this->tally ??= new ImportTally;
+        $before = $tally->imported();
 
         foreach ($lines as $line) {
             $tally->countRead();
@@ -313,7 +319,7 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
 
         $this->assertTransactionBudget(1, 1, static fn () => app(ImportWriter::class)->write(self::BATCH, $lines, $tally, CarbonImmutable::now()));
 
-        self::assertSame(count($lines), $tally->imported());
+        self::assertSame(count($lines), $tally->imported() - $before);
 
         return $this->capturedStatements();
     }
