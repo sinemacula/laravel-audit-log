@@ -179,10 +179,10 @@ final class AuditedReadsTest extends TestCase
 
         unset($properties['_audit']);
 
-        self::assertSame(self::PAGE_EVIDENCE, array_keys($properties));
+        self::assertSamePropertyKeys(self::PAGE_EVIDENCE, $properties);
         $terms = self::termsOf(TrailFilters::none()->withCategories(['finance']), $scope);
 
-        self::assertSame([
+        self::assertSameProperties([
             'purpose'           => 'read',
             'query_fingerprint' => $terms->queryFingerprint,
             'scope_fingerprint' => $terms->scopeFingerprint,
@@ -296,7 +296,7 @@ final class AuditedReadsTest extends TestCase
         unset($properties['_audit']);
 
         self::assertCount(1, $this->readRecords());
-        self::assertSame(self::COUNT_EVIDENCE, array_keys($properties));
+        self::assertSamePropertyKeys(self::COUNT_EVIDENCE, $properties);
         self::assertSame(['count', 3, 'success'], [$properties['purpose'], $properties['returned'], $properties['outcome']]);
         self::assertSame([], $this->disclosureOf($record['id'])['members']);
     }

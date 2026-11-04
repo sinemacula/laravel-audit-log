@@ -179,7 +179,7 @@ final class TrailOrderingTest extends TestCase
 
         $positions = array_map(static fn (array $record): mixed => self::propertiesOf($record)['page'], $this->readRecords('audit_log.trail_read'));
 
-        self::assertSame([
+        self::assertSameProperties([
             'first',
             ['occurred_at' => '2026-11-01T12:00:02.000000Z', 'id' => self::IDS[1]],
             ['occurred_at' => '2026-11-01T12:00:01.000000Z', 'id' => self::IDS[2]],

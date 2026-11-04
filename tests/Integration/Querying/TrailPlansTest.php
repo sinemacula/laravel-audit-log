@@ -26,8 +26,9 @@ use Tests\TestCase;
  * on whichever engine the suite runs against: a read narrowed on one dimension
  * reads that dimension's index in the page's order, `occurred_at` then `id`,
  * both descending, and sorts nothing, the first page and a page after a cursor
- * alike; a read that combines conditions uses an index of the table and filters
- * the rest of its conditions row by row.
+ * alike, which reads the index from the cursor's time; a read that combines
+ * conditions uses an index of the table and filters the rest of its conditions
+ * row by row.
  *
  * Each plan is of the very statement the trail runs: a page of 50 is read
  * through `AuditTrail` for a viewer the policy gives the scope, after a page
@@ -37,9 +38,15 @@ use Tests\TestCase;
  * what is explained. The plan is the engine's own: `EXPLAIN QUERY PLAN` on
  * SQLite, `EXPLAIN
  * FORMAT=JSON` on MySQL and `EXPLAIN (FORMAT JSON)` on PostgreSQL, read after
- * 2,000 rows over 20 tenants, 10 actors and 30 codes are stored in the order
+ * 5,000 rows over 20 tenants, 10 actors and 30 codes are stored in the order
  * they occurred and the table is analysed, so the planner chooses from the
  * table's own statistics.
+ *
+ * The table is that large because MySQL reads a page of the whole trail by its
+ * index only when the table spans more pages of storage than the page reads
+ * rows: 2,000 rows fit in 32 pages, so MySQL scans and sorts them for a limit
+ * of 51, which it does not do for a trail of any real size. 5,000 rows span
+ * well over a hundred pages.
  *
  * Marked `#[CoversNothing]` because a migration's indexes and the planner's
  * choices are not code PHPUnit can attribute.
@@ -55,7 +62,7 @@ final class TrailPlansTest extends TestCase
     use ReadsTheTrail;
 
     /** @var int How many rows are stored. */
-    private const int ROWS = 2000;
+    private const int ROWS = 5000;
 
     /** @var int How many entries a page shows; the read asks for one more. */
     private const int PER_PAGE = 50;
@@ -190,7 +197,9 @@ final class TrailPlansTest extends TestCase
      * A page narrowed on one dimension reads that dimension's own index in its
      * order and is never sorted: MySQL uses no filesort, PostgreSQL has no
      * `Sort` node and SQLite builds no temporary B-tree for the order, the page
-     * after a cursor included.
+     * after a cursor included. A page after a cursor reads the index from the
+     * cursor's time, a range of it, never from the newest entry, filtering out
+     * every entry it has already shown.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
@@ -206,6 +215,7 @@ final class TrailPlansTest extends TestCase
 
         if ($afterAPage) {
             self::assertMatchesRegularExpression('/occurred_at. < \?/', $statement['sql']);
+            self::assertTrue($plan['bounded'], $plan['text']);
         }
 
         self::assertContains(self::index($suffix), $plan['indexes'], $plan['text']);
@@ -321,11 +331,12 @@ final class TrailPlansTest extends TestCase
 
     /**
      * The plan the engine chooses for the statement: the indexes it reads,
-     * whether it sorts, and the plan as the engine gave it, for a failure's
+     * whether it sorts, whether it reads an index from a bound on
+     * `occurred_at`, and the plan as the engine gave it, for a failure's
      * message.
      *
      * @param  array{sql: string, bindings: array<array-key, scalar|null>}  $statement
-     * @return array{indexes: list<string>, sorted: bool, text: string}
+     * @return array{indexes: list<string>, sorted: bool, bounded: bool, text: string}
      *
      * @throws \JsonException
      */
@@ -354,14 +365,16 @@ final class TrailPlansTest extends TestCase
 
     /**
      * The plan MySQL or PostgreSQL gives as JSON: each index a node names, as
-     * MySQL's `key` or `index_name` or PostgreSQL's `Index Name`, and whether a
+     * MySQL's `key` or `index_name` or PostgreSQL's `Index Name`; whether a
      * node sorts, as MySQL's `using_filesort` or a sort access, or a `Sort` or
-     * `Incremental Sort` node of PostgreSQL's.
+     * `Incremental Sort` node of PostgreSQL's; and whether a node reads an
+     * index from a bound on `occurred_at`, as a key part MySQL's range uses or
+     * a column PostgreSQL's `Index Cond` names.
      *
      * @param  string  $driver
      * @param  array<array-key, array<array-key, bool|float|int|string|null>|bool|float|int|string|null>  $tree
      * @param  string  $text
-     * @return array{indexes: list<string>, sorted: bool, text: string}
+     * @return array{indexes: list<string>, sorted: bool, bounded: bool, text: string}
      */
     private static function jsonPlan(string $driver, array $tree, string $text): array
     {
@@ -372,25 +385,45 @@ final class TrailPlansTest extends TestCase
 
         $indexes = [];
         $sorted  = false;
+        $bounded = false;
 
-        foreach (new \RecursiveIteratorIterator(new \RecursiveArrayIterator($tree)) as $key => $value) {
+        foreach (new \RecursiveIteratorIterator(new \RecursiveArrayIterator($tree), \RecursiveIteratorIterator::SELF_FIRST) as $key => $value) {
             if (in_array($key, $names, true) && is_string($value)) {
                 $indexes[] = $value;
             }
 
-            $sorted = $sorted || in_array([$key, $value], $sorts, true);
+            $sorted  = $sorted  || in_array([$key, $value], $sorts, true);
+            $bounded = $bounded || self::boundsTheTime($driver, $key, $value);
         }
 
-        return ['indexes' => array_values(array_unique($indexes)), 'sorted' => $sorted, 'text' => $text];
+        return ['indexes' => array_values(array_unique($indexes)), 'sorted' => $sorted, 'bounded' => $bounded, 'text' => $text];
+    }
+
+    /**
+     * Whether the node of a JSON plan reads an index from a bound on
+     * `occurred_at`: MySQL's `used_key_parts` naming it, or PostgreSQL's `Index
+     * Cond` naming it.
+     *
+     * @param  string  $driver
+     * @param  array-key  $key
+     * @param  array<array-key, bool|float|int|string|null>|bool|float|int|string|null  $value
+     * @return bool
+     */
+    private static function boundsTheTime(string $driver, int|string $key, array|bool|float|int|string|null $value): bool
+    {
+        return $driver === 'mysql'
+            ? $key     === 'used_key_parts' && is_array($value) && in_array('occurred_at', $value, true)
+            : $key     === 'Index Cond'     && is_string($value) && str_contains($value, 'occurred_at');
     }
 
     /**
      * The plan SQLite gives as the details of its steps: each index a step
-     * searches or scans, and whether a step builds a temporary B-tree for the
-     * order, all of it or a part.
+     * searches or scans, whether a step builds a temporary B-tree for the
+     * order, all of it or a part, and whether a step searches an index by a
+     * bound on `occurred_at`.
      *
      * @param  list<string>  $details
-     * @return array{indexes: list<string>, sorted: bool, text: string}
+     * @return array{indexes: list<string>, sorted: bool, bounded: bool, text: string}
      */
     private static function sqlitePlan(array $details): array
     {
@@ -406,7 +439,8 @@ final class TrailPlansTest extends TestCase
 
         return [
             'indexes' => array_values(array_unique($indexes)),
-            'sorted'  => preg_grep('/TEMP B-TREE FOR .*ORDER BY/', $details) !== [],
+            'sorted'  => preg_grep('/TEMP B-TREE FOR .*ORDER BY/', $details)                                     !== [],
+            'bounded' => preg_grep('/^SEARCH .* USING (?:COVERING )?INDEX \S+ \(.*\boccurred_at[<>]/', $details) !== [],
             'text'    => implode("\n", $details),
         ];
     }

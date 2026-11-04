@@ -494,15 +494,15 @@ final class EntriesTableSchemaTest extends TestCase
     private static function pgsqlIdCollations(): array
     {
         $rows = DB::select(
-            'select k.collation from pg_index i'
+            'select k.collation_oid from pg_index i'
             . ' join pg_class t on t.oid = i.indrelid'
-            . ' cross join lateral unnest(i.indkey::int2[], i.indcollation::oid[]) as k(attnum, collation)'
+            . ' cross join lateral unnest(i.indkey::int2[], i.indcollation::oid[]) as k(attnum, collation_oid)'
             . ' join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum'
             . ' where t.relname = ? and t.relnamespace = current_schema()::regnamespace and a.attname = ? and not i.indisprimary',
             [self::TABLE, 'id'],
         );
 
-        return array_values(array_map(static fn (object $row): string => (string) ((array) $row)['collation'], $rows));
+        return array_values(array_map(static fn (object $row): string => (string) ((array) $row)['collation_oid'], $rows));
     }
 
     /**

@@ -208,7 +208,7 @@ final class ExportVerifierTest extends TestCase
         $stored = $this->storedRow($result->entryId);
 
         self::assertSame(['success', null], [$record['outcome'], $record['reason']]);
-        self::assertSame([
+        self::assertSameProperties([
             'purpose'           => 'verify',
             'scope_fingerprint' => self::termsOf(null, AccessScope::all())->scopeFingerprint,
             'fingerprint_key'   => app(KeyRing::class)->signingKey()->id,

@@ -560,7 +560,7 @@ final class TrailReaderTest extends TestCase
 
         $pages = array_map(static fn (array $record): mixed => self::propertiesOf($record)['page'], $this->readRecords('audit_log.trail_read'));
 
-        self::assertSame([
+        self::assertSameProperties([
             'first',
             ['occurred_at' => StoredTime::format($first->entries[1]->occurredAt), 'id' => $ids[3]],
             ['occurred_at' => StoredTime::format($second->entries[1]->occurredAt), 'id' => $ids[1]],
@@ -825,14 +825,17 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * Store the entry's properties as JSON no decoder accepts.
+     * Store the entry's properties as JSON the row codec refuses to decode: a
+     * valid document every engine's JSON column holds, but with a key that
+     * starts with a NUL character, which PHP cannot make the name of an
+     * object's property.
      *
      * @param  string  $id
      * @return void
      */
     private function corrupt(string $id): void
     {
-        DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $id)->update(['properties' => '{"amount":']);
+        DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $id)->update(['properties' => '{"\u0000amount":1}']);
     }
 
     /**

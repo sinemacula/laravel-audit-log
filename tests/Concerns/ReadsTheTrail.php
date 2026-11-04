@@ -37,7 +37,8 @@ use Tests\Fixtures\Support\FrozenClock;
  * no-op of; an access policy answered by a closure, or one that sees every
  * entry or the entries of some tenants; entries seeded through the database
  * store, signed as the package signs them; the records of the package's own
- * codes, decoded as stored; the plaintext of a read's disclosure; the viewer
+ * codes, decoded as stored, and their properties compared as the engine keeps
+ * them; the plaintext of a read's disclosure; the viewer
  * the tests read for; and the statements run on any connection.
  *
  * A seeded entry is a captured record of an approved invoice, in the `finance`
@@ -221,6 +222,53 @@ trait ReadsTheTrail
     }
 
     /**
+     * Assert stored properties, or a part of them, are the expected ones:
+     * identical, key order included, where the storage connection keeps the
+     * order a JSON object's keys were written in, and identical but for that
+     * order on MySQL, whose JSON column stores every object with its keys
+     * sorted. A list keeps its order on every engine.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $expected
+     * @param  mixed  $actual
+     * @return void
+     */
+    protected static function assertSameProperties(mixed $expected, mixed $actual): void
+    {
+        if (!self::doesStorageSortJsonKeys()) {
+            self::assertSame($expected, $actual);
+
+            return;
+        }
+
+        self::assertSame(self::withSortedKeys($expected), self::withSortedKeys($actual));
+    }
+
+    /**
+     * Assert stored properties have exactly the expected keys: in the order
+     * given where the storage connection keeps the order a JSON object's keys
+     * were written in, and in any order on MySQL, which sorts them.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  list<string>  $expected
+     * @param  array<array-key, mixed>  $properties
+     * @return void
+     */
+    protected static function assertSamePropertyKeys(array $expected, array $properties): void
+    {
+        $keys = array_keys($properties);
+
+        if (self::doesStorageSortJsonKeys()) {
+            sort($expected);
+            sort($keys);
+        }
+
+        self::assertSame($expected, $keys);
+    }
+
+    /**
      * The plaintext of the artifact the entry carries, decrypted under the
      * application's key and decoded with its maps as arrays; the artifact must
      * exist.
@@ -318,5 +366,40 @@ trait ReadsTheTrail
         }
 
         return $reads;
+    }
+
+    /**
+     * Whether the storage connection's JSON column sorts the keys of every
+     * object it stores, as MySQL's binary JSON does.
+     *
+     * @return bool
+     */
+    private static function doesStorageSortJsonKeys(): bool
+    {
+        return DB::connection(StorageConnection::name())->getDriverName() === 'mysql';
+    }
+
+    /**
+     * The value with the keys of every map within it sorted, each list kept in
+     * its order.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $value
+     * @return mixed
+     */
+    private static function withSortedKeys(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        $sorted = array_map(self::withSortedKeys(...), $value);
+
+        if (!array_is_list($sorted)) {
+            ksort($sorted, SORT_STRING);
+        }
+
+        return $sorted;
     }
 }

@@ -29,8 +29,17 @@ use Tests\TestCase;
  * purge of the session, an engine the export cannot read refused before
  * anything, and what the manifest says of it.
  *
- * SQLite runs here; the statements MySQL and PostgreSQL begin with are pinned
- * as strings, and run against those engines in the integration tests.
+ * The sessions made here are of SQLite files, and in-memory SQLite is a
+ * connection of its own, so they read the same on every engine the suite runs
+ * against; the statements MySQL and PostgreSQL begin with are pinned as
+ * strings, and run against those engines in the integration tests. The testing
+ * manager's transaction and the semantics are read on the storage connection
+ * itself, whichever engine it is.
+ *
+ * Whether a SQLite session is inside a transaction is asked of the database,
+ * never of `PDO::inTransaction()`: before PHP 8.4, pdo_sqlite reports only a
+ * transaction begun through `PDO::beginTransaction()`, never one a statement
+ * begins, as the snapshot begins its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,6 +57,12 @@ final class ExportSnapshotTest extends TestCase
     /** @var string A table that exists on the replica alone. */
     private const string REPLICA_ONLY = 'replica_only';
 
+    /** @var string A table the testing transaction writes a row to. */
+    private const string HELD_ROWS = 'export_snapshot_held_rows';
+
+    /** @var string A connection to in-memory SQLite. */
+    private const string MEMORY_CONNECTION = 'memory';
+
     /** @var list<array{0: string, 1: string}> Each statement run since the test began listening, with its connection's name. */
     private array $statements = [];
 
@@ -60,6 +75,8 @@ final class ExportSnapshotTest extends TestCase
     protected function tearDown(): void
     {
         $this->removeReadWriteSplit();
+
+        DB::purge(self::MEMORY_CONNECTION);
 
         parent::tearDown();
     }
@@ -94,7 +111,7 @@ final class ExportSnapshotTest extends TestCase
         $session  = $snapshot->connection()->getName();
 
         self::assertSame([[$session, 'BEGIN DEFERRED']], $this->statements);
-        self::assertTrue($snapshot->connection()->getPdo()->inTransaction());
+        self::assertTrue(self::isInSqliteTransaction($snapshot->connection()));
 
         $snapshot->close();
 
@@ -276,23 +293,24 @@ final class ExportSnapshotTest extends TestCase
      */
     public function testInMemorySqliteSharesTheConnection(): void
     {
+        $storage = $this->onInMemorySqlite();
+
         $this->listen();
 
-        $storage  = DB::connection(self::CONNECTION);
         $snapshot = $this->open();
 
         self::assertSame($storage, $snapshot->connection());
-        self::assertSame([[self::CONNECTION, 'BEGIN DEFERRED']], $this->statements);
-        self::assertTrue($storage->getPdo()->inTransaction());
+        self::assertSame([[self::MEMORY_CONNECTION, 'BEGIN DEFERRED']], $this->statements);
+        self::assertTrue(self::isInSqliteTransaction($storage));
         self::assertSame(0, $storage->transactionLevel());
         self::assertSame('deferred_read_transaction', $snapshot->semantics()['consistency']);
         self::assertSame([], $this->sessions());
 
         $snapshot->close();
 
-        self::assertSame([[self::CONNECTION, 'BEGIN DEFERRED'], [self::CONNECTION, 'COMMIT']], $this->statements);
-        self::assertFalse($storage->getPdo()->inTransaction());
-        self::assertSame($storage, DB::connection(self::CONNECTION));
+        self::assertSame([[self::MEMORY_CONNECTION, 'BEGIN DEFERRED'], [self::MEMORY_CONNECTION, 'COMMIT']], $this->statements);
+        self::assertFalse(self::isInSqliteTransaction($storage));
+        self::assertSame($storage, DB::connection(self::MEMORY_CONNECTION));
     }
 
     /**
@@ -338,8 +356,8 @@ final class ExportSnapshotTest extends TestCase
 
     /**
      * A storage connection holding the testing manager's base transaction is
-     * read inside it: no session is made, nothing is begun or committed, rows
-     * the transaction holds are seen, the consistency is named
+     * read inside it: no session is made, nothing is begun or committed, a row
+     * the transaction holds is seen, the consistency is named
      * `testing_transaction`, and the transaction is still open once the
      * snapshot closes.
      *
@@ -348,32 +366,38 @@ final class ExportSnapshotTest extends TestCase
     public function testAnOpenTestingTransactionIsReadInside(): void
     {
         $storage = DB::connection(self::CONNECTION);
+        $schema  = Schema::connection(self::CONNECTION);
 
-        $this->testingManager();
-
-        $storage->beginTransaction();
-
-        Schema::connection(self::CONNECTION)->create(self::REPLICA_ONLY, static function ($table): void {
+        $schema->create(self::HELD_ROWS, static function ($table): void {
             $table->id();
         });
 
-        $this->listen();
+        try {
+            $this->testingManager();
 
-        $snapshot = $this->open();
+            $storage->beginTransaction();
+            $storage->table(self::HELD_ROWS)->insert(['id' => 1]);
 
-        self::assertSame($storage, $snapshot->connection());
-        self::assertSame('testing_transaction', $snapshot->semantics()['consistency']);
-        self::assertTrue(self::hasTable($snapshot->connection(), self::REPLICA_ONLY));
+            $this->listen();
 
-        $snapshot->close();
-        $snapshot->abandon();
+            $snapshot = $this->open();
 
-        self::assertSame([], array_filter($this->statements, static fn (array $statement): bool => !str_starts_with($statement[1], 'select')));
-        self::assertSame([], $this->sessions());
-        self::assertSame(1, $storage->transactionLevel());
-        self::assertTrue($storage->getPdo()->inTransaction());
+            self::assertSame($storage, $snapshot->connection());
+            self::assertSame('testing_transaction', $snapshot->semantics()['consistency']);
+            self::assertSame(1, $snapshot->connection()->table(self::HELD_ROWS)->count());
 
-        $storage->rollBack();
+            $snapshot->close();
+            $snapshot->abandon();
+
+            self::assertSame([], array_filter($this->statements, static fn (array $statement): bool => !str_starts_with($statement[1], 'select')));
+            self::assertSame([], $this->sessions());
+            self::assertSame(1, $storage->transactionLevel());
+            self::assertTrue($storage->getPdo()->inTransaction());
+
+            $storage->rollBack();
+        } finally {
+            $schema->dropIfExists(self::HELD_ROWS);
+        }
     }
 
     /**
@@ -541,7 +565,7 @@ final class ExportSnapshotTest extends TestCase
             $abandoning->abandon();
             $abandoning->close();
 
-            self::assertFalse($pdo->inTransaction());
+            self::assertFalse(self::isInSqliteTransaction(DB::connection('silent')));
         } finally {
             DB::purge('silent');
         }
@@ -635,7 +659,8 @@ final class ExportSnapshotTest extends TestCase
     /**
      * The manifest names the storage connection, the snapshot's consistency,
      * the database the session reads, the engine and the entries table as
-     * configured.
+     * configured, on the storage connection's own engine and on a split of
+     * SQLite files.
      *
      * @return void
      */
@@ -643,14 +668,20 @@ final class ExportSnapshotTest extends TestCase
     {
         app(ConfigRepository::class)->set('audit-log.entries.table', 'activity');
 
+        $storage  = DB::connection(self::CONNECTION);
+        $engine   = $storage->getDriverName();
         $snapshot = $this->open();
 
         self::assertSame([
             'connection'  => self::CONNECTION,
-            'consistency' => 'deferred_read_transaction',
-            'database'    => ':memory:',
-            'engine'      => 'sqlite',
-            'table'       => 'activity',
+            'consistency' => match ($engine) {
+                'mysql' => 'consistent_snapshot_read_only',
+                'pgsql' => 'repeatable_read_read_only',
+                default => 'deferred_read_transaction',
+            },
+            'database' => $engine === 'sqlite' ? ':memory:' : $storage->getDatabaseName(),
+            'engine'   => $engine,
+            'table'    => 'activity',
         ], $snapshot->semantics());
 
         $snapshot->close();
@@ -706,6 +737,22 @@ final class ExportSnapshotTest extends TestCase
         } catch (\UnexpectedValueException $exception) {
             self::assertSame(sprintf('The export\'s snapshot could not run %s.', $statement), $exception->getMessage());
         }
+    }
+
+    /**
+     * Make a connection to in-memory SQLite the storage connection, and return
+     * it.
+     *
+     * @return \Illuminate\Database\Connection
+     */
+    private function onInMemorySqlite(): Connection
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.' . self::MEMORY_CONNECTION, ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+        $config->set('audit-log.storage.connection', self::MEMORY_CONNECTION);
+
+        return DB::connection(self::MEMORY_CONNECTION);
     }
 
     /**
@@ -771,6 +818,38 @@ final class ExportSnapshotTest extends TestCase
         $this->app?->instance('db.transactions', $manager);
 
         DB::connection(self::CONNECTION)->setTransactionManager($manager);
+    }
+
+    /**
+     * Whether the SQLite connection is inside a transaction, asked of the
+     * database by beginning another: SQLite refuses a transaction within a
+     * transaction and changes nothing, and a begin it accepts is rolled back at
+     * once. The begin is sent through the PDO, so no statement is heard.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return bool
+     */
+    private static function isInSqliteTransaction(Connection $connection): bool
+    {
+        $pdo   = $connection->getPdo();
+        $error = null;
+
+        try {
+            $begun = $pdo->exec('BEGIN') !== false;
+        } catch (\PDOException $exception) {
+            $begun = false;
+            $error = $exception->getMessage();
+        }
+
+        if ($begun) {
+            $pdo->exec('ROLLBACK');
+
+            return false;
+        }
+
+        self::assertStringContainsString('cannot start a transaction within a transaction', $error ?? (string) $pdo->errorInfo()[2]);
+
+        return true;
     }
 
     /**

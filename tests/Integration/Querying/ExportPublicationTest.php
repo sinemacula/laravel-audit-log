@@ -333,7 +333,7 @@ final class ExportPublicationTest extends TestCase
         self::assertCount(1, $journals);
         self::assertCount(1, $failures);
         self::assertSame(['success', 'failure', 'publish_failed', 'audit'], [$journals[0]['outcome'], $failures[0]['outcome'], $failures[0]['reason'], $failures[0]['category']]);
-        self::assertSame(['export_entry' => $journals[0]['id'], 'outcome' => 'failure'], self::propertiesOf($failures[0]));
+        self::assertSameProperties(['export_entry' => $journals[0]['id'], 'outcome' => 'failure'], self::propertiesOf($failures[0]));
     }
 
     /**

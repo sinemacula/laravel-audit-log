@@ -825,7 +825,7 @@ final class ExporterTest extends TestCase
         $failure = $this->readRecords('audit_log.export_publish_failed')[0];
 
         self::assertSame(['failure', 'publish_failed'], [$failure['outcome'], $failure['reason']]);
-        self::assertSame(['export_entry' => $journal['id'], 'outcome' => 'failure'], self::propertiesOf($failure));
+        self::assertSameProperties(['export_entry' => $journal['id'], 'outcome' => 'failure'], self::propertiesOf($failure));
         self::assertSame('appeared', file_get_contents($this->target()));
         self::assertFileDoesNotExist($this->target() . ExportFile::MANIFEST_SUFFIX);
         self::assertSame([], $this->temporaries());
@@ -996,7 +996,7 @@ final class ExporterTest extends TestCase
 
         unset($properties['_audit']);
 
-        self::assertSame([
+        self::assertSameProperties([
             'purpose'           => 'export',
             'query_fingerprint' => self::termsOf(TrailFilters::none()->withCategories(['finance']), null)->queryFingerprint,
             'scope_fingerprint' => self::termsOf(null, AccessScope::all())->scopeFingerprint,

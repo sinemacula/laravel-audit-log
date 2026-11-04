@@ -81,7 +81,7 @@ final class ScopeCompilerTest extends TestCase
             . ' and actor_type = ? and actor_id = ? and principal_type = ? and principal_id = ?'
             . ' and event like ? escape \'!\' and category in (?) and outcome in (?, ?)'
             . ' and occurred_at >= ? and occurred_at < ? and correlation_id = ?'
-            . ' and (occurred_at < ? or (occurred_at = ? and id < ?))';
+            . ' and (occurred_at <= ? and (occurred_at < ? or (occurred_at = ? and id < ?)))';
 
         self::assertSame('select * from audit_log_entries where ' . $where, self::sqlOf($query));
         self::assertSame([
@@ -91,7 +91,7 @@ final class ScopeCompilerTest extends TestCase
             'user', '42', 'service', '9',
             'invoice.%', 'billing', 'denied', 'success',
             '2026-11-01 00:00:00.000000', '2026-11-02 00:00:00.500000', 'app:ticket-123',
-            '2026-11-01 12:00:00.123456', '2026-11-01 12:00:00.123456', self::ID,
+            '2026-11-01 12:00:00.123456', '2026-11-01 12:00:00.123456', '2026-11-01 12:00:00.123456', self::ID,
         ], $query->getBindings());
     }
 
@@ -154,7 +154,7 @@ final class ScopeCompilerTest extends TestCase
 
     /**
      * The page cursor takes the entries strictly after the position in
-     * newest-first order, as one group.
+     * newest-first order, as one group led by the bound on the time it implies.
      *
      * @return void
      */
@@ -162,8 +162,8 @@ final class ScopeCompilerTest extends TestCase
     {
         $query = (new ScopeCompiler)->before(self::entries(), new Position('2026-11-01T12:00:00.000001Z', self::ID));
 
-        self::assertSame('select * from audit_log_entries where (occurred_at < ? or (occurred_at = ? and id < ?))', self::sqlOf($query));
-        self::assertSame(['2026-11-01 12:00:00.000001', '2026-11-01 12:00:00.000001', self::ID], $query->getBindings());
+        self::assertSame('select * from audit_log_entries where (occurred_at <= ? and (occurred_at < ? or (occurred_at = ? and id < ?)))', self::sqlOf($query));
+        self::assertSame(['2026-11-01 12:00:00.000001', '2026-11-01 12:00:00.000001', '2026-11-01 12:00:00.000001', self::ID], $query->getBindings());
     }
 
     /**

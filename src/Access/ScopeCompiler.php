@@ -117,6 +117,13 @@ final readonly class ScopeCompiler
      * with a lower id, as one grouped condition. The caller orders by
      * `occurred_at` then `id`, both descending.
      *
+     * The group leads with the bound `occurred_at <= t` the strict predicate
+     * implies, so the time is a range every engine reads its index by after the
+     * scope's equalities. Without it SQLite and PostgreSQL read the index from
+     * the newest entry and filter out every entry the pages before have shown,
+     * or PostgreSQL splits the `or` across two indexes and sorts what they
+     * match.
+     *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  \SineMacula\Laravel\AuditLog\Querying\Position  $position
      * @return \Illuminate\Database\Query\Builder
@@ -128,8 +135,10 @@ final readonly class ScopeCompiler
         $time = StoredTime::toStorage($position->time);
 
         return $query->where(static fn (Builder $group): Builder => $group
-            ->where('occurred_at', '<', $time)
-            ->orWhere(static fn (Builder $tie): Builder => $tie->where('occurred_at', '=', $time)->where('id', '<', $position->id)));
+            ->where('occurred_at', '<=', $time)
+            ->where(static fn (Builder $after): Builder => $after
+                ->where('occurred_at', '<', $time)
+                ->orWhere(static fn (Builder $tie): Builder => $tie->where('occurred_at', '=', $time)->where('id', '<', $position->id))));
     }
 
     /**

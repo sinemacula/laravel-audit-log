@@ -43,7 +43,8 @@ read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is 
   `InvalidCursorException`; the anchor row is never loaded and no cursor expires, since the scope is answered again on
   every page. A cursor is refused once the scope it was issued under changes in any way, and a denied scope is answered
   with the uniform empty page before any cursor is opened. Pages are ordered by `occurred_at` then `id`, descending,
-  with the strict predicate `occurred_at < t OR (occurred_at = t AND id < i)`.
+  with the strict predicate `occurred_at < t OR (occurred_at = t AND id < i)`, led by the bound `occurred_at <= t` it
+  implies, so every engine reads the time as a range of the index after the scope's equalities.
 - **The read's record.** Each read is recorded under a `Querying\Enums\PackageActivity` code, the only way to mint one
   under `audit_log.`: the viewer as its actor, the category `audit`, and the scope's one tenant when it sees exactly
   one, else explicitly none. Its properties are the evidence `Querying\AccessEvidence` lists, kept exactly or the read

@@ -137,9 +137,9 @@ final class AccessRecorderTest extends TestCase
         self::assertSame('success', $records[0]['outcome']);
         self::assertNull($records[0]['reason']);
         self::assertSame(['App\Models\User', '7'], [$records[0]['actor_type'], $records[0]['actor_id']]);
-        self::assertSame(
+        self::assertSamePropertyKeys(
             ['purpose', 'query_fingerprint', 'scope_fingerprint', 'fingerprint_key', 'policy', 'page', 'per_page', 'returned', 'outcome', '_audit'],
-            array_keys(self::propertiesOf($records[0])),
+            self::propertiesOf($records[0]),
         );
         self::assertSame(2, self::propertiesOf($records[0])['returned']);
     }

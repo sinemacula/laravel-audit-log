@@ -280,7 +280,7 @@ final class ExportProofsTest extends TestCase
 
         self::assertCount(1, $records);
         self::assertSame(['denied', 'no_scope', 'audit'], [$records[0]['outcome'], $records[0]['reason'], $records[0]['category']]);
-        self::assertSame([
+        self::assertSameProperties([
             'purpose'           => 'verify',
             'scope_fingerprint' => self::termsOf(null, AccessScope::none())->scopeFingerprint,
             'fingerprint_key'   => app(KeyRing::class)->signingKey()->id,
