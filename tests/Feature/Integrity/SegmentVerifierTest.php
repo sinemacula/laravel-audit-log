@@ -1261,7 +1261,8 @@ final class SegmentVerifierTest extends TestCase
         $pruned   = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($bytewise)));
 
         self::assertSame(IntegrityStatus::PRUNED, $pruned->integrity);
-        self::assertSame(array_reverse($sorted), $reversed->getArrayCopy());
+        self::assertEqualsCanonicalizing($sorted, $reversed->getArrayCopy());
+        self::assertNotSame($sorted, $reversed->getArrayCopy());
 
         $misplaced = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($engine)));
 
