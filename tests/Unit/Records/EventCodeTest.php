@@ -7,14 +7,16 @@ namespace Tests\Unit\Records;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use Tests\Unit\Stubs\Enums\StubActivity;
 use Tests\Unit\Stubs\Enums\StubNumberedActivity;
 
 /**
  * Unit tests for the event code: the codes it keeps, the enums it takes, the
- * codes it refuses, the order its rules apply in, and the prefix reserved for
- * the package's own codes.
+ * codes it refuses, the order its rules apply in, the prefix reserved for the
+ * package's own codes, minting one of them, and reading a code under any
+ * prefix.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -253,5 +255,108 @@ final class EventCodeTest extends TestCase
         $this->expectExceptionMessage(self::GRAMMAR_MESSAGE);
 
         EventCode::of('audit_log.');
+    }
+
+    /**
+     * Each of the package's own activities mints its code, under the reserved
+     * prefix.
+     *
+     * @return void
+     */
+    public function testPackageMintsAReservedCode(): void
+    {
+        self::assertSame('audit_log.trail_read', EventCode::package(PackageActivity::TRAIL_READ)->value);
+
+        foreach (PackageActivity::cases() as $activity) {
+            $code = EventCode::package($activity);
+
+            self::assertSame($activity->value, $code->value, $activity->name);
+            self::assertStringStartsWith(EventCode::RESERVED_PREFIX, $code->value, $activity->name);
+        }
+    }
+
+    /**
+     * `of()` still refuses the package's own codes, given as the activity or as
+     * its value, so minting one is no way for a caller to record one.
+     *
+     * @return void
+     */
+    public function testOfStillRefusesTheReservedPrefix(): void
+    {
+        foreach ([PackageActivity::TRAIL_READ, PackageActivity::EXPORT_PUBLISH_FAILED->value] as $code) {
+            try {
+                EventCode::of($code);
+
+                self::fail('Expected the package code to be refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame(self::RESERVED_MESSAGE, $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * A code read for a lookup may be under the reserved prefix, given as a
+     * string or as an enum case, and keeps its value; an ordinary code is read
+     * as `of()` reads it.
+     *
+     * @return void
+     */
+    public function testForReadingAcceptsAReservedCode(): void
+    {
+        self::assertSame('audit_log.trail_read', EventCode::forReading('audit_log.trail_read')->value);
+        self::assertSame('audit_log.trail_exported', EventCode::forReading(PackageActivity::TRAIL_EXPORTED)->value);
+        self::assertSame('audit_log.pruned', EventCode::forReading(StubActivity::RESERVED)->value);
+        self::assertSame('invoice.approved', EventCode::forReading(StubActivity::APPROVED)->value);
+        self::assertSame('invoice.approved', EventCode::forReading('invoice.approved')->value);
+    }
+
+    /**
+     * Rows of `[code, message]`: codes a lookup still refuses, outside the
+     * grammar, past the column, or backed by integers.
+     *
+     * @return iterable<string, array{0: \BackedEnum|string, 1: string}>
+     */
+    public static function provideCodesReadingRefuses(): iterable
+    {
+        yield from [
+            'empty'                       => ['', self::GRAMMAR_MESSAGE],
+            'one segment'                 => ['audit_log', self::GRAMMAR_MESSAGE],
+            'the prefix alone'            => ['audit_log.', self::GRAMMAR_MESSAGE],
+            'upper case under the prefix' => ['audit_log.Trail_read', self::GRAMMAR_MESSAGE],
+            'trailing newline'            => ["audit_log.trail_read\n", self::GRAMMAR_MESSAGE],
+            'a wildcard'                  => ['audit_log.%', self::GRAMMAR_MESSAGE],
+            'reserved, 192 bytes'         => ['audit_log.' . str_repeat('b', 182), self::LENGTH_MESSAGE],
+            'ordinary, 192 bytes'         => ['a.' . str_repeat('b', 190), self::LENGTH_MESSAGE],
+            'an integer-backed enum'      => [StubNumberedActivity::FIRST, 'An event code enum must be backed by strings.'],
+        ];
+    }
+
+    /**
+     * A lookup still holds a code to the grammar and the length, so a malformed
+     * code is refused rather than read as one that matches nothing.
+     *
+     * @param  \BackedEnum|string  $code
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideCodesReadingRefuses')]
+    public function testForReadingStillChecksTheGrammarAndLength(\BackedEnum|string $code, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        EventCode::forReading($code);
+    }
+
+    /**
+     * The longest reserved code a lookup takes is the column's 191 bytes.
+     *
+     * @return void
+     */
+    public function testForReadingTakesTheLongestReservedCode(): void
+    {
+        $code = 'audit_log.' . str_repeat('b', 181);
+
+        self::assertSame($code, EventCode::forReading($code)->value);
     }
 }

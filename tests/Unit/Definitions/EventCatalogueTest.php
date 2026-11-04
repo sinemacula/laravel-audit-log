@@ -11,6 +11,7 @@ use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Definitions\Enums\MisdefinedActivity;
@@ -22,7 +23,8 @@ use Tests\Unit\Stubs\Enums\StubActivity;
  * Unit tests for the event catalogue: the permissive default and the refusal of
  * unregistered codes, registering a definition or a whole enum, idempotent
  * repeats, conflicts in either order, the enums it refuses and in what order,
- * and freezing once the application has booted.
+ * freezing once the application has booted, and the package's own definitions,
+ * there from the start.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -449,5 +451,119 @@ final class EventCatalogueTest extends TestCase
         self::assertTrue($catalogue->isRegistered($code));
         self::assertTrue($catalogue->definitionFor($code)->equals(InvoiceActivity::REFUND_FAILED->definition()));
         self::assertSame(FieldHandling::RETAIN, $catalogue->definitionFor(EventCode::of('user.suspended'))->unlisted);
+    }
+
+    /**
+     * Every package definition is registered and served from the moment the
+     * catalogue is made, before any registration, even when registration is
+     * required.
+     *
+     * @return void
+     */
+    public function testThePackageDefinitionsAreThereFromTheStart(): void
+    {
+        $catalogue = new EventCatalogue;
+
+        foreach (PackageActivity::cases() as $activity) {
+            $code = EventCode::package($activity);
+
+            self::assertTrue($catalogue->isRegistered($code), $activity->value);
+            self::assertTrue($catalogue->definitionFor($code, requireRegistered: true)->equals($activity->definition()), $activity->value);
+            self::assertSame('audit', $catalogue->definitionFor($code)->category, $activity->value);
+        }
+
+        self::assertFalse($catalogue->isFrozen());
+    }
+
+    /**
+     * A new catalogue holds the package definitions, by code, and nothing else:
+     * no application code is registered until it is defined.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    public function testANewCatalogueHoldsOnlyThePackageDefinitions(): void
+    {
+        $catalogue = new EventCatalogue;
+        $held      = (new \ReflectionProperty(EventCatalogue::class, 'definitions'))->getValue($catalogue);
+
+        self::assertIsArray($held);
+        self::assertSame(array_map(static fn (PackageActivity $activity): string => $activity->value, PackageActivity::cases()), array_keys($held));
+        self::assertFalse($catalogue->isRegistered(EventCode::of('invoice.approved')));
+        self::assertFalse($catalogue->isRegistered(EventCode::forReading('audit_log.pruned')));
+    }
+
+    /**
+     * Defining a package definition again identically, alone or as the whole
+     * enum, changes nothing and throws nothing; a different definition of a
+     * package code is refused as any conflicting one is, and the package's
+     * stays.
+     *
+     * @return void
+     */
+    public function testDefiningAPackageCodeAgainChangesNothing(): void
+    {
+        $catalogue = new EventCatalogue;
+        $code      = EventCode::package(PackageActivity::TRAIL_READ);
+        $first     = $catalogue->definitionFor($code);
+
+        $catalogue->define(PackageActivity::TRAIL_READ->definition());
+        $catalogue->define(PackageActivity::class);
+
+        self::assertSame($first, $catalogue->definitionFor($code));
+
+        try {
+            $catalogue->define(PackageActivity::TRAIL_READ->definition()->category('other'));
+
+            self::fail('Expected the different definition to be refused.');
+        } catch (\LogicException $exception) {
+            self::assertSame('The event code `audit_log.trail_read` is already defined differently; a code has one definition.', $exception->getMessage());
+        }
+
+        self::assertSame($first, $catalogue->definitionFor($code));
+    }
+
+    /**
+     * Freezing the catalogue leaves the package definitions in place, and a
+     * frozen catalogue still refuses to define one again.
+     *
+     * @return void
+     */
+    public function testThePackageDefinitionsSurviveTheFreeze(): void
+    {
+        $catalogue = new EventCatalogue;
+
+        $catalogue->freeze();
+
+        foreach (PackageActivity::cases() as $activity) {
+            $code = EventCode::package($activity);
+
+            self::assertTrue($catalogue->isRegistered($code), $activity->value);
+            self::assertTrue($catalogue->definitionFor($code, true)->equals($activity->definition()), $activity->value);
+        }
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(self::FROZEN_MESSAGE);
+
+        $catalogue->define(PackageActivity::class);
+    }
+
+    /**
+     * Each catalogue holds its own package definitions, so one catalogue made
+     * in a test and another resolved by the application serve the same.
+     *
+     * @return void
+     */
+    public function testEachCatalogueIsSeededOnItsOwn(): void
+    {
+        $code   = EventCode::package(PackageActivity::EXPORT_VERIFIED);
+        $first  = new EventCatalogue;
+        $second = new EventCatalogue;
+
+        $first->freeze();
+
+        self::assertTrue($first->definitionFor($code)->equals($second->definitionFor($code)));
+        self::assertFalse($second->isFrozen());
     }
 }

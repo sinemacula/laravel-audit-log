@@ -80,10 +80,24 @@ enum Finding: string
     // An entry's manifest names an artifact that is not stored
     case MANIFEST_MISSING = 'manifest_missing';
 
-    // An entry's artifact is not the one its manifest signed: another id,
-    // entry, kind, count or digest, or members that are not the canonical form
-    // the manifest describes
+    // An entry's artifact counts other members, or holds another digest, than
+    // its manifest signed
     case MANIFEST_MISMATCH = 'manifest_mismatch';
+
+    // An entry's artifact is stored under another id than its manifest signed,
+    // or names another entry
+    case MANIFEST_SWAPPED = 'manifest_swapped';
+
+    // An entry's artifact is stored as another kind than its manifest signed
+    case MANIFEST_WRONG_KIND = 'manifest_wrong_kind';
+
+    // An entry's manifest is not a well-formed descriptor, or its artifact's
+    // members are no canonical form of the kind the manifest signed
+    case MANIFEST_MALFORMED = 'manifest_malformed';
+
+    // An entry's artifact's members are a canonical form of the signed kind,
+    // but not the one its manifest signed
+    case MANIFEST_TAMPERED = 'manifest_tampered';
 
     // A prune record is signed under a key the ring does not hold
     case PRUNE_KEY = 'prune_key';

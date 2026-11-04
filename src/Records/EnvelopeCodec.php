@@ -20,9 +20,14 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * An envelope takes one of two shapes. A record without an attachment is its
  * columns. A record with one is a bundle of three keys: `bundle_version`, the
  * bundle schema's version; `record`, its columns; and `attachment`, its id,
- * entry id, kind, member count, digest and sealed members. A record that was
- * never finalised is kept in either shape with `unsigned` set beside it. The
- * envelope's bound applies to the whole of it, the attachment included.
+ * entry id, kind, member count, digest and sealed members. The attachment is of
+ * any kind, a bulk operation's subjects, a disclosure's evidence or an export's
+ * manifest, in the one schema; its kind and the count that kind allows are the
+ * attachment's own rules. A record that was never finalised is kept in either
+ * shape with `unsigned` set beside it. The envelope's bound applies to the
+ * whole of it, the attachment included. An attachment described from a stored
+ * entry carries no members and is refused as a programming error, never
+ * encoded.
  *
  * Decoding reads the envelope's record version and holds it to that version's
  * schema, exactly its columns, each of its kind, before it verifies the
@@ -39,7 +44,8 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * other, then its attachment is held to its schema and must name that record as
  * its entry. The attachment is not signed: it is bound by the descriptor the
  * record signs at `properties._audit.manifest`, so a bundle whose attachment
- * the descriptor does not describe is malformed, and so is a plain envelope
+ * the descriptor does not describe is malformed, as is one of a kind the
+ * release does not know or a count its kind refuses, and so is a plain envelope
  * whose properties hold a descriptor, which never becomes a record that lost
  * its members. Every refusal of a bundle names the id of its record.
  *
@@ -117,6 +123,8 @@ final readonly class EnvelopeCodec
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return array<string, mixed>
+     *
+     * @throws \LogicException
      */
     public static function envelopeOf(#[\SensitiveParameter] FinalisedRecord $record): array
     {
@@ -132,6 +140,8 @@ final readonly class EnvelopeCodec
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return array<string, mixed>
+     *
+     * @throws \LogicException
      */
     public static function unsignedEnvelopeOf(#[\SensitiveParameter] AuditRecord $record): array
     {
@@ -212,6 +222,8 @@ final readonly class EnvelopeCodec
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  array<string, mixed>  $columns
      * @return array<string, mixed>
+     *
+     * @throws \LogicException
      */
     private static function shapeOf(#[\SensitiveParameter] AuditRecord $record, #[\SensitiveParameter] array $columns): array
     {
@@ -476,7 +488,8 @@ final readonly class EnvelopeCodec
 
     /**
      * The finalised record of the verified bundle, rebuilt with its attachment,
-     * which must be the one its signed descriptor describes.
+     * which must be of a known kind with a count that kind allows, and the one
+     * its signed descriptor describes.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

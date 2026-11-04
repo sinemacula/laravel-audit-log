@@ -14,6 +14,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\SeedsArtifacts;
@@ -25,12 +26,15 @@ use Tests\TestCase;
 /**
  * Integration tests for the check of bundles' artifacts by `audit-log:verify`
  * on whichever engine the suite runs against, each artifact written and changed
- * through the engine's own columns: a sealed bundle verifies, a missing
- * artifact, a changed member list, a changed count and an artifact moved to
- * another entry are each tampered, an artifact the application's key cannot
- * open is unverifiable, a bundle not yet sealed is not checked until it is, and
- * the greatest manifest the settings allow, sealed in the longest artifact
- * there can be, verifies on every engine.
+ * through the engine's own columns: a sealed bundle verifies, as do a
+ * disclosure's and an export's artifacts and an empty disclosure, a missing
+ * artifact, artifacts swapped between entries, an artifact stored as another
+ * kind, members that are no canonical form, a changed member list, a changed
+ * count and an artifact moved to another entry are each tampered with a finding
+ * of their own, an artifact the application's key cannot open is unverifiable,
+ * a bundle not yet sealed is not checked until it is, and the greatest manifest
+ * the settings allow, sealed in the longest artifact there can be, verifies on
+ * every engine.
  *
  * The memory limit is raised for the test, because it is often less than the
  * greatest manifest needs, and the assertions should be what fails rather than
@@ -134,6 +138,122 @@ final class ManifestVerificationEnginesTest extends TestCase
     }
 
     /**
+     * A sealed disclosure's artifact, written through the engine's columns,
+     * verifies beside a plain entry.
+     *
+     * @return void
+     */
+    public function testADisclosureArtifactVerifies(): void
+    {
+        $this->storeEntries(1);
+        $this->seedBundle(3, ArtifactKind::DISCLOSURE);
+        $this->sealAll();
+
+        [$exit, $output] = $this->verify();
+
+        self::assertSame(0, $exit);
+        self::assertStringContainsString(sprintf("seal 1 %s integrity=valid anchoring=unanchored members=2\n", $this->sealIdAt(1)), $output);
+    }
+
+    /**
+     * A sealed export's artifact, written through the engine's columns,
+     * verifies.
+     *
+     * @return void
+     */
+    public function testAnExportArtifactVerifies(): void
+    {
+        $this->seedBundle(2, ArtifactKind::EXPORT);
+        $this->sealAll();
+
+        [$exit, $output] = $this->verify();
+
+        self::assertSame(0, $exit);
+        self::assertStringContainsString('integrity=valid anchoring=unanchored members=1', $output);
+    }
+
+    /**
+     * A sealed disclosure of nothing and an export of no line, stored with a
+     * count of 0 in the engine's unsigned column, verify.
+     *
+     * @return void
+     */
+    public function testAnEmptyDisclosureVerifies(): void
+    {
+        $disclosure = $this->seedBundle(0, ArtifactKind::DISCLOSURE);
+
+        $this->seedBundle(0, ArtifactKind::EXPORT);
+        $this->sealAll();
+
+        self::assertSame(0, (int) ($this->artifactOf($disclosure)['member_count'] ?? -1));
+
+        [$exit, $output] = $this->verify();
+
+        self::assertSame(0, $exit);
+        self::assertStringContainsString('integrity=valid anchoring=unanchored members=2', $output);
+    }
+
+    /**
+     * A sealed disclosure and a sealed export in one seal, written through the
+     * engine's columns, verify together; the export's members replaced by a
+     * plaintext that is no export manifest are then tampered as malformed, read
+     * by the export's own reader.
+     *
+     * @return void
+     */
+    public function testADisclosureAndAnExportVerifyOnEveryEngine(): void
+    {
+        $this->seedBundle(3, ArtifactKind::DISCLOSURE);
+
+        $export = $this->seedBundle(2, ArtifactKind::EXPORT);
+
+        $this->sealAll();
+
+        [$exit, $output] = $this->verify();
+
+        self::assertSame(0, $exit);
+        self::assertStringContainsString(sprintf("seal 1 %s integrity=valid anchoring=unanchored members=2\n", $this->sealIdAt(1)), $output);
+
+        $this->tamperWithArtifact($export, ['members' => app(StringEncrypter::class)->encryptString(RecordFactory::canonical(ArtifactKind::DISCLOSURE, 2))]);
+
+        $this->assertTheSealIs('tampered', 'manifest_malformed', $export, 2);
+    }
+
+    /**
+     * Two sealed bundles whose artifacts are swapped between their entries,
+     * through the engine's unique entry index, are tampered as swapped, at the
+     * earlier entry.
+     *
+     * @return void
+     */
+    public function testASwappedArtifactIsFoundOnEveryEngine(): void
+    {
+        $first  = $this->seedBundle();
+        $second = $this->seedBundle();
+
+        $this->sealAll();
+        $this->swapArtifacts($first, $second);
+
+        $this->assertTheSealIs('tampered', 'manifest_swapped', min($first, $second), 2);
+    }
+
+    /**
+     * A sealed disclosure whose artifact is stored as another kind than its
+     * descriptor names is tampered as the wrong kind.
+     *
+     * @return void
+     */
+    public function testAKindTheDescriptorDoesNotNameIsTheWrongKind(): void
+    {
+        $entryId = $this->seedBundle(3, ArtifactKind::DISCLOSURE);
+
+        $this->sealAll();
+        $this->tamperWithArtifact($entryId, ['kind' => 'export']);
+
+        $this->assertTheSealIs('tampered', 'manifest_wrong_kind', $entryId);
+    }
+
+    /**
      * A sealed bundle whose artifact is deleted is tampered, at its entry.
      *
      * @return void
@@ -150,7 +270,7 @@ final class ManifestVerificationEnginesTest extends TestCase
 
     /**
      * A sealed bundle whose members are replaced by another canonical list,
-     * opened by the application's key, is tampered.
+     * opened by the application's key, is tampered as `manifest_tampered`.
      *
      * @return void
      */
@@ -162,12 +282,12 @@ final class ManifestVerificationEnginesTest extends TestCase
         $this->sealAll();
         $this->tamperWithArtifact($entryId, ['members' => app(StringEncrypter::class)->encryptString($members)]);
 
-        $this->assertTheSealIs('tampered', 'manifest_mismatch', $entryId);
+        $this->assertTheSealIs('tampered', 'manifest_tampered', $entryId);
     }
 
     /**
      * A sealed bundle whose artifact counts another number of members is
-     * tampered.
+     * tampered as a mismatch.
      *
      * @return void
      */
@@ -183,7 +303,7 @@ final class ManifestVerificationEnginesTest extends TestCase
 
     /**
      * A sealed bundle whose artifact is moved to name another entry is found by
-     * its id and is tampered.
+     * its id and is tampered as swapped.
      *
      * @return void
      */
@@ -194,7 +314,7 @@ final class ManifestVerificationEnginesTest extends TestCase
         $this->sealAll();
         $this->tamperWithArtifact($entryId, ['entry_id' => self::OTHER_ID]);
 
-        $this->assertTheSealIs('tampered', 'manifest_mismatch', $entryId);
+        $this->assertTheSealIs('tampered', 'manifest_swapped', $entryId);
     }
 
     /**
@@ -255,7 +375,7 @@ final class ManifestVerificationEnginesTest extends TestCase
 
         $entryId = $this->seedFinalisedBundle(app(RecordSigner::class)->sign($record, RecordFactory::RECORDED_AT));
 
-        self::assertSame(strlen($attachment->members), strlen((string) ($this->artifactOf($entryId)['members'] ?? '')));
+        self::assertSame(strlen((string) $attachment->members), strlen((string) ($this->artifactOf($entryId)['members'] ?? '')));
 
         $this->sealAll();
 
@@ -266,20 +386,21 @@ final class ManifestVerificationEnginesTest extends TestCase
     }
 
     /**
-     * The run fails, and the first seal is of the integrity given, with the
-     * finding given at the entry given.
+     * The run fails, and the first seal, holding the number of members given,
+     * is of the integrity given, with the finding given at the entry given.
      *
      * @param  string  $integrity
      * @param  string  $finding
      * @param  string  $entryId
+     * @param  int  $members
      * @return void
      */
-    private function assertTheSealIs(string $integrity, string $finding, string $entryId): void
+    private function assertTheSealIs(string $integrity, string $finding, string $entryId, int $members = 1): void
     {
         [$exit, $output] = $this->verify();
 
         self::assertSame(1, $exit);
-        $line = sprintf("seal 1 %s integrity=%s anchoring=unanchored members=1 finding=%s first=%s\n", $this->sealIdAt(1), $integrity, $finding, $entryId);
+        $line = sprintf("seal 1 %s integrity=%s anchoring=unanchored members=%d finding=%s first=%s\n", $this->sealIdAt(1), $integrity, $members, $finding, $entryId);
 
         self::assertStringContainsString($line, $output);
     }

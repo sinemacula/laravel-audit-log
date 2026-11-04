@@ -233,9 +233,11 @@ subjects. It writes nothing until `record()`, and its timing is chosen as for an
   unverifiable, though their entries still verify.
 - `audit-log:verify` checks each bulk entry's artifact: that it is stored under the signed id, names the entry, is a
   bulk artifact, and that its members decrypt to the signed count, each once and in canonical order, with the signed
-  digest. A missing artifact is `manifest_missing`, one that differs is `manifest_mismatch`, and one that cannot be read
-  is `manifest_unreadable`. An entry's manifest is checked with its seal: until an entry is sealed, its artifact is
-  checked by nothing.
+  digest. Each difference is its own finding: a missing artifact is `manifest_missing`, one stored under another id or
+  naming another entry `manifest_swapped`, one stored as another kind `manifest_wrong_kind`, one storing another count
+  or digest `manifest_mismatch`, members that are no canonical list `manifest_malformed`, another canonical list than
+  the one signed `manifest_tampered`, and members that cannot be read `manifest_unreadable`. An entry's manifest is
+  checked with its seal: until an entry is sealed, its artifact is checked by nothing.
 - An artifact follows its entry's retention: it is never updated, and is deleted only with its entry, by the
   maintenance user, so a hold on the entry holds it too.
 

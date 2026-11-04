@@ -477,7 +477,7 @@ final class EngineChecksTest extends TestCase
         };
 
         /** @var \Illuminate\Database\Connection&\Mockery\MockInterface $connection */
-        $connection = \Mockery::mock($class . '[scalar]', [new VersionReportingPdo($answers[0]), '', $prefix, ['driver' => $driver]]);
+        $connection = \Mockery::mock($class . '[scalar]', [new VersionReportingPdo($answers[0]), '', $prefix, ['driver' => $driver, 'name' => 'fake']]);
 
         $connection->shouldReceive('scalar')->andReturnUsing(static function (string $query, array $bindings = [], bool $useReadPdo = true) use ($answers, $asked): ?string {
             $asked->append([$query, $bindings, $useReadPdo]);

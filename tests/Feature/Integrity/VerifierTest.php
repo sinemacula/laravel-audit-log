@@ -38,10 +38,12 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationRange;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\Verifier;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Integrity\RecordingAnchor;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
@@ -1336,9 +1338,10 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A run over a seal holding a bundle whose artifact was changed after
-     * sealing fails as tampered, its segment naming the bundle's entry, while
-     * the seal of an intact bundle stays valid.
+     * A run over a seal holding a bundle whose artifact's digest column was
+     * changed after sealing fails as tampered with a mismatch, its segment
+     * naming the bundle's entry, while the seal of an intact bundle stays
+     * valid.
      *
      * @return void
      */
@@ -1359,6 +1362,30 @@ final class VerifierTest extends TestCase
         self::assertSame(Finding::MANIFEST_MISMATCH, $this->streamed[1]->finding);
         self::assertSame($entryId, $this->streamed[1]->firstBadId);
         self::assertSame(Finding::MANIFEST_MISMATCH, $summary->firstFinding);
+        self::assertTrue($summary->fails(false));
+    }
+
+    /**
+     * A run over a seal holding a bundle whose members were replaced after
+     * sealing by another canonical list, its columns untouched, fails as
+     * tampered with `manifest_tampered`, at the bundle's entry.
+     *
+     * @return void
+     */
+    public function testARunWithTamperedMembersFails(): void
+    {
+        $entryId = $this->seedBundle(2);
+        $members = Manifest::encode([[RecordFactory::MEMBER_TYPE, '1'], [RecordFactory::MEMBER_TYPE, '3']]);
+
+        $this->sealAll();
+        $this->tamperWithArtifact($entryId, ['members' => RecordFactory::encrypter()->encryptString($members)]);
+
+        $summary = $this->verifyLog();
+
+        self::assertSame(1, $summary->integrity['tampered']);
+        self::assertSame(Finding::MANIFEST_TAMPERED, $this->streamed[0]->finding);
+        self::assertSame($entryId, $this->streamed[0]->firstBadId);
+        self::assertSame(Finding::MANIFEST_TAMPERED, $summary->firstFinding);
         self::assertTrue($summary->fails(false));
     }
 

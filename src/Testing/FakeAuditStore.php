@@ -168,8 +168,9 @@ final class FakeAuditStore implements AcceptsAttachments, DurableAuditStore
     }
 
     /**
-     * Whether a record of the code was stored; the code is read as `event()`
-     * reads it, so a malformed one is refused.
+     * Whether a record of the code was stored; the code is held to the grammar
+     * and the length, so a malformed one is refused, and may be one of the
+     * package's own.
      *
      * @param  \BackedEnum|string  $code
      * @return bool
@@ -178,7 +179,7 @@ final class FakeAuditStore implements AcceptsAttachments, DurableAuditStore
      */
     public function hasRecorded(\BackedEnum|string $code): bool
     {
-        $value = EventCode::of($code)->value;
+        $value = EventCode::forReading($code)->value;
 
         return $this->recorded(static fn (AuditRecord $record): bool => $record->event === $value) !== [];
     }

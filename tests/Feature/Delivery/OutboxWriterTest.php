@@ -30,6 +30,7 @@ use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule;
 use SineMacula\Laravel\AuditLog\Delivery\Outbox;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxWriter;
+use SineMacula\Laravel\AuditLog\Delivery\PackageWrite;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
@@ -55,7 +56,8 @@ use Tests\TestCase;
  * does under each rule, a spill bound to the commit it depends on above all,
  * with the write guard around the insert; and a capture's signal, carried into
  * the insert, marked when the insert waits for another connection's commit,
- * with nothing let out of that commit.
+ * with nothing let out of that commit; and a package write, handed its
+ * finalised record once the insert has returned and never when it failed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,6 +92,9 @@ final class OutboxWriterTest extends TestCase
 
     /** @var list<string> The class each capture's signal passed on, in order. */
     private array $signalled = [];
+
+    /** @var list<array{0: \SineMacula\Laravel\AuditLog\Records\FinalisedRecord, 1: int}> Each finalised record a package write was handed, with the outbox's row count then. */
+    private array $acknowledged = [];
 
     /**
      * Bind the reporter, capture the spill lines and keep every failed write
@@ -1517,6 +1522,90 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
+     * A package write is handed the finalised record once its row is in the
+     * outbox, and it is the envelope the row holds, the signature included.
+     *
+     * @return void
+     */
+    public function testAPackageWriteIsGivenItsFinalisedRecordOnceInserted(): void
+    {
+        $record = $this->record();
+
+        $this->write($record, Timing::IMMEDIATE, null, FailureRule::SPILL_AND_THROW, null, $this->packageWrite());
+
+        $enveloped = $this->enveloped($record);
+
+        self::assertCount(1, $this->acknowledged);
+
+        [$finalised, $rows] = $this->acknowledged[0];
+
+        self::assertSame(1, $rows);
+        self::assertSame($record, $finalised->record);
+        self::assertSame($enveloped->hmac, $finalised->hmac);
+        self::assertSame($enveloped->keyId, $finalised->keyId);
+        self::assertSame($enveloped->recordedAt, $finalised->recordedAt);
+    }
+
+    /**
+     * A failed insert is never acknowledged: it follows the record's rule, and
+     * its spill is written.
+     *
+     * @return void
+     */
+    public function testAFailedInsertIsNeverAcknowledged(): void
+    {
+        $this->pointOutboxAtProbeTable();
+
+        $thrown = $this->thrownBy($this->record(), Timing::IMMEDIATE, null, FailureRule::SPILL_AND_THROW, null, $this->packageWrite());
+
+        self::assertInstanceOf(AuditWriteFailedException::class, $thrown);
+        self::assertSame([], $this->acknowledged);
+        self::assertCount(1, $this->spillLines());
+    }
+
+    /**
+     * A package write whose finalising fails is never acknowledged either.
+     *
+     * @return void
+     */
+    public function testAFailedFinaliseIsNeverAcknowledged(): void
+    {
+        $writer = $this->writer();
+
+        $this->breakTheClock();
+
+        $thrown = null;
+
+        try {
+            $writer->write($this->record(), Timing::IMMEDIATE, null, FailureRule::SPILL_AND_THROW, null, $this->packageWrite());
+        } catch (AuditWriteFailedException $exception) {
+            $thrown = $exception;
+        }
+
+        self::assertInstanceOf(AuditWriteFailedException::class, $thrown);
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame([], $this->acknowledged);
+    }
+
+    /**
+     * A write without a package write acknowledges nothing, and one under a
+     * rule that returns on failure acknowledges nothing when its insert fails.
+     *
+     * @return void
+     */
+    public function testOnlyAnInsertedPackageWriteIsAcknowledged(): void
+    {
+        $this->write($this->record(), Timing::IMMEDIATE);
+
+        $this->pointOutboxAtProbeTable();
+
+        $this->write($this->record(), Timing::IMMEDIATE, null, FailureRule::REPORT, null, $this->packageWrite());
+
+        self::assertSame([], $this->acknowledged);
+        self::assertCount(1, $this->spillLines());
+    }
+
+    /**
      * Spill to a channel that writes nowhere, and register the second
      * transacting connection, with a table prefix of its own.
      *
@@ -1568,15 +1657,22 @@ final class OutboxWriterTest extends TestCase
      * @param  ?string  $transaction
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \Illuminate\Database\DeadlockException
      * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
-    private function write(AuditRecord $record, Timing $timing, ?string $transaction = null, FailureRule $rule = FailureRule::REPORT, ?CaptureSignal $capture = null): void
-    {
-        $this->writer()->write($record, $timing, $transaction, $rule, $capture);
+    private function write(
+        AuditRecord $record,
+        Timing $timing,
+        ?string $transaction = null,
+        FailureRule $rule = FailureRule::REPORT,
+        ?CaptureSignal $capture = null,
+        ?PackageWrite $package = null,
+    ): void {
+        $this->writer()->write($record, $timing, $transaction, $rule, $capture, $package);
     }
 
     /**
@@ -1587,17 +1683,40 @@ final class OutboxWriterTest extends TestCase
      * @param  ?string  $transaction
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
      * @return \RuntimeException
      */
-    private function thrownBy(AuditRecord $record, Timing $timing, ?string $transaction, FailureRule $rule, ?CaptureSignal $capture = null): \RuntimeException
-    {
+    private function thrownBy(
+        AuditRecord $record,
+        Timing $timing,
+        ?string $transaction,
+        FailureRule $rule,
+        ?CaptureSignal $capture = null,
+        ?PackageWrite $package = null,
+    ): \RuntimeException {
         try {
-            $this->write($record, $timing, $transaction, $rule, $capture);
+            $this->write($record, $timing, $transaction, $rule, $capture, $package);
         } catch (\RuntimeException $thrown) {
             return $thrown;
         }
 
         self::fail('Expected the write to throw.');
+    }
+
+    /**
+     * A package write that accepts every record, and keeps each finalised
+     * record it is handed with the outbox's row count at that moment.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Delivery\PackageWrite
+     */
+    private function packageWrite(): PackageWrite
+    {
+        return new PackageWrite(
+            static function (): void {},
+            function (FinalisedRecord $finalised): void {
+                $this->acknowledged[] = [$finalised, $this->outboxCount()];
+            },
+        );
     }
 
     /**

@@ -5,11 +5,18 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Definitions;
 
 use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
  * The event definitions an application registers while it boots, one per code,
  * and the definition every code is recorded under.
+ *
+ * The package's own definitions, those of its read path, are there from the
+ * moment the catalogue is made, before any registration and whatever the
+ * freeze, so a package record has its definition before the application boots
+ * and after it. Defining one of them again identically changes nothing, and
+ * differently is refused as any conflicting definition is.
  *
  * A definition is registered on its own or as every case of an enum defining
  * the application's codes; an enum is registered whole or, when any of its
@@ -35,6 +42,20 @@ final class EventCatalogue
 
     /** @var bool Whether the application has booted, after which nothing more is registered. */
     private bool $frozen = false;
+
+    /**
+     * Constructor. The package's own definitions are there from the start, so
+     * they hold before the application boots and after the catalogue freezes.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public function __construct()
+    {
+        foreach (PackageActivity::cases() as $activity) {
+            $this->definitions[$activity->value] = $activity->definition();
+        }
+    }
 
     /**
      * Register a definition, or every case of an enum implementing

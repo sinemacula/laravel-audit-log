@@ -12,13 +12,16 @@ use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
+use SineMacula\Laravel\AuditLog\Delivery\PackageWrite;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
+use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
+use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 
 /**
@@ -42,6 +45,15 @@ use SineMacula\Laravel\AuditLog\Records\SourceSettings;
  * its own signal, is written as any capture is, so a watched model it saves or
  * a Gate check it denies is never lost.
  *
+ * A code under the reserved `audit_log.` prefix is written only with a package
+ * write, which only the package's own read path makes, and a package write only
+ * with such a code, fail-closed, immediate and never a capture; anything else
+ * is refused before anything is consumed. Naming a package code on a builder is
+ * no way to record one, since the facade's builders are written without a
+ * package write. A package write's check runs on the built record before it is
+ * delivered, and what it throws propagates with nothing delivered; the delivery
+ * hands it the finalised record once that is acknowledged.
+ *
  * It writes with the definitions and contributors it was made with, and
  * resolves everything else from the current container on every write, so it
  * holds only frozen registration data and outlives requests safely.
@@ -58,6 +70,15 @@ final readonly class RecordPipeline
 
     /** @var string Why a builder with no code is refused. */
     private const string NO_CODE = 'A pending record needs an event code before it is recorded; set one with `event()`.';
+
+    /** @var string Why a reserved code without a package write is refused. */
+    private const string RESERVED_CODE = 'A code under the reserved prefix is written only by the package\'s own read path.';
+
+    /** @var string Why a package write of any other code is refused. */
+    private const string PACKAGE_WRITE_OF_ANOTHER_CODE = 'A package write records a code under the reserved prefix, and no other.';
+
+    /** @var string Why a package write that is not fail-closed and immediate, or is a capture, is refused. */
+    private const string LOOSE_PACKAGE_WRITE = 'A package write is written immediately and fail-closed, and is never a capture.';
 
     /**
      * Constructor.
@@ -81,10 +102,13 @@ final readonly class RecordPipeline
      * the manifest, which they cannot change. An explicit record without a
      * timing is written after commit, and a captured one immediately. An
      * explicit record is refused while an event mapper runs; a captured one,
-     * which its signal tells apart, is not.
+     * which its signal tells apart, is not. A reserved code is written only
+     * with a package write, whose check runs on the built record before it is
+     * delivered.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
@@ -96,8 +120,11 @@ final readonly class RecordPipeline
      * @throws \Illuminate\Database\DeadlockException
      * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
-    public function write(#[\SensitiveParameter] PendingRecord $pending, #[\SensitiveParameter] ?CaptureSignal $capture = null): AuditRecord
-    {
+    public function write(
+        #[\SensitiveParameter] PendingRecord $pending,
+        #[\SensitiveParameter] ?CaptureSignal $capture = null,
+        #[\SensitiveParameter] ?PackageWrite $package = null,
+    ): AuditRecord {
         $container = Container::getInstance();
 
         if ($capture === null && $container->make(CapturedEvents::class)->isMapping()) {
@@ -109,6 +136,8 @@ final readonly class RecordPipeline
         if ($snapshot->code === null) {
             self::refuse(self::NO_CODE);
         }
+
+        self::checkPackageWrite($snapshot, $snapshot->code, $capture, $package);
 
         $definition = $this->catalogue->definitionFor($snapshot->code, $container->make(DefinitionSettings::class)->requiresRegistered());
         $delivery   = $container->make(RecordDelivery::class);
@@ -128,9 +157,52 @@ final readonly class RecordPipeline
         $occurredAt = $container->make(Clock::class)->now();
         $record     = AuditRecord::fromPending($pending, $minimised, $definition->version, $definition->category, $occurredAt, $source->id(), $source->region(), $attachment);
 
-        $delivery->deliver($record, $timing, $snapshot->connection, $snapshot->failClosed, $capture);
+        $package?->check($record);
+
+        $delivery->deliver($record, $timing, $snapshot->connection, $snapshot->failClosed, $capture, $package);
 
         return $record;
+    }
+
+    /**
+     * Refuse a reserved code without a package write, and a package write of
+     * any other code, or one that is not fail-closed and immediate, or comes
+     * with a capture's signal, before anything is consumed.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
+     * @param  \SineMacula\Laravel\AuditLog\Records\EventCode  $code
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    private static function checkPackageWrite(
+        #[\SensitiveParameter] PendingSnapshot $snapshot,
+        EventCode $code,
+        #[\SensitiveParameter] ?CaptureSignal $capture,
+        #[\SensitiveParameter] ?PackageWrite $package,
+    ): void {
+        $reserved = str_starts_with($code->value, EventCode::RESERVED_PREFIX);
+
+        if ($package === null) {
+
+            if ($reserved) {
+                self::refuse(self::RESERVED_CODE);
+            }
+
+            return;
+        }
+
+        if (!$reserved) {
+            self::refuse(self::PACKAGE_WRITE_OF_ANOTHER_CODE);
+        }
+
+        if ($capture === null && $snapshot->failClosed && $snapshot->timing === Timing::IMMEDIATE) {
+            return;
+        }
+
+        self::refuse(self::LOOSE_PACKAGE_WRITE);
     }
 
     /**

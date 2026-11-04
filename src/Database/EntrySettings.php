@@ -9,9 +9,10 @@ use Illuminate\Support\Facades\Config;
 /**
  * Reads the names of the entries table, `audit-log.entries.table`, and of the
  * artifacts table beside it, `audit-log.entries.artifacts_table`, which holds
- * each bulk operation's manifest, the one way the migrations, the model, the
- * store and the check command read them, and fails closed on a name the
- * migration could not build every index name from.
+ * each entry's artifact, a bulk operation's subjects, a read's disclosure or an
+ * export's manifest, the one way the migrations, the model, the store and the
+ * check command read them, and fails closed on a name the migration could not
+ * build every index name from.
  *
  * Each name is 1 to 47 lower-case ASCII letters, digits and underscores that
  * does not start with a digit, so the longest index name the migration derives
@@ -69,9 +70,10 @@ final class EntrySettings
     }
 
     /**
-     * The name of the artifacts table, which holds each bulk operation's
-     * manifest beside its entry: the configured one, or `audit_log_artifacts`
-     * when none is configured.
+     * The name of the artifacts table, which holds each entry's artifact beside
+     * it, a bulk operation's subjects, a read's disclosure or an export's
+     * manifest: the configured one, or `audit_log_artifacts` when none is
+     * configured.
      *
      * @return string
      *

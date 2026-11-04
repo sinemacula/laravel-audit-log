@@ -8,6 +8,7 @@ use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Console\TableShape;
 use Tests\Concerns\RunsDocumentedSql;
 
 /**
@@ -17,8 +18,9 @@ use Tests\Concerns\RunsDocumentedSql;
  * privileges and nothing that changes the schema, and creates exactly the
  * documented triggers; each engine's checkpoints trigger guards every immutable
  * column and no anchor column; the artifacts' triggers are the entries' own;
- * the SQLite prune recreates the very triggers it drops; and the note states
- * what it must, in its own section, in order.
+ * the SQLite prune recreates the very triggers it drops; the note states what
+ * it must, in its own section, in order; and it lists the entries' indexes as
+ * the schema checks expect them.
  *
  * The integration tests run the same blocks against each engine; this test
  * holds them to what the note says on any engine, SQLite included.
@@ -260,6 +262,10 @@ final class DocumentedSqlTest extends TestCase
                 . ' by the maintenance user'],
             'the writer\'s artifacts'    => ['the application\'s writer needs `SELECT` and `INSERT` on the entries and the artifacts tables and nothing else'],
             'the four truncate triggers' => ['a statement trigger on each of the four tables'],
+            'the trail\'s lookups'       => ['category and occurred indexes, ends in `occurred_at` and then `id`, the order a page of the trail is read in'],
+            'no collation on the id'     => ['no collation is applied to `id`, which compares in the type the migration gives it'],
+            'a combined read'            => ['uses one index and filters the rest of its conditions row by row'],
+            'the plans'                  => ['`tests/Integration/Querying/TrailPlansTest.php` reads each engine\'s plan'],
         ];
     }
 
@@ -289,6 +295,30 @@ final class DocumentedSqlTest extends TestCase
         preg_match_all('/^## (.+)$/m', $prose, $sections);
 
         self::assertSame(self::SECTIONS, $sections[1]);
+    }
+
+    /**
+     * The storage note's table of the entries' indexes lists each index the
+     * schema checks expect, by its suffix, with its columns in order and its
+     * uniqueness, and no other.
+     *
+     * @return void
+     */
+    public function testTheStorageNoteListsEveryEntriesIndex(): void
+    {
+        preg_match_all('/^ *\| `(_[a-z_]+)` +\| (.+?) +\|$/m', self::note(), $rows, PREG_SET_ORDER);
+
+        $documented = [];
+
+        foreach ($rows as [, $suffix, $cells]) {
+            $columns = explode(', ', $cells);
+            $unique  = end($columns) === 'unique';
+            $names   = array_map(static fn (string $column): string => trim($column, '`'), $unique ? array_slice($columns, 0, -1) : $columns);
+
+            $documented[$suffix] = [$names, $unique];
+        }
+
+        self::assertSame(TableShape::entries()->indexes, $documented);
     }
 
     /**

@@ -148,6 +148,12 @@ return new class extends Migration {
      * entries in, by the time each was recorded and then its id, and keep an
      * imported record's source identity unique.
      *
+     * Each lookup index but the correlation's ends in the time an entry
+     * occurred and then its id, the order a page of the trail is read in, so a
+     * keyset page reads the index in order and is never sorted, entries of one
+     * microsecond included. No collation is applied to `id`: it compares in the
+     * type the table gives it, a native `uuid` on PostgreSQL.
+     *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
      * @param  string  $table
      * @return void
@@ -156,14 +162,14 @@ return new class extends Migration {
     {
         // Named short, so the index names of a 47-character table still fit
         // PostgreSQL's 63-character identifiers.
-        $blueprint->index(['actor_type', 'actor_id', 'occurred_at'], $table . '_actor_index');
-        $blueprint->index(['subject_type', 'subject_id', 'occurred_at'], $table . '_subject_index');
-        $blueprint->index(['principal_type', 'principal_id', 'occurred_at'], $table . '_principal_index');
-        $blueprint->index(['tenant_type', 'tenant_id', 'occurred_at'], $table . '_tenant_index');
-        $blueprint->index(['event', 'occurred_at'], $table . '_event_index');
-        $blueprint->index(['category', 'occurred_at'], $table . '_category_index');
+        $blueprint->index(['actor_type', 'actor_id', 'occurred_at', 'id'], $table . '_actor_index');
+        $blueprint->index(['subject_type', 'subject_id', 'occurred_at', 'id'], $table . '_subject_index');
+        $blueprint->index(['principal_type', 'principal_id', 'occurred_at', 'id'], $table . '_principal_index');
+        $blueprint->index(['tenant_type', 'tenant_id', 'occurred_at', 'id'], $table . '_tenant_index');
+        $blueprint->index(['event', 'occurred_at', 'id'], $table . '_event_index');
+        $blueprint->index(['category', 'occurred_at', 'id'], $table . '_category_index');
         $blueprint->index(['correlation_id'], $table . '_correlate_index');
-        $blueprint->index(['occurred_at'], $table . '_occurred_index');
+        $blueprint->index(['occurred_at', 'id'], $table . '_occurred_index');
 
         // What sealing keyset-pages by: the time each entry was recorded, then
         // its id, so entries recorded in the same microsecond keep an order.

@@ -51,6 +51,10 @@ final class FindingTest extends TestCase
             'ENTRY_HMAC'           => 'entry_hmac',
             'MANIFEST_MISSING'     => 'manifest_missing',
             'MANIFEST_MISMATCH'    => 'manifest_mismatch',
+            'MANIFEST_SWAPPED'     => 'manifest_swapped',
+            'MANIFEST_WRONG_KIND'  => 'manifest_wrong_kind',
+            'MANIFEST_MALFORMED'   => 'manifest_malformed',
+            'MANIFEST_TAMPERED'    => 'manifest_tampered',
             'PRUNE_KEY'            => 'prune_key',
             'ENTRY_MALFORMED'      => 'entry_malformed',
             'ENTRY_KEY'            => 'entry_key',
@@ -65,9 +69,10 @@ final class FindingTest extends TestCase
      * Each finding gives its status: a seal or entry that cannot be read or
      * whose key is unknown, or an artifact that cannot be decrypted, is
      * `unverifiable`, a missing entry, or an unsealed one overdue or far ahead
-     * of the clock, is `incomplete`, and every other finding, a missing or
-     * mismatched artifact among them, shows the log was altered. The whole map
-     * is compared at once, so a finding moved to another status fails.
+     * of the clock, is `incomplete`, and every other finding, an artifact that
+     * is missing, mismatched, swapped, of the wrong kind, malformed or tampered
+     * among them, shows the log was altered. The whole map is compared at once,
+     * so a finding moved to another status fails.
      *
      * @return void
      */
@@ -94,6 +99,10 @@ final class FindingTest extends TestCase
             'entry_hmac'           => 'tampered',
             'manifest_missing'     => 'tampered',
             'manifest_mismatch'    => 'tampered',
+            'manifest_swapped'     => 'tampered',
+            'manifest_wrong_kind'  => 'tampered',
+            'manifest_malformed'   => 'tampered',
+            'manifest_tampered'    => 'tampered',
             'prune_key'            => 'unverifiable',
             'entry_malformed'      => 'unverifiable',
             'entry_key'            => 'unverifiable',

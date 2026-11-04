@@ -56,14 +56,14 @@ final class TableShapeTest extends TestCase
             array_keys(array_filter($strings, static fn (array $column): bool => !$column[2])),
         );
         self::assertSame([
-            '_actor_index'     => [['actor_type', 'actor_id', 'occurred_at'], false],
-            '_subject_index'   => [['subject_type', 'subject_id', 'occurred_at'], false],
-            '_principal_index' => [['principal_type', 'principal_id', 'occurred_at'], false],
-            '_tenant_index'    => [['tenant_type', 'tenant_id', 'occurred_at'], false],
-            '_event_index'     => [['event', 'occurred_at'], false],
-            '_category_index'  => [['category', 'occurred_at'], false],
+            '_actor_index'     => [['actor_type', 'actor_id', 'occurred_at', 'id'], false],
+            '_subject_index'   => [['subject_type', 'subject_id', 'occurred_at', 'id'], false],
+            '_principal_index' => [['principal_type', 'principal_id', 'occurred_at', 'id'], false],
+            '_tenant_index'    => [['tenant_type', 'tenant_id', 'occurred_at', 'id'], false],
+            '_event_index'     => [['event', 'occurred_at', 'id'], false],
+            '_category_index'  => [['category', 'occurred_at', 'id'], false],
             '_correlate_index' => [['correlation_id'], false],
-            '_occurred_index'  => [['occurred_at'], false],
+            '_occurred_index'  => [['occurred_at', 'id'], false],
             '_recorded_index'  => [['recorded_at', 'id'], false],
             '_source_unique'   => [['source_id', 'source_record_id'], true],
         ], $shape->indexes);

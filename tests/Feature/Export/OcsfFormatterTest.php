@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Export\OcsfFormatter;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use Tests\Fixtures\Export\ApprovedInvoiceMapper;
@@ -24,8 +25,9 @@ use Tests\TestCase;
  * Base Event that is never classified, a mapped code is classified by its
  * mapper only at its definition's version, both validate offline against the
  * pinned schema, the base attributes and metadata are pinned, the integrity
- * fields are left out, a mapper's attributes are checked, and the line is one
- * line, the same bytes on every call, with every hostile value in its string.
+ * fields are left out, a mapper's attributes are checked, a package code
+ * resolves its definition, and the line is one line, the same bytes on every
+ * call, with every hostile value in its string.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -100,7 +102,8 @@ final class OcsfFormatterTest extends TestCase
 
     /**
      * A code no definition is registered for, and a code with the package's
-     * reserved prefix, which no caller can register, are Base Events.
+     * reserved prefix that is none of the package's own, which no caller can
+     * register, are Base Events.
      *
      * @return void
      *
@@ -114,6 +117,42 @@ final class OcsfFormatterTest extends TestCase
         self::assertSame(self::BASE_EVENT, array_intersect_key($unregistered, self::BASE_EVENT));
         self::assertSame(self::BASE_EVENT, array_intersect_key($reserved, self::BASE_EVENT));
         self::assertSame('audit_log.exported', $reserved['message']);
+    }
+
+    /**
+     * A package code is looked up as any other code is, so its record is
+     * classified by the mapper its definition names, at its version, and a
+     * record of the package's own definition, which names none, is a Base Event
+     * carrying the code.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    public function testAPackageCodeResolvesItsDefinition(): void
+    {
+        $code      = PackageActivity::TRAIL_READ->value;
+        $record    = self::record(['event' => $code, 'event_version' => 1]);
+        $catalogue = new EventCatalogue;
+        $plain     = json_decode((new OcsfFormatter($catalogue, $this->container()))->format(self::finalised($record)), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($plain);
+        self::assertSame(self::BASE_EVENT, array_intersect_key($plain, self::BASE_EVENT));
+        self::assertSame($code, $plain['message']);
+
+        $definitions = new \ReflectionProperty(EventCatalogue::class, 'definitions');
+        $held        = $definitions->getValue($catalogue);
+        $held[$code] = PackageActivity::TRAIL_READ->definition()->ocsf(ApprovedInvoiceMapper::class);
+
+        $definitions->setValue($catalogue, $held);
+
+        $mapped = json_decode((new OcsfFormatter($catalogue, $this->container()))->format(self::finalised($record)), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($mapped);
+        self::assertSame(6003, $mapped['class_uid'] ?? null);
+        self::assertSame(['operation' => $code], $mapped['api'] ?? null);
     }
 
     /**

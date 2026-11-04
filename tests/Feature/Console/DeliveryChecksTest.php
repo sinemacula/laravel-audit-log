@@ -580,7 +580,7 @@ final class DeliveryChecksTest extends TestCase
      */
     public function testAnOutboxConnectionToAnUnsupportedServerIsAProblem(): void
     {
-        $connection = new MySqlConnection(new VersionReportingPdo('8.0.36'), '', '', ['driver' => 'mysql']);
+        $connection = new MySqlConnection(new VersionReportingPdo('8.0.36'), '', '', ['driver' => 'mysql', 'name' => 'audit_outbox']);
 
         app(ConfigRepository::class)->set('database.connections.audit_outbox', ['driver' => 'mysql', 'database' => 'audit', 'prefix' => '']);
 

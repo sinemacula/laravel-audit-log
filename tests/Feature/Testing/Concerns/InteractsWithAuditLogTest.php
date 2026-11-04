@@ -8,6 +8,7 @@ use Illuminate\Container\Container;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Testing\Concerns\InteractsWithAuditLog;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
@@ -116,7 +117,7 @@ final class InteractsWithAuditLogTest extends TestCase
     }
 
     /**
-     * A code `event()` would refuse is refused, so a mistyped code cannot pass.
+     * A malformed code is refused, so a mistyped code cannot pass.
      *
      * @return void
      */
@@ -127,6 +128,49 @@ final class InteractsWithAuditLogTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         $this->assertNotAudited('Not A Code');
+    }
+
+    /**
+     * `assertAudited()` takes one of the package's own codes, as a string or as
+     * the activity, in every assertion that takes a code, and fails naming it
+     * when there is no record of it.
+     *
+     * @return void
+     */
+    public function testAssertAuditedTakesAPackageCode(): void
+    {
+        $this->stored('audit_log.trail_read');
+
+        $this->assertAudited('audit_log.trail_read');
+        $this->assertAudited(PackageActivity::TRAIL_READ);
+        $this->assertAuditedTimes(PackageActivity::TRAIL_READ, 1);
+        $this->assertAuditedTimes('audit_log.trail_counted', 0);
+
+        self::assertStringContainsString(
+            'Expected a record of [audit_log.trail_counted]. Stored, in order: audit_log.trail_read.',
+            $this->failureOf(fn () => $this->assertAudited(PackageActivity::TRAIL_COUNTED)),
+        );
+    }
+
+    /**
+     * `assertNotAudited()` takes one of the package's own codes, passes when
+     * there is no record of it, and fails naming it when there is.
+     *
+     * @return void
+     */
+    public function testAssertNotAuditedTakesAPackageCode(): void
+    {
+        $this->stored('invoice.approved');
+
+        $this->assertNotAudited('audit_log.trail_read');
+        $this->assertNotAudited(PackageActivity::TRAIL_READ);
+
+        $this->stored('audit_log.trail_read');
+
+        self::assertStringContainsString(
+            'Expected no record of [audit_log.trail_read]. Stored, in order: invoice.approved, audit_log.trail_read.',
+            $this->failureOf(fn () => $this->assertNotAudited(PackageActivity::TRAIL_READ)),
+        );
     }
 
     /**

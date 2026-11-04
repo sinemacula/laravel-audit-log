@@ -14,6 +14,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Delivery\RecordedNotifier;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
+use SineMacula\Laravel\AuditLog\Runtime\ReadGuard;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -24,7 +25,8 @@ use Tests\TestCase;
  * `AuditRecorded`, contains a listener's failure and a broken reporter, reports
  * through the latch so a reporter that records cannot loop, and throws a
  * listener's deadlock or lost connection inside a host transaction, sanitised,
- * instead of containing it.
+ * instead of containing it; and runs the listeners of a package record, and
+ * only those, inside the read guard, which closes however they end.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,6 +46,9 @@ final class RecordedNotifierTest extends TestCase
 
     /** @var string The category the notifications name. */
     private const string CATEGORY = 'finance';
+
+    /** @var string A package code, under the reserved prefix. */
+    private const string PACKAGE_CODE = 'audit_log.trail_read';
 
     /** @var string A driver's message of a deadlock. */
     private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock';
@@ -461,6 +466,90 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
+     * The listeners of a package record run inside the read guard, so one that
+     * reads the trail is refused, and the guard is closed again once they have
+     * run.
+     *
+     * @return void
+     */
+    public function testAPackageRecordsListenersRunInsideTheReadGuard(): void
+    {
+        $heard = $this->guardStatesHeard();
+
+        $this->notifier()->notify(self::ID, self::PACKAGE_CODE, 'audit');
+
+        self::assertSame([true], $heard->states);
+        self::assertFalse(app(ReadGuard::class)->isActive());
+    }
+
+    /**
+     * The listeners of the application's own records run outside the read
+     * guard, so they may read the trail, a code that only resembles the
+     * reserved prefix included.
+     *
+     * @return void
+     */
+    public function testAnApplicationRecordsListenersRunOutsideIt(): void
+    {
+        $heard = $this->guardStatesHeard();
+
+        $this->notifier()->notify(self::ID, self::CODE, self::CATEGORY);
+        $this->notifier()->notify(self::ID, 'audit_logs.read', self::CATEGORY);
+        $this->notifier()->notify(self::ID, 'app.audit_log.read', self::CATEGORY);
+
+        self::assertSame([false, false, false], $heard->states);
+    }
+
+    /**
+     * A listener of a package record that throws is reported and contained as
+     * any other, and the read guard is closed once it has, so a later read is
+     * not refused; its refusal is forgotten with it.
+     *
+     * @return void
+     */
+    public function testTheReadGuardClosesWhenAListenerThrows(): void
+    {
+        $handler   = $this->recordingHandler();
+        $exception = new \RuntimeException('The listener failed.');
+
+        Event::listen(AuditRecorded::class, static function () use ($exception): never {
+            app(ReadGuard::class)->isFirstRefusal();
+
+            throw $exception;
+        });
+
+        $this->notifier()->notify(self::ID, self::PACKAGE_CODE, 'audit');
+
+        $guard = app(ReadGuard::class);
+
+        self::assertSame([$exception], $handler->reports());
+        self::assertFalse($guard->isActive());
+        self::assertTrue($guard->during(static fn (): bool => $guard->isFirstRefusal()));
+    }
+
+    /**
+     * A package record's listener that ends the host's transaction is thrown,
+     * sanitised, as any listener's is, and the read guard is closed once it
+     * has.
+     *
+     * @return void
+     */
+    public function testAHostFatalPackageListenerFailureClosesTheGuard(): void
+    {
+        $this->listenerThrows(self::queryFailure(self::DEADLOCK));
+
+        try {
+            $this->notifier()->notify(self::ID, self::PACKAGE_CODE, 'audit', ['testing']);
+
+            self::fail('Expected the listener\'s deadlock to propagate.');
+        } catch (DeadlockException $thrown) {
+            self::assertSame(FailureClassifier::sanitisedDeadlock()->getMessage(), $thrown->getMessage());
+        }
+
+        self::assertFalse(app(ReadGuard::class)->isActive());
+    }
+
+    /**
      * A query exception holding the secret in its SQL and bindings, failing
      * with the driver's message on the testing connection.
      *
@@ -510,6 +599,26 @@ final class RecordedNotifierTest extends TestCase
         $reporter->allows('report')->andThrow($failure);
 
         app()->instance(ExceptionHandler::class, $reporter);
+    }
+
+    /**
+     * Register a listener of `AuditRecorded` that keeps whether the read guard
+     * is active each time it is told, and return what it keeps.
+     *
+     * @return object{states: list<bool>}
+     */
+    private function guardStatesHeard(): object
+    {
+        $heard = new class {
+            /** @var list<bool> Whether the read guard was active, at each notification. */
+            public array $states = [];
+        };
+
+        Event::listen(AuditRecorded::class, static function () use ($heard): void {
+            $heard->states[] = app(ReadGuard::class)->isActive();
+        });
+
+        return $heard;
     }
 
     /**

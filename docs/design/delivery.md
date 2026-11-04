@@ -33,8 +33,19 @@ invents a record changes what the log is evidence of, so each of those limits is
   whose envelope holds another is refused as `id_mismatch`.
 - The spill and the outbox hold personal data, and `threat-model.md` says what follows from that.
 - A record captured from an event is delivered with its capture's signal, `Delivery\CaptureSignal`, and follows the
-  `REPORT` rule whatever `failure.mode` says. A record with an attachment, a bulk operation's, is delivered as one
-  bundle, and only to a store that keeps attachments.
+  `REPORT` rule whatever `failure.mode` says. A record with an attachment, a bulk operation's or a read's, is
+  delivered as one bundle, and only to a store that keeps attachments.
+- A record of the package's own read path, a read, a count, an export, the verification of an export or an export's
+  failed publication, is a package write, `Delivery\PackageWrite`: fail-closed and immediate whatever `failure.mode`
+  says. `RecordPipeline::write()` refuses a code under the reserved `audit_log.` prefix without one, and a package write
+  of any other code. Its `accept` check runs once the record is built and before anything is delivered, refusing a
+  record that would not keep its evidence exactly, and its `acknowledged` hand-over receives the finalised record once
+  the store has stored it or the outbox row is inserted, so the read discloses nothing before then, as `reading.md` sets
+  out.
+- Accepted is not delivered. In sync mode the store's return is both. In outbox mode a committed outbox row is the
+  record's acceptance: it is durable, and a read's result or an export's publication may follow it, but the store holds
+  the record, and `AuditRecorded` is said, only once a drain has delivered it. `Querying\Enums\Acknowledgement` names
+  which an export's journal had, `stored` or `accepted`.
 - No payload reaches `failed_jobs`, because no job exists. The drain is a command, and an empty job would not have been
   enough on its own: Laravel stores exception text in `failed_jobs` separately from the payload.
 
@@ -241,6 +252,9 @@ $this->app->singleton(AuditStore::class, static fn ($app): AuditStore => new Sta
 
 - `failClosed()` needs durability and `transactional()` needs participation, or it is a `\LogicException`. In outbox
   mode the row acknowledges for them, so the store is not asked.
+- A read of the trail needs, in sync mode, a store that says it is durable and keeps attachments, since every read's
+  record carries one, so the read gate refuses any other before anything is queried. In outbox mode the committed row
+  is the acknowledgement, and the store is asked whether it keeps attachments only when a drain delivers the row.
 - A stack is durable when its first destination is, and joins a transaction only when every destination does. A stack of
   the database and a log would write its line for a business change that may then roll back, so such a stack is refused
   for `transactional()` in sync mode, and the outbox is the remedy.
@@ -287,8 +301,9 @@ model, is written through the same delivery as any other, with one difference: i
   connection is inserted inside it, and one whose transaction is on another connection waits for that commit, marked
   deferred.
 
-A bulk operation's record carries a `Records\Attachment`, the artifact descriptor and the members sealed once with
-`encryptString()`, and travels as one bundle:
+A record with an artifact carries a `Records\Attachment`, the artifact descriptor and the members sealed once with
+`encryptString()`, and travels as one bundle. The artifact is a bulk operation's members, kind `bulk`, a read's
+`disclosure` or an export's `export` manifest (`Records\Enums\ArtifactKind`):
 
 - The envelope of a record with an attachment is a bundle of three keys, through the canonical encoding:
   `bundle_version` (`EnvelopeCodec::BUNDLE_VERSION`, 1), `record`, the record's 36 columns, and `attachment`, its `id`,
@@ -296,9 +311,9 @@ A bulk operation's record carries a `Records\Attachment`, the artifact descripto
 - `EnvelopeCodec::MAX_BYTES` applies to the whole bundle, so a bundle over it is `oversize` like any record. A bundle
   version this release does not read is `unsupported_version`, and one with another key, or an attachment the signed
   descriptor does not describe or that names another entry, is `malformed`.
-- The attachment is not signed itself. The record signs `properties._audit.manifest`, its `artifact_id`, `digest` and
-  `count`, and the descriptor binds the attachment, so a plain envelope whose properties hold a descriptor never
-  becomes a record that lost its members.
+- The attachment is not signed itself. The record signs `properties._audit.manifest`, its `artifact_id`, `kind`,
+  `digest` and `count`, and the descriptor binds the attachment, so a plain envelope whose properties hold a descriptor
+  never becomes a record that lost its members.
 - The outbox row and the spill line hold the whole bundle. A drain asks each destination whether it keeps attachments
   before calling it: one that keeps none is refused, as that destination's failure, its attempt counted, so the others
   are still tried and the row is retried, then failed and kept, never deleted. A destination's receipt is marked
@@ -371,6 +386,8 @@ else does yet. A projection is never the integrity artefact.
 - `src/Contracts/AcceptsAttachments.php`: `acceptsAttachments()`; `src/Records/Attachment.php`;
   `src/Records/EnvelopeCodec.php`: `BUNDLE_VERSION`, `SUPPORTED_BUNDLE_VERSIONS`.
 - `src/Delivery/CaptureSignal.php`: `defer()`, `fail()`, `isFatal()`; `src/Capture/CaptureCoordinator.php`.
+- `src/Delivery/PackageWrite.php`; `src/RecordPipeline.php`: `write()`; `src/Querying/Enums/Acknowledgement.php`;
+  `src/Records/Enums/ArtifactKind.php`.
 - `src/Stores/LogAuditStore.php`: `MARKER`; `src/Stores/DirectLog.php`: `channel()`; `src/Stores/NullAuditStore.php`;
   `src/Stores/StackAuditStore.php`: `DESTINATION_PATTERN`; `src/Stores/StackDeliveryException.php`.
 - `src/Contracts/AuditFormatter.php`: `format()`; `src/Contracts/OcsfMapper.php`: `map()`;
@@ -381,6 +398,13 @@ else does yet. A projection is never the integrity artefact.
 
 ## Authoritative Tests
 
+- `tests/Feature/RecordPipelineTest.php` `testAReservedCodeWithoutAPackageWriteIsRefused`,
+  `testAPackageWriteOfAnotherCodeIsRefused`, `testARefusingAcceptDeliversNothing`,
+  `testAPackageWriteMustBeFailClosedAndImmediate`
+- `tests/Feature/Delivery/RecordDeliveryTest.php` `testAPackageWriteIsGivenItsFinalisedRecord`,
+  `testAPackageWriteIsAcknowledgedBeforeItsNotification`
+- `tests/Feature/Delivery/OutboxWriterTest.php` `testAPackageWriteIsGivenItsFinalisedRecordOnceInserted`
+- `tests/Feature/Querying/ExporterTest.php` `testInOutboxModeTheJournalIsAccepted`
 - `tests/Feature/Delivery/ReplayerTest.php` `testSpillThenReplayGivesOneRowEqualToTheSpilledBytes`,
   `testReplayingTwiceAddsNothing`, `testAChannelPrefixedLineParses`, `testKeepsIdEnvelopeAndProvenance`,
   `testATamperedLineIsSkippedAndCounted`, `testAnUnsignedLineIsSkippedAndCounted`,
@@ -530,3 +554,4 @@ Update this note when any of the following change:
 - the rule a capture follows, when its signal is told, or what leaves a deferred capture's commit
 - the bundle's keys or version, what the attachment holds, or who is asked whether it keeps one
 - the pinned OCSF version, the base attributes, the fallback, or the CEF header or extension
+- what a package write guarantees, what acknowledges it, or what accepted and delivered mean

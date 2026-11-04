@@ -24,10 +24,11 @@ use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
  * `audit-log:check`: reads every setting the package stores entries, captures
- * records, seals, anchors and delivers them with, the connections, guards, log
- * channels and disks they name, the entries and artifacts tables, the integrity
- * keys and tables and, in outbox mode, the outbox and deliveries tables, and
- * exits non-zero on a problem, for deploy pipelines and readiness probes.
+ * records, seals, anchors, delivers, reads and exports them with, the
+ * connections, guards, log channels and disks they name, the entries and
+ * artifacts tables, the integrity keys and tables and, in outbox mode, the
+ * outbox and deliveries tables, and exits non-zero on a problem, for deploy
+ * pipelines and readiness probes.
  *
  * Every check runs, so one run lists every problem, each as
  * `[<subject>] <message>`, and a subject without one as `[<subject>] OK`, in
@@ -44,33 +45,33 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * failure and delivery settings, the delivery tables' names and the outbox
  * connection; then the capture settings and the artifacts table's name, and the
  * guards the automatic capture skips, each configured in `auth.guards`, skipped
- * when the list is malformed or is `['*']`), `[connections]` (the storage and
- * maintenance connections are each configured in `database.connections`, and
- * use the same driver; skipped when a connection setting is malformed),
- * `[schema]` (the storage connection's engine and the entries and artifacts
- * tables' shapes; see `EngineChecks` and `SchemaChecks`, skipped when the
- * storage connection or the entries table's name is malformed or the connection
- * is not configured, and the artifacts table left out while its name is
- * malformed), `[integrity]` (a key signs and, once the storage connection, the
- * sealing and anchor settings and the integrity tables' names are well formed,
- * the checkpoints, checkpoint members and integrity state tables have their
- * shape and a disk anchor's disk is configured; see `IntegrityChecks`, skipped
- * when the integrity key settings are malformed) and `[delivery]` (the spill
- * channel, the store when a failure is thrown, and in outbox mode the outbox
- * and deliveries tables; see `DeliveryChecks`, skipped when the storage
- * connection or a failure or delivery setting is malformed). A malformed
- * context, source, definition, redaction or capture setting, or artifacts
- * table's name, skips nothing, since no later subject reads it. After every
- * subject, `[spill] OK` says the spill channel is the one the documentation
- * gives, or a `[spill]` warning says replaying what it holds is unverified;
- * that is a note, not a problem, and leaves the exit code as it is, and it is
- * left out while the channel setting is malformed. It does not warn about a
- * storage connection shared with the application, which every default install
- * would trip. The command writes nothing and prints no secret, statement or
- * binding: a malformed setting is named by its key and never its value, only
- * the name of a connection, guard, log channel or disk is printed, and a
- * connection that cannot be opened or read, or a store that cannot be resolved,
- * is named with the class of what was thrown, never its message.
+ * when the list is malformed or is `['*']`; then the read and export settings),
+ * `[connections]` (the storage and maintenance connections are each configured
+ * in `database.connections`, and use the same driver; skipped when a connection
+ * setting is malformed), `[schema]` (the storage connection's engine and the
+ * entries and artifacts tables' shapes; see `EngineChecks` and `SchemaChecks`,
+ * skipped when the storage connection or the entries table's name is malformed
+ * or the connection is not configured, and the artifacts table left out while
+ * its name is malformed), `[integrity]` (a key signs and, once the storage
+ * connection, the sealing and anchor settings and the integrity tables' names
+ * are well formed, the checkpoints, checkpoint members and integrity state
+ * tables have their shape and a disk anchor's disk is configured; see
+ * `IntegrityChecks`, skipped when the integrity key settings are malformed) and
+ * `[delivery]` (the spill channel, the store when a failure is thrown, and in
+ * outbox mode the outbox and deliveries tables; see `DeliveryChecks`, skipped
+ * when the storage connection or a failure or delivery setting is malformed). A
+ * malformed context, source, definition, redaction, capture, read or export
+ * setting, or artifacts table's name, skips nothing, since no later subject
+ * reads it. After every subject, `[spill] OK` says the spill channel is the one
+ * the documentation gives, or a `[spill]` warning says replaying what it holds
+ * is unverified; that is a note, not a problem, and leaves the exit code as it
+ * is, and it is left out while the channel setting is malformed. It does not
+ * warn about a storage connection shared with the application, which every
+ * default install would trip. The command writes nothing and prints no secret,
+ * statement or binding: a malformed setting is named by its key and never its
+ * value, only the name of a connection, guard, log channel or disk is printed,
+ * and a connection that cannot be opened or read, or a store that cannot be
+ * resolved, is named with the class of what was thrown, never its message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -272,15 +273,15 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The checks of the settings records are captured and delivered with, one
-     * for each, so one run reports every malformed setting: the context
-     * settings, the source settings, the definition setting, the guards the
-     * actor is read from, the redaction settings, the failure and delivery
-     * settings, the delivery tables' names and the outbox connection, then the
-     * capture settings, the artifacts table's name and the guards the automatic
-     * capture skips. Only the delivery subject depends on any of them: the
-     * failure and delivery settings, the delivery tables' names and the outbox
-     * connection.
+     * The checks of the settings records are captured, delivered, read and
+     * exported with, one for each, so one run reports every malformed setting:
+     * the context settings, the source settings, the definition setting, the
+     * guards the actor is read from, the redaction settings, the failure and
+     * delivery settings, the delivery tables' names and the outbox connection,
+     * then the capture settings, the artifacts table's name and the guards the
+     * automatic capture skips, then the read and export settings. Only the
+     * delivery subject depends on any of them: the failure and delivery
+     * settings, the delivery tables' names and the outbox connection.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -313,6 +314,7 @@ final class CheckCommand extends Command
             self::reading(DeliveryTables::outboxConnection(...)),
             ...array_map(self::reading(...), CaptureChecks::readers($config)),
             static fn (): array => CaptureChecks::guardProblems($config),
+            ...array_map(self::reading(...), ReadChecks::readers($config)),
         ];
     }
 

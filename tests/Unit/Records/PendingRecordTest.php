@@ -7,6 +7,7 @@ namespace Tests\Unit\Records;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
@@ -358,8 +359,77 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
+     * `forPackage()` names the activity's code, under the reserved prefix, and
+     * returns the builder; the last code given wins, whichever way it was
+     * given.
+     *
+     * @return void
+     */
+    public function testForPackageSetsAReservedCode(): void
+    {
+        $pending = new PendingRecord;
+
+        self::assertSame($pending, $pending->forPackage(PackageActivity::TRAIL_READ));
+
+        $package = $pending->snapshot();
+
+        $pending->event('invoice.approved');
+
+        $replaced = $pending->snapshot();
+
+        $pending->forPackage(PackageActivity::EXPORT_VERIFIED);
+
+        self::assertSame('audit_log.trail_read', $package->code?->value);
+        self::assertSame('invoice.approved', $replaced->code?->value);
+        self::assertSame('audit_log.export_verified', $pending->consume()->code?->value);
+    }
+
+    /**
+     * `event()` still refuses a code under the reserved prefix, given as the
+     * package's activity or as its value, and the builder keeps the code it
+     * had.
+     *
+     * @return void
+     */
+    public function testEventStillRefusesAReservedCode(): void
+    {
+        $pending = (new PendingRecord)->event('invoice.approved');
+
+        foreach ([PackageActivity::TRAIL_READ, 'audit_log.trail_read'] as $code) {
+            try {
+                $pending->event($code);
+
+                self::fail('Expected the reserved code to be refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('The `audit_log.` prefix is reserved for the package\'s own event codes.', $exception->getMessage());
+            }
+        }
+
+        self::assertSame('invoice.approved', $pending->snapshot()->code?->value);
+    }
+
+    /**
+     * A builder whose record has been built refuses `forPackage()` as it
+     * refuses every other mutator.
+     *
+     * @return void
+     */
+    public function testForPackageIsRefusedOnceRecorded(): void
+    {
+        $pending = (new PendingRecord)->forPackage(PackageActivity::TRAIL_COUNTED);
+
+        $pending->consume();
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage(self::REUSED);
+
+        $pending->forPackage(PackageActivity::TRAIL_READ);
+    }
+
+    /**
      * Rows of `[call]`: one call of each public mutator, the seventeen fluent
-     * methods, the nine fillers and the manifest, each with a valid argument.
+     * methods, the nine fillers, the manifest and the package's own code, each
+     * with a valid argument.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
      */
@@ -394,6 +464,9 @@ final class PendingRecordTest extends TestCase
             'withManifest' => [static function (PendingRecord $pending): void {
                 $pending->withManifest(self::manifest());
             }],
+            'forPackage' => [static function (PendingRecord $pending): void {
+                $pending->forPackage(PackageActivity::TRAIL_READ);
+            }],
         ];
     }
 
@@ -418,7 +491,8 @@ final class PendingRecordTest extends TestCase
     /**
      * Rows of `[call]`: one call of each public mutator with an argument it
      * would refuse, or with `null` where a filler then does nothing; a mutator
-     * that takes no argument, or only an origin, is called as it always is.
+     * that takes no argument, or only an origin or an activity, is called as it
+     * always is.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
      */
@@ -506,6 +580,9 @@ final class PendingRecordTest extends TestCase
             'withManifest' => [static function (PendingRecord $pending): void {
                 $pending->withManifest(self::manifest());
             }],
+            'forPackage' => [static function (PendingRecord $pending): void {
+                $pending->forPackage(PackageActivity::TRAIL_READ);
+            }],
         ];
     }
 
@@ -550,7 +627,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(27, $mutators);
+        self::assertCount(28, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }

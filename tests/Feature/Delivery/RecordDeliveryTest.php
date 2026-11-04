@@ -29,6 +29,7 @@ use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\FailedWrite;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
+use SineMacula\Laravel\AuditLog\Delivery\PackageWrite;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
@@ -66,9 +67,12 @@ use Tests\TestCase;
  * outside the write, what a failed write does under each rule and when its
  * spill goes, which stores a strict record may use, how the delivery mode
  * routes it, what happens to a record made inside a write, that a bundle is
- * refused by a store keeping no attachments, and how a captured record is
+ * refused by a store keeping no attachments, how a captured record is
  * delivered: under the `REPORT` rule whatever the mode, never strict, with its
- * failure signalled once and nothing let out of a deferred one's commit.
+ * failure signalled once and nothing let out of a deferred one's commit; and
+ * how a package write is delivered: immediately and fail-closed only, handed
+ * its finalised record once the store or the outbox has it and before the
+ * notification, and never when the write failed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -105,8 +109,17 @@ final class RecordDeliveryTest extends TestCase
     private const string STRICT_REFUSAL = 'A fail-closed or transactional record was made while an audit record was being written or its failure handled,'
         . ' so its guarantee cannot be met.';
 
+    /** @var string Why a package write is refused any other timing. */
+    private const string LOOSE_PACKAGE_WRITE = 'A package write is delivered immediately and fail-closed.';
+
     /** @var list<string> The class each capture's signal passed on, in order. */
     private array $signalled = [];
+
+    /** @var list<string> What a package write and a listener saw, in order. */
+    private array $seen = [];
+
+    /** @var list<\SineMacula\Laravel\AuditLog\Records\FinalisedRecord> The finalised records a package write was handed, in order. */
+    private array $acknowledged = [];
 
     /**
      * Capture every line logged.
@@ -2914,6 +2927,185 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
+     * A package write is handed the finalised record the store was given, the
+     * very one, once the store has it.
+     *
+     * @return void
+     */
+    public function testAPackageWriteIsGivenItsFinalisedRecord(): void
+    {
+        $fake   = FakeAuditStore::fake();
+        $record = RecordFactory::captured();
+
+        $this->delivery()->deliver($record, Timing::IMMEDIATE, null, true, null, $this->packageWrite());
+
+        self::assertCount(1, $this->acknowledged);
+        self::assertSame($fake->finalised(), $this->acknowledged);
+        self::assertSame($record, $this->acknowledged[0]->record);
+    }
+
+    /**
+     * The acknowledgement follows the store's write, outside the write guard's
+     * window, and precedes the notification.
+     *
+     * @return void
+     */
+    public function testAPackageWriteIsAcknowledgedBeforeItsNotification(): void
+    {
+        $fake = FakeAuditStore::fake();
+
+        Event::listen(AuditRecorded::class, function (): void {
+            $this->seen[] = 'notified';
+        });
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, true, null, $this->packageWrite(static fn (): string => sprintf(
+            'acknowledged, %d stored, %s',
+            $fake->count(),
+            app(WriteGuard::class)->isActive() ? 'inside the write guard' : 'outside the write guard',
+        )));
+
+        self::assertSame(['acknowledged, 1 stored, outside the write guard', 'notified'], $this->seen);
+    }
+
+    /**
+     * A package write whose write fails is never acknowledged, and the failure
+     * is thrown whatever the failure mode.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideFailureModes')]
+    public function testAFailedPackageWriteIsNeverAcknowledged(string $mode): void
+    {
+        $this->failureMode($mode);
+
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $this->assertThrows(
+            fn () => $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, true, null, $this->packageWrite()),
+            AuditWriteFailedException::class,
+        );
+
+        self::assertSame([], $this->acknowledged);
+        $this->assertSpilled(1);
+    }
+
+    /**
+     * A package write whose finalising fails is never acknowledged either.
+     *
+     * @return void
+     */
+    public function testAPackageWriteWhoseFinalisingFailsIsNeverAcknowledged(): void
+    {
+        $fake  = FakeAuditStore::fake();
+        $clock = \Mockery::mock(Clock::class);
+
+        $clock->shouldReceive('now')->andThrow(new \RuntimeException('The clock stopped.'));
+
+        app()->instance(Clock::class, $clock);
+
+        $this->assertThrows(
+            fn () => $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, true, null, $this->packageWrite()),
+            AuditWriteFailedException::class,
+        );
+
+        self::assertSame(0, $fake->count());
+        self::assertSame([], $this->acknowledged);
+    }
+
+    /**
+     * Rows of `[timing, fail-closed, with a capture's signal]`: every way a
+     * package write could ask to be delivered other than immediately and
+     * fail-closed.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Records\Enums\Timing, 1: bool, 2: bool}>
+     */
+    public static function provideLooseTimings(): iterable
+    {
+        yield from [
+            'after commit'               => [Timing::AFTER_COMMIT, false, false],
+            'immediate, not fail-closed' => [Timing::IMMEDIATE, false, false],
+            'transactional, fail-closed' => [Timing::TRANSACTIONAL, true, false],
+            'transactional'              => [Timing::TRANSACTIONAL, false, false],
+            'immediate, as a capture'    => [Timing::IMMEDIATE, false, true],
+        ];
+    }
+
+    /**
+     * A package write asked to be delivered any other way is refused before
+     * anything is written or acknowledged.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
+     * @param  bool  $failClosed
+     * @param  bool  $captured
+     * @return void
+     */
+    #[DataProvider('provideLooseTimings')]
+    public function testAPackageWriteIsRefusedAnyOtherTiming(Timing $timing, bool $failClosed, bool $captured): void
+    {
+        $fake = FakeAuditStore::fake();
+
+        DB::connection(self::CONNECTION)->beginTransaction();
+
+        $this->assertThrows(
+            fn () => $this->delivery()->deliver(RecordFactory::captured(), $timing, null, $failClosed, $captured ? $this->signal() : null, $this->packageWrite()),
+            \LogicException::class,
+            self::LOOSE_PACKAGE_WRITE,
+        );
+
+        DB::connection(self::CONNECTION)->commit();
+
+        self::assertSame(0, $fake->count());
+        self::assertSame([], $this->acknowledged);
+        self::assertSame([], $this->signalled);
+    }
+
+    /**
+     * In outbox mode a package write is handed the finalised record once the
+     * outbox's insert has returned, and it is the envelope the row holds; no
+     * store is called and nothing is notified.
+     *
+     * @return void
+     */
+    public function testInOutboxModeAPackageWriteIsAcknowledgedByTheInsert(): void
+    {
+        $this->outboxModeOn();
+
+        $store  = new PlainStore;
+        $record = RecordFactory::captured();
+
+        app()->instance(AuditStore::class, $store);
+
+        Event::fake([AuditRecorded::class]);
+
+        $note = fn (): string => sprintf('acknowledged, %d in the outbox', $this->outboxCount());
+
+        $this->delivery()->deliver($record, Timing::IMMEDIATE, null, true, null, $this->packageWrite($note));
+
+        self::assertSame(['acknowledged, 1 in the outbox'], $this->seen);
+        self::assertCount(1, $this->acknowledged);
+        self::assertSame($record, $this->acknowledged[0]->record);
+        self::assertSame(0, $store->calls());
+
+        Event::assertNotDispatched(AuditRecorded::class);
+    }
+
+    /**
+     * A record delivered without a package write is never acknowledged, so the
+     * acknowledgement belongs only to the write that asked for it.
+     *
+     * @return void
+     */
+    public function testARecordWithoutAPackageWriteIsNotAcknowledged(): void
+    {
+        FakeAuditStore::fake();
+
+        $this->delivery()->deliver(RecordFactory::captured(), Timing::IMMEDIATE, null, true);
+
+        self::assertSame([], $this->acknowledged);
+    }
+
+    /**
      * Add the second connection, on its own in-memory SQLite database.
      *
      * @param  mixed  $app
@@ -2936,6 +3128,29 @@ final class RecordDeliveryTest extends TestCase
     private function delivery(): RecordDelivery
     {
         return app(RecordDelivery::class);
+    }
+
+    /**
+     * A package write that accepts every record, and keeps each finalised
+     * record it is handed, saying what the note gives when one is given.
+     *
+     * @param  ?\Closure(): string  $note
+     * @return \SineMacula\Laravel\AuditLog\Delivery\PackageWrite
+     */
+    private function packageWrite(?\Closure $note = null): PackageWrite
+    {
+        return new PackageWrite(
+            static function (): void {},
+            function (FinalisedRecord $finalised) use ($note): void {
+                $this->acknowledged[] = $finalised;
+
+                if ($note === null) {
+                    return;
+                }
+
+                $this->seen[] = $note();
+            },
+        );
     }
 
     /**

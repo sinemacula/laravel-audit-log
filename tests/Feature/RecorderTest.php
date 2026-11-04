@@ -7,9 +7,11 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Events\Dispatcher as EventDispatcher;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Ramsey\Uuid\Uuid;
@@ -32,6 +34,7 @@ use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
@@ -69,8 +72,9 @@ use Tests\Unit\Stubs\StubDocument;
  * Feature tests for the recorder: what each of its calls does, and the capture
  * pipeline a recorded activity runs: the definition, the timing's checks, the
  * contributors in order, minimising what they leave, the clock and source, and
- * delivery. Its collaborators come from the current container on every capture,
- * and it holds nothing but registration data.
+ * delivery, and the trail it gives as the way into the read path. Its
+ * collaborators come from the current container on every capture, and it holds
+ * nothing but registration data.
  *
  * Definitions and contributors are registered on a recorder of a test's own,
  * since the application's has frozen by the time a test runs.
@@ -1593,7 +1597,7 @@ final class RecorderTest extends TestCase
         self::assertSame('invoice.voided', $record->event);
         self::assertNotNull($record->attachment);
         self::assertSame($manifest->id, $record->attachment->id);
-        self::assertSame(['artifact_id' => $manifest->id, 'digest' => self::GOLDEN_DIGEST, 'count' => 3], $record->properties['_audit']['manifest'] ?? null);
+        self::assertSame(['artifact_id' => $manifest->id, 'kind' => 'bulk', 'digest' => self::GOLDEN_DIGEST, 'count' => 3], $record->properties['_audit']['manifest'] ?? null);
         self::assertSame([$record], $this->fake->recorded());
     }
 
@@ -1762,6 +1766,51 @@ final class RecorderTest extends TestCase
         foreach ($parameters as $parameter) {
             self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class), sprintf('`$%s` is not marked sensitive.', $parameter->getName()));
         }
+    }
+
+    /**
+     * `trail()` resolves a new trail from the current container on each call,
+     * so a trail bound there is the one it gives, and two calls never share
+     * one.
+     *
+     * @return void
+     */
+    public function testTrailResolvesAFreshTrailEachTime(): void
+    {
+        $recorder = app(Recorder::class);
+        $first    = $recorder->trail();
+
+        self::assertNotSame($first, $recorder->trail());
+
+        $this->app?->bind(AuditTrail::class, static fn (): AuditTrail => $first);
+
+        self::assertSame($first, $recorder->trail());
+    }
+
+    /**
+     * The trail `trail()` gives names no viewer: a terminal call on it is
+     * refused before anything is queried or recorded.
+     *
+     * @return void
+     */
+    public function testTrailHasNoViewer(): void
+    {
+        $queries = [];
+
+        Event::listen(QueryExecuted::class, static function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        try {
+            AuditLog::recorder()->trail()->count();
+
+            self::fail('Expected the read to be refused.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A read of the audit trail names its viewer; call visibleTo() first.', $refusal->getMessage());
+        }
+
+        self::assertSame([], $queries);
+        self::assertSame([], $this->fake->recorded());
     }
 
     /**

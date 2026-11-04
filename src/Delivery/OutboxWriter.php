@@ -85,13 +85,15 @@ final readonly class OutboxWriter
     /**
      * Write the record as its timing and the selected transaction say: inside
      * that transaction when it is on the outbox connection, at its commit when
-     * it is on another, and now otherwise.
+     * it is on another, and now otherwise. A package write, which is immediate,
+     * is inserted now and acknowledged once the insert returns.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  ?string  $transaction
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
@@ -104,13 +106,14 @@ final readonly class OutboxWriter
         ?string $transaction,
         FailureRule $rule,
         #[\SensitiveParameter] ?CaptureSignal $capture = null,
+        #[\SensitiveParameter] ?PackageWrite $package = null,
     ): void {
         $afterCommit = $timing === Timing::AFTER_COMMIT;
         $selected    = $afterCommit ? $this->transactions()->selected($transaction) : null;
 
         if ($selected === null) {
 
-            $this->insert($record, $rule, $afterCommit, $capture);
+            $this->insert($record, $rule, $afterCommit, $capture, $package);
 
             return;
         }
@@ -199,6 +202,10 @@ final readonly class OutboxWriter
     /**
      * Finalise the record once and insert its encrypted envelope, and hand any
      * failure to the failure handler under the rule, with the capture's signal.
+     * A package write is handed the finalised record once the insert has
+     * returned, which is a committed row, since the read path refuses a read
+     * while a transaction is open on the outbox connection; a failed insert is
+     * never acknowledged.
      *
      * Whether a transaction is open on the outbox connection, every connection
      * with one open, and which one an after-commit record's spill is bound to,
@@ -210,14 +217,20 @@ final readonly class OutboxWriter
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  bool  $afterCommit
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \Illuminate\Database\DeadlockException
      * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
-    private function insert(#[\SensitiveParameter] AuditRecord $record, FailureRule $rule, bool $afterCommit, #[\SensitiveParameter] ?CaptureSignal $capture = null): void
-    {
+    private function insert(
+        #[\SensitiveParameter] AuditRecord $record,
+        FailureRule $rule,
+        bool $afterCommit,
+        #[\SensitiveParameter] ?CaptureSignal $capture = null,
+        #[\SensitiveParameter] ?PackageWrite $package = null,
+    ): void {
         $connection  = $this->connectionName();
         $hostOpen    = $this->isTransacting();
         $open        = (new OpenTransactions($this->container->make(ConnectionResolverInterface::class)))->names();
@@ -233,7 +246,11 @@ final readonly class OutboxWriter
             $failed    = new FailedWrite($record, $finalised, $failure, $operation, get_debug_type($this->outbox), $connection, $hostOpen, $open);
 
             (new FailureHandler($this->container))->handle($failed, $rule, $commitBound, $capture);
+
+            return;
         }
+
+        $package?->acknowledge($finalised);
     }
 
     /**

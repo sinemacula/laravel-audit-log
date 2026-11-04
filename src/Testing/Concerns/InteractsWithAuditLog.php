@@ -16,9 +16,11 @@ use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
  * `AuditLog::fake()` bound as the store.
  *
  * Every assertion takes a code as a string or as a string-backed enum case,
- * read as `event()` reads it, and a closure takes the captured record. A
- * failure lists the codes recorded, in order, or says none was, and never
- * prints a property or any other value of a record.
+ * held to the grammar and the length, so a malformed one is refused, and one of
+ * the package's own codes, such as `audit_log.trail_read`, is accepted. A
+ * closure takes the captured record. A failure lists the codes recorded, in
+ * order, or says none was, and never prints a property or any other value of a
+ * record.
  *
  * @api
  *
@@ -42,7 +44,7 @@ trait InteractsWithAuditLog
     public function assertAudited(\BackedEnum|string $code, ?\Closure $filter = null): static
     {
         $fake  = self::auditLogFake();
-        $value = EventCode::of($code)->value;
+        $value = EventCode::forReading($code)->value;
 
         Assert::assertTrue(
             self::auditRecordsOf($fake, $value, $filter) !== [],
@@ -67,7 +69,7 @@ trait InteractsWithAuditLog
     public function assertNotAudited(\BackedEnum|string $code, ?\Closure $filter = null): static
     {
         $fake  = self::auditLogFake();
-        $value = EventCode::of($code)->value;
+        $value = EventCode::forReading($code)->value;
 
         Assert::assertTrue(
             self::auditRecordsOf($fake, $value, $filter) === [],
@@ -108,7 +110,7 @@ trait InteractsWithAuditLog
     public function assertAuditedTimes(\BackedEnum|string $code, int $times): static
     {
         $fake  = self::auditLogFake();
-        $value = EventCode::of($code)->value;
+        $value = EventCode::forReading($code)->value;
         $count = count(self::auditRecordsOf($fake, $value, null));
 
         Assert::assertTrue($count === $times, sprintf('Expected %d of [%s], and there were %d. %s', $times, $value, $count, self::auditedCodes($fake)));

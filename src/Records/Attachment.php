@@ -5,17 +5,25 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records;
 
 use Illuminate\Contracts\Encryption\StringEncrypter;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 
 /**
- * An artifact that travels with its record: a bulk operation's manifest,
- * described by its id, kind, member count and digest, with its members sealed
- * under the application's encrypter.
+ * An artifact that travels with its record, of any kind: a bulk operation's
+ * subjects, a disclosure's evidence or an export's manifest, described by its
+ * id, kind, member count and digest, with its canonical form sealed under the
+ * application's encrypter. A bulk operation counts at least one member; a
+ * disclosure or an export may count none.
  *
  * The members are encrypted once, when the record is captured, and the same
  * ciphertext is carried by every retry, drain and replay, so a duplicate is
  * told by its description, never by its bytes. An attachment is not signed: it
  * is bound to its record by the descriptor the record signs at
- * `properties._audit.manifest`, which names its id, digest and count.
+ * `properties._audit.manifest`, which names exactly its id, kind, digest and
+ * count.
+ *
+ * An attachment described from a stored entry's descriptor alone carries no
+ * members: it keeps a record rebuilt for reading bound to its descriptor, and
+ * is never stored, queued or spilled, since it has nothing to store.
  *
  * @api
  *
@@ -24,14 +32,17 @@ use Illuminate\Contracts\Encryption\StringEncrypter;
  */
 final readonly class Attachment
 {
-    /** @var string The kind of a bulk operation's manifest, the only kind there is. */
-    public const string KIND_BULK = Manifest::KIND;
-
     /** @var string A UUID as every engine returns it. */
     private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
     /** @var string SHA-256 as lower-case hex. */
     private const string DIGEST_PATTERN = '/\A[0-9a-f]{64}\z/';
+
+    /** @var list<string> The keys of a descriptor, sorted: exactly these and nothing else. */
+    private const array DESCRIPTOR_KEYS = ['artifact_id', 'count', 'digest', 'kind'];
+
+    /** @var string The refusal of a descriptor that is not exactly its four keys, each of its type. */
+    private const string DESCRIPTOR_MESSAGE = 'A manifest descriptor is exactly a string `artifact_id`, `kind` and `digest` and an integer `count`.';
 
     /**
      * Constructor.
@@ -40,7 +51,7 @@ final readonly class Attachment
      * @param  string  $kind
      * @param  int  $memberCount
      * @param  string  $digest
-     * @param  string  $members
+     * @param  ?string  $members
      *
      * @throws \InvalidArgumentException
      */
@@ -49,29 +60,27 @@ final readonly class Attachment
         /** The artifact's id: a lower-case UUID. */
         public string $id,
 
-        /** What kind of artifact it is: `bulk`. */
+        /** What kind of artifact it is: `bulk`, `disclosure` or `export`. */
         public string $kind,
 
-        /** How many members it holds, at least one. */
+        /** How many members it holds: at least one for `bulk`, and never fewer than none. */
         public int $memberCount,
 
         /** Lower-case hex SHA-256 of the members' canonical form. */
         public string $digest,
 
-        /** The members' canonical form, encrypted under the application's encrypter. */
+        /** The members' canonical form, encrypted under the application's encrypter; `null` only when described from an entry. */
         #[\SensitiveParameter]
-        public string $members,
+        public ?string $members,
     ) {
         if (preg_match(self::UUID_PATTERN, $id) !== 1) {
             throw self::malformed('id', 'a lower-case UUID');
         }
 
-        if ($kind !== self::KIND_BULK) {
-            throw self::malformed('kind', '`' . self::KIND_BULK . '`');
-        }
+        $artifactKind = ArtifactKind::tryFrom($kind) ?? throw self::malformed('kind', '`bulk`, `disclosure` or `export`');
 
-        if ($memberCount < 1) {
-            throw self::malformed('member_count', 'at least 1');
+        if ($memberCount < ($artifactKind->allowsEmpty() ? 0 : 1)) {
+            throw self::malformed('member_count', $artifactKind->allowsEmpty() ? 'at least 0' : 'at least 1');
         }
 
         if (preg_match(self::DIGEST_PATTERN, $digest) !== 1) {
@@ -98,7 +107,7 @@ final readonly class Attachment
      */
     public static function sealed(#[\SensitiveParameter] Manifest $manifest, StringEncrypter $encrypter): self
     {
-        return new self($manifest->id, Manifest::KIND, $manifest->count, $manifest->digest, $encrypter->encryptString($manifest->canonical));
+        return new self($manifest->id, $manifest->kind->value, $manifest->count, $manifest->digest, $encrypter->encryptString($manifest->canonical));
     }
 
     /**
@@ -128,8 +137,42 @@ final readonly class Attachment
     }
 
     /**
+     * The attachment a stored entry's signed descriptor describes, for a record
+     * rebuilt to be read: its id, kind, count and digest, and no members, so it
+     * is never stored or encoded. A descriptor that is not exactly an artifact
+     * id, a kind, a digest and a count, each well formed, is refused.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $descriptor
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     *
+     * @internal
+     */
+    public static function described(array $descriptor): self
+    {
+        $keys = array_keys($descriptor);
+
+        sort($keys);
+
+        if ($keys !== self::DESCRIPTOR_KEYS) {
+            throw new \InvalidArgumentException(self::DESCRIPTOR_MESSAGE);
+        }
+
+        ['artifact_id' => $id, 'kind' => $kind, 'digest' => $digest, 'count' => $count] = $descriptor;
+
+        if (!is_string($id) || !is_string($kind) || !is_string($digest) || !is_int($count)) {
+            throw new \InvalidArgumentException(self::DESCRIPTOR_MESSAGE);
+        }
+
+        return new self($id, $kind, $count, $digest, null);
+    }
+
+    /**
      * Whether the descriptor is exactly this attachment's: its artifact id,
-     * digest and count, and nothing else.
+     * kind, digest and count, and nothing else.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -138,20 +181,38 @@ final readonly class Attachment
      */
     public function describes(array $descriptor): bool
     {
-        return count($descriptor)                   === 3
-            && ($descriptor['artifact_id'] ?? null) === $this->id
-            && ($descriptor['digest'] ?? null)      === $this->digest
-            && ($descriptor['count'] ?? null)       === $this->memberCount;
+        ksort($descriptor);
+
+        return $descriptor === ['artifact_id' => $this->id, 'count' => $this->memberCount, 'digest' => $this->digest, 'kind' => $this->kind];
     }
 
     /**
-     * The attachment as a bundle carries it, naming the entry it belongs to.
+     * Whether the attachment carries its sealed members, as every attachment
+     * but one described from its entry does.
+     *
+     * @return bool
+     */
+    public function isSealed(): bool
+    {
+        return $this->members !== null;
+    }
+
+    /**
+     * The attachment as a bundle carries it, naming the entry it belongs to. An
+     * attachment described from its entry has no members to carry and is
+     * refused, so it is never stored, queued or spilled.
      *
      * @param  string  $entryId
      * @return array{id: string, entry_id: string, kind: string, member_count: int, digest: string, members: string}
+     *
+     * @throws \LogicException
      */
     public function envelopeFor(string $entryId): array
     {
+        if ($this->members === null) {
+            throw new \LogicException('An attachment described from its entry carries no members and is never stored or encoded.');
+        }
+
         return [
             'id'           => $this->id,
             'entry_id'     => $entryId,

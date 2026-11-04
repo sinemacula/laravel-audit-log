@@ -9,18 +9,20 @@ use Illuminate\Support\Facades\DB;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Writes bulk entries and their artifacts straight to the tables, as the store
- * leaves them, and changes them afterwards: a signed entry carrying its
- * manifest descriptor, encoded through the row codec rather than stored through
- * the store, beside its artifact row, the members sealed under the test
- * encrypter, which opens under the `app.key` the Feature and Integration tests
- * configure; and an entry whose signed descriptor is a value of the test's
- * choosing, which no capture produces.
+ * Writes entries with artifacts straight to the tables, as the store leaves
+ * them, and changes them afterwards: a signed entry carrying the manifest
+ * descriptor of an artifact of any kind, a bulk operation's by default, encoded
+ * through the row codec rather than stored through the store, beside its
+ * artifact row, the members sealed under the test encrypter, which opens under
+ * the `app.key` the Feature and Integration tests configure; and an entry whose
+ * signed descriptor is a value of the test's choosing, which no capture
+ * produces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,16 +32,40 @@ use Tests\Fixtures\Records\RecordFactory;
 trait SeedsArtifacts
 {
     /**
-     * Write a signed bulk entry of the number of members, `App\Models\Invoice`
-     * 1 to that number, and its artifact, recorded when the factory's bundles
-     * are, and return the entry's id.
+     * Write a signed entry with an artifact of the kind holding the number of
+     * members, and the artifact, recorded when the factory's bundles are, and
+     * return the entry's id: a bulk operation of `App\Models\Invoice` 1 to that
+     * number, a disclosure of that many entries, or an export of that many
+     * lines, each in the canonical form its kind's builder makes.
      *
      * @param  int  $members
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @return string
      */
-    protected function seedBundle(int $members = 3): string
+    protected function seedBundle(int $members = 3, ArtifactKind $kind = ArtifactKind::BULK): string
     {
-        return $this->seedFinalisedBundle(RecordFactory::finalisedBundle($members));
+        if ($kind === ArtifactKind::BULK) {
+            return $this->seedFinalisedBundle(RecordFactory::finalisedBundle($members));
+        }
+
+        return $this->seedArtifactOfKind($kind, RecordFactory::canonical($kind, $members), $members);
+    }
+
+    /**
+     * Write a signed entry whose artifact is of the kind given, holding the
+     * canonical form given and counting the members given, whatever that form
+     * is, and the artifact, and return the entry's id: the descriptor signs the
+     * digest of exactly that form, so a form that is not the kind's canonical
+     * one is stored as the descriptor describes it.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  string  $canonical
+     * @param  int  $count
+     * @return string
+     */
+    protected function seedArtifactOfKind(ArtifactKind $kind, string $canonical, int $count): string
+    {
+        return $this->seedFinalisedBundle(RecordFactory::finalisedWithArtifact($kind, $canonical, $count));
     }
 
     /**
@@ -122,6 +148,25 @@ trait SeedsArtifacts
     protected function tamperWithArtifact(string $entryId, array $columns): void
     {
         $this->artifactsTable()->where('entry_id', $entryId)->update($columns);
+    }
+
+    /**
+     * Swap the artifacts of the two entries, so each entry's artifact row is
+     * the other's, its id, kind, count, digest and members untouched: the first
+     * is moved aside to an entry id no entry has, so the unique entry index
+     * never holds two rows for one entry.
+     *
+     * @param  string  $entryA
+     * @param  string  $entryB
+     * @return void
+     */
+    protected function swapArtifacts(string $entryA, string $entryB): void
+    {
+        $aside = '01932b4e-9000-7000-8000-00000000aaaa';
+
+        $this->tamperWithArtifact($entryA, ['entry_id' => $aside]);
+        $this->tamperWithArtifact($entryB, ['entry_id' => $entryA]);
+        $this->tamperWithArtifact($aside, ['entry_id' => $entryB]);
     }
 
     /**

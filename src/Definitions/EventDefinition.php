@@ -44,8 +44,8 @@ final readonly class EventDefinition
     /** @var string Category of a definition that names none. */
     public const string DEFAULT_CATEGORY = 'general';
 
-    /** @var string Pattern of a category slug: a lower-case letter, then up to 63 lower-case letters, digits or underscores. */
-    private const string CATEGORY_PATTERN = '/\A[a-z][a-z0-9_]{0,63}\z/';
+    /** @var string Pattern of a category slug: a lower-case letter, then up to 63 lower-case letters, digits or underscores; the one grammar every category is held to. */
+    public const string CATEGORY_PATTERN = '/\A[a-z][a-z0-9_]{0,63}\z/';
 
     /**
      * Constructor.
@@ -110,7 +110,8 @@ final readonly class EventDefinition
     /**
      * The definition an unregistered code takes: version 1, the `general`
      * category, no rules, and every field retained. The code is already
-     * validated.
+     * validated, so this is also where the definition of one of the package's
+     * own codes starts, which `for()` refuses.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\EventCode  $code
      * @return self

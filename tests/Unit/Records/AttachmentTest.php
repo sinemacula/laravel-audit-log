@@ -10,14 +10,17 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for a record's attachment: sealing a manifest once under the
- * encrypter, the fields it refuses, the descriptor it answers to, and the
- * object a bundle carries it as.
+ * Unit tests for a record's attachment: sealing a manifest of any kind once
+ * under the encrypter, the kinds and counts it takes, the fields it refuses,
+ * the four-key descriptor it answers to, the memberless attachment described
+ * from a descriptor, which is never encoded, and the object a bundle carries it
+ * as.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +54,8 @@ final class AttachmentTest extends TestCase
 
         self::assertSame($manifest->canonical, RecordFactory::encrypter()->decryptString($attachment->members));
         self::assertSame($manifest->id, $attachment->id);
-        self::assertSame(Attachment::KIND_BULK, $attachment->kind);
         self::assertSame('bulk', $attachment->kind);
+        self::assertTrue($attachment->isSealed());
         self::assertSame(3, $attachment->memberCount);
         self::assertSame($manifest->digest, $attachment->digest);
     }
@@ -196,8 +199,9 @@ final class AttachmentTest extends TestCase
             'an id that is not a UUID'  => ['id', 'inv_0042', 'An attachment\'s `id` must be a lower-case UUID.'],
             'an id with a newline'      => ['id', self::ID . "\n", 'An attachment\'s `id` must be a lower-case UUID.'],
             'no kind'                   => ['kind', null, 'An attachment\'s `kind` must be a string.'],
-            'another kind'              => ['kind', 'export', 'An attachment\'s `kind` must be `bulk`.'],
-            'an upper-case kind'        => ['kind', 'BULK', 'An attachment\'s `kind` must be `bulk`.'],
+            'an unknown kind'           => ['kind', 'audit', 'An attachment\'s `kind` must be `bulk`, `disclosure` or `export`.'],
+            'an upper-case kind'        => ['kind', 'BULK', 'An attachment\'s `kind` must be `bulk`, `disclosure` or `export`.'],
+            'an empty kind'             => ['kind', '', 'An attachment\'s `kind` must be `bulk`, `disclosure` or `export`.'],
             'no count'                  => ['member_count', null, 'An attachment\'s `member_count` must be an integer.'],
             'a string count'            => ['member_count', '3', 'An attachment\'s `member_count` must be an integer.'],
             'a count of nought'         => ['member_count', 0, 'An attachment\'s `member_count` must be at least 1.'],
@@ -249,9 +253,86 @@ final class AttachmentTest extends TestCase
     }
 
     /**
+     * Every kind is accepted from a bundle, and a manifest of every kind is
+     * sealed as that kind, its count and digest kept.
+     *
+     * @return void
+     */
+    public function testEachKindIsAccepted(): void
+    {
+        foreach (ArtifactKind::cases() as $kind) {
+            self::assertSame($kind->value, Attachment::fromEnvelope(['kind' => $kind->value] + self::fields())->kind);
+
+            $manifest   = Manifest::ofContent($kind, '{"kind":"' . $kind->value . '"}', 2);
+            $attachment = Attachment::sealed($manifest, RecordFactory::encrypter());
+
+            self::assertSame([$manifest->id, $kind->value, 2, $manifest->digest], [$attachment->id, $attachment->kind, $attachment->memberCount, $attachment->digest]);
+            self::assertSame($manifest->canonical, RecordFactory::encrypter()->decryptString((string) $attachment->members));
+        }
+    }
+
+    /**
+     * Rows of `[kind, count, message or null when kept]`: the counts each kind
+     * takes and refuses at the edge.
+     *
+     * @return iterable<string, array{0: string, 1: int, 2: ?string}>
+     */
+    public static function provideCountsByKind(): iterable
+    {
+        yield from [
+            'a bulk operation of one'    => ['bulk', 1, null],
+            'a bulk operation of none'   => ['bulk', 0, 'An attachment\'s `member_count` must be at least 1.'],
+            'a negative bulk operation'  => ['bulk', -1, 'An attachment\'s `member_count` must be at least 1.'],
+            'a disclosure of none'       => ['disclosure', 0, null],
+            'a negative disclosure'      => ['disclosure', -1, 'An attachment\'s `member_count` must be at least 0.'],
+            'an export of none'          => ['export', 0, null],
+            'a negative export'          => ['export', -1, 'An attachment\'s `member_count` must be at least 0.'],
+            'the lowest integer, export' => ['export', PHP_INT_MIN, 'An attachment\'s `member_count` must be at least 0.'],
+        ];
+    }
+
+    /**
+     * Only a bulk operation needs a member: a disclosure or an export of none
+     * is kept, and a negative count of any kind is refused.
+     *
+     * @param  string  $kind
+     * @param  int  $count
+     * @param  ?string  $message
+     * @return void
+     */
+    #[DataProvider('provideCountsByKind')]
+    public function testOnlyABulkNeedsAMember(string $kind, int $count, ?string $message): void
+    {
+        if ($message !== null) {
+            $this->expectException(\InvalidArgumentException::class);
+            $this->expectExceptionMessage($message);
+        }
+
+        self::assertSame($count, Attachment::fromEnvelope(['kind' => $kind, 'member_count' => $count] + self::fields())->memberCount);
+    }
+
+    /**
+     * A kind the package does not know is refused, naming the three it does,
+     * never the value given.
+     *
+     * @return void
+     */
+    public function testAnUnknownKindIsRefused(): void
+    {
+        try {
+            Attachment::fromEnvelope(['kind' => 'secret-kind'] + self::fields());
+
+            self::fail('Expected an unknown kind to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('An attachment\'s `kind` must be `bulk`, `disclosure` or `export`.', $exception->getMessage());
+            self::assertStringNotContainsString('secret-kind', $exception->getMessage());
+        }
+    }
+
+    /**
      * An attachment describes exactly its own descriptor, in any key order:
-     * another id, digest or count, a value of another type, a key missing or a
-     * key added is another descriptor.
+     * another id, kind, digest or count, a value of another type, a key missing
+     * or a key added is another descriptor.
      *
      * @return void
      *
@@ -264,25 +345,132 @@ final class AttachmentTest extends TestCase
         $descriptor = $manifest->descriptor();
 
         self::assertTrue($attachment->describes($descriptor));
-        self::assertTrue($attachment->describes(['count' => 3, 'digest' => $manifest->digest, 'artifact_id' => $manifest->id]));
+        self::assertTrue($attachment->describes(['count' => 3, 'digest' => $manifest->digest, 'kind' => 'bulk', 'artifact_id' => $manifest->id]));
 
         $others = [
             'another id'       => ['artifact_id' => self::ID]       + $descriptor,
             'another digest'   => ['digest' => str_repeat('a', 64)] + $descriptor,
             'another count'    => ['count' => 4]                    + $descriptor,
+            'another kind'     => ['kind' => 'export']              + $descriptor,
             'a string count'   => ['count' => '3']                  + $descriptor,
             'no id'            => array_diff_key($descriptor, ['artifact_id' => true]),
             'no digest'        => array_diff_key($descriptor, ['digest' => true]),
             'no count'         => array_diff_key($descriptor, ['count' => true]),
-            'a key added'      => $descriptor + ['kind' => 'bulk'],
+            'a key added'      => $descriptor + ['members' => 'x'],
             'nothing'          => [],
             'another manifest' => self::manifest()->descriptor(),
-            'the id as a list' => [$manifest->id, $manifest->digest, 3],
+            'the id as a list' => [$manifest->id, 'bulk', $manifest->digest, 3],
         ];
 
         foreach ($others as $label => $other) {
             self::assertFalse($attachment->describes($other), $label);
         }
+    }
+
+    /**
+     * A descriptor without its kind, the three keys a record signed before
+     * artifacts had kinds, describes no attachment, nor does one whose kind
+     * names another kind of the same artifact.
+     *
+     * @return void
+     */
+    public function testDescribesNeedsTheKind(): void
+    {
+        $manifest   = Manifest::ofContent(ArtifactKind::DISCLOSURE, '{}', 0);
+        $attachment = Attachment::sealed($manifest, RecordFactory::encrypter());
+
+        self::assertTrue($attachment->describes($manifest->descriptor()));
+        self::assertFalse($attachment->describes(['artifact_id' => $manifest->id, 'digest' => $manifest->digest, 'count' => 0]));
+        self::assertFalse($attachment->describes(['kind' => 'export'] + $manifest->descriptor()));
+        self::assertFalse($attachment->describes(['kind' => 'bulk'] + $manifest->descriptor()));
+    }
+
+    /**
+     * An attachment described from a descriptor keeps its id, kind, count and
+     * digest, carries no members, is not sealed, and describes exactly the
+     * descriptor it was made from, in any key order.
+     *
+     * @return void
+     */
+    public function testADescribedAttachmentCarriesNoMembers(): void
+    {
+        $descriptor = ['artifact_id' => self::ID, 'kind' => 'export', 'digest' => self::DIGEST, 'count' => 0];
+        $attachment = Attachment::described(['count' => 0, 'digest' => self::DIGEST, 'kind' => 'export', 'artifact_id' => self::ID]);
+
+        self::assertSame([self::ID, 'export', 0, self::DIGEST], [$attachment->id, $attachment->kind, $attachment->memberCount, $attachment->digest]);
+        self::assertNull($attachment->members);
+        self::assertFalse($attachment->isSealed());
+        self::assertTrue($attachment->describes($descriptor));
+        self::assertFalse($attachment->describes(['count' => 1] + $descriptor));
+    }
+
+    /**
+     * An attachment described from its entry is never encoded: asking for its
+     * envelope is a programming error, so it can never be stored, queued or
+     * spilled.
+     *
+     * @return void
+     */
+    public function testADescribedAttachmentIsNeverEncoded(): void
+    {
+        $attachment = Attachment::described(['artifact_id' => self::ID, 'kind' => 'bulk', 'digest' => self::DIGEST, 'count' => 3]);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('An attachment described from its entry carries no members and is never stored or encoded.');
+
+        $attachment->envelopeFor(self::ENTRY_ID);
+    }
+
+    /**
+     * Rows of `[descriptor, message]`: descriptors the verifier would refuse,
+     * and the refusal each gives.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @return iterable<string, array{0: array<array-key, mixed>, 1: string}>
+     */
+    public static function provideMalformedDescriptors(): iterable
+    {
+        $shape      = 'A manifest descriptor is exactly a string `artifact_id`, `kind` and `digest` and an integer `count`.';
+        $descriptor = ['artifact_id' => self::ID, 'kind' => 'bulk', 'digest' => self::DIGEST, 'count' => 3];
+
+        yield from [
+            'no kind'           => [array_diff_key($descriptor, ['kind' => true]), $shape],
+            'no id'             => [array_diff_key($descriptor, ['artifact_id' => true]), $shape],
+            'no digest'         => [array_diff_key($descriptor, ['digest' => true]), $shape],
+            'no count'          => [array_diff_key($descriptor, ['count' => true]), $shape],
+            'a key added'       => [$descriptor + ['members' => 'x'], $shape],
+            'nothing'           => [[], $shape],
+            'a list'            => [[self::ID, 'bulk', self::DIGEST, 3], $shape],
+            'an integer id'     => [['artifact_id' => 1] + $descriptor, $shape],
+            'a null kind'       => [['kind' => null] + $descriptor, $shape],
+            'an integer digest' => [['digest' => 1] + $descriptor, $shape],
+            'a string count'    => [['count' => '3'] + $descriptor, $shape],
+            'an upper-case id'  => [['artifact_id' => strtoupper(self::ID)] + $descriptor, 'An attachment\'s `id` must be a lower-case UUID.'],
+            'an unknown kind'   => [['kind' => 'audit'] + $descriptor, 'An attachment\'s `kind` must be `bulk`, `disclosure` or `export`.'],
+            'an empty bulk'     => [['count' => 0] + $descriptor, 'An attachment\'s `member_count` must be at least 1.'],
+            'a negative export' => [['kind' => 'export', 'count' => -1] + $descriptor, 'An attachment\'s `member_count` must be at least 0.'],
+            'a short digest'    => [['digest' => substr(self::DIGEST, 1)] + $descriptor, 'An attachment\'s `digest` must be a lower-case hex SHA-256.'],
+        ];
+    }
+
+    /**
+     * A descriptor the verifier would refuse describes no attachment: its keys
+     * must be exactly the four, each of its type, and its values well formed.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $descriptor
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideMalformedDescriptors')]
+    public function testDescribedRefusesAMalformedDescriptor(array $descriptor, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Attachment::described($descriptor);
     }
 
     /**

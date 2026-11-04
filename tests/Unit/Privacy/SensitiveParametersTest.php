@@ -9,12 +9,15 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Definitions\FieldPath;
 use SineMacula\Laravel\AuditLog\Privacy\ByteBudget;
+use SineMacula\Laravel\AuditLog\Privacy\EncryptedField;
 use SineMacula\Laravel\AuditLog\Privacy\EnvelopeSealer;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\FieldPolicy;
+use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 use SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher;
 use SineMacula\Laravel\AuditLog\Privacy\IpMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\KeyCeiling;
@@ -24,6 +27,7 @@ use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\PathMasker;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
+use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
@@ -94,6 +98,8 @@ final class SensitiveParametersTest extends TestCase
         KeyCeiling::class,
         KeyTokenizer::class,
         PathMasker::class,
+        EncryptedField::class,
+        FieldReading::class,
     ];
 
     /**
@@ -158,6 +164,14 @@ final class SensitiveParametersTest extends TestCase
             'the attachment a record is built on' => [AuditRecord::class, 'fromPending', 'attachment'],
             'the attachment a record is read on'  => [AuditRecord::class, 'fromEnvelope', 'attachment'],
             'the attachment a record holds'       => [AuditRecord::class, '__construct', 'attachment'],
+            'the path of an encrypted field'      => [EncryptedField::class, '__construct', 'path'],
+            'the ciphertext a field holds'        => [EncryptedField::class, '__construct', 'ciphertext'],
+            'the path a field is read at'         => [EncryptedField::class, 'fromEnvelope', 'path'],
+            'the envelope a field is read from'   => [EncryptedField::class, 'fromEnvelope', 'envelope'],
+            'the value a reader reveals'          => [FieldReading::class, 'revealed', 'value'],
+            'the value a reading holds'           => [FieldReading::class, '__construct', 'value'],
+            'the field a reader is given'         => [FieldReader::class, 'read', 'field'],
+            'the field the sealed reader reads'   => [SealedFieldReader::class, 'read', 'field'],
         ];
     }
 
@@ -274,7 +288,8 @@ final class SensitiveParametersTest extends TestCase
     /**
      * The scan holds a concrete path to the rule through every helper that
      * walks one, so a raw dynamic key cannot be left in a frame of the walker
-     * by adding one more of them.
+     * by adding one more of them, and through the encrypted field that carries
+     * one to a field reader.
      *
      * @return void
      */
@@ -284,6 +299,8 @@ final class SensitiveParametersTest extends TestCase
 
         self::assertSame(
             [
+                [EncryptedField::class, '__construct'],
+                [EncryptedField::class, 'fromEnvelope'],
                 [FieldPolicy::class, 'retained'],
                 [FieldPolicy::class, 'selected'],
                 [FieldPolicy::class, 'walk'],

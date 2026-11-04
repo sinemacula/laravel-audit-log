@@ -15,11 +15,15 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
+use SineMacula\Laravel\AuditLog\Delivery\PackageWrite;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\RecordPipeline;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -37,7 +41,9 @@ use Tests\TestCase;
  * the definition, the timing's checks, the contributors, minimising,
  * sealing a manifest, and delivery; the default timing of each kind of record;
  * the refusals that leave the builder usable, a write while a mapper runs among
- * them; and the definitions and contributors it was made with.
+ * them; the definitions and contributors it was made with; and the package
+ * write, the only way a reserved code is written: checked before delivery,
+ * fail-closed and immediate, never a capture, and refused for any other code.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,6 +58,12 @@ final class RecordPipelineTest extends TestCase
 
     /** @var string The code a bulk record is written under. */
     private const string BULK_CODE = 'invoice.bulk_approved';
+
+    /** @var string Why a reserved code without a package write is refused. */
+    private const string RESERVED_CODE = 'A code under the reserved prefix is written only by the package\'s own read path.';
+
+    /** @var string Why a package write that is not fail-closed and immediate, or is a capture, is refused. */
+    private const string LOOSE_PACKAGE_WRITE = 'A package write is written immediately and fail-closed, and is never a capture.';
 
     /** @var string Why a write while a mapper runs is refused. */
     private const string WRITE_WHILE_MAPPING = 'A record is never written while an event mapper runs; the mapper returns its builder and the capture writes it.';
@@ -192,7 +204,10 @@ final class RecordPipelineTest extends TestCase
         self::assertInstanceOf(Attachment::class, $attachment);
         self::assertNotSame($manifest->canonical, $attachment->members);
         self::assertSame($manifest->canonical, RecordFactory::encrypter()->decryptString($attachment->members));
-        self::assertSame(['artifact_id' => $manifest->id, 'digest' => $manifest->digest, 'count' => $manifest->count], $stored->properties['_audit']['manifest'] ?? null);
+        self::assertSame(
+            ['artifact_id' => $manifest->id, 'kind' => 'bulk', 'digest' => $manifest->digest, 'count' => $manifest->count],
+            $stored->properties['_audit']['manifest'] ?? null,
+        );
     }
 
     /**
@@ -208,10 +223,10 @@ final class RecordPipelineTest extends TestCase
         $record = self::pipeline()->write((new PendingRecord)->event(self::BULK_CODE)->withManifest($manifest));
 
         self::assertSame($manifest->id, $record->attachment?->id);
-        self::assertSame(Attachment::KIND_BULK, $record->attachment->kind);
+        self::assertSame('bulk', $record->attachment->kind);
         self::assertSame(3, $record->attachment->memberCount);
         self::assertSame($manifest->digest, $record->attachment->digest);
-        self::assertTrue($record->attachment->describes(['artifact_id' => $manifest->id, 'digest' => $manifest->digest, 'count' => 3]));
+        self::assertTrue($record->attachment->describes(['artifact_id' => $manifest->id, 'kind' => 'bulk', 'digest' => $manifest->digest, 'count' => 3]));
     }
 
     /**
@@ -424,6 +439,166 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
+     * A package write's check runs on the built record before it is delivered,
+     * and the finalised record is handed over once the store has it; the record
+     * takes the package's own definition, dropping what it does not list.
+     *
+     * @return void
+     */
+    public function testAPackageWriteIsAcceptedBeforeDeliveryAndAcknowledgedAfter(): void
+    {
+        $seen    = [];
+        $package = new PackageWrite(
+            function (AuditRecord $record) use (&$seen): void {
+                $seen[] = ['accept', $record->id, $this->fake->count()];
+            },
+            function (FinalisedRecord $finalised) use (&$seen): void {
+                $seen[] = ['acknowledged', $finalised->record->id, $this->fake->count()];
+            },
+        );
+
+        $record = self::pipeline()->write(self::packageRecord()->withProperties(['purpose' => 'read', 'unlisted' => 'dropped']), null, $package);
+
+        self::assertSame([['accept', $record->id, 0], ['acknowledged', $record->id, 1]], $seen);
+        self::assertSame('audit_log.trail_read', $record->event);
+        self::assertSame('audit', $record->category);
+        self::assertSame(1, $record->eventVersion);
+        self::assertSame('read', $record->properties['purpose'] ?? null);
+        self::assertArrayNotHasKey('unlisted', $record->properties ?? []);
+        self::assertSame([$record], $this->fake->recorded());
+    }
+
+    /**
+     * What the check throws propagates as it is, and nothing is delivered or
+     * acknowledged.
+     *
+     * @return void
+     */
+    public function testARefusingAcceptDeliversNothing(): void
+    {
+        $refusal      = AuditReadRefusedException::evidenceAltered();
+        $acknowledged = 0;
+        $package      = new PackageWrite(
+            static function () use ($refusal): never {
+                throw $refusal;
+            },
+            static function () use (&$acknowledged): void {
+                $acknowledged++;
+            },
+        );
+
+        try {
+            self::pipeline()->write(self::packageRecord(), null, $package);
+
+            self::fail('Expected the check\'s refusal to propagate.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame($refusal, $exception);
+        }
+
+        self::assertSame(0, $acknowledged);
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * A package write that is not fail-closed, or not immediate, is refused
+     * before anything is consumed or checked.
+     *
+     * @return void
+     */
+    public function testAPackageWriteMustBeFailClosedAndImmediate(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+        $builders   = [
+            'after commit, by default'       => (new PendingRecord)->forPackage(PackageActivity::TRAIL_READ),
+            'immediate, not fail-closed'     => (new PendingRecord)->forPackage(PackageActivity::TRAIL_READ)->immediately(),
+            'fail-closed, transactional'     => (new PendingRecord)->forPackage(PackageActivity::TRAIL_READ)->transactional()->failClosed(),
+            'after commit, named connection' => (new PendingRecord)->forPackage(PackageActivity::TRAIL_READ)->afterCommit(self::CONNECTION),
+        ];
+
+        $connection->beginTransaction();
+
+        foreach ($builders as $kind => $pending) {
+            $this->assertPackageWriteRefused($pending, self::LOOSE_PACKAGE_WRITE, $kind);
+        }
+
+        $connection->rollBack();
+
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * A package write that comes with a capture's signal is refused, before
+     * anything is consumed, ahead of the refusal of a fail-closed capture.
+     *
+     * @return void
+     */
+    public function testAPackageWriteCannotBeACapture(): void
+    {
+        $this->assertPackageWriteRefused(self::packageRecord(), self::LOOSE_PACKAGE_WRITE, 'a capture', $this->signal());
+
+        self::assertSame(0, $this->fake->count());
+        self::assertSame([], $this->signalled);
+    }
+
+    /**
+     * A reserved code without a package write is refused before anything is
+     * consumed, so naming a package code on a builder the facade made, or on a
+     * captured one, records nothing.
+     *
+     * @return void
+     */
+    public function testAReservedCodeWithoutAPackageWriteIsRefused(): void
+    {
+        $facade = AuditLog::event(self::CODE)->forPackage(PackageActivity::TRAIL_READ)->failClosed();
+
+        try {
+            $facade->record();
+
+            self::fail('Expected a reserved code from the facade to be refused.');
+        } catch (\LogicException $exception) {
+            self::assertSame(self::RESERVED_CODE, $exception->getMessage());
+        }
+
+        self::assertFalse($facade->isConsumed());
+
+        foreach ([null, $this->signal()] as $capture) {
+            $pending = (new PendingRecord)->forPackage(PackageActivity::TRAIL_COUNTED);
+
+            try {
+                self::pipeline(TenantContributor::class)->write($pending, $capture);
+
+                self::fail('Expected a reserved code without a package write to be refused.');
+            } catch (\LogicException $exception) {
+                self::assertSame(self::RESERVED_CODE, $exception->getMessage());
+            }
+
+            self::assertFalse($pending->isConsumed());
+            self::assertNull($pending->snapshot()->tenant);
+        }
+
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * A package write of a code outside the reserved prefix is refused before
+     * anything is consumed, a code that only resembles the prefix included.
+     *
+     * @return void
+     */
+    public function testAPackageWriteOfAnotherCodeIsRefused(): void
+    {
+        foreach ([self::CODE, 'audit_logs.read'] as $code) {
+            $this->assertPackageWriteRefused(
+                (new PendingRecord)->event($code)->failClosed(),
+                'A package write records a code under the reserved prefix, and no other.',
+                $code,
+            );
+        }
+
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
      * Bind the scoped capture state as the provider does, so the pipeline and a
      * test share one mapping window.
      *
@@ -457,6 +632,52 @@ final class RecordPipelineTest extends TestCase
         }
 
         return new RecordPipeline($catalogue, $registry);
+    }
+
+    /**
+     * A fail-closed builder of a read of the trail, as the read path makes one.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
+     */
+    private static function packageRecord(): PendingRecord
+    {
+        return (new PendingRecord)->forPackage(PackageActivity::TRAIL_READ)->failClosed();
+    }
+
+    /**
+     * Assert that writing the builder with a package write, and the signal when
+     * one is given, is refused with the message before anything is consumed,
+     * checked or acknowledged.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
+     * @param  string  $message
+     * @param  string  $kind
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @return void
+     */
+    private function assertPackageWriteRefused(PendingRecord $pending, string $message, string $kind, ?CaptureSignal $capture = null): void
+    {
+        $called  = 0;
+        $package = new PackageWrite(
+            static function () use (&$called): void {
+                $called++;
+            },
+            static function () use (&$called): void {
+                $called++;
+            },
+        );
+
+        try {
+            self::pipeline(TenantContributor::class)->write($pending, $capture, $package);
+
+            self::fail(sprintf('Expected the package write (%s) to be refused.', $kind));
+        } catch (\LogicException $exception) {
+            self::assertSame($message, $exception->getMessage(), $kind);
+        }
+
+        self::assertSame(0, $called, $kind);
+        self::assertFalse($pending->isConsumed(), $kind);
+        self::assertNull($pending->snapshot()->tenant, $kind);
     }
 
     /**

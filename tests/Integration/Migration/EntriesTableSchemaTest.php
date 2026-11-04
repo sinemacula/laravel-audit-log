@@ -247,9 +247,10 @@ final class EntriesTableSchemaTest extends TestCase
 
     /**
      * Each lookup has its own index, its columns in the order the lookup uses
-     * them and named after the table with a short suffix, sealing pages the
-     * entries by the time each was recorded and then its id, and a source's own
-     * record id is unique within the source.
+     * them and named after the table with a short suffix, each lookup of the
+     * trail ending in the time an entry occurred and then its id, sealing pages
+     * the entries by the time each was recorded and then its id, and a source's
+     * own record id is unique within the source.
      *
      * @return void
      */
@@ -262,17 +263,38 @@ final class EntriesTableSchemaTest extends TestCase
         sort($indexes);
 
         self::assertSame([
-            [self::TABLE . '_actor_index', ['actor_type', 'actor_id', 'occurred_at'], false],
-            [self::TABLE . '_category_index', ['category', 'occurred_at'], false],
+            [self::TABLE . '_actor_index', ['actor_type', 'actor_id', 'occurred_at', 'id'], false],
+            [self::TABLE . '_category_index', ['category', 'occurred_at', 'id'], false],
             [self::TABLE . '_correlate_index', ['correlation_id'], false],
-            [self::TABLE . '_event_index', ['event', 'occurred_at'], false],
-            [self::TABLE . '_occurred_index', ['occurred_at'], false],
-            [self::TABLE . '_principal_index', ['principal_type', 'principal_id', 'occurred_at'], false],
+            [self::TABLE . '_event_index', ['event', 'occurred_at', 'id'], false],
+            [self::TABLE . '_occurred_index', ['occurred_at', 'id'], false],
+            [self::TABLE . '_principal_index', ['principal_type', 'principal_id', 'occurred_at', 'id'], false],
             [self::TABLE . '_recorded_index', ['recorded_at', 'id'], false],
             [self::TABLE . '_source_unique', ['source_id', 'source_record_id'], true],
-            [self::TABLE . '_subject_index', ['subject_type', 'subject_id', 'occurred_at'], false],
-            [self::TABLE . '_tenant_index', ['tenant_type', 'tenant_id', 'occurred_at'], false],
+            [self::TABLE . '_subject_index', ['subject_type', 'subject_id', 'occurred_at', 'id'], false],
+            [self::TABLE . '_tenant_index', ['tenant_type', 'tenant_id', 'occurred_at', 'id'], false],
         ], $indexes);
+    }
+
+    /**
+     * No index applies a collation of its own to `id`: each of the eight that
+     * end in it compares the id as the column does, binary on SQLite and with
+     * no collation at all on PostgreSQL, whose `uuid` has none. MySQL keeps no
+     * collation per index; its columns' collation is pinned on its own.
+     *
+     * @return void
+     */
+    public function testNoIndexAppliesACollationToTheId(): void
+    {
+        $collations = match (Schema::getConnection()->getDriverName()) {
+            'sqlite' => self::sqliteIdCollations(),
+            'pgsql'  => self::pgsqlIdCollations(),
+            default  => self::markTestSkipped('MySQL keeps no collation per index column.'),
+        };
+
+        sort($collations);
+
+        self::assertSame(array_fill(0, 8, Schema::getConnection()->getDriverName() === 'sqlite' ? 'BINARY' : '0'), $collations);
     }
 
     /**
@@ -432,6 +454,55 @@ final class EntriesTableSchemaTest extends TestCase
             'hmac'              => str_repeat('a', 64),
             ...$columns,
         ];
+    }
+
+    /**
+     * The collation each secondary index of the table gives `id`, as SQLite
+     * records it for each index's key columns.
+     *
+     * @return list<string>
+     */
+    private static function sqliteIdCollations(): array
+    {
+        $collations = [];
+
+        foreach (Schema::getIndexes(self::TABLE) as $index) {
+            if ($index['primary']) {
+                continue;
+            }
+
+            foreach (DB::select('PRAGMA index_xinfo(' . DB::getPdo()->quote($index['name']) . ')') as $column) {
+                $column = (array) $column;
+
+                if ($column['name'] !== 'id' || (int) $column['key'] !== 1) {
+                    continue;
+                }
+
+                $collations[] = (string) $column['coll'];
+            }
+        }
+
+        return $collations;
+    }
+
+    /**
+     * The collation each secondary index of the table gives `id`, as the oid
+     * PostgreSQL records for each index column, `0` for none.
+     *
+     * @return list<string>
+     */
+    private static function pgsqlIdCollations(): array
+    {
+        $rows = DB::select(
+            'select k.collation from pg_index i'
+            . ' join pg_class t on t.oid = i.indrelid'
+            . ' cross join lateral unnest(i.indkey::int2[], i.indcollation::oid[]) as k(attnum, collation)'
+            . ' join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum'
+            . ' where t.relname = ? and t.relnamespace = current_schema()::regnamespace and a.attname = ? and not i.indisprimary',
+            [self::TABLE, 'id'],
+        );
+
+        return array_values(array_map(static fn (object $row): string => (string) ((array) $row)['collation'], $rows));
     }
 
     /**

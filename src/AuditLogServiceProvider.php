@@ -29,20 +29,24 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use SineMacula\Laravel\AuditLog\Access\DenyAllPolicy;
 use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
 use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
 use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
+use SineMacula\Laravel\AuditLog\Console\ExportCommand;
 use SineMacula\Laravel\AuditLog\Console\IntegritySchedule;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
 use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
+use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
@@ -58,7 +62,10 @@ use SineMacula\Laravel\AuditLog\Listeners\RecordLaravelAuthEvent;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
+use SineMacula\Laravel\AuditLog\Querying\Describer;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
+use SineMacula\Laravel\AuditLog\Runtime\ReadGuard;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
@@ -69,14 +76,17 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
  * Package service provider: registers the package's configuration, its clock,
  * integrity settings, key ring, store and field encrypter, the anchor seals are
  * kept in and the prune ledger, the recorder with its catalogue, contributors,
- * event mappers and model watcher, the scoped runtime and capture state, the
- * listeners that track execution frames and carry context into jobs, the
- * listeners that capture Laravel's authentication events and Gate denials, the
- * package's own event codes, the global middleware that enters an HTTP frame,
- * its publishing tags (the configuration and the migrations, the artifacts
- * table's among them, which it never loads itself) and the `audit-log:check`,
- * `audit-log:drain`, `audit-log:replay`, `audit-log:seal` and
- * `audit-log:verify` console commands. It adds no route.
+ * event mappers and model watcher, the access policy that denies every viewer
+ * until the application binds its own, the field reader that shows an encrypted
+ * value as sealed, the scoped runtime and capture state with the read guard
+ * among it, the listeners that track execution frames and carry context into
+ * jobs, the listeners that capture Laravel's authentication events and Gate
+ * denials, the package's own event codes, the global middleware that enters an
+ * HTTP frame, the package's translations under the `audit-log` namespace, its
+ * publishing tags (the configuration, the migrations, the artifacts table's
+ * among them, which it never loads itself, and the translations) and the
+ * `audit-log:check`, `audit-log:drain`, `audit-log:export`, `audit-log:replay`,
+ * `audit-log:seal` and `audit-log:verify` console commands. It adds no route.
  *
  * In the console it schedules sealing, the sweep and a strict verification,
  * each of which its schedule setting can turn off, once the application
@@ -86,12 +96,16 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
  * Binding `AuditStore` is the only seam for where records go: there is no
  * manager and no driver registry. The delivery classes are autowired for each
  * capture, so none outlives a request. The anchor is made from the settings on
- * each resolution, so a changed setting takes effect without a restart.
+ * each resolution, so a changed setting takes effect without a restart. The
+ * trail, the describer and the classes that read the trail are autowired and
+ * never shared, so each read resolves what it reads with afresh.
  *
  * The package's own codes are defined while it boots, so an application or an
- * integration that defines one of them differently is refused at boot. The
+ * integration that defines one of them differently is refused at boot; the
+ * codes of its own reads are in the catalogue from the moment it is made. The
  * listener that routes mapped events is added by the first mapping, never by
- * the provider, so an application that maps nothing pays nothing for it.
+ * the provider, so an application that maps nothing pays nothing for it. The
+ * translations are read only once the translator is resolved.
  *
  * Registration of definitions, contributors, event mappers and watched models
  * is frozen once the application has booted, so a long-lived worker registers
@@ -127,8 +141,10 @@ final class AuditLogServiceProvider extends ServiceProvider
      * encrypter bound earlier is never replaced by the package's (an
      * `AuditStore` by `DatabaseAuditStore`, a `Clock` by `SystemClock`, a
      * `FieldEncrypter` by `NoFieldEncrypter`, a `PruneLedger` by
-     * `NullPruneLedger`, a `CheckpointAnchor` by the configured anchor), and
-     * one made after replaces the default, as any later binding does.
+     * `NullPruneLedger`, an `AuditAccessPolicy` by `DenyAllPolicy`, a
+     * `FieldReader` by `SealedFieldReader`, a `CheckpointAnchor` by the
+     * configured anchor), and one made after replaces the default, as any later
+     * binding does.
      *
      * @return void
      */
@@ -146,6 +162,8 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->singletonIf(AuditStore::class, DatabaseAuditStore::class);
         $this->app->singletonIf(FieldEncrypter::class, NoFieldEncrypter::class);
         $this->app->singletonIf(PruneLedger::class, NullPruneLedger::class);
+        $this->app->singletonIf(AuditAccessPolicy::class, DenyAllPolicy::class);
+        $this->app->singletonIf(FieldReader::class, SealedFieldReader::class);
         $this->app->bindIf(CheckpointAnchor::class, static fn (Application $app): CheckpointAnchor => $app->make(AnchorFactory::class)->make());
         $this->app->singletonIf(EventCatalogue::class);
         $this->app->singletonIf(ContributorRegistry::class);
@@ -156,6 +174,7 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->scopedIf(RequestIdentity::class);
         $this->app->scopedIf(ReportLatch::class);
         $this->app->scopedIf(WriteGuard::class);
+        $this->app->scopedIf(ReadGuard::class);
         $this->app->scopedIf(CommitQueue::class);
         $this->app->scopedIf(CapturedEvents::class);
     }
@@ -167,6 +186,7 @@ final class AuditLogServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->registerTranslations();
         $this->registerPublishing();
         $this->registerCommands();
         $this->registerSchedule();
@@ -178,10 +198,12 @@ final class AuditLogServiceProvider extends ServiceProvider
 
     /**
      * Register the configuration file for publishing under the
-     * `audit-log-config` tag, and the migrations under the
-     * `audit-log-migrations` tag, when running in the console. The migrations
-     * are published only, never loaded from the package, so the application
-     * owns them and runs them on the storage connection.
+     * `audit-log-config` tag, the migrations under the `audit-log-migrations`
+     * tag and the translations under the `audit-log-lang` tag, when running in
+     * the console. The migrations are published only, never loaded from the
+     * package, so the application owns them and runs them on the storage
+     * connection; the translations are published to the vendor directory the
+     * translator reads an application's overrides from.
      *
      * @return void
      */
@@ -202,6 +224,21 @@ final class AuditLogServiceProvider extends ServiceProvider
         }
 
         $this->publishes($migrations, 'audit-log-migrations');
+
+        $this->publishes([
+            dirname(__DIR__) . '/lang' => lang_path('vendor/audit-log'),
+        ], 'audit-log-lang');
+    }
+
+    /**
+     * Load the package's translations under the `audit-log` namespace once the
+     * translator is resolved, so booting reads none of them.
+     *
+     * @return void
+     */
+    protected function registerTranslations(): void
+    {
+        $this->loadTranslationsFrom(dirname(__DIR__) . '/lang', Describer::NAMESPACE);
     }
 
     /**
@@ -215,7 +252,7 @@ final class AuditLogServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->commands([CheckCommand::class, DrainCommand::class, ReplayCommand::class, SealCommand::class, VerifyCommand::class]);
+        $this->commands([CheckCommand::class, DrainCommand::class, ExportCommand::class, ReplayCommand::class, SealCommand::class, VerifyCommand::class]);
     }
 
     /**
