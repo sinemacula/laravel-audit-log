@@ -38,10 +38,12 @@ return [
     | lower-case letters, digits and underscores that does not start with a
     | digit, so every index the migration names after it fits PostgreSQL's 63
     | characters, the connection's table prefix included. `artifacts_table`
-    | (`audit_log_artifacts` by default) holds each bulk operation's manifest
-    | beside its entry, on the storage connection, with the same grammar. Any
-    | other value fails closed when it is read, and `audit-log:check` reports
-    | it. Set both before migrating: changing one later moves no table.
+    | (`audit_log_artifacts` by default) holds each entry's artifact beside its
+    | entry, on the storage connection, with the same grammar: a bulk
+    | operation's subjects, a read's disclosure, which every audited read of the
+    | trail writes, and an export's manifest. Any other value fails closed when
+    | it is read, and `audit-log:check` reports it. Set both before migrating:
+    | changing one later moves no table.
     |
     */
 
@@ -261,6 +263,41 @@ return [
             'max_members' => env('AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS', 100000),
             'max_bytes'   => env('AUDIT_LOG_CAPTURE_BULK_MAX_BYTES', 4194304),
         ],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Reading
+    |---------------------------------------------------------------------------
+    |
+    | The most entries a page of the trail may ask for. `max_per_page` is from 1
+    | to 500 and 100 by default; a page size above it is refused as a
+    | programming error, before any query, and a page that names no size holds
+    | 50 entries, or `max_per_page` when that is fewer. A malformed value fails
+    | closed when a page is read, and `audit-log:check` reports it. It may
+    | change on any deploy.
+    |
+    */
+
+    'read' => [
+        'max_per_page' => env('AUDIT_LOG_READ_MAX_PER_PAGE', 100),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Export
+    |---------------------------------------------------------------------------
+    |
+    | How many entries an export reads per statement inside its snapshot.
+    | `chunk` is from 100 to 10000 and 1000 by default; memory grows with it,
+    | never with the export's size. A malformed value fails closed when an
+    | export runs, before any query or record, and `audit-log:check` reports
+    | it. It may change on any deploy.
+    |
+    */
+
+    'export' => [
+        'chunk' => env('AUDIT_LOG_EXPORT_CHUNK', 1000),
     ],
 
     /*

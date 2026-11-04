@@ -56,12 +56,22 @@ never an edit of the old one. What none of this promises is in `threat-model.md`
   signed under a derived key cannot yet be carried into it.
 - A row's signature proves that row alone: it shows neither that every entry is present nor that none was deleted. That
   is what a seal adds, for the rows it holds.
-- A bulk entry signs `properties._audit.manifest`, its artifact's `artifact_id`, `digest` and `count`, and its artifact
-  is a row of `entries.artifacts_table` that no signature of its own covers: the signed descriptor binds it. Verification
-  checks that the artifact is stored under the signed id, names the entry, is of kind `bulk`, stores the signed count and
-  digest, and that its members decrypt to exactly a canonical form, each member once and in canonical order, as many as
-  the signed count, whose SHA-256 is the signed digest. A signed descriptor cannot be malformed without the key, so one
-  that is not exactly those three fields is a mismatch.
+- An entry with an artifact signs `properties._audit.manifest`, its artifact's `artifact_id`, `kind`, `digest` and
+  `count`, and its artifact is a row of `entries.artifacts_table` that no signature of its own covers: the signed
+  descriptor binds it. The artifact is of one of three kinds: `bulk`, a bulk operation's subjects, at least one; and
+  `disclosure`, the evidence of what a read of the trail returned, and `export`, an export's manifest, each of zero or
+  more members. Verification checks that the artifact is stored under the signed id, names the entry, is of the signed
+  kind, stores the signed count and digest, and that its members decrypt to exactly a canonical form of that kind, read
+  by that kind's own versioned reader, as many as the signed count, whose SHA-256 is the signed digest. A signed
+  descriptor cannot be malformed without the key, so one that is not exactly those four fields, of a known kind and a
+  count it allows, is `manifest_malformed`.
+- Each way an artifact can differ from its descriptor is its own finding, all `tampered` but `manifest_unreadable`:
+  `manifest_missing` when no artifact is stored, `manifest_swapped` when the artifact is stored under another id or
+  names another entry, `manifest_wrong_kind` when it is stored as another kind, `manifest_mismatch` when it stores
+  another count or digest, `manifest_malformed` when its members decrypt to no canonical form of the signed kind,
+  another kind's among them, `manifest_tampered` when they decrypt to a canonical form of that kind other than the one
+  signed, and `manifest_unreadable` when they do not decrypt. The columns are checked in that order, and the members
+  only when the columns are the signed ones.
 - Only an entry that verifies is trusted for its descriptor, so a sealed entry's manifest is checked with its seal and an
   unsealed one once it is sealed, as its entry's own signature is: until then a bundle's artifact is checked by nothing.
   An entry that fails its own check, or is missing, has no descriptor to check.
@@ -311,11 +321,13 @@ writes each line as one JSON object, the summary last. Nothing is accumulated, s
 - The manifests of a segment's verified entries are then checked together by `Integrity\ManifestVerifier`, never one
   statement per entry: the artifacts of 100 entries at a time (`ManifestVerifier::ENTRY_BATCH`) are read in one
   statement of their columns and their members' stored length, found by their entry or by the signed artifact id, so an
-  artifact moved to another entry is a mismatch rather than missing, and the members of those that match are read in
+  artifact moved to another entry is swapped rather than missing, and the members of those that match are read in
   sub-batches of at most 64 MiB of stored bytes (`ManifestVerifier::MEMBERS_BATCH_BYTES`), an artifact larger than that
-  alone. A segment with no bundle costs no statement more. A missing artifact is `manifest_missing`, any other
-  difference `manifest_mismatch`, and members that do not decrypt `manifest_unreadable`; each is reported at the
-  earliest entry, bytewise.
+  alone. A segment with no artifact costs no statement more. Each artifact, of whichever kind, is classified by
+  `Integrity\ArtifactInspector`: a missing artifact is `manifest_missing`, one under another id or naming another entry
+  `manifest_swapped`, one of another kind `manifest_wrong_kind`, another count or digest `manifest_mismatch`, members
+  that are no canonical form of the signed kind `manifest_malformed`, another canonical form `manifest_tampered`, and
+  members that do not decrypt `manifest_unreadable`; each is reported at the earliest entry, bytewise.
 - Anchoring comes from the anchor, never from the receipt. When discovery gave the anchor's head, the walk reaches it
   and the local seal there has the head's digest, the head settles every seal's anchoring with no further call: a seal
   up to the head is `anchored`, since the head's digest commits to the chain the walk checks link by link, and one after
@@ -386,7 +398,11 @@ writes each line as one JSON object, the summary last. Nothing is accumulated, s
 | `member_hmac`          | `tampered`     | An entry's stored HMAC is not the one its seal recorded                           |
 | `entry_hmac`           | `tampered`     | An entry's HMAC does not match its content                                        |
 | `manifest_missing`     | `tampered`     | A verified entry's manifest names an artifact that is not stored                  |
-| `manifest_mismatch`    | `tampered`     | An artifact is not the one its manifest signed, or its members are not that list  |
+| `manifest_mismatch`    | `tampered`     | An artifact stores another count or digest than its manifest signed               |
+| `manifest_swapped`     | `tampered`     | An artifact is stored under another id than signed, or names another entry        |
+| `manifest_wrong_kind`  | `tampered`     | An artifact is stored as another kind than its manifest signed                    |
+| `manifest_malformed`   | `tampered`     | A manifest is no descriptor, or its members are no canonical form of its kind     |
+| `manifest_tampered`    | `tampered`     | An artifact's members are a canonical form of its kind other than the one signed  |
 | `prune_key`            | `unverifiable` | A prune record is signed under a key the ring does not hold                       |
 | `entry_malformed`      | `unverifiable` | An entry is not a well-formed record, so it cannot be verified or sealed          |
 | `entry_key`            | `unverifiable` | An entry is signed under a key the ring does not hold                             |
@@ -475,7 +491,8 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `src/Integrity/Anchors/AnchorConflictException.php`.
 - `src/Integrity/Verifier.php`: `verify()`, `SEAL_PAGE`, `ANCHOR_GRACE_SECONDS`; `src/Integrity/SegmentVerifier.php`:
   `verify()`, `boundary()`; `src/Integrity/ManifestVerifier.php`: `descriptorOf()`, `findings()`, `ENTRY_BATCH`,
-  `MEMBERS_BATCH_BYTES`; `src/Integrity/SegmentReport.php`, `src/Integrity/RunFinding.php`,
+  `MEMBERS_BATCH_BYTES`; `src/Integrity/ArtifactInspector.php`: `isDescriptor()`, `columnsFinding()`,
+  `plaintextFinding()`; `src/Integrity/SegmentReport.php`, `src/Integrity/RunFinding.php`,
   `src/Integrity/VerificationRange.php`, `src/Integrity/VerificationContext.php`, `src/Integrity/VerificationTally.php`,
   `src/Integrity/VerificationSummary.php`.
 - `src/Integrity/Enums/IntegrityStatus.php`, `src/Integrity/Enums/AnchorStatus.php`, `src/Integrity/Enums/Finding.php`,
@@ -586,15 +603,19 @@ Pruning ships with lifecycle; what it must do to keep the log verifiable is fixe
   `testOneStatementReadsTheMembersAndTheirEntries`, `testTheMemberOrderIsSortedNotTrusted`,
   `testASegmentWithAValidBundleIsValid`, `testATamperedArtifactMakesTheSegmentTampered`,
   `testAnUnreadableArtifactMakesTheSegmentUnverifiable`, `testAMemberThatFailsItsHmacIsNotTrustedForItsDescriptor`,
-  `testAPrunedBundleEntryNeedsNoArtifact`
+  `testAPrunedBundleEntryNeedsNoArtifact`, `testEachNewArtifactFindingMakesTheSegmentTampered`
+- `tests/Unit/Integrity/ArtifactInspectorTest.php` `testIsDescriptor`, `testEachColumnsFinding`,
+  `testEachPlaintextFinding`
 - `tests/Feature/Integrity/ManifestVerifierTest.php` `testAMissingArtifactIsManifestMissing`,
-  `testAnArtifactOfAnotherEntryIsManifestMismatch`, `testArtifactsSwappedBetweenEntriesAreManifestMismatch`,
-  `testMembersOutOfOrderAreManifestMismatch`, `testADuplicateMemberIsManifestMismatch`,
-  `testFewerMembersThanSignedAreManifestMismatch`, `testUndecryptableMembersAreManifestUnreadable`,
-  `testAPreviousApplicationKeyStillOpensTheMembers`, `testAMalformedDescriptorIsManifestMismatch`,
-  `testAnArtifactGoneWithItsEntryIsNoFinding`, `testManifestsAreReadInBatches`, `testMembersAreFetchedWithinTheByteBatch`
+  `testAnArtifactOfAnotherEntryIsManifestSwapped`, `testASwappedArtifactIsSwapped`, `testAWrongKindIsWrongKind`,
+  `testAMalformedPlaintextIsMalformed`, `testATamperedPlaintextIsTampered`, `testAColumnMismatchIsAMismatch`,
+  `testEachKindOfArtifactIsChecked`, `testMembersOutOfOrderAreMalformed`,
+  `testUndecryptableMembersAreManifestUnreadable`, `testAPreviousApplicationKeyStillOpensTheMembers`,
+  `testAMalformedDescriptorIsMalformed`, `testAnArtifactGoneWithItsEntryIsNoFinding`, `testManifestsAreReadInBatches`,
+  `testMembersAreFetchedWithinTheByteBatch`
 - `tests/Integration/Integrity/ManifestVerificationEnginesTest.php` `testAnUnsealedBundleIsNotYetChecked`,
-  `testTheMaximumManifestVerifies`
+  `testTheMaximumManifestVerifies`, `testASwappedArtifactIsFoundOnEveryEngine`,
+  `testADisclosureAndAnExportVerifyOnEveryEngine`
 - `tests/Performance/VerifyQueryBudgetTest.php` `testManifestChecksAddTwoQueriesPerBatch`,
   `testASegmentWithoutBundlesAddsNoQuery`
 - `tests/Feature/Integrity/VerifierTest.php` `testADeletedGenesisSealIsTampered`, `testAMissingBoundarySealIsAGap`,

@@ -11,6 +11,7 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Privacy\ByteBudget;
 use SineMacula\Laravel\AuditLog\Privacy\OmissionLog;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 
 /**
  * Unit tests for the byte budget: the order keys are omitted in, what is never
@@ -34,9 +35,10 @@ final class ByteBudgetTest extends TestCase
     /** @var int The least budget the settings accept for the context. */
     private const int CONTEXT_MINIMUM = 1024;
 
-    /** @var array{artifact_id: string, digest: string, count: int} The largest manifest descriptor: a UUID, a SHA-256 and the greatest member cap the settings allow. */
+    /** @var array{artifact_id: string, kind: string, digest: string, count: int} The largest manifest descriptor: a UUID, the longest kind, a SHA-256 and the greatest member cap the settings allow. */
     private const array LARGEST_MANIFEST = [
         'artifact_id' => 'ffffffff-ffff-7fff-bfff-ffffffffffff',
+        'kind'        => 'disclosure',
         'digest'      => 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
         'count'       => 1000000,
     ];
@@ -535,7 +537,7 @@ final class ByteBudgetTest extends TestCase
     /**
      * The reserve holds the largest metadata there can be, measured rather than
      * assumed: a full hash, the largest manifest descriptor and 32 paths of 128
-     * bytes under the largest count, with a comma, which is 4515 bytes.
+     * bytes under the largest count, with a comma, which is 4535 bytes.
      *
      * @return void
      *
@@ -547,16 +549,17 @@ final class ByteBudgetTest extends TestCase
 
         $metadata = ['_audit' => ['identifier_hash' => self::HASH, 'manifest' => self::LARGEST_MANIFEST, 'omitted' => ['count' => PHP_INT_MAX, 'paths' => $paths]]];
 
-        self::assertSame(4515, strlen(self::encoded($metadata)) + 1);
+        self::assertSame(4535, strlen(self::encoded($metadata)) + 1);
         self::assertSame(4600, ByteBudget::METADATA_RESERVE_BYTES);
         self::assertLessThanOrEqual(ByteBudget::METADATA_RESERVE_BYTES, strlen(self::encoded($metadata)) + 1);
     }
 
     /**
-     * The largest manifest descriptor, measured: its key, a lower-case UUID, a
-     * hex SHA-256 and the greatest count the settings allow cost 158 bytes with
-     * a comma, which the reserve holds beside the rest of the largest metadata,
-     * and still holds should a count reach the largest integer.
+     * The largest manifest descriptor, measured: its key, a lower-case UUID,
+     * the longest kind, `disclosure`, a hex SHA-256 and the greatest count the
+     * settings allow cost 178 bytes with a comma, which the reserve holds
+     * beside the rest of the largest metadata, and still holds should a count
+     * reach the largest integer.
      *
      * @return void
      *
@@ -570,7 +573,11 @@ final class ByteBudgetTest extends TestCase
         $without = strlen(self::encoded(['_audit' => $rest]));
         $with    = strlen(self::encoded(['_audit' => ['identifier_hash' => self::HASH, 'manifest' => self::LARGEST_MANIFEST] + $rest]));
 
-        self::assertSame(158, $with - $without);
+        self::assertSame(178, $with - $without);
+        self::assertSame(
+            max(array_map(static fn (ArtifactKind $kind): int => strlen($kind->value), ArtifactKind::cases())),
+            strlen(self::LARGEST_MANIFEST['kind']),
+        );
 
         $endless = strlen(self::encoded(['_audit' => ['identifier_hash' => self::HASH, 'manifest' => ['count' => PHP_INT_MAX] + self::LARGEST_MANIFEST] + $rest]));
 

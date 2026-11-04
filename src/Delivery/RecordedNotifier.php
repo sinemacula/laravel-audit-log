@@ -9,6 +9,8 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
+use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Runtime\ReadGuard;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
@@ -34,6 +36,16 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
  * it. A failure on a connection with no transaction open ended nothing, so it
  * is contained whatever else is open.
  *
+ * A record of the package's own, under the reserved `audit_log.` prefix, is
+ * dispatched inside the read guard, wherever it is delivered: synchronously, at
+ * a drain or at a replay. A listener of a read record cannot read the trail
+ * again, so a read never records a read whose listeners read once more. Every
+ * other code is dispatched outside it, so a listener of the application's own
+ * records may read. One limit no guard can reach: a queued listener runs later
+ * in a worker, outside every window, so a queued listener of an `audit_log.`
+ * code that reads the trail makes one more read record, and one more job, each
+ * time it runs. A listener that reads the trail ignores `audit_log.` codes.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -53,10 +65,11 @@ final readonly class RecordedNotifier
     ) {}
 
     /**
-     * Dispatch `AuditRecorded` for the record, containing a listener's failure
-     * unless it ended a transaction on one of the connections named as open,
-     * which were read before the write, since Laravel forgets an open
-     * transaction when its connection is lost.
+     * Dispatch `AuditRecorded` for the record, inside the read guard for a
+     * package code, containing a listener's failure unless it ended a
+     * transaction on one of the connections named as open, which were read
+     * before the write, since Laravel forgets an open transaction when its
+     * connection is lost.
      *
      * @param  string  $id
      * @param  string  $code
@@ -70,7 +83,7 @@ final readonly class RecordedNotifier
     public function notify(string $id, string $code, string $category, array $openTransactions = []): void
     {
         try {
-            $this->container->make(Dispatcher::class)->dispatch(new AuditRecorded($id, $code, $category));
+            $this->dispatch(new AuditRecorded($id, $code, $category));
         } catch (\Throwable $exception) {
             $fatal = self::fatalOf($exception, $id, $code, $openTransactions) ?? $this->report($exception, $id, $code, $openTransactions);
 
@@ -78,6 +91,31 @@ final readonly class RecordedNotifier
                 throw $fatal;
             }
         }
+    }
+
+    /**
+     * Dispatch the event, inside the read guard when it names a package code,
+     * so the guard closes however a listener ends.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Events\AuditRecorded  $event
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    private function dispatch(#[\SensitiveParameter] AuditRecorded $event): void
+    {
+        $dispatcher = $this->container->make(Dispatcher::class);
+
+        if (!str_starts_with($event->code, EventCode::RESERVED_PREFIX)) {
+
+            $dispatcher->dispatch($event);
+
+            return;
+        }
+
+        $this->container->make(ReadGuard::class)->during(static function () use ($dispatcher, $event): void {
+            $dispatcher->dispatch($event);
+        });
     }
 
     /**

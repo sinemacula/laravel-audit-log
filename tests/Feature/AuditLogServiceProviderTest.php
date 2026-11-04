@@ -45,6 +45,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Access\DenyAllPolicy;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
@@ -53,13 +54,16 @@ use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
+use SineMacula\Laravel\AuditLog\Console\ExportCommand;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
 use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
+use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
@@ -79,10 +83,15 @@ use SineMacula\Laravel\AuditLog\Listeners\RecordModelChange;
 use SineMacula\Laravel\AuditLog\Listeners\TrackCommandFrames;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
+use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
+use SineMacula\Laravel\AuditLog\Querying\Describer;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
+use SineMacula\Laravel\AuditLog\Runtime\ReadGuard;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
@@ -99,9 +108,10 @@ use Tests\TestCase;
 /**
  * Feature tests for the package AuditLogServiceProvider: the configuration it
  * merges, the defaults it binds, the files it publishes under each tag, the
- * migrations it never loads, the commands it registers and the runs it
- * schedules in the console only, the listeners and middleware it adds, the
- * package's codes it defines, and that it freezes registration at boot.
+ * migrations it never loads, the translations it loads without reading them at
+ * boot, the commands it registers and the runs it schedules in the console
+ * only, the listeners and middleware it adds, the package's codes it defines,
+ * and that it freezes registration at boot.
  *
  * The class runs no migration of its own, so the migrator's paths are what the
  * provider leaves there.
@@ -121,6 +131,9 @@ final class AuditLogServiceProviderTest extends TestCase
 
     /** @var string The tag the migrations are published under. */
     private const string MIGRATIONS_TAG = 'audit-log-migrations';
+
+    /** @var string The tag the translations are published under. */
+    private const string LANG_TAG = 'audit-log-lang';
 
     /** @var list<string> File names of every shipped migration, in the order they run. */
     private const array SHIPPED_MIGRATIONS = [
@@ -297,6 +310,17 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * Running in the console, as a test does, the export command is there.
+     *
+     * @return void
+     */
+    public function testTheExportCommandIsRegistered(): void
+    {
+        self::assertArrayHasKey('audit-log:export', Artisan::all());
+        self::assertInstanceOf(ExportCommand::class, Artisan::all()['audit-log:export']);
+    }
+
+    /**
      * Outside the console no command is registered.
      *
      * @return void
@@ -331,6 +355,8 @@ final class AuditLogServiceProviderTest extends TestCase
             'the store'              => [AuditStore::class, DatabaseAuditStore::class],
             'the field encrypter'    => [FieldEncrypter::class, NoFieldEncrypter::class],
             'the prune ledger'       => [PruneLedger::class, NullPruneLedger::class],
+            'the access policy'      => [AuditAccessPolicy::class, DenyAllPolicy::class],
+            'the field reader'       => [FieldReader::class, SealedFieldReader::class],
             'the catalogue'          => [EventCatalogue::class, EventCatalogue::class],
             'the contributors'       => [ContributorRegistry::class, ContributorRegistry::class],
             'the event mappers'      => [MapperRegistry::class, MapperRegistry::class],
@@ -496,8 +522,42 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * The trail and the describer are never shared: each resolution is a new
+     * one, so nothing a read resolves outlives it.
+     *
+     * @return void
+     */
+    public function testTheReadPathIsNeverShared(): void
+    {
+        self::assertNotSame(app(AuditTrail::class), app(AuditTrail::class));
+        self::assertNotSame(app(Describer::class), app(Describer::class));
+    }
+
+    /**
+     * A policy and a field reader the application bound before the provider
+     * registers are kept, and the provider's defaults never replace them.
+     *
+     * @return void
+     */
+    public function testAnEarlierPolicyAndFieldReaderAreKept(): void
+    {
+        $policy = new DenyAllPolicy;
+        $reader = new SealedFieldReader;
+
+        $this->app?->instance(AuditAccessPolicy::class, $policy);
+        $this->app?->instance(FieldReader::class, $reader);
+
+        (new AuditLogServiceProvider($this->app))->register();
+
+        self::assertSame($policy, app(AuditAccessPolicy::class));
+        self::assertSame($reader, app(FieldReader::class));
+    }
+
+    /**
      * The runtime state dies with its scope: forgetting scoped instances gives
-     * new frames and a new identity, as Octane and a queue worker do.
+     * new frames and a new identity, as Octane and a queue worker do. Within a
+     * scope each is one instance, so a read guard opened by one class is the
+     * one another class asks, and could never be a fresh, inactive one.
      *
      * @return void
      */
@@ -507,9 +567,12 @@ final class AuditLogServiceProviderTest extends TestCase
         $identity = app(RequestIdentity::class);
         $latch    = app(ReportLatch::class);
         $guard    = app(WriteGuard::class);
+        $reads    = app(ReadGuard::class);
         $queue    = app(CommitQueue::class);
 
         self::assertSame($latch, app(ReportLatch::class));
+        self::assertSame($reads, app(ReadGuard::class));
+        self::assertTrue($reads->during(static fn (): bool => app(ReadGuard::class)->isActive()));
 
         $this->app?->forgetScopedInstances();
 
@@ -517,6 +580,7 @@ final class AuditLogServiceProviderTest extends TestCase
         self::assertNotSame($identity, app(RequestIdentity::class));
         self::assertNotSame($latch, app(ReportLatch::class));
         self::assertNotSame($guard, app(WriteGuard::class));
+        self::assertNotSame($reads, app(ReadGuard::class));
         self::assertNotSame($queue, app(CommitQueue::class));
     }
 
@@ -765,6 +829,70 @@ final class AuditLogServiceProviderTest extends TestCase
 
         foreach ($paths as $path) {
             self::assertStringStartsNotWith($source, (string) realpath($path));
+        }
+    }
+
+    /**
+     * The package's translations are loaded under their namespace, so a code's
+     * title is found through the translator, a code of the package's own reads
+     * included.
+     *
+     * @return void
+     */
+    public function testTheTranslationsAreLoaded(): void
+    {
+        self::assertSame('Signed in', __('audit-log::codes.authentication.signed_in'));
+        self::assertSame('Audit trail exported', __('audit-log::codes.audit_log.trail_exported'));
+    }
+
+    /**
+     * The translations tag publishes the package's language directory to the
+     * vendor directory the translator reads an application's overrides from.
+     *
+     * @return void
+     */
+    public function testTheTranslationsArePublishedUnderTheirTag(): void
+    {
+        $paths = ServiceProvider::pathsToPublish(AuditLogServiceProvider::class, self::LANG_TAG);
+
+        self::assertCount(1, $paths);
+        self::assertSame(realpath(__DIR__ . '/../../lang'), realpath((string) array_key_first($paths)));
+        self::assertSame(lang_path('vendor/audit-log'), array_values($paths)[0]);
+        self::assertContains(self::LANG_TAG, ServiceProvider::publishableGroups());
+    }
+
+    /**
+     * Booting reads no translation: the translator is not resolved once the
+     * application has booted, nor by booting the provider again, and the
+     * package's translations are added when it is.
+     *
+     * @return void
+     */
+    public function testBootingReadsNoTranslation(): void
+    {
+        self::assertFalse($this->app?->resolved('translator'));
+
+        (new AuditLogServiceProvider($this->app))->boot();
+
+        self::assertFalse($this->app->resolved('translator'));
+        self::assertSame('Signed in', __('audit-log::codes.authentication.signed_in'));
+    }
+
+    /**
+     * Every code of the package's own reads is in the catalogue from the start,
+     * as its definition says, without the provider defining it.
+     *
+     * @return void
+     */
+    public function testThePackageReadCodesAreThereFromTheStart(): void
+    {
+        $catalogue = app(EventCatalogue::class);
+
+        foreach (PackageActivity::cases() as $activity) {
+            $code = EventCode::package($activity);
+
+            self::assertTrue($catalogue->isRegistered($code), "{$activity->value} is not defined.");
+            self::assertTrue($catalogue->definitionFor($code)->equals($activity->definition()), "{$activity->value} is defined differently.");
         }
     }
 
@@ -1097,7 +1225,7 @@ final class AuditLogServiceProviderTest extends TestCase
             /** @var array<string, array<string, string>> $value */
             $value = $paths->getValue();
 
-            unset($value[AuditLogServiceProvider::class], $value[self::CONFIG_TAG], $value[self::MIGRATIONS_TAG]);
+            unset($value[AuditLogServiceProvider::class], $value[self::CONFIG_TAG], $value[self::MIGRATIONS_TAG], $value[self::LANG_TAG]);
 
             $paths->setValue(null, $value);
         }

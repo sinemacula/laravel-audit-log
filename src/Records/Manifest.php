@@ -6,22 +6,28 @@ namespace SineMacula\Laravel\AuditLog\Records;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 
 /**
- * What a bulk operation affected, in its canonical form and bounded, before it
- * is sealed: each subject once, as the type and id pair a reference stores.
+ * What an artifact holds before it is sealed, in its canonical form: a bulk
+ * operation's subjects, a disclosure's evidence of what a read returned, or an
+ * export's manifest. Its kind says which, its digest is a lower-case hex
+ * SHA-256 of the canonical bytes, and its id is a lower-case UUID version 7
+ * made once, so a retry, a drain and a replay of its record carry the same
+ * artifact.
  *
- * The canonical form is the JSON list of `[type, id]` pairs, de-duplicated on
- * the exact pair and sorted bytewise on the type and then on the id, encoded
- * with fixed flags, so the same subjects in any order and with any repetition
- * give the same bytes and the same digest, a lower-case hex SHA-256 of them.
- * Its id is a lower-case UUID version 7 made once, so a retry, a drain and a
- * replay of its record carry the same artifact.
+ * A bulk operation's canonical form is built here: the JSON list of `[type,
+ * id]` pairs, de-duplicated on the exact pair and sorted bytewise on the type
+ * and then on the id, encoded with fixed flags, so the same subjects in any
+ * order and with any repetition give the same bytes and the same digest. It
+ * names at least one subject. Nothing is ever truncated: more unique subjects
+ * than the cap, a canonical form over the byte bound, or more subjects read
+ * than four times the cap, duplicates included, is refused. The bytes are
+ * counted as the subjects arrive, so an endless or oversize input stops early.
  *
- * Nothing is ever truncated: more unique subjects than the cap, a canonical
- * form over the byte bound, or more subjects read than four times the cap,
- * duplicates included, is refused. The bytes are counted as the subjects
- * arrive, so an endless or oversize input stops early.
+ * A disclosure's and an export's canonical forms are built by their own
+ * versioned builders and given here as they are, with their count, which may be
+ * zero.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,9 +36,6 @@ use Illuminate\Support\Str;
  */
 final readonly class Manifest
 {
-    /** @var string The kind of artifact a manifest is sealed as. */
-    public const string KIND = 'bulk';
-
     /** @var int How many subjects may be read for each one the cap allows, duplicates included. */
     public const int MAX_INPUT_FACTOR = 4;
 
@@ -52,6 +55,7 @@ final readonly class Manifest
      * Constructor.
      *
      * @param  string  $id
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  int  $count
      * @param  string  $digest
      * @param  string  $canonical
@@ -63,18 +67,29 @@ final readonly class Manifest
         /** The artifact's id: a lower-case UUID version 7, made once. */
         public string $id,
 
-        /** How many members the manifest holds, each once, at least one. */
+        /** What the artifact holds: a bulk operation's subjects, a disclosure or an export's manifest. */
+        public ArtifactKind $kind,
+
+        /** How many members the manifest holds, each once: at least one for a bulk operation, and never fewer than none. */
         public int $count,
 
         /** Lower-case hex SHA-256 of the canonical form. */
         public string $digest,
 
-        /** The canonical form: the sorted JSON list of each member's type and id. */
+        /** The canonical form: a bulk operation's sorted JSON list of each member's type and id, or a builder's versioned form. */
         #[\SensitiveParameter]
         public string $canonical,
     ) {
-        if ($count < 1) {
+        if ($count < 1 && !$kind->allowsEmpty()) {
             throw new \InvalidArgumentException('A bulk operation names at least one subject.');
+        }
+
+        if ($count < 0) {
+            throw new \InvalidArgumentException('An artifact counts no fewer than zero members.');
+        }
+
+        if ($canonical === '') {
+            throw new \InvalidArgumentException('An artifact\'s canonical form is never empty.');
         }
     }
 
@@ -110,7 +125,26 @@ final readonly class Manifest
 
         $canonical = self::encode(array_values($members));
 
-        return new self(Str::uuid7()->toString(), count($members), hash('sha256', $canonical), $canonical);
+        return new self(Str::uuid7()->toString(), ArtifactKind::BULK, count($members), hash('sha256', $canonical), $canonical);
+    }
+
+    /**
+     * The manifest of a canonical form a kind's own builder made, given as it
+     * is with the count of what it holds: a fresh id, and the digest of the
+     * bytes.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  string  $canonical
+     * @param  int  $count
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     *
+     * @internal
+     */
+    public static function ofContent(ArtifactKind $kind, #[\SensitiveParameter] string $canonical, int $count): self
+    {
+        return new self(Str::uuid7()->toString(), $kind, $count, hash('sha256', $canonical), $canonical);
     }
 
     /**
@@ -130,10 +164,10 @@ final readonly class Manifest
     }
 
     /**
-     * The count and digest of a plaintext that is exactly a canonical form: a
-     * non-empty list of type and id pairs, both strings, in strictly increasing
-     * order, which encodes back to the same bytes; `null` for any other
-     * plaintext.
+     * The count and digest of a plaintext that is exactly a bulk operation's
+     * canonical form, the one kind this reads: a non-empty list of type and id
+     * pairs, both strings, in strictly increasing order, which encodes back to
+     * the same bytes; `null` for any other plaintext.
      *
      * @param  string  $plaintext
      * @return ?array{count: int, digest: string}
@@ -152,14 +186,15 @@ final readonly class Manifest
     }
 
     /**
-     * The descriptor a bulk record signs at `properties._audit.manifest`: the
-     * artifact's id, the digest and the count.
+     * The descriptor a record with an artifact signs at
+     * `properties._audit.manifest`: the artifact's id, its kind, the digest and
+     * the count, in that order.
      *
-     * @return array{artifact_id: string, digest: string, count: int}
+     * @return array{artifact_id: string, kind: string, digest: string, count: int}
      */
     public function descriptor(): array
     {
-        return ['artifact_id' => $this->id, 'digest' => $this->digest, 'count' => $this->count];
+        return ['artifact_id' => $this->id, 'kind' => $this->kind->value, 'digest' => $this->digest, 'count' => $this->count];
     }
 
     /**

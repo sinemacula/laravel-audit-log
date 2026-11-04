@@ -10,27 +10,31 @@ out. Neither needs the package to know anything about the code that uses it. Wha
 Every concrete class of the package is `final`. It is extended through the contracts below, each bound in the container
 or registered from a service provider's `boot()`; each contract's docblock says what an implementation must keep to:
 
-| Extension point                              | How                                                                                                               |
-|----------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| Where records are kept                       | Implement `Contracts\AuditStore` and bind it; bind a `Stores\StackAuditStore` to reach several stores             |
-| What a store's return means                  | Implement `Contracts\DurableAuditStore` on the store: whether a return is durable, and whose transaction it joins |
-| Bulk manifests on a custom store             | Implement `Contracts\AcceptsAttachments` on the store, as below                                                   |
-| Events of the application or another package | Implement `Contracts\EventMapper` and register it with `AuditLog::map()`, as below                                |
-| What a record leaves out                     | Implement `Contracts\ContextContributor` and register it with `AuditLog::contribute()`                            |
-| The application's event codes                | Implement `Contracts\DefinesAuditEvents` on a string-backed enum and register it with `AuditLog::define()`        |
-| Encrypted fields                             | Implement `Contracts\FieldEncrypter` and bind it; until then every encrypted value is dropped                     |
-| Where seals are anchored                     | Set `integrity.anchor.driver`, or implement `Contracts\CheckpointAnchor` and bind it                              |
-| Seals whose entries were pruned              | Implement `Contracts\PruneLedger` and bind it, in the journal that writes each prune                              |
-| Lines for a log or a security tool           | Implement `Contracts\AuditFormatter` and give it to the `Stores\LogAuditStore` the application binds              |
-| OCSF classes of a code                       | Implement `Contracts\OcsfMapper` and name it in the code's definition with `EventDefinition::ocsf()`              |
-| The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                           |
+| Extension point                              | How                                                                                                                            |
+|----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| Where records are kept                       | Implement `Contracts\AuditStore` and bind it; bind a `Stores\StackAuditStore` to reach several stores                          |
+| What a store's return means                  | Implement `Contracts\DurableAuditStore` on the store: whether a return is durable, and whose transaction it joins              |
+| Attachments on a custom store                | Implement `Contracts\AcceptsAttachments` on the store, as below: bulk members, read disclosures, export manifests              |
+| Events of the application or another package | Implement `Contracts\EventMapper` and register it with `AuditLog::map()`, as below                                             |
+| What a record leaves out                     | Implement `Contracts\ContextContributor` and register it with `AuditLog::contribute()`                                         |
+| The application's event codes                | Implement `Contracts\DefinesAuditEvents` on a string-backed enum and register it with `AuditLog::define()`                     |
+| Encrypted fields                             | Implement `Contracts\FieldEncrypter` and bind it; until then every encrypted value is dropped                                  |
+| Where seals are anchored                     | Set `integrity.anchor.driver`, or implement `Contracts\CheckpointAnchor` and bind it                                           |
+| Seals whose entries were pruned              | Implement `Contracts\PruneLedger` and bind it, in the journal that writes each prune                                           |
+| Lines for a log or a security tool           | Implement `Contracts\AuditFormatter` and give it to the `Stores\LogAuditStore` the application binds                           |
+| OCSF classes of a code                       | Implement `Contracts\OcsfMapper` and name it in the code's definition with `EventDefinition::ocsf()`                           |
+| Which entries a viewer may read              | Implement `Contracts\AuditAccessPolicy` and bind it; it is asked on every terminal call, and `Access\DenyAllPolicy` denies all |
+| How an entry's encrypted fields are shown    | Implement `Contracts\FieldReader` and bind it; the default answers `encrypted`, and a decrypting one also `erased`             |
+| The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                                        |
 
-A store that keeps a bulk operation's manifest implements `Contracts\AcceptsAttachments` and returns `true` from
-`acceptsAttachments()` only when it keeps the attachment and its entry atomically, both or neither, so an entry never
-points at a manifest that is not there. It answers from its own configuration, never from the record. Storing the same
-id with the same artifact again is a success, and the same id with a different artifact, or an entry without its own,
-is a `Stores\RecordConflictException`. A store that does not implement the contract, or returns `false`, is never
-handed an attachment, and `AuditLog::bulk()` is refused while it is bound.
+A store that keeps attachments, a bulk operation's subjects, a read's disclosure and an export's manifest, implements
+`Contracts\AcceptsAttachments` and returns `true` from `acceptsAttachments()` only when it keeps the attachment and its
+entry atomically, both or neither, so an entry never points at an artifact that is not there. It answers from its own
+configuration, never from the record. Storing the same id with the same artifact again is a success, and the same id
+with a different artifact, or an entry without its own, is a `Stores\RecordConflictException`. A store that does not
+implement the contract, or returns `false`, is never handed an attachment: `AuditLog::bulk()` is refused while it is
+bound, and, since every read of the trail is recorded with a disclosure or an export manifest, in sync mode every page,
+count, export and verification is refused with `Querying\AuditReadRefusedException` before anything is queried.
 
 ## Mapping another package's events
 

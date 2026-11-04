@@ -23,10 +23,10 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * address is minimised, an owned note is sealed under its owner and the
  * identifier is hashed. The properties are redacted, put through the event
  * definition's rules and budgeted last, so the one omission log, which
- * everything above added to, lands in `properties._audit.omitted`. A bulk
- * operation's manifest descriptor, its artifact id, digest and count, is the
- * package's own: it lands in `properties._audit.manifest`, outside every field
- * rule, and is never omitted.
+ * everything above added to, lands in `properties._audit.omitted`. An
+ * artifact's manifest descriptor, its artifact id, kind, digest and count, is
+ * the package's own: it lands in `properties._audit.manifest`, outside every
+ * field rule, and is never omitted.
  *
  * Nothing is caught: an encrypter's failure is contained by its sealer, and any
  * other failure fails the write, with a message that names keys and types and

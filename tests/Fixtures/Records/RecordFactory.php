@@ -23,8 +23,11 @@ use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\DisclosureManifest;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\ExportManifest;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
@@ -33,8 +36,10 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 
 /**
  * Records for tests: captured records built through the public builder, as an
- * application builds them, bulk records carrying their sealed manifest, and
- * records of a shape capture never produces.
+ * application builds them, records carrying a sealed artifact of any kind, a
+ * bulk operation's subjects, a disclosure or an export's manifest, with the
+ * canonical forms each kind's builder makes, and records of a shape capture
+ * never produces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -115,24 +120,93 @@ final class RecordFactory
      */
     public static function bundled(int $members = 3): AuditRecord
     {
-        $manifest = Manifest::of(self::members($members), max($members, 1), self::BULK_MAX_BYTES);
+        return self::carrying('invoice.bulk_approved', Manifest::of(self::members($members), max($members, 1), self::BULK_MAX_BYTES));
+    }
 
-        $builder = (new PendingRecord)
-            ->event('invoice.bulk_approved')
-            ->by(Reference::of('user', '42'))
-            ->forTenant(Reference::of('organisation', 'org_01'))
-            ->correlatedWith('app:ticket-123')
-            ->withProperties(['batch' => 'march'])
-            ->withManifest($manifest);
+    /**
+     * A captured record carrying an artifact of the kind, of the canonical form
+     * and count given as they are, sealed under the test encrypter: a listing
+     * of invoices for a disclosure, an export of them for an export, and a bulk
+     * approval for a bulk operation, by a user, for an organisation, over HTTP,
+     * its descriptor at `properties._audit.manifest`.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  string  $canonical
+     * @param  int  $count
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     */
+    public static function withArtifact(ArtifactKind $kind, string $canonical, int $count): AuditRecord
+    {
+        $event = match ($kind) {
+            ArtifactKind::BULK       => 'invoice.bulk_approved',
+            ArtifactKind::DISCLOSURE => 'invoice.listed',
+            ArtifactKind::EXPORT     => 'invoice.exported',
+        };
 
-        $builder->fillOrigin(Origin::HTTP);
-        $builder->fillGuard('web');
-        $builder->fillClient('203.0.113.7', 'Mozilla/5.0');
+        return self::carrying($event, Manifest::ofContent($kind, $canonical, $count));
+    }
 
-        $minimised  = self::minimisedOf($builder);
-        $attachment = Attachment::sealed($manifest, self::encrypter());
+    /**
+     * The record of `withArtifact()` finalised at `RECORDED_AT` and signed as
+     * `finalisedBundle()` signs.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  string  $canonical
+     * @param  int  $count
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     * @throws \UnexpectedValueException
+     * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
+     */
+    public static function finalisedWithArtifact(ArtifactKind $kind, string $canonical, int $count): FinalisedRecord
+    {
+        return self::signed(self::withArtifact($kind, $canonical, $count));
+    }
 
-        return AuditRecord::fromPending($builder, $minimised, 1, 'finance', self::instant(self::OCCURRED_AT), 'app-eu-1', 'eu-west-2', $attachment);
+    /**
+     * A canonical form of the kind holding the number of members given, as that
+     * kind's builder makes it: `App\Models\Invoice` 1 to that number for a bulk
+     * operation, that many entries returned for a disclosure, and that many
+     * lines for an export.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  int  $count
+     * @return string
+     *
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     */
+    public static function canonical(ArtifactKind $kind, int $count): string
+    {
+        $entries = array_map(static fn (int $index): string => sprintf('01932b4e-8a40-7000-8000-%012d', $index), $count < 1 ? [] : range(1, $count));
+
+        return match ($kind) {
+            ArtifactKind::BULK       => Manifest::encode(array_map(static fn (Reference $member): array => [$member->type, $member->id], self::members($count))),
+            ArtifactKind::DISCLOSURE => DisclosureManifest::of(
+                ['category' => ['finance'], 'event' => null],
+                ['denied' => false, 'tenants' => [['organisation', 'org_01']]],
+                array_map(static fn (string $id): array => [$id, hash('sha256', $id)], $entries),
+            )->canonical,
+            ArtifactKind::EXPORT => ExportManifest::canonical(
+                'ndjson',
+                Reference::of('user', '42'),
+                hash('sha256', 'scope'),
+                hash('sha256', 'query'),
+                ['connection' => 'testing', 'consistency' => 'deferred_read_transaction', 'database' => 'audit', 'engine' => 'sqlite', 'table' => 'audit_log_entries'],
+                $count,
+                $entries === [] ? null : [self::RECORDED_AT, $entries[0]],
+                $entries === [] ? null : [self::RECORDED_AT, $entries[$count - 1]],
+                hash('sha256', 'file'),
+                hash('sha256', implode('', array_map(static fn (string $id): string => $id . "\n", $entries))),
+            ),
+        };
     }
 
     /**
@@ -151,9 +225,7 @@ final class RecordFactory
      */
     public static function finalisedBundle(int $members = 3): FinalisedRecord
     {
-        $config = new Repository(['app' => ['key' => 'base64:' . base64_encode(self::ENCRYPTION_KEY)]]);
-
-        return (new RecordSigner(new KeyRing(new IntegritySettings($config))))->sign(self::bundled($members), self::RECORDED_AT);
+        return self::signed(self::bundled($members));
     }
 
     /**
@@ -268,6 +340,57 @@ final class RecordFactory
         $builder->fillContext(['route' => 'invoices.approve', 'method' => 'POST']);
 
         return AuditRecord::fromPending($builder, self::minimisedOf($builder), 1, 'finance', self::instant($occurredAt), 'app-eu-1', 'eu-west-2');
+    }
+
+    /**
+     * A captured record of the code carrying the manifest sealed under the test
+     * encrypter, by a user, for an organisation, over HTTP.
+     *
+     * @param  string  $event
+     * @param  \SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
+     * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     */
+    private static function carrying(string $event, Manifest $manifest): AuditRecord
+    {
+        $builder = (new PendingRecord)
+            ->event($event)
+            ->by(Reference::of('user', '42'))
+            ->forTenant(Reference::of('organisation', 'org_01'))
+            ->correlatedWith('app:ticket-123')
+            ->withProperties(['batch' => 'march'])
+            ->withManifest($manifest);
+
+        $builder->fillOrigin(Origin::HTTP);
+        $builder->fillGuard('web');
+        $builder->fillClient('203.0.113.7', 'Mozilla/5.0');
+
+        $minimised  = self::minimisedOf($builder);
+        $attachment = Attachment::sealed($manifest, self::encrypter());
+
+        return AuditRecord::fromPending($builder, $minimised, 1, 'finance', self::instant(self::OCCURRED_AT), 'app-eu-1', 'eu-west-2', $attachment);
+    }
+
+    /**
+     * The record finalised at `RECORDED_AT` and signed under the key derived
+     * from the `app.key` the Feature and Integration tests configure, so their
+     * key ring verifies it.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
+     *
+     * @throws \InvalidArgumentException
+     * @throws \UnexpectedValueException
+     * @throws \SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException
+     */
+    private static function signed(AuditRecord $record): FinalisedRecord
+    {
+        $config = new Repository(['app' => ['key' => 'base64:' . base64_encode(self::ENCRYPTION_KEY)]]);
+
+        return (new RecordSigner(new KeyRing(new IntegritySettings($config))))->sign($record, self::RECORDED_AT);
     }
 
     /**

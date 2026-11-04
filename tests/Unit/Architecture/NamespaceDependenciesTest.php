@@ -17,9 +17,11 @@ use PHPUnit\Framework\TestCase;
  * for every class of the package) except those in `except`, and forbids them to
  * name anything in its `forbids` namespaces or classes except what `allows`
  * lists; every name is relative to the package. The capture layer names neither
- * the stores nor the read model, and only its coordinator and the recorder
- * reach the record pipeline, so nothing a mapper or a listener runs can write a
- * record of its own.
+ * the stores nor the read model, and only its coordinator, the recorder and the
+ * access recorder reach the record pipeline, so nothing a mapper or a listener
+ * runs can write a record of its own. The read path names neither the console
+ * nor the stores' writers, and access control names nothing of the package but
+ * the values it compiles.
  *
  * The same scanner holds the package to the framework: `FRAMEWORK_RULES` are
  * read the same way, with `forbids` and `allows` relative to the framework, so
@@ -27,9 +29,10 @@ use PHPUnit\Framework\TestCase;
  * domain reaches for no facade or container. Only the contributors, the cached
  * user, the core capture listeners, the user reference and the service provider
  * read authentication state, as the classes that touch `Auth` and the guards,
- * name its events or read the user an event carries. And no class names another
- * package of the suite: anything under the suite's namespace but outside this
- * package's is refused.
+ * name its events or read the user an event carries; naming the authenticatable
+ * type alone, as a viewer of the trail and an access policy do, reads none. And
+ * no class names another package of the suite: anything under the suite's
+ * namespace but outside this package's is refused.
  *
  * A class names another through an import (`use`, grouped or aliased), a
  * qualified or fully qualified name in its code, or a fully qualified type in a
@@ -62,10 +65,30 @@ final class NamespaceDependenciesTest extends TestCase
     /** @var array<string, array{from: non-empty-list<string>, except: list<string>, forbids: non-empty-list<string>, allows: list<string>}> The rules, by what each holds. */
     private const array RULES = [
         'the enums name nothing of the package but other enums' => [
-            'from'    => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums', 'Delivery\Enums', 'Stores\Enums', 'Integrity\Enums'],
+            'from' => [
+                'Records\Enums',
+                'Definitions\Enums',
+                'Runtime\Enums',
+                'Privacy\Enums',
+                'Delivery\Enums',
+                'Stores\Enums',
+                'Integrity\Enums',
+                'Access\Enums',
+                'Export\Enums',
+            ],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Records\Enums', 'Definitions\Enums', 'Runtime\Enums', 'Privacy\Enums', 'Delivery\Enums', 'Stores\Enums', 'Integrity\Enums'],
+            'allows'  => [
+                'Records\Enums',
+                'Definitions\Enums',
+                'Runtime\Enums',
+                'Privacy\Enums',
+                'Delivery\Enums',
+                'Stores\Enums',
+                'Integrity\Enums',
+                'Access\Enums',
+                'Export\Enums',
+            ],
         ],
         'the support helpers name nothing of the package but the support helpers, references and the clock contract' => [
             'from'    => ['Support'],
@@ -85,18 +108,22 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Records'],
             'allows'  => ['Records\EventCode'],
         ],
-        'contracts name nothing of the package but contracts, the definitions they return, the records, references, pending records '
-        . 'and seal values they take and the conflict they raise' => [
+        'contracts name nothing of the package but contracts, the definitions, access scopes and field readings they return, the records, '
+        . 'references, pending records, read purposes, encrypted fields and seal values they take and the conflict they raise' => [
             'from'    => ['Contracts'],
             'except'  => [],
             'forbids' => ['*'],
             'allows'  => [
                 'Contracts',
                 'Definitions\EventDefinition',
+                'Access\AccessScope',
+                'Access\Enums\ReadPurpose',
                 'Records\FinalisedRecord',
                 'Records\Contribution',
                 'Records\Reference',
                 'Records\PendingRecord',
+                'Privacy\EncryptedField',
+                'Privacy\FieldReading',
                 'Stores\RecordConflictException',
                 'Integrity\SealSummary',
                 'Integrity\AnchoredHead',
@@ -110,9 +137,9 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Stores', 'Models', 'Casts', 'Console', 'Database', 'Delivery', 'Contributors', 'Runtime', 'Listeners', 'Testing', 'Facades', 'Recorder', 'Http'],
             'allows'  => [],
         ],
-        'the record values name nothing of the integrity layer but the finaliser and the codec' => [
+        'the record values name nothing of the integrity layer but the finaliser, the codec and the manifests, which encode canonically' => [
             'from'    => ['Records'],
-            'except'  => ['Records\RecordFinaliser', 'Records\EnvelopeCodec'],
+            'except'  => ['Records\RecordFinaliser', 'Records\EnvelopeCodec', 'Records\DisclosureManifest', 'Records\ExportManifest'],
             'forbids' => ['Integrity'],
             'allows'  => [],
         ],
@@ -260,11 +287,57 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Stores', 'Console', 'Delivery'],
             'allows'  => [],
         ],
-        'only the capture coordinator writes captured records' => [
+        'only the capture coordinator, the recorder and the access recorder write through the record pipeline' => [
             'from'    => ['*'],
-            'except'  => ['Capture\CaptureCoordinator', 'Recorder', 'RecordPipeline'],
+            'except'  => ['Capture\CaptureCoordinator', 'Recorder', 'Querying\AccessRecorder', 'RecordPipeline'],
             'forbids' => ['RecordPipeline'],
             'allows'  => [],
+        ],
+        'the read path names nothing of the console, the read model, the stores\' writers or the testing helpers' => [
+            'from'    => ['Querying'],
+            'except'  => [],
+            'forbids' => ['Console', 'Models', 'Casts', 'Testing', 'Facades', 'Stores'],
+            'allows'  => ['Stores\RowCodec', 'Stores\AuditWriteFailedException'],
+        ],
+        'access control names nothing of the package but references, the read path\'s filters and positions, the definitions\' grammar '
+        . 'and the canonical encoder' => [
+            'from'    => ['Access'],
+            'except'  => [],
+            'forbids' => ['*'],
+            'allows'  => [
+                'Access',
+                'Contracts\AuditAccessPolicy',
+                'Records\Reference',
+                'Querying\TrailFilters',
+                'Querying\Position',
+                'Definitions\EventDefinition',
+                'Integrity\CanonicalEncoder',
+                'Support\StoredTime',
+            ],
+        ],
+        'the records name nothing of the read path or access control but the package\'s own codes' => [
+            'from'    => ['Records'],
+            'except'  => [],
+            'forbids' => ['Querying', 'Access'],
+            'allows'  => ['Querying\Enums\PackageActivity'],
+        ],
+        'the read enums name nothing of the package but other enums, the definitions, event codes and the defining contract' => [
+            'from'    => ['Querying\Enums'],
+            'except'  => [],
+            'forbids' => ['*'],
+            'allows'  => [
+                'Querying\Enums',
+                'Access\Enums',
+                'Records\Enums',
+                'Runtime\Enums',
+                'Privacy\Enums',
+                'Delivery\Enums',
+                'Stores\Enums',
+                'Integrity\Enums',
+                'Definitions',
+                'Records\EventCode',
+                'Contracts\DefinesAuditEvents',
+            ],
         ],
     ];
 
@@ -276,7 +349,8 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Routing', 'Support\Facades\Route', 'View', 'Contracts\View', 'Support\Facades\View', 'Support\Facades\Blade'],
             'allows'  => ['Routing\Route'],
         ],
-        'only the contributors, the cached user, the core capture listeners, the user reference and the service provider read authentication state' => [
+        'only the contributors, the cached user, the core capture listeners, the user reference and the service provider read authentication state; '
+        . 'naming the authenticatable type reads none' => [
             'from'   => ['*'],
             'except' => [
                 'Contributors',
@@ -287,10 +361,10 @@ final class NamespaceDependenciesTest extends TestCase
                 'AuditLogServiceProvider',
             ],
             'forbids' => ['Auth', 'Contracts\Auth', 'Support\Facades\Auth'],
-            'allows'  => [],
+            'allows'  => ['Contracts\Auth\Authenticatable'],
         ],
         'the domain uses no facade and no application container' => [
-            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores', 'Contributors', 'Runtime', 'Events', 'Privacy'],
+            'from'    => ['Records', 'Definitions', 'Support', 'Contracts', 'Integrity', 'Stores', 'Contributors', 'Runtime', 'Events', 'Privacy', 'Access'],
             'except'  => [],
             'forbids' => ['Support\Facades', 'Foundation', 'Container', 'Contracts\Foundation', 'Contracts\Container'],
             'allows'  => [],
@@ -684,7 +758,7 @@ final class NamespaceDependenciesTest extends TestCase
         $capture   = 'the capture layer names nothing of the stores, the read model, the console or the testing helpers';
         $enums     = 'the capture enums name nothing of the package but other enums, the definitions and the defining contract';
         $listeners = 'the listeners name nothing of the stores, the console or the delivery';
-        $pipeline  = 'only the capture coordinator writes captured records';
+        $pipeline  = 'only the capture coordinator, the recorder and the access recorder write through the record pipeline';
 
         yield from [
             'a watch naming the read model'           => [$capture, 'Capture\ModelWatch', 'Models\AuditEntry', true],
@@ -706,6 +780,8 @@ final class NamespaceDependenciesTest extends TestCase
             'the capture settings naming it'          => [$pipeline, 'Capture\CaptureSettings', 'RecordPipeline', true],
             'the coordinator naming the pipeline'     => [$pipeline, 'Capture\CaptureCoordinator', 'RecordPipeline', false],
             'the recorder naming the pipeline'        => [$pipeline, 'Recorder', 'RecordPipeline', false],
+            'the access recorder naming the pipeline' => [$pipeline, 'Querying\AccessRecorder', 'RecordPipeline', false],
+            'the trail reader naming the pipeline'    => [$pipeline, 'Querying\TrailReader', 'RecordPipeline', true],
         ];
     }
 

@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Records;
 
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
+
 /**
  * The code naming what happened, as a record stores it: lower-case dotted
  * segments such as `invoice.approved`, each a letter followed by letters,
@@ -11,9 +13,14 @@ namespace SineMacula\Laravel\AuditLog\Records;
  *
  * A code is given as a string or as a string-backed enum case, whose value is
  * the code; it is never derived from a class name. A code is validated, never
- * cleaned or cut: the length is checked first, then the grammar, and a code a
- * caller gives may not begin with the `audit_log.` prefix, which is reserved
- * for the package's own codes.
+ * cleaned or cut: the length is checked first, then the grammar.
+ *
+ * There are three ways in, and only one of them writes. `of()` takes a caller's
+ * code to record, which may not begin with the `audit_log.` prefix, reserved
+ * for the package's own codes. `package()` mints one of those codes from the
+ * package's own activity, for its read path alone. `forReading()` takes a code
+ * to look for, under any prefix, so a filter, a description, a test's assertion
+ * or a lookup can name a package code without a way to record one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,6 +80,44 @@ final readonly class EventCode
         }
 
         return $code;
+    }
+
+    /**
+     * The code of one of the package's own activities, under the reserved
+     * prefix: the activity's value, held to the length and the grammar, and
+     * refused unless it begins with the prefix.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
+     * @return self
+     *
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public static function package(PackageActivity $activity): self
+    {
+        $code = new self($activity->value);
+
+        if (!str_starts_with($code->value, self::RESERVED_PREFIX)) {
+            throw new \LogicException(sprintf('The package\'s own event codes begin with the `%s` prefix.', self::RESERVED_PREFIX));
+        }
+
+        return $code;
+    }
+
+    /**
+     * A code to look for, given as a string or as a string-backed enum case:
+     * held to the length and the grammar, under any prefix, the reserved one
+     * included. Nothing is ever recorded under a code made this way.
+     *
+     * @param  \BackedEnum|string  $code
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function forReading(\BackedEnum|string $code): self
+    {
+        return new self(self::valueOf($code));
     }
 
     /**

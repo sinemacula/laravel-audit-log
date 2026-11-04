@@ -18,12 +18,16 @@ use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
 use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
 use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
+use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
+use SineMacula\Laravel\AuditLog\Querying\Describer;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\RecordPipeline;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
@@ -38,8 +42,8 @@ use Tests\TestCase;
 /**
  * Performance contract for booting the package: registering it adds no query to
  * a request that records nothing, booting with capture wired issues none, and
- * resolving the store, what finalises a record, or the recorder and what it
- * works with issues none and opens no connection.
+ * resolving the store, what finalises a record, the recorder and what it works
+ * with, or the trail and what reads it issues none and opens no connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -160,5 +164,30 @@ final class BootQueryBudgetTest extends TestCase
         self::assertTrue($catalogue->isRegistered(EventCode::of(CapturedActivity::SIGNED_IN)));
         self::assertTrue($mappers->isFrozen());
         self::assertTrue($watcher->isFrozen());
+    }
+
+    /**
+     * Resolving the trail, the describer, the access policy and the field
+     * reader issues no statement and opens no connection: a trail reads only
+     * when a terminal call is made for a viewer.
+     *
+     * @return void
+     */
+    public function testResolvingTheReadPathIssuesNoQueries(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
+        $config->set('audit-log.storage.connection', 'audit_unopened');
+
+        DB::enableQueryLog();
+
+        foreach ([AuditTrail::class, Describer::class, AuditAccessPolicy::class, FieldReader::class] as $abstract) {
+            self::assertIsObject(app($abstract));
+        }
+
+        self::assertIsObject(app(Recorder::class)->trail());
+        self::assertSame([], DB::getQueryLog());
+        self::assertArrayNotHasKey('audit_unopened', DB::getConnections());
     }
 }

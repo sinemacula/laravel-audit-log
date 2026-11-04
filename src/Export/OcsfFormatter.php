@@ -139,8 +139,8 @@ final readonly class OcsfFormatter implements AuditFormatter
     }
 
     /**
-     * The registered definition of the code, or `null` when the code has none
-     * or is not one a caller can register.
+     * The registered definition of the code, the package's own codes' included,
+     * or `null` when the code has none or is not a code at all.
      *
      * @param  string  $code
      * @return ?\SineMacula\Laravel\AuditLog\Definitions\EventDefinition
@@ -148,7 +148,7 @@ final readonly class OcsfFormatter implements AuditFormatter
     private function definitionOf(string $code): ?EventDefinition
     {
         try {
-            $eventCode = EventCode::of($code);
+            $eventCode = EventCode::forReading($code);
 
             return $this->catalogue->isRegistered($eventCode) ? $this->catalogue->definitionFor($eventCode) : null;
         } catch (\InvalidArgumentException) {

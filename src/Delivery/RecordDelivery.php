@@ -68,6 +68,13 @@ use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
  * store that keeps none, so the refusal follows the record's rule with the
  * whole bundle spilled, and nothing is silently lost.
  *
+ * A record of the package's own read path comes with its package write, and is
+ * delivered immediately and fail-closed, never any other way. Once the store
+ * has it, after the write guard's window and before the notification, or once
+ * the outbox's insert has returned, the package write is handed the finalised
+ * record, so the read discloses nothing until then and holds the envelope that
+ * was written. A write that fails is never acknowledged.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -77,6 +84,9 @@ final readonly class RecordDelivery
 {
     /** @var string Why a captured record is refused a guarantee a capture cannot give. */
     private const string STRICT_CAPTURE = 'A captured record is written immediately or after commit, never fail-closed or transactional.';
+
+    /** @var string Why a package write is refused any other timing. */
+    private const string LOOSE_PACKAGE_WRITE = 'A package write is delivered immediately and fail-closed.';
 
     /** @var string Why a fail-closed or a transactional record made inside the write guard is refused. */
     private const string STRICT_RECORD_IN_A_WRITE = 'A fail-closed or transactional record was made while an audit record was being written or its failure handled,'
@@ -150,13 +160,16 @@ final readonly class RecordDelivery
      * now, with a failure following the record's rule, which is `REPORT` for a
      * capture. A connection named with a read or write selector is the
      * connection it selects. Inside the write guard a strict record is refused,
-     * and any other is left unwritten.
+     * and any other is left unwritten. A package write is delivered immediately
+     * and fail-closed, or refused, and is handed the finalised record once it
+     * is acknowledged.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  ?string  $connection
      * @param  bool  $failClosed
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
@@ -171,8 +184,10 @@ final readonly class RecordDelivery
         ?string $connection,
         bool $failClosed = false,
         #[\SensitiveParameter] ?CaptureSignal $capture = null,
+        #[\SensitiveParameter] ?PackageWrite $package = null,
     ): void {
         self::refuseAStrictCapture($timing, $failClosed, $capture);
+        self::refuseALoosePackageWrite($timing, $failClosed, $capture, $package);
 
         $guard = $this->container->make(WriteGuard::class);
 
@@ -187,14 +202,14 @@ final readonly class RecordDelivery
 
         if ($this->container->make(DeliverySettings::class)->mode() === DeliveryMode::OUTBOX) {
 
-            (new OutboxWriter($this->container, $this->container->make(Outbox::class)))->write($record, $timing, $this->transactionNameOf($connection), $rule, $capture);
+            (new OutboxWriter($this->container, $this->container->make(Outbox::class)))->write($record, $timing, $this->transactionNameOf($connection), $rule, $capture, $package);
 
             return;
         }
 
         if ($timing !== Timing::AFTER_COMMIT) {
 
-            $this->write($record, $rule, false, $capture);
+            $this->write($record, $rule, false, $capture, $package);
 
             return;
         }
@@ -218,6 +233,32 @@ final readonly class RecordDelivery
         if ($capture !== null && ($failClosed || $timing === Timing::TRANSACTIONAL)) {
             throw new \LogicException(self::STRICT_CAPTURE);
         }
+    }
+
+    /**
+     * Refuse a package write that is not immediate and fail-closed, or comes
+     * with a capture's signal: the read it records discloses nothing until the
+     * record is acknowledged, which nothing else could promise.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
+     * @param  bool  $failClosed
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    private static function refuseALoosePackageWrite(
+        Timing $timing,
+        bool $failClosed,
+        #[\SensitiveParameter] ?CaptureSignal $capture,
+        #[\SensitiveParameter] ?PackageWrite $package,
+    ): void {
+        if ($package === null || ($timing === Timing::IMMEDIATE && $failClosed && $capture === null)) {
+            return;
+        }
+
+        throw new \LogicException(self::LOOSE_PACKAGE_WRITE);
     }
 
     /**
@@ -469,7 +510,9 @@ final readonly class RecordDelivery
      * Finalise the record once, store it inside the write guard and notify, or
      * hand any failure to the failure handler under the rule, which notifies
      * nothing, with the capture's signal. A record carrying an attachment is
-     * refused by a store that keeps none, inside the attempt.
+     * refused by a store that keeps none, inside the attempt. A package write
+     * is handed the finalised record once the store has it, before the
+     * notification, and never when the write failed.
      *
      * Whether a transaction is open on the storage connection, which decides
      * what the write's own failure ended, every connection with one open, which
@@ -483,14 +526,20 @@ final readonly class RecordDelivery
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  bool  $afterCommit
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
      * @return void
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \Illuminate\Database\DeadlockException
      * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
      */
-    private function write(#[\SensitiveParameter] AuditRecord $record, FailureRule $rule, bool $afterCommit, #[\SensitiveParameter] ?CaptureSignal $capture = null): void
-    {
+    private function write(
+        #[\SensitiveParameter] AuditRecord $record,
+        FailureRule $rule,
+        bool $afterCommit,
+        #[\SensitiveParameter] ?CaptureSignal $capture = null,
+        #[\SensitiveParameter] ?PackageWrite $package = null,
+    ): void {
         $connection  = $this->storageConnection();
         $name        = $connection === null ? null : $connection->getName() ?? StorageConnection::resolvedName();
         $hostOpen    = $connection !== null && $connection->transactionLevel() > 0;
@@ -519,6 +568,8 @@ final readonly class RecordDelivery
 
             return;
         }
+
+        $package?->acknowledge($finalised);
 
         (new RecordedNotifier($this->container))->notify($record->id, $record->event, $record->category, $open);
     }

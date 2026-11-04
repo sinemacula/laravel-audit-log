@@ -59,7 +59,15 @@ seam that suite packages and applications register their own events through.
   anchored on a write-once disk, and `audit-log:verify` reports any entry or seal changed, removed or added.
 - **Append-only storage** with indexed actor, subject, principal and tenant columns, portable across SQLite, MySQL and
   PostgreSQL, and retention through Laravel's `model:prune`.
-- **Reading the trail** by actor, subject, principal or tenant, with cursor pagination and translatable descriptions.
+- **[Reading the trail](docs/guides/reading.md)** by actor, subject, principal, tenant, event, category, outcome, time
+  or correlation id, newest first with signed cursors, through an access policy the application binds, which denies
+  every viewer until it does.
+- **Audited reads**: every page, count, export and verification is recorded under the package's own codes before
+  anything it found is returned, and is refused when it cannot be recorded.
+- **Describing entries**: a translated title for each code, which an application overrides per locale, with concealed
+  reasons and encrypted values never shown.
+- **Verifiable exports**: `audit-log:export` writes NDJSON, OCSF or CEF from one consistent snapshot, journals it with a
+  signed manifest, and verifies it later, line by line for NDJSON.
 - **Request and job context**: the request id and actor follow a request into the jobs it dispatches, and nothing leaks
   between Octane requests or queued jobs.
 - **Testing fake** with assertions for what was, and was not, recorded.
@@ -85,7 +93,7 @@ php artisan migrate
 | `storage.connection`                        | `null`                         | `AUDIT_LOG_STORAGE_CONNECTION`                        | The connection the tables live on; `null` or empty for the default connection.                                                                  |
 | `storage.maintenance_connection`            | `null`                         | `AUDIT_LOG_STORAGE_MAINTENANCE_CONNECTION`            | The connection pruning, holds and erasure run through, to the same database with a user of its own; `null` or empty for the storage connection. |
 | `entries.table`                             | `audit_log_entries`            | `AUDIT_LOG_ENTRIES_TABLE`                             | The entries table: 1 to 47 lower-case letters, digits and underscores, not starting with a digit.                                               |
-| `entries.artifacts_table`                   | `audit_log_artifacts`          | `AUDIT_LOG_ENTRIES_ARTIFACTS_TABLE`                   | The table of each bulk operation's manifest, beside its entry on the storage connection: the same grammar as the entries table.                 |
+| `entries.artifacts_table`                   | `audit_log_artifacts`          | `AUDIT_LOG_ENTRIES_ARTIFACTS_TABLE`                   | The table of each entry's artifact (bulk subjects, read disclosures, export manifests), on the storage connection: the entries table's grammar. |
 | `integrity.keys`                            | `[]`                           | -                                                     | A map of key ids to secrets of at least 32 bytes that sign and verify entries; empty to derive the key from `app.key`.                          |
 | `integrity.current`                         | `null`                         | `AUDIT_LOG_INTEGRITY_CURRENT`                         | The key in `integrity.keys` that signs new entries.                                                                                             |
 | `integrity.log_id`                          | `null`                         | `AUDIT_LOG_INTEGRITY_LOG_ID`                          | The log every seal names, 1 to 64 letters, digits, dots, underscores or hyphens; `null` or empty for `source.id`. Set before the first seal.    |
@@ -118,6 +126,8 @@ php artisan migrate
 | `capture.gate.reason_codes`                 | `[]`                           | -                                                     | The machine-readable codes a denial's response may give that are kept as its reason; any other is never kept.                                   |
 | `capture.bulk.max_members`                  | `100000`                       | `AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS`                  | The most subjects a bulk operation's manifest holds, from 1 to 1000000; a larger one is refused, never truncated.                               |
 | `capture.bulk.max_bytes`                    | `4194304`                      | `AUDIT_LOG_CAPTURE_BULK_MAX_BYTES`                    | The most a bulk operation's encoded manifest may hold, from 65536 to 8388608; a larger one is refused, never truncated.                         |
+| `read.max_per_page`                         | `100`                          | `AUDIT_LOG_READ_MAX_PER_PAGE`                         | The most entries a page of the trail may ask for, from 1 to 500.                                                                                |
+| `export.chunk`                              | `1000`                         | `AUDIT_LOG_EXPORT_CHUNK`                              | How many entries an export reads per statement, from 100 to 10000; memory grows with it, never with the export.                                 |
 | `source.id`                                 | `null`                         | `AUDIT_LOG_SOURCE_ID`                                 | The deployment records come from, 1 to 64 characters; `null` or empty for a slug of `app.name`.                                                 |
 | `source.region`                             | `null`                         | `AUDIT_LOG_SOURCE_REGION`                             | The region records come from, 1 to 32 characters; `null` or empty for none.                                                                     |
 | `redaction.keys`                            | `[]`                           | -                                                     | More key names to redact, merged with the built-ins, which cannot be removed.                                                                   |
@@ -281,12 +291,73 @@ What is captured, and the gaps where nothing can be, is in
 [the automatic-capture guide](docs/guides/automatic-capture.md); mapping another package's events, with one row per
 sign-in, is in [the extending guide](docs/guides/extending.md).
 
+### Reading the trail
+
+Nothing is read until the application binds an access policy: the package's default denies every viewer. A policy
+answers with the scope of entries a viewer may see for a purpose, and is asked again on every read. Bind it in a service
+provider's `register()`:
+
+```php
+use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
+
+$this->app->singleton(AuditAccessPolicy::class, OrganisationAuditPolicy::class);
+```
+
+```php
+use Illuminate\Contracts\Auth\Authenticatable;
+use SineMacula\Laravel\AuditLog\Access\AccessScope;
+use SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose;
+use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
+use SineMacula\Laravel\AuditLog\Records\Reference;
+
+final class OrganisationAuditPolicy implements AuditAccessPolicy
+{
+    public function scope(Authenticatable|Reference $viewer, ReadPurpose $purpose): AccessScope
+    {
+        return $viewer instanceof User && $viewer->isAuditor()
+            ? AccessScope::tenants(Reference::to($viewer->organisation))
+            : AccessScope::none();
+    }
+}
+```
+
+Read a page for the user the application has authenticated, newest first, and the next page from its cursor:
+
+```php
+$page = AuditLog::trail()->visibleTo($user)->forSubject($invoice)->cursorPaginate();
+
+$next = AuditLog::trail()->visibleTo($user)->forSubject($invoice)->cursorPaginate(50, $page->nextCursor);
+```
+
+A viewer the policy denies sees an empty page. Every page, count, export and verification is recorded before anything
+it found is returned: one that cannot be recorded, or that runs inside a transaction which could still roll its record
+back, throws `AuditReadRefusedException` and returns nothing. Describe an entry for a person, its title from the
+package's translations, which `php artisan vendor:publish --tag=audit-log-lang` copies for an application to override
+and extend:
+
+```php
+use SineMacula\Laravel\AuditLog\Querying\Describer;
+
+$title = app(Describer::class)->describe($page->entries[0])->title; // "Signed in"
+```
+
+Export the entries a viewer may see to a file, journalled, with its bundle beside it, and verify the export later. The
+viewer is named by type and id, which asserts who the export is for and proves nothing of who runs the command:
+
+```bash
+php artisan audit-log:export storage/app/audit.ndjson --viewer-type='App\Models\User' --viewer-id=42
+php artisan audit-log:export storage/app/audit.ndjson --verify --viewer-type='App\Models\User' --viewer-id=42
+```
+
+Filters, cursors, scopes, exports and their verification are in [the reading guide](docs/guides/reading.md).
+
 ### Guides
 
 | Guide                                                 | Covers                                                                                                            |
 |-------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
 | [Automatic capture](docs/guides/automatic-capture.md) | Laravel's authentication events, excluded guards, Gate denials, model changes, bulk operations, gaps and failures |
 | [Extending](docs/guides/extending.md)                 | Extension points, mapping another package's events, one row per sign-in, correlation ids and contributors         |
+| [Reading](docs/guides/reading.md)                     | Access policies, filters, cursors, audited reads, describing entries, exports and their verification              |
 | [Events](docs/guides/events.md)                       | The events the package dispatches, and alerting on a failed write, a failed capture or an integrity failure       |
 | [Operations](docs/guides/operations.md)               | Scheduling sealing and verification, monitoring, anchoring, keys, grants and what sealing costs                   |
 

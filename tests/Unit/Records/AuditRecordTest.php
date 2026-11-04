@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Privacy\Minimised;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
@@ -44,7 +45,7 @@ use Tests\Unit\Stubs\StubUser;
 final class AuditRecordTest extends TestCase
 {
     /** @var string The refusal of a record built with an attachment that is not its manifest's. */
-    private const string UNBOUND = 'A bulk record is built with the attachment of its own manifest, and any other record with none.';
+    private const string UNBOUND = 'A record with an artifact is built with the attachment of its own manifest, and any other record with none.';
 
     /** @var string The refusal of an envelope and an attachment that do not describe one artifact. */
     private const string MISMATCHED = 'A record\'s manifest and its attachment must describe the same artifact.';
@@ -815,8 +816,9 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A bulk builder's record carries the attachment of its manifest, and its
-     * properties sign the descriptor that names it, after the caller's keys.
+     * A builder with a manifest gives a record carrying the attachment of that
+     * manifest, and its properties sign the descriptor that names it, its kind
+     * included, after the caller's keys.
      *
      * @return void
      *
@@ -832,7 +834,68 @@ final class AuditRecordTest extends TestCase
 
         self::assertSame($attachment, $record->attachment);
         self::assertSame(['batch' => 'march', '_audit' => ['manifest' => $manifest->descriptor()]], $record->properties);
+        self::assertSame('bulk', $manifest->descriptor()['kind']);
         self::assertTrue($pending->isConsumed());
+    }
+
+    /**
+     * A record carries an artifact of any kind the same way: a disclosure of
+     * nothing and an export are bound by a descriptor naming their kind.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testARecordOfAnyKindCarriesItsAttachment(): void
+    {
+        foreach ([ArtifactKind::DISCLOSURE, ArtifactKind::EXPORT] as $kind) {
+            $record = RecordFactory::withArtifact($kind, RecordFactory::canonical($kind, 0), 0);
+
+            self::assertNotNull($record->attachment, $kind->value);
+            self::assertSame($kind->value, $record->attachment->kind);
+            self::assertSame(0, $record->attachment->memberCount);
+            self::assertSame($kind->value, $record->properties['_audit']['manifest']['kind'] ?? null);
+            self::assertSame($record->attachment, AuditRecord::fromEnvelope($record->toArray(), $record->attachment)->attachment);
+        }
+    }
+
+    /**
+     * A stored entry rebuilt to be read keeps its binding through an attachment
+     * described from its own descriptor; one described from any other
+     * descriptor, or none, is refused as an unbound attachment is.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testARecordIsBoundToADescribedAttachment(): void
+    {
+        $record     = RecordFactory::bundled();
+        $fields     = $record->toArray();
+        $descriptor = $fields['properties']['_audit']['manifest'] ?? null;
+
+        self::assertIsArray($descriptor);
+
+        $described = Attachment::described($descriptor);
+        $rebuilt   = AuditRecord::fromEnvelope($fields, $described);
+
+        self::assertSame($described, $rebuilt->attachment);
+        self::assertFalse($described->isSealed());
+        self::assertSame($fields, $rebuilt->toArray());
+
+        $others = [
+            'another kind'  => Attachment::described(['kind' => 'export'] + $descriptor),
+            'another count' => Attachment::described(['count' => 4] + $descriptor),
+        ];
+
+        foreach ($others as $label => $other) {
+            try {
+                AuditRecord::fromEnvelope($fields, $other);
+                self::fail("Expected an attachment of {$label} to be refused.");
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame(self::MISMATCHED, $exception->getMessage(), $label);
+            }
+        }
     }
 
     /**
@@ -847,7 +910,7 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A bulk builder's record is refused without the attachment of its
+     * A builder with a manifest gives no record without the attachment of that
      * manifest.
      *
      * @return void
@@ -863,7 +926,7 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A bulk builder's record is refused with the attachment of another
+     * A builder with a manifest gives no record with the attachment of another
      * manifest, even one of the same members, whose id is another.
      *
      * @return void
@@ -1018,7 +1081,8 @@ final class AuditRecordTest extends TestCase
 
     /**
      * Rows of `[what replaces the signed descriptor]`: a descriptor of another
-     * artifact, a changed count, a malformed descriptor and one key missing.
+     * artifact or kind, a changed count, a malformed descriptor and one key
+     * missing, the kind among them.
      *
      * @return iterable<string, array{0: array<string, int|string|null>|string|null}>
      */
@@ -1027,6 +1091,8 @@ final class AuditRecordTest extends TestCase
         yield from [
             'another artifact' => [['artifact_id' => '01932b4e-8a40-7000-8000-00000000000f']],
             'a changed count'  => [['count' => 4]],
+            'another kind'     => [['kind' => 'export']],
+            'no kind'          => [['kind' => null]],
             'a changed digest' => [['digest' => str_repeat('a', 64)]],
             'a string'         => ['01932b4e-8a40-7000-8000-00000000000f'],
             'null'             => [null],

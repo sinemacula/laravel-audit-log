@@ -24,16 +24,18 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  *
  * It holds only minimised values: its IP address, context and properties are
  * what `RecordMinimiser` left of the builder's, and the note, the identifier
- * hash, a bulk operation's manifest descriptor and the diagnostics of what was
+ * hash, an artifact's manifest descriptor and the diagnostics of what was
  * removed sit at `properties._audit`, last and after the caller's keys, written
  * there by that minimiser.
  *
- * A bulk record carries its attachment, the sealed manifest of what the
- * operation affected. The attachment is carried, not signed, and is never in
- * the envelope: the record is bound to it by the descriptor it signs at
- * `properties._audit.manifest`, which names the attachment's id, digest and
- * count, so a record with the descriptor is built only with the attachment it
- * describes, and a record without one only with none.
+ * A record with an artifact carries its attachment: a bulk operation's sealed
+ * subjects, a disclosure's evidence or an export's manifest. The attachment is
+ * carried, not signed, and is never in the envelope: the record is bound to it
+ * by the descriptor it signs at `properties._audit.manifest`, which names the
+ * attachment's id, kind, digest and count, so a record with the descriptor is
+ * built only with the attachment it describes, and a record without one only
+ * with none. The rule holds for an attachment described from a stored entry's
+ * descriptor too, so a record rebuilt to be read keeps it.
  *
  * The delivery pipeline later finalises it, once, adding the time it was
  * recorded and its integrity fields; nothing here knows of that. A record kept
@@ -198,7 +200,7 @@ final readonly class AuditRecord
         /** When the activity happened, as ISO-8601 UTC with microseconds. */
         public string $occurredAt,
 
-        /** The bulk operation's sealed manifest, carried and bound by the signed descriptor; `null` for any other record. */
+        /** The artifact's attachment, carried and bound by the signed descriptor; `null` for a record with no artifact. */
         #[\SensitiveParameter]
         public ?Attachment $attachment = null,
     ) {}
@@ -272,9 +274,9 @@ final readonly class AuditRecord
      * once, with what minimising left of its IP address, context and
      * properties, the event version and category of its code's definition, the
      * instant the activity happened, and the source it was captured on. The
-     * origin must have been filled. A bulk builder's record takes the
-     * attachment of its own manifest, which its minimised properties describe,
-     * and any other record takes none.
+     * origin must have been filled. A builder with a manifest gives a record
+     * that takes the attachment of that manifest, which its minimised
+     * properties describe, and any other record takes none.
      *
      * Its parameters are the record's parts, each from its own stage of the
      * pipeline, so none groups naturally with another.
@@ -414,8 +416,8 @@ final readonly class AuditRecord
 
     /**
      * Refuse an attachment that is not the snapshot's own manifest sealed, or
-     * that the minimised properties do not describe, and a bulk snapshot
-     * without one.
+     * that the minimised properties do not describe, and a snapshot with a
+     * manifest without one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
@@ -427,7 +429,7 @@ final readonly class AuditRecord
     private static function checkAttachment(#[\SensitiveParameter] PendingSnapshot $snapshot, Minimised $minimised, #[\SensitiveParameter] ?Attachment $attachment): void
     {
         if ($snapshot->manifest?->id !== $attachment?->id || !self::isBound($minimised->properties, $attachment)) {
-            throw new \LogicException('A bulk record is built with the attachment of its own manifest, and any other record with none.');
+            throw new \LogicException('A record with an artifact is built with the attachment of its own manifest, and any other record with none.');
         }
     }
 

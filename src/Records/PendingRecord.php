@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Records;
 
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Concerns\ChoosesDelivery;
 use SineMacula\Laravel\AuditLog\Records\Concerns\DescribesTheActivity;
 use SineMacula\Laravel\AuditLog\Records\Concerns\FillsAmbientContext;
@@ -34,7 +35,13 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  *
  * A bulk builder carries its manifest, what the operation affected, which its
  * record seals as an attachment and describes in `properties._audit.manifest`.
- * Only `AuditLog::bulk()` gives a builder one.
+ * Only `AuditLog::bulk()` and the package's own read records give a builder
+ * one.
+ *
+ * Only the package's own read path names one of its codes, with `forPackage()`.
+ * A builder the facade made is refused when it is recorded with a code under
+ * the reserved prefix, because only the package's write path may record one, so
+ * `forPackage()` is no public way to record a package code.
  *
  * The recorder is the seam `record()` hands the builder to, and it returns the
  * captured record; the package's recorder passes its own write method. A
@@ -96,8 +103,31 @@ final class PendingRecord
     }
 
     /**
-     * Carry the bulk operation's manifest. A builder has one manifest, given
-     * before its record is built.
+     * Name what happened with one of the package's own codes, under the
+     * reserved prefix. Only the package's read path calls it; the last code
+     * given wins, as with `event()`.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function forPackage(PackageActivity $activity): self
+    {
+        $this->assertUsable();
+
+        $this->code = EventCode::package($activity);
+
+        return $this;
+    }
+
+    /**
+     * Carry the manifest of what the record covers: a bulk operation's members,
+     * or the package's own read records' disclosure or export. A builder has
+     * one manifest, given before its record is built.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
      * @return self

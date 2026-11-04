@@ -16,6 +16,7 @@ use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException;
@@ -30,7 +31,9 @@ use Tests\Fixtures\Records\RecordFactory;
  * columns, an imported record's fields, Unicode and the largest integers come
  * back with the same canonical bytes and signature; each refusal as its own
  * failure, in a fixed order; that nothing is minimised, sanitised or finalised
- * again; and that no refusal carries the envelope.
+ * again; a bundle of an artifact of each kind, an empty disclosure among them,
+ * and the kinds and counts it refuses; and that no refusal carries the
+ * envelope.
  *
  * Envelopes are signed here directly with the key's secret, as the signer
  * signs, so a value capture never produces (an object at the top of a column, a
@@ -991,8 +994,16 @@ final class EnvelopeCodecTest extends TestCase
     /**
      * The golden bundle, of the golden members sealed once under the test
      * encrypter and signed under the golden key, decodes and encodes back byte
-     * for byte; its manifest is the settled golden, and its members open to the
-     * golden canonical form.
+     * for byte; its manifest is the settled golden, its signed descriptor names
+     * its kind, and its members open to the golden canonical form.
+     *
+     * The fixture holds the golden secret and key id, the members, their
+     * digest, and the bundle's canonical envelope: the bulk record of three
+     * invoices, its ids pinned, finalised under `k2026`. Its record's signed
+     * descriptor is the four keys `artifact_id`, `kind`, `digest` and `count`,
+     * and its `hmac` is the record signed over them with the golden secret, as
+     * `RecordSigner` signs; the sealed members and every other field are as
+     * they were first sealed.
      *
      * @return void
      *
@@ -1013,13 +1024,145 @@ final class EnvelopeCodecTest extends TestCase
         self::assertSame(self::GOLDEN_DIGEST, $attachment->digest);
         self::assertSame(3, $attachment->memberCount);
         self::assertSame(self::ARTIFACT_ID, $attachment->id);
-        self::assertSame(Attachment::KIND_BULK, $attachment->kind);
+        self::assertSame('bulk', $attachment->kind);
 
-        $members = RecordFactory::encrypter()->decryptString($attachment->members);
+        $members = RecordFactory::encrypter()->decryptString((string) $attachment->members);
 
         self::assertSame(self::goldenBundle('members'), $members);
         self::assertSame(['count' => 3, 'digest' => self::GOLDEN_DIGEST], Manifest::readCanonical($members));
-        self::assertSame(['artifact_id' => self::ARTIFACT_ID, 'count' => 3, 'digest' => self::GOLDEN_DIGEST], self::assoc($envelope)['record']['properties']['_audit']['manifest']);
+        self::assertSame(
+            ['artifact_id' => self::ARTIFACT_ID, 'count' => 3, 'digest' => self::GOLDEN_DIGEST, 'kind' => 'bulk'],
+            self::assoc($envelope)['record']['properties']['_audit']['manifest'],
+        );
+    }
+
+    /**
+     * A bundle of a disclosure encodes to the canonical encoding of its three
+     * keys and decodes to a record that encodes to exactly the same bytes, its
+     * attachment of the `disclosure` kind kept whole.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testADisclosureBundleRoundTripsByteForByte(): void
+    {
+        self::assertKindRoundTrips(ArtifactKind::DISCLOSURE, 3);
+    }
+
+    /**
+     * A bundle of an export's manifest round-trips byte for byte, its
+     * attachment of the `export` kind kept whole.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAnExportBundleRoundTripsByteForByte(): void
+    {
+        self::assertKindRoundTrips(ArtifactKind::EXPORT, 2);
+    }
+
+    /**
+     * A bundle of a disclosure of nothing, counting no member, round-trips byte
+     * for byte, as does an export of no line.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAnEmptyDisclosureBundleRoundTrips(): void
+    {
+        self::assertKindRoundTrips(ArtifactKind::DISCLOSURE, 0);
+        self::assertKindRoundTrips(ArtifactKind::EXPORT, 0);
+    }
+
+    /**
+     * A bundle whose signed descriptor and attachment both name a kind the
+     * release does not know is malformed, naming the record's id, though the
+     * record verifies and the descriptor describes the attachment.
+     *
+     * @return void
+     */
+    public function testAnUnknownKindIsMalformedNamingTheRecord(): void
+    {
+        $bundle = self::bundle(['properties' => self::properties(['kind' => 'audit'])], ['kind' => 'audit']);
+
+        self::assertTrue(self::signer()->verifies($bundle['record']));
+
+        $exception = self::rejection(CanonicalEncoder::encode($bundle));
+
+        self::assertSame(EnvelopeFailure::MALFORMED, $exception->failure);
+        self::assertSame(self::ID, $exception->id);
+    }
+
+    /**
+     * Rows of `[kind, count]`: counts a kind refuses, signed alike by the
+     * descriptor and the attachment.
+     *
+     * @return iterable<string, array{0: string, 1: int}>
+     */
+    public static function provideRefusedCounts(): iterable
+    {
+        yield from [
+            'a negative disclosure'    => ['disclosure', -1],
+            'a negative export'        => ['export', -1],
+            'a negative bulk'          => ['bulk', -1],
+            'a bulk operation of none' => ['bulk', 0],
+        ];
+    }
+
+    /**
+     * A count the attachment's kind refuses is malformed, naming the record's
+     * id, though the descriptor signs the same count.
+     *
+     * @param  string  $kind
+     * @param  int  $count
+     * @return void
+     */
+    #[DataProvider('provideRefusedCounts')]
+    public function testANegativeCountIsMalformed(string $kind, int $count): void
+    {
+        $bundle = self::bundle(['properties' => self::properties(['kind' => $kind, 'count' => $count])], ['kind' => $kind, 'member_count' => $count]);
+
+        self::assertTrue(self::signer()->verifies($bundle['record']));
+
+        $exception = self::rejection(CanonicalEncoder::encode($bundle));
+
+        self::assertSame(EnvelopeFailure::MALFORMED, $exception->failure);
+        self::assertSame(self::ID, $exception->id);
+    }
+
+    /**
+     * A record whose attachment was described from its entry, and so carries no
+     * members, is never encoded: neither its envelope, signed or unsigned, nor
+     * its encoding is made, so it can never be queued or spilled.
+     *
+     * @return void
+     */
+    public function testAnUnsealedAttachmentIsNeverEncoded(): void
+    {
+        $columns    = self::bundledRecord()->toArray();
+        $descriptor = $columns['properties']['_audit']['manifest'] ?? null;
+
+        self::assertIsArray($descriptor);
+
+        $described = AuditRecord::fromEnvelope($columns, Attachment::described($descriptor));
+        $finalised = new FinalisedRecord($described, self::RECORDED_AT, 1, self::KEY_ID, self::PLACEHOLDER_HMAC);
+        $attempts  = [
+            'encode'             => static fn (): string => self::codec()->encode($finalised),
+            'envelopeOf'         => static fn (): array => EnvelopeCodec::envelopeOf($finalised),
+            'unsignedEnvelopeOf' => static fn (): array => EnvelopeCodec::unsignedEnvelopeOf($described),
+        ];
+
+        foreach ($attempts as $label => $attempt) {
+            try {
+                $attempt();
+                self::fail(sprintf('Expected %s to refuse a described attachment.', $label));
+            } catch (\LogicException $exception) {
+                self::assertSame('An attachment described from its entry carries no members and is never stored or encoded.', $exception->getMessage(), $label);
+            }
+        }
     }
 
     /**
@@ -1163,8 +1306,8 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * Rows of `[record fields in place of its own, attachment fields in place
-     * of its own]`: an attachment whose id, digest or count is not the signed
-     * descriptor's, a signed descriptor that is not the attachment's, one with
+     * of its own]`: an attachment whose id, kind, digest or count is not the
+     * signed descriptor's, a signed descriptor that is not the attachment's, one with
      * a field added, and a record that signs no descriptor at all.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
@@ -1188,6 +1331,9 @@ final class EnvelopeCodecTest extends TestCase
             'no descriptor'             => [['properties' => ['batch' => 'march']], []],
             'no properties'             => [['properties' => null], []],
             'another kind'              => [[], ['kind' => 'other']],
+            'another known kind'        => [[], ['kind' => 'export']],
+            'a descriptor of a kind'    => [['properties' => self::properties(['kind' => 'disclosure'])], []],
+            'a descriptor without kind' => [['properties' => ['batch' => 'march', '_audit' => ['manifest' => array_diff_key(self::descriptor(), ['kind' => true])]]], []],
             'an upper-case artifact id' => [[], ['id' => strtoupper(self::ARTIFACT_ID)]],
             'no members'                => [[], ['members' => '']],
             'no member'                 => [['properties' => self::properties(['count' => 0])], ['member_count' => 0]],
@@ -1812,9 +1958,59 @@ final class EnvelopeCodecTest extends TestCase
     private static function properties(array $descriptor = [], array $more = []): array
     {
         $members = Manifest::encode(array_map(static fn (int $id): array => [RecordFactory::MEMBER_TYPE, (string) $id], [1, 2, 3]));
-        $own     = ['artifact_id' => self::ARTIFACT_ID, 'digest' => hash('sha256', $members), 'count' => 3];
+        $own     = ['artifact_id' => self::ARTIFACT_ID, 'kind' => 'bulk', 'digest' => hash('sha256', $members), 'count' => 3];
 
         return ['batch' => 'march', ...$more, '_audit' => ['manifest' => array_replace($own, $descriptor)]];
+    }
+
+    /**
+     * The bulk record's own signed descriptor, as `properties()` writes it.
+     *
+     * @return array<string, int|string>
+     *
+     * @throws \JsonException
+     */
+    private static function descriptor(): array
+    {
+        $metadata = self::properties()['_audit'] ?? null;
+
+        self::assertIsArray($metadata);
+        self::assertIsArray($metadata['manifest'] ?? null);
+
+        /** @var array<string, int|string> */
+        return $metadata['manifest'];
+    }
+
+    /**
+     * Assert that a bundle of an artifact of the kind, holding the number of
+     * members given, encodes to the canonical encoding of its three keys and
+     * decodes to a record that encodes to exactly the same bytes, with its
+     * signature and every field of its attachment, which opens to the canonical
+     * form its kind's builder made.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  int  $count
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    private static function assertKindRoundTrips(ArtifactKind $kind, int $count): void
+    {
+        $canonical = RecordFactory::canonical($kind, $count);
+        $codec     = self::codec();
+        $finalised = self::signer()->sign(RecordFactory::withArtifact($kind, $canonical, $count), self::RECORDED_AT);
+        $envelope  = $codec->encode($finalised);
+        $decoded   = $codec->decode($envelope, $finalised->record->id);
+        $bundle    = self::assoc($envelope);
+
+        self::assertSame(['attachment', 'bundle_version', 'record'], array_keys($bundle));
+        self::assertSame($kind->value, $bundle['attachment']['kind'] ?? null);
+        self::assertSame($count, $bundle['attachment']['member_count'] ?? null);
+        self::assertSame($kind->value, $bundle['record']['properties']['_audit']['manifest']['kind'] ?? null);
+        self::assertSame($envelope, $codec->encode($decoded));
+        self::assertSame($finalised->hmac, $decoded->hmac);
+        self::assertEquals($finalised->record->attachment, $decoded->record->attachment);
+        self::assertSame($canonical, RecordFactory::encrypter()->decryptString((string) $decoded->record->attachment?->members));
     }
 
     /**

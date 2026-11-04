@@ -120,6 +120,8 @@ final class CheckCommandTest extends TestCase
         'capture.gate.reason_codes'                 => 'plan_expired',
         'capture.bulk.max_members'                  => 0,
         'capture.bulk.max_bytes'                    => 65535,
+        'read.max_per_page'                         => 0,
+        'export.chunk'                              => 99,
         'source.id'                                 => 42,
         'source.region'                             => 42,
         'redaction.keys'                            => 'password',
@@ -675,7 +677,7 @@ final class CheckCommandTest extends TestCase
 
         $schema->shouldReceive('hasTable')->andReturnFalse();
 
-        $connection = \Mockery::mock(MySqlConnection::class . '[getSchemaBuilder,scalar]', [new VersionReportingPdo('8.4.11'), '', '', ['driver' => 'mysql']]);
+        $connection = \Mockery::mock(MySqlConnection::class . '[getSchemaBuilder,scalar]', [new VersionReportingPdo('8.4.11'), '', '', ['driver' => 'mysql', 'name' => 'fake']]);
 
         $connection->shouldReceive('getSchemaBuilder')->andReturn($schema);
         $connection->shouldReceive('scalar')->andReturnUsing(static fn (string $query): string => str_contains($query, 'sql_mode') ? 'NO_ENGINE_SUBSTITUTION' : 'InnoDB');
@@ -2200,6 +2202,104 @@ final class CheckCommandTest extends TestCase
      */
     #[DataProvider('provideCaptureValuesThatMustNotBePrinted')]
     public function testThePrintedOutputHoldsNoValueOfACaptureSetting(string $setting, array|string $value, string $sentinel): void
+    {
+        app(ConfigRepository::class)->set($setting, $value);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertCount(1, self::problemsIn($output));
+        self::assertStringContainsString("`{$setting}`", implode("\n", $output));
+        self::assertStringNotContainsString($sentinel, implode("\n", $output));
+    }
+
+    /**
+     * Every malformed read and export setting is listed by the one run, by its
+     * full path and in the order the settings are read, after the capture
+     * settings, and none of them leaves out a later subject, since none of
+     * those reads them.
+     *
+     * @return void
+     */
+    public function testEveryMalformedReadLeafIsReportedInOneRun(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        foreach (array_reverse(self::BAD_LEAVES, true) as $leaf => $bad) {
+
+            if (!str_starts_with($leaf, 'read.') && !str_starts_with($leaf, 'export.')) {
+                continue;
+            }
+
+            $config->set("audit-log.{$leaf}", $bad);
+        }
+
+        $read = [
+            '[config] `audit-log.read.max_per_page` must be an integer from 1 to 500.',
+            '[config] `audit-log.export.chunk` must be an integer from 100 to 10000.',
+        ];
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([...$read, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE], $output);
+
+        $config->set('audit-log.capture.bulk.max_members', 0);
+
+        $capture = '[config] `audit-log.capture.bulk.max_members` must be an integer from 1 to 1000000.';
+
+        self::assertSame([$capture, ...$read], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Every value at the edge of what a read or export setting accepts passes:
+     * each at either end of its range, as an integer or the digits `env()`
+     * returns.
+     *
+     * @return void
+     */
+    public function testTheReadSettingsAcceptEveryGoodValue(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set(['audit-log.read.max_per_page' => 1, 'audit-log.export.chunk' => '100']);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+
+        $config->set(['audit-log.read.max_per_page' => '500', 'audit-log.export.chunk' => 10000]);
+
+        self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
+    }
+
+    /**
+     * Rows of `[the setting, the bad value, the text in it]`: a read or export
+     * setting in each shape it is refused in.
+     *
+     * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
+     */
+    public static function provideReadValuesThatMustNotBePrinted(): iterable
+    {
+        yield from [
+            'a page size that is a word'  => ['audit-log.read.max_per_page', self::SENTINEL, self::SENTINEL],
+            'a page size that is a list'  => ['audit-log.read.max_per_page', [self::SENTINEL], self::SENTINEL],
+            'a page size over its most'   => ['audit-log.read.max_per_page', '501', '501'],
+            'a chunk that is a word'      => ['audit-log.export.chunk', self::SENTINEL, self::SENTINEL],
+            'a chunk that is an exponent' => ['audit-log.export.chunk', '1e3', '1e3'],
+            'a chunk under its least'     => ['audit-log.export.chunk', '99', '99'],
+        ];
+    }
+
+    /**
+     * A bad read or export setting fails the run with one problem and never
+     * appears in its output, which names the setting by its key.
+     *
+     * @param  string  $setting
+     * @param  array<array-key, string>|string  $value
+     * @param  string  $sentinel
+     * @return void
+     */
+    #[DataProvider('provideReadValuesThatMustNotBePrinted')]
+    public function testThePrintedOutputHoldsNoValueOfAReadSetting(string $setting, array|string $value, string $sentinel): void
     {
         app(ConfigRepository::class)->set($setting, $value);
 

@@ -23,6 +23,7 @@ use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
@@ -619,7 +620,7 @@ final class RecordMinimiserTest extends TestCase
     /**
      * A bulk record's manifest descriptor is added at capture, in the reserved
      * area after the note and the identifier hash, and holds the artifact's id,
-     * the digest and the count.
+     * its kind, the digest and the count.
      *
      * @return void
      *
@@ -633,7 +634,7 @@ final class RecordMinimiserTest extends TestCase
         self::assertSame(['batch' => 'march', '_audit' => [
             'note'            => self::NOTE,
             'identifier_hash' => self::ALICE_HASH,
-            'manifest'        => ['artifact_id' => $manifest->id, 'digest' => $manifest->digest, 'count' => 3],
+            'manifest'        => ['artifact_id' => $manifest->id, 'kind' => 'bulk', 'digest' => $manifest->digest, 'count' => 3],
         ]], $this->minimise($pending)->properties);
     }
 
@@ -645,12 +646,34 @@ final class RecordMinimiserTest extends TestCase
      *
      * @throws \JsonException
      */
-    public function testOnlyABulkRecordHasADescriptor(): void
+    public function testOnlyARecordWithAnArtifactHasADescriptor(): void
     {
         $manifest = self::manifest();
 
         self::assertSame(['_audit' => ['manifest' => $manifest->descriptor()]], $this->minimise(self::pending()->withManifest($manifest))->properties);
         self::assertSame(['batch' => 'march'], $this->minimise(self::pending()->withProperties(['batch' => 'march']))->properties);
+    }
+
+    /**
+     * A disclosure's descriptor, of an empty disclosure counting none, is added
+     * as a bulk operation's is, naming its kind, and survives a definition that
+     * drops every unlisted property.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testADisclosureDescriptorIsAddedAsAnyOther(): void
+    {
+        $manifest = Manifest::ofContent(ArtifactKind::DISCLOSURE, RecordFactory::canonical(ArtifactKind::DISCLOSURE, 0), 0);
+        $pending  = self::pending()->withProperties(['batch' => 'march'])->withManifest($manifest);
+
+        $properties = $this->minimise($pending, EventDefinition::for(self::CODE))->properties;
+
+        self::assertSame(['_audit' => [
+            'manifest' => ['artifact_id' => $manifest->id, 'kind' => 'disclosure', 'digest' => $manifest->digest, 'count' => 0],
+            'omitted'  => ['count' => 1, 'paths' => ['*']],
+        ]], $properties);
     }
 
     /**

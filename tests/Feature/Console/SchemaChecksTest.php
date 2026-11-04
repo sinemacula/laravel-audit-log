@@ -418,7 +418,7 @@ final class SchemaChecksTest extends TestCase
             $table->index(['event'], self::TABLE . '_event_index');
         });
 
-        self::assertSame(['Index `audit_check_entries_event_index` covers (`event`); expected (`event`, `occurred_at`).'], $this->problems());
+        self::assertSame(['Index `audit_check_entries_event_index` covers (`event`); expected (`event`, `occurred_at`, `id`).'], $this->problems());
     }
 
     /**
@@ -430,11 +430,11 @@ final class SchemaChecksTest extends TestCase
     public function testAnIndexWhoseColumnsAreOutOfOrderIsAProblem(): void
     {
         $this->replaceIndex(self::TABLE . '_actor_index', static function (Blueprint $table): void {
-            $table->index(['actor_id', 'actor_type', 'occurred_at'], self::TABLE . '_actor_index');
+            $table->index(['actor_id', 'actor_type', 'occurred_at', 'id'], self::TABLE . '_actor_index');
         });
 
         self::assertSame([
-            'Index `audit_check_entries_actor_index` covers (`actor_id`, `actor_type`, `occurred_at`); expected (`actor_type`, `actor_id`, `occurred_at`).',
+            'Index `audit_check_entries_actor_index` covers (`actor_id`, `actor_type`, `occurred_at`, `id`); expected (`actor_type`, `actor_id`, `occurred_at`, `id`).',
         ], $this->problems());
     }
 
@@ -466,7 +466,7 @@ final class SchemaChecksTest extends TestCase
     public function testALookupIndexThatIsUniqueIsAProblem(): void
     {
         $this->replaceIndex(self::TABLE . '_occurred_index', static function (Blueprint $table): void {
-            $table->unique(['occurred_at'], self::TABLE . '_occurred_index');
+            $table->unique(['occurred_at', 'id'], self::TABLE . '_occurred_index');
         });
 
         self::assertSame(['Index `audit_check_entries_occurred_index` must not be unique.'], $this->problems());
@@ -966,6 +966,84 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
+     * Rows of `[an index's suffix, the columns an install migrated before each
+     * lookup ended in the id gave it]`: the seven lookups of the trail.
+     *
+     * @return iterable<string, array{0: string, 1: non-empty-list<string>}>
+     */
+    public static function provideIndexesWithoutTheirId(): iterable
+    {
+        yield from [
+            'the actor'     => ['_actor_index', ['actor_type', 'actor_id', 'occurred_at']],
+            'the subject'   => ['_subject_index', ['subject_type', 'subject_id', 'occurred_at']],
+            'the principal' => ['_principal_index', ['principal_type', 'principal_id', 'occurred_at']],
+            'the tenant'    => ['_tenant_index', ['tenant_type', 'tenant_id', 'occurred_at']],
+            'the event'     => ['_event_index', ['event', 'occurred_at']],
+            'the category'  => ['_category_index', ['category', 'occurred_at']],
+            'the time'      => ['_occurred_index', ['occurred_at']],
+        ];
+    }
+
+    /**
+     * A lookup index of the trail that does not end in the id is a problem,
+     * naming both column lists, since a keyset page could not read it in order
+     * and the engine would sort every match.
+     *
+     * @param  string  $suffix
+     * @param  non-empty-list<string>  $columns
+     * @return void
+     */
+    #[DataProvider('provideIndexesWithoutTheirId')]
+    public function testAnIndexWithoutItsIdIsReported(string $suffix, array $columns): void
+    {
+        $this->replaceIndex(self::TABLE . $suffix, static function (Blueprint $table) use ($suffix, $columns): void {
+            $table->index($columns, self::TABLE . $suffix);
+        });
+
+        $listed = static fn (array $names): string => implode(', ', array_map(static fn (string $name): string => '`' . $name . '`', $names));
+
+        self::assertSame([
+            sprintf('Index `%s%s` covers (%s); expected (%s).', self::TABLE, $suffix, $listed($columns), $listed([...$columns, 'id'])),
+        ], $this->problems());
+    }
+
+    /**
+     * An install migrated with every lookup index of the trail as it was before
+     * each ended in the id is reported once for each of the seven, in the
+     * migration's order, and for nothing else: the correlation, recorded and
+     * source indexes are unchanged.
+     *
+     * @return void
+     */
+    public function testAnInstallWithTheOldIndexesReportsEachOfThem(): void
+    {
+        $old = iterator_to_array(self::provideIndexesWithoutTheirId(), false);
+
+        $this->alter(static function (Blueprint $table) use ($old): void {
+            foreach ($old as [$suffix]) {
+                $table->dropIndex(self::TABLE . $suffix);
+            }
+        });
+
+        $this->alter(static function (Blueprint $table) use ($old): void {
+            foreach ($old as [$suffix, $columns]) {
+                $table->index($columns, self::TABLE . $suffix);
+            }
+        });
+
+        self::assertSame([
+            'Index `audit_check_entries_actor_index` covers (`actor_type`, `actor_id`, `occurred_at`); expected (`actor_type`, `actor_id`, `occurred_at`, `id`).',
+            'Index `audit_check_entries_subject_index` covers (`subject_type`, `subject_id`, `occurred_at`); expected (`subject_type`, `subject_id`, `occurred_at`, `id`).',
+            'Index `audit_check_entries_principal_index` covers (`principal_type`, `principal_id`, `occurred_at`);'
+                . ' expected (`principal_type`, `principal_id`, `occurred_at`, `id`).',
+            'Index `audit_check_entries_tenant_index` covers (`tenant_type`, `tenant_id`, `occurred_at`); expected (`tenant_type`, `tenant_id`, `occurred_at`, `id`).',
+            'Index `audit_check_entries_event_index` covers (`event`, `occurred_at`); expected (`event`, `occurred_at`, `id`).',
+            'Index `audit_check_entries_category_index` covers (`category`, `occurred_at`); expected (`category`, `occurred_at`, `id`).',
+            'Index `audit_check_entries_occurred_index` covers (`occurred_at`); expected (`occurred_at`, `id`).',
+        ], $this->problems());
+    }
+
+    /**
      * The artifacts table the shipped migration creates has no problem.
      *
      * @return void
@@ -1460,7 +1538,7 @@ final class SchemaChecksTest extends TestCase
         $schema->shouldReceive('getColumns')->andReturn($columns);
         $schema->shouldReceive('getIndexes')->andReturn($indexes);
 
-        $connection = \Mockery::mock(SQLiteConnection::class . '[getSchemaBuilder]', [new \PDO('sqlite::memory:'), '', '', ['driver' => $driver]]);
+        $connection = \Mockery::mock(SQLiteConnection::class . '[getSchemaBuilder]', [new \PDO('sqlite::memory:'), '', '', ['driver' => $driver, 'name' => 'fake']]);
 
         $connection->shouldReceive('getSchemaBuilder')->andReturn($schema);
 

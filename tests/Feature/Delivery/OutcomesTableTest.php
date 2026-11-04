@@ -18,8 +18,10 @@ use Illuminate\Support\Str;
 use Monolog\Handler\NullHandler;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
+use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
@@ -36,7 +38,16 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Listeners\RecordModelChange;
+use SineMacula\Laravel\AuditLog\Querying\AccessRecorder;
+use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
+use SineMacula\Laravel\AuditLog\Querying\ReadGate;
+use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
+use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\CapturesLogLines;
 use Tests\Concerns\CreatesWatchedModels;
@@ -47,6 +58,7 @@ use Tests\Fixtures\Capture\Events\PortalSignedIn;
 use Tests\Fixtures\Capture\Mappers\PortalMapper;
 use Tests\Fixtures\Capture\Models\WatchedInvoice;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
+use Tests\Fixtures\Querying\ClosurePolicy;
 use Tests\Fixtures\Stores\CallbackStore;
 use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
@@ -73,6 +85,8 @@ use Tests\TestCase;
 #[CoversClass(FailureHandler::class)]
 #[CoversClass(OutboxDrainer::class)]
 #[CoversClass(CaptureCoordinator::class)]
+#[CoversClass(ReadGate::class)]
+#[CoversClass(AccessRecorder::class)]
 final class OutcomesTableTest extends TestCase
 {
     use CapturesLogLines, CreatesWatchedModels, InteractsWithAuditStore, InteractsWithOutbox, SeedsTheOutbox;
@@ -1081,6 +1095,149 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
+     * `read-sync`: under either failure mode the page is returned once the
+     * read's record is stored, its own row and its `AuditRecorded` already
+     * there when the read returns, and the entry it found is the page's.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideFailureModes')]
+    public function testRowReadSync(string $mode): void
+    {
+        $this->failureMode($mode);
+        $this->allowEveryViewer();
+
+        $id = $this->recordAs(self::IMMEDIATELY)->id;
+
+        self::assertSame([$id], self::idsOf($this->trail()->cursorPaginate()));
+        self::assertSame([PackageActivity::TRAIL_READ->value], $this->readCodes());
+        $this->assertOutcome(entries: 2, recorded: 2);
+    }
+
+    /**
+     * `read-outbox`: under either failure mode the page is returned once the
+     * read's record is a committed outbox row, accepted and not yet delivered:
+     * the store holds it, and it is said, only once a drain has run.
+     *
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideFailureModes')]
+    public function testRowReadOutbox(string $mode): void
+    {
+        $this->failureMode($mode);
+        $this->allowEveryViewer();
+
+        $id = $this->recordAs(self::IMMEDIATELY)->id;
+
+        $this->outboxModeOn();
+
+        self::assertSame([$id], self::idsOf($this->trail()->cursorPaginate()));
+        self::assertSame([], $this->readCodes());
+        $this->assertOutcome(entries: 1, outbox: 1, recorded: 1);
+
+        self::assertSame(1, $this->drain()->delivered());
+        self::assertSame([PackageActivity::TRAIL_READ->value], $this->readCodes());
+        $this->assertOutcome(entries: 2, recorded: 2);
+    }
+
+    /**
+     * Rows of `[delivery mode, failure mode]`: each delivery mode under each
+     * failure mode, for the read rows that hold under any.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function provideReadModes(): iterable
+    {
+        yield from [
+            'sync, report'   => [self::SYNC, self::REPORT],
+            'sync, throw'    => [self::SYNC, self::THROW],
+            'outbox, report' => [self::OUTBOX, self::REPORT],
+            'outbox, throw'  => [self::OUTBOX, self::THROW],
+        ];
+    }
+
+    /**
+     * `read-open-transaction`: in any mode a read inside a transaction open on
+     * the storage connection, which the outbox shares here, is refused naming
+     * it, before the policy is asked or anything is queried, and leaves
+     * nothing; one on another connection refuses nothing, and once the
+     * transaction ends the same read is answered.
+     *
+     * @param  string  $delivery
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideReadModes')]
+    public function testRowReadOpenTransaction(string $delivery, string $mode): void
+    {
+        $this->failureMode($mode);
+
+        $policy = $this->allowEveryViewer();
+        $id     = $this->recordAs(self::IMMEDIATELY)->id;
+
+        if ($delivery === self::OUTBOX) {
+            $this->outboxModeOn();
+        }
+
+        $this->host()->beginTransaction();
+
+        $thrown = $this->thrownBy(fn () => $this->trail()->cursorPaginate());
+
+        self::assertInstanceOf(AuditReadRefusedException::class, $thrown);
+        self::assertSame(AuditReadRefusedException::inTransaction(self::CONNECTION)->getMessage(), $thrown->getMessage());
+        self::assertNull($thrown->getPrevious());
+        self::assertSame([], $policy->asked());
+        $this->assertOutcome(entries: 1, recorded: 1);
+
+        $this->host()->rollBack();
+
+        $other = DB::connection(self::OTHER);
+
+        $other->beginTransaction();
+
+        self::assertSame([$id], self::idsOf($this->trail()->cursorPaginate()));
+
+        $other->rollBack();
+    }
+
+    /**
+     * `read-failed-write`: in any mode a read whose record cannot be written is
+     * spilled once, said once and reported once, and is refused as unrecorded,
+     * with nothing behind it; in outbox mode the entry it found is never
+     * returned.
+     *
+     * @param  string  $delivery
+     * @param  string  $mode
+     * @return void
+     */
+    #[DataProvider('provideReadModes')]
+    public function testRowReadFailedWrite(string $delivery, string $mode): void
+    {
+        $this->failureMode($mode);
+        $this->allowEveryViewer();
+        $this->recordAs(self::IMMEDIATELY);
+
+        if ($delivery === self::OUTBOX) {
+            $this->outboxModeOn();
+            $this->pointOutboxAtProbeTable();
+        }
+
+        if ($delivery === self::SYNC) {
+            $this->pointAtProbeTable();
+        }
+
+        $thrown = $this->thrownBy(fn () => $this->trail()->cursorPaginate());
+
+        self::assertInstanceOf(AuditReadRefusedException::class, $thrown);
+        self::assertSame(AuditReadRefusedException::unrecorded()->getMessage(), $thrown->getMessage());
+        self::assertNull($thrown->getPrevious());
+        self::assertInstanceOf(AuditWriteFailedException::class, $this->firstReport());
+        $this->assertOutcome(entries: $delivery === self::OUTBOX ? 1 : 0, spills: 1, reports: 1, events: 1, recorded: 1);
+    }
+
+    /**
      * Every row of the note's guarantee table has its test here, and every row
      * test here has its row, so a row added, renamed or dropped on either side
      * fails.
@@ -1310,6 +1467,60 @@ final class OutcomesTableTest extends TestCase
         app()->booting(static function (): void {
             AuditLog::watch(WatchedInvoice::class, as: 'invoice', fields: ['number', 'amount']);
         });
+    }
+
+    /**
+     * Bind an access policy that lets every viewer see every entry, and return
+     * it so a test can read what it was asked.
+     *
+     * @return \Tests\Fixtures\Querying\ClosurePolicy
+     */
+    private function allowEveryViewer(): ClosurePolicy
+    {
+        $policy = new ClosurePolicy(static fn (): AccessScope => AccessScope::all());
+
+        app()->instance(AuditAccessPolicy::class, $policy);
+
+        return $policy;
+    }
+
+    /**
+     * The trail of the code every test records, read for a viewer the tests
+     * name by reference.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
+     */
+    private function trail(): AuditTrail
+    {
+        return app(AuditTrail::class)->visibleTo(Reference::of('App\Models\User', '7'))->forEvent(self::CODE);
+    }
+
+    /**
+     * The ids of a page's entries, in order.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
+     * @return list<string>
+     */
+    private static function idsOf(TrailPage $page): array
+    {
+        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
+    }
+
+    /**
+     * The codes of the package's own records in the entries table, in the order
+     * they were recorded.
+     *
+     * @return list<string>
+     */
+    private function readCodes(): array
+    {
+        $codes = $this->storageConnection()->table(EntrySettings::table())
+            ->where('event', 'like', EventCode::RESERVED_PREFIX . '%')
+            ->orderBy('recorded_at')
+            ->pluck('event')
+            ->all();
+
+        return array_values(array_map(static fn (mixed $code): string => is_string($code) ? $code : '', $codes));
     }
 
     /**

@@ -169,7 +169,7 @@ final class IntegrityChecksTest extends TestCase
 
         $schema->shouldReceive('hasTable')->andThrow(new QueryException('fake', 'select secret_column from audit_log_checkpoints', [], new \PDOException('denied')));
 
-        $connection = \Mockery::mock(SQLiteConnection::class . '[getSchemaBuilder]', [new \PDO('sqlite::memory:'), '', '', ['driver' => 'sqlite']]);
+        $connection = \Mockery::mock(SQLiteConnection::class . '[getSchemaBuilder]', [new \PDO('sqlite::memory:'), '', '', ['driver' => 'sqlite', 'name' => 'fake']]);
 
         $connection->shouldReceive('getSchemaBuilder')->andReturn($schema);
 

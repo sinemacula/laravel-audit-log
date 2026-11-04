@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -20,7 +21,8 @@ use Tests\Unit\Stubs\StubAuthUser;
 /**
  * Feature tests for the facade: it resolves the recorder, gives it typed, and
  * has a real static `fake()`, with which a record, a bulk record and its
- * attachment included, still runs the whole pipeline up to the store.
+ * attachment included, still runs the whole pipeline up to the store; and it is
+ * the way into the trail, whose reads the fake records.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -225,10 +227,34 @@ final class AuditLogTest extends TestCase
         self::assertSame($record, $stored);
         self::assertNotNull($attachment);
         self::assertSame(2, $attachment->memberCount);
-        self::assertSame(Manifest::KIND, $attachment->kind);
-        self::assertTrue($attachment->describes(['artifact_id' => $attachment->id, 'digest' => $attachment->digest, 'count' => 2]));
-        self::assertSame($record->properties['_audit']['manifest'] ?? null, ['artifact_id' => $attachment->id, 'digest' => $attachment->digest, 'count' => 2]);
+        self::assertSame('bulk', $attachment->kind);
+        self::assertTrue($attachment->describes(['artifact_id' => $attachment->id, 'kind' => 'bulk', 'digest' => $attachment->digest, 'count' => 2]));
+        self::assertSame($record->properties['_audit']['manifest'] ?? null, ['artifact_id' => $attachment->id, 'kind' => 'bulk', 'digest' => $attachment->digest, 'count' => 2]);
         self::assertSame(Manifest::encode([['invoice', '1'], ['invoice', '2']]), app(StringEncrypter::class)->decryptString($attachment->members));
         self::assertSame($record, $fake->finalised()[0]->record);
+    }
+
+    /**
+     * `trail()` gives a new trail through the facade on each call, and a read
+     * of it is authorised by the default policy, which denies, and recorded
+     * through the fake before its empty result is returned.
+     *
+     * @return void
+     */
+    public function testTrailIsReachedThroughTheFacade(): void
+    {
+        $fake  = AuditLog::fake();
+        $trail = AuditLog::trail();
+
+        self::assertInstanceOf(AuditTrail::class, $trail);
+        self::assertNotSame($trail, AuditLog::trail());
+        self::assertSame(0, $trail->visibleTo(Reference::of('user', '7'))->count());
+
+        $recorded = $fake->recorded();
+
+        self::assertCount(1, $recorded);
+        self::assertSame('audit_log.trail_counted', $recorded[0]->event);
+        self::assertSame('denied', $recorded[0]->outcome);
+        self::assertSame('no_scope', $recorded[0]->reason);
     }
 }

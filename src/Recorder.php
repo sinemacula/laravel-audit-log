@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
@@ -49,6 +50,12 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
  * watched model's changes are captured from its own Eloquent events, and a bulk
  * operation is one explicit record carrying the manifest of what it affected,
  * refused up front while the bound store keeps no attachment.
+ *
+ * The recorder is also the way into the read path: `trail()` gives a fresh
+ * trail, resolved from the current container on each call, which reads nothing
+ * until a viewer is named and a terminal call made, and which every read
+ * authorises through the bound access policy and records before anything it
+ * found is returned.
  *
  * A singleton that outlives requests under Octane, so it holds only frozen
  * registration data, its definitions and contributors. The event mappers and
@@ -297,6 +304,20 @@ final readonly class Recorder
         $manifest = Manifest::of($subjects, $settings->bulkMaxMembers(), $settings->bulkMaxBytes());
 
         return $this->event($code)->withManifest($manifest);
+    }
+
+    /**
+     * A fresh trail of every entry, resolved from the current container, with
+     * no filter and no viewer: nothing is read until `visibleTo()` names the
+     * viewer and a terminal call reads for them.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    public function trail(): AuditTrail
+    {
+        return Container::getInstance()->make(AuditTrail::class);
     }
 
     /**

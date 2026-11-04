@@ -13,6 +13,10 @@ It also records what the log's integrity does not promise. Signing, sealing and 
 record detectable; they do not make a record true, show that everything that happened was recorded, or hold against
 whoever holds the integrity key. How each of them works is in `integrity.md`.
 
+And it records what the access policy that guards the trail does not promise. The policy decides what a read through
+the package shows and every such read is recorded, but it is PHP: it cannot see a query that never passes through the
+package. How the trail is read is in `reading.md`.
+
 ## Invariants
 
 - Minimising happens at capture, so nothing raw rests in a deferred callback, event or row. A record written after
@@ -174,6 +178,30 @@ limit below holds however the package is configured.
   recorded, how long it is kept, who can read it and its keys, how the anchor is configured, and who answers an alert
   remain the operator's.
 
+## Limits Of A PHP Access Policy
+
+The access policy, its scope and the record of every read hold for reads made through the trail, and nothing more. Each
+limit below holds however the policy is written.
+
+- **Direct access.** A PHP policy cannot stop direct SQL, a replica dump or a backup. Whoever holds credentials to the
+  storage connection, a replica or a backup reads every entry without asking the policy and without being recorded, so
+  database roles and the database's own auditing must cover them: the writer's grants in `storage.md`, a reader role
+  that is not the application's, and the engine's own logging of who connected and what they read.
+- **The model.** Reading `AuditEntry` directly bypasses the trail, as any query does: the policy is not asked, no scope
+  narrows it, and nothing records it. The model is there for pruning, and an application that reads it in a portal has
+  stepped outside the access control this note describes.
+- **Timing.** A denied scope, and one the caller's filters cannot meet, run no statement and return the same empty
+  result as a trail with nothing in it, so neither the result nor an error tells a viewer whether an entry exists. A
+  read that runs a statement takes as long as its plan does, and plans differ with the data. Plan-dependent timing is
+  not constant, and a viewer able to time many reads can learn something of what lies beyond its scope.
+- **The viewer.** The application authenticates the viewer. A `Reference` given as the viewer, and the console's
+  `--viewer-type` and `--viewer-id`, assert who is reading and prove nothing, so anyone who can run code or artisan can
+  read as any viewer the policy allows.
+- **The scope.** `onlyAbout()` selects entries by their actor or subject, and an entry about one person can name others
+  in its properties, its principal or its tenant. A scope is a selection, not a review of what the entries hold.
+- **The record.** A read is refused when its record cannot be written, so every read the trail answers is recorded.
+  What a viewer does with what it was shown, once it has left the package, is beyond any record.
+
 ## Implementation Anchors
 
 - `src/Stores/FailureSpill.php`: `line()`; `src/Delivery/OutboxWriter.php`: `write()`; `src/Delivery/SpillReader.php`;
@@ -189,6 +217,8 @@ limit below holds however the package is configured.
 - `src/Records/Concerns/DescribesTheActivity.php`: `withProperties()`, `withNote()`, `withIdentifier()`.
 - `src/Integrity/SealSigner.php`: `sealKey()`; `src/Integrity/Verifier.php`: `verify()`;
   `src/Contracts/CheckpointAnchor.php`: `latest()`; `src/Database/IntegrityProgress.php`.
+- `src/Contracts/AuditAccessPolicy.php`: `scope()`; `src/Access/ScopeCompiler.php`: `isEmpty()`;
+  `src/Querying/AccessRecorder.php`: `record()`; `src/Models/AuditEntry.php`.
 
 ## Authoritative Tests
 
@@ -234,6 +264,9 @@ limit below holds however the package is configured.
   `testMarkingASealUnreadableNeverHidesItsDeletedSegment`, `testEditingTheAnchorColumnsChangesNothing`
 - `tests/Feature/Integrity/IntegrityAlertingTest.php` `testTheEventIsPayloadFree`
 - `tests/Feature/Integrity/SealerTest.php` `testTheLastRunIsRecordedEvenWithNothingToSeal`
+- `tests/Unit/Documentation/DocumentationTest.php` `testTheThreatModelStatesTheLimitsOfAPhpPolicy`
+- `tests/Feature/Querying/AccessControlTest.php` `testAGuessedTenantGivesTheSameEmptyResultAsAnUnknownOne`
+- `tests/Feature/Querying/TrailReaderTest.php` `testADeniedScopeMakesNoQuery`
 
 ## Change Triggers
 
@@ -248,3 +281,4 @@ Update this note when any of the following change:
 - what the spill or the outbox holds, or how either is protected
 - what signing a line establishes
 - what sealing, anchoring or verification leaves undetectable, or what a held key can forge
+- what the access policy can see, what bypasses it, or what a read's timing can tell

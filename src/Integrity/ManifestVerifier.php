@@ -12,28 +12,38 @@ use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
-use SineMacula\Laravel\AuditLog\Records\Manifest;
 
 /**
  * Checks the artifact each verified entry's signed manifest names: that it is
- * stored, under the manifest's artifact id and for that entry, of the bulk
- * kind, counting the members the manifest signed, with its digest, and that its
- * members decrypt to exactly the canonical form the manifest describes: each
- * member once, in canonical order, as many as signed and giving the signed
- * digest.
+ * stored, under the manifest's artifact id and for that entry, of the kind the
+ * manifest signed, counting the members the manifest signed, with its digest,
+ * and that its members decrypt to exactly the canonical form of that kind the
+ * manifest describes, as many as signed and giving the signed digest. A bulk
+ * operation's subjects are read by the manifest, a disclosure's evidence and an
+ * export's manifest by their own versioned readers, none of which reads the
+ * catalogue.
+ *
+ * Each difference is its own finding, classified by the artifact inspector:
+ * `manifest_missing` for an artifact that is not stored, `manifest_swapped` for
+ * one under another id or naming another entry, `manifest_wrong_kind` for one
+ * stored as another kind, `manifest_mismatch` for another count or digest,
+ * `manifest_malformed` for members that are no canonical form of the signed
+ * kind, `manifest_tampered` for a canonical form other than the one signed, and
+ * `manifest_unreadable` for members that do not decrypt.
  *
  * The descriptor is trusted only because its entry verified: a signed
  * descriptor cannot be malformed without the key, so one that is not exactly an
- * artifact id, a digest and a positive count is a mismatch. Entries are checked
- * in batches of `ENTRY_BATCH`, one statement reading the artifacts' columns and
- * the length of their members, and the members of those that match are then
- * read in sub-batches of at most `MEMBERS_BATCH_BYTES` stored bytes, so no
- * statement is made per entry and no read holds more than a bound of members.
- * An artifact the application's keys cannot decrypt cannot be checked; any
- * other difference shows the log was altered. An artifact missing with its
- * entry, both deleted by a prune that committed after the segment was read, is
- * no finding: the run reports the segment as it read it. Every statement reads
- * the writer. Nothing here writes or repairs.
+ * artifact id, a known kind, a digest and a count that kind allows is
+ * `manifest_malformed`. Entries are checked in batches of `ENTRY_BATCH`, one
+ * statement reading the artifacts' columns and the length of their members, and
+ * the members of those that match are then read in sub-batches of at most
+ * `MEMBERS_BATCH_BYTES` stored bytes, so no statement is made per entry and no
+ * read holds more than a bound of members. An artifact the application's keys
+ * cannot decrypt cannot be checked; any other difference shows the log was
+ * altered. An artifact missing with its entry, both deleted by a prune that
+ * committed after the segment was read, is no finding: the run reports the
+ * segment as it read it. Every statement reads the writer. Nothing here writes
+ * or repairs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,9 +57,6 @@ final readonly class ManifestVerifier
 
     /** @var int The most stored bytes of members one statement reads, summed over its artifacts: 64 MiB. */
     public const int MEMBERS_BATCH_BYTES = 67108864;
-
-    /** @var list<string> The keys of a descriptor, sorted: exactly these and nothing else. */
-    private const array DESCRIPTOR_KEYS = ['artifact_id', 'count', 'digest'];
 
     /**
      * Constructor.
@@ -132,10 +139,10 @@ final readonly class ManifestVerifier
 
     /**
      * The finding of each entry of one batch that has one, by entry id: a
-     * malformed descriptor or an entry id that is not a lower-case UUID is a
-     * mismatch before any statement, an artifact that is not stored is missing,
-     * one whose columns differ from the descriptor is a mismatch, and the
-     * members of every other are opened and read.
+     * malformed descriptor or an entry id that is not a lower-case UUID is
+     * malformed before any statement, the artifact's columns are classified
+     * against the descriptor, and the members of every artifact whose columns
+     * are the signed ones are opened and read.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -157,7 +164,7 @@ final readonly class ManifestVerifier
 
         foreach ($descriptors as $entryId => $descriptor) {
             $artifact = $byEntry[$entryId] ?? $byId[$descriptor['artifact_id']] ?? null;
-            $finding  = self::columnsFinding($artifact, $entryId, $descriptor);
+            $finding  = ArtifactInspector::columnsFinding($artifact, $entryId, $descriptor);
 
             if ($finding !== null) {
                 $findings[$entryId] = $finding;
@@ -211,7 +218,7 @@ final readonly class ManifestVerifier
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @param  array<string, array{artifact_id: string, count: int, digest: string}>  $descriptors
+     * @param  array<string, array{artifact_id: string, count: int, digest: string, kind: string}>  $descriptors
      * @return array{0: array<string, array<string, scalar|null>>, 1: array<string, array<string, scalar|null>>}
      *
      * @throws \InvalidArgumentException
@@ -250,7 +257,7 @@ final readonly class ManifestVerifier
      * read a sub-batch at a time: as many artifacts as fit the byte bound, and
      * one alone when it is larger than the bound.
      *
-     * @param  array<string, array{artifact_id: string, count: int, digest: string}>  $descriptors
+     * @param  array<string, array{artifact_id: string, count: int, digest: string, kind: string}>  $descriptors
      * @param  array<string, int>  $lengths
      * @return array<string, \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding>
      *
@@ -334,11 +341,11 @@ final readonly class ManifestVerifier
      * The finding of an artifact's stored members, or `null` when they open
      * under the application's keys to exactly a canonical form of the
      * descriptor's count and digest: an artifact gone since its columns were
-     * read is missing, members that do not open are unreadable, and any other
-     * plaintext is a mismatch.
+     * read is missing, members that do not open are unreadable, and the
+     * plaintext of any other is classified against the descriptor.
      *
      * @param  scalar|null  $members
-     * @param  array{artifact_id: string, count: int, digest: string}  $descriptor
+     * @param  array{artifact_id: string, count: int, digest: string, kind: string}  $descriptor
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
      */
     private function membersFinding(#[\SensitiveParameter] bool|float|int|string|null $members, array $descriptor): ?Finding
@@ -353,9 +360,7 @@ final readonly class ManifestVerifier
             return Finding::MANIFEST_UNREADABLE;
         }
 
-        $read = self::canonicalOf($plaintext);
-
-        return $read !== null && $read['count'] === $descriptor['count'] && $read['digest'] === $descriptor['digest'] ? null : Finding::MANIFEST_MISMATCH;
+        return ArtifactInspector::plaintextFinding($plaintext, $descriptor);
     }
 
     /**
@@ -387,9 +392,9 @@ final readonly class ManifestVerifier
     }
 
     /**
-     * The batch's well-formed descriptors, by entry id, and a mismatch for each
-     * entry whose descriptor is malformed or whose id is not a lower-case UUID,
-     * which no statement is made for.
+     * The batch's well-formed descriptors, by entry id, and a malformed finding
+     * for each entry whose descriptor is malformed or whose id is not a
+     * lower-case UUID, which no statement is made for.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -398,7 +403,7 @@ final readonly class ManifestVerifier
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
      * @param  array<array-key, array<array-key, mixed>>  $batch
-     * @return array{0: array<string, array{artifact_id: string, count: int, digest: string}>, 1: array<array-key, \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding>}
+     * @return array{0: array<string, array{artifact_id: string, count: int, digest: string, kind: string}>, 1: array<array-key, \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding>}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -410,8 +415,8 @@ final readonly class ManifestVerifier
         $findings    = [];
 
         foreach ($batch as $entryId => $descriptor) {
-            if (!self::isDescriptor($descriptor) || preg_match(SealEnvelope::UUID_PATTERN, (string) $entryId) !== 1) {
-                $findings[$entryId] = Finding::MANIFEST_MISMATCH;
+            if (!ArtifactInspector::isDescriptor($descriptor) || preg_match(SealEnvelope::UUID_PATTERN, (string) $entryId) !== 1) {
+                $findings[$entryId] = Finding::MANIFEST_MALFORMED;
 
                 continue;
             }
@@ -420,80 +425,6 @@ final readonly class ManifestVerifier
         }
 
         return [$descriptors, $findings];
-    }
-
-    /**
-     * The finding of the entry's stored artifact, or `null` when it is the one
-     * the entry's descriptor signed: its id, the entry it names, its kind, its
-     * count and its digest. No artifact is missing; any difference is a
-     * mismatch.
-     *
-     * @param  ?array<string, scalar|null>  $artifact
-     * @param  string  $entryId
-     * @param  array{artifact_id: string, count: int, digest: string}  $descriptor
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
-     */
-    private static function columnsFinding(?array $artifact, string $entryId, array $descriptor): ?Finding
-    {
-        if ($artifact === null) {
-            return Finding::MANIFEST_MISSING;
-        }
-
-        $stored = [
-            $artifact['id']       ?? null,
-            $artifact['entry_id'] ?? null,
-            $artifact['kind']     ?? null,
-            IntegerSetting::parse($artifact['member_count'] ?? null),
-            $artifact['digest'] ?? null,
-        ];
-
-        $signed = [$descriptor['artifact_id'], $entryId, Manifest::KIND, $descriptor['count'], $descriptor['digest']];
-
-        return $stored === $signed ? null : Finding::MANIFEST_MISMATCH;
-    }
-
-    /**
-     * The count and digest of a plaintext that is exactly a canonical form, or
-     * `null` for any other plaintext.
-     *
-     * @param  string  $plaintext
-     * @return ?array{count: int, digest: string}
-     */
-    private static function canonicalOf(#[\SensitiveParameter] string $plaintext): ?array
-    {
-        try {
-            return Manifest::readCanonical($plaintext);
-        } catch (\JsonException) {
-            return null;
-        }
-    }
-
-    /**
-     * Whether the value is exactly a descriptor: an artifact id that is a
-     * lower-case UUID, a digest of 64 lower-case hex and a positive integer
-     * count, and no other key.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<array-key, mixed>  $descriptor
-     * @return bool
-     *
-     * @phpstan-assert-if-true array{artifact_id: string, count: int, digest: string} $descriptor
-     */
-    private static function isDescriptor(array $descriptor): bool
-    {
-        $keys   = array_keys($descriptor);
-        $id     = $descriptor['artifact_id'] ?? null;
-        $digest = $descriptor['digest']      ?? null;
-        $count  = $descriptor['count']       ?? null;
-
-        sort($keys);
-
-        if ($keys !== self::DESCRIPTOR_KEYS || !is_string($id) || !is_string($digest) || !is_int($count)) {
-            return false;
-        }
-
-        return $count >= 1 && preg_match(SealEnvelope::UUID_PATTERN, $id) === 1 && preg_match(SealEnvelope::DIGEST_PATTERN, $digest) === 1;
     }
 
     /**

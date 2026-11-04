@@ -10,9 +10,10 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the artifacts table: one row per bulk operation, holding the encrypted
- * list of the subjects its entry's signed manifest describes. An artifact is
- * written with its entry and never changed.
+ * Create the artifacts table: one row per artifact, a bulk operation's
+ * subjects, a read's disclosure or an export's manifest, holding the encrypted
+ * canonical form its entry's signed manifest describes. An artifact is written
+ * with its entry and never changed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,14 +42,15 @@ return new class extends Migration {
             $blueprint->uuid('id')->primary();
             $blueprint->uuid('entry_id');
 
-            // What the artifact holds (`bulk`), how many members it lists, and
-            // the SHA-256 of their canonical form, in hex.
+            // What the artifact holds (`bulk`, `disclosure` or `export`), how
+            // many members it lists, none for an empty disclosure or export,
+            // and the SHA-256 of its canonical form, in hex.
             $blueprint->string('kind', 16);
             $blueprint->unsignedInteger('member_count');
             $blueprint->string('digest', 64);
 
-            // The canonical member list, encrypted with the application's key,
-            // so the row holds nothing readable.
+            // The canonical form, encrypted with the application's key, so the
+            // row holds nothing readable.
             $blueprint->longText('members');
 
             // The entry's recorded time.

@@ -35,11 +35,13 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationContext;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\Fixtures\Integrity\RecordingAnchor;
+use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
@@ -1628,6 +1630,59 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
+     * Rows of `[change, finding]`: a change to a sealed bundle's artifact, by
+     * name, and the finding of its own that it gives.
+     *
+     * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding}>
+     */
+    public static function provideArtifactChanges(): iterable
+    {
+        yield from [
+            'swapped between entries' => ['swapped', Finding::MANIFEST_SWAPPED],
+            'stored as another kind'  => ['kind', Finding::MANIFEST_WRONG_KIND],
+            'members no manifest'     => ['malformed', Finding::MANIFEST_MALFORMED],
+            'other canonical members' => ['tampered', Finding::MANIFEST_TAMPERED],
+        ];
+    }
+
+    /**
+     * A segment whose bundle's artifact was swapped with another, stored as
+     * another kind, or given members that are no canonical form or another
+     * canonical form than the one signed, is tampered with that finding, named
+     * at the earliest bundle's entry that gives it.
+     *
+     * @param  string  $change
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding
+     * @return void
+     */
+    #[DataProvider('provideArtifactChanges')]
+    public function testEachNewArtifactFindingMakesTheSegmentTampered(string $change, Finding $finding): void
+    {
+        $this->storeEntries(1);
+
+        $first  = $this->seedBundle();
+        $second = $this->seedBundle();
+
+        $this->sealAll();
+
+        if ($change === 'swapped') {
+            $this->swapArtifacts($first, $second);
+        } else {
+            $this->tamperWithArtifact($first, match ($change) {
+                'kind'      => ['kind' => 'disclosure'],
+                'malformed' => ['members' => RecordFactory::encrypter()->encryptString('not json')],
+                default     => ['members' => RecordFactory::encrypter()->encryptString(Manifest::encode([[RecordFactory::MEMBER_TYPE, '1']]))],
+            });
+        }
+
+        $report = $this->report(1);
+
+        self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
+        self::assertSame($finding, $report->finding);
+        self::assertSame($change === 'swapped' ? min($first, $second) : $first, $report->firstBadId);
+    }
+
+    /**
      * A segment whose bundle's members the application's keys cannot decrypt is
      * unverifiable, named at the bundle's entry.
      *
@@ -1665,7 +1720,7 @@ final class SegmentVerifierTest extends TestCase
         $report = $this->report(1);
 
         self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
-        self::assertSame(Finding::MANIFEST_MISMATCH, $report->finding);
+        self::assertSame(Finding::MANIFEST_WRONG_KIND, $report->finding);
         self::assertSame($tampered, $report->firstBadId);
     }
 

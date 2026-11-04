@@ -138,7 +138,11 @@ final class BundleEnvelopeRoundTripTest extends TestCase
         $attachment = $decoded->record->attachment;
 
         self::assertNotNull($attachment);
-        self::assertSame(['count' => 3, 'digest' => $attachment->digest], Manifest::readCanonical(app(StringEncrypter::class)->decryptString($attachment->members)));
+        self::assertSame(['count' => 3, 'digest' => $attachment->digest], Manifest::readCanonical(app(StringEncrypter::class)->decryptString((string) $attachment->members)));
+        self::assertSame(
+            ['artifact_id' => $attachment->id, 'count' => 3, 'digest' => $attachment->digest, 'kind' => 'bulk'],
+            $decoded->record->properties['_audit']['manifest'] ?? null,
+        );
     }
 
     /**
@@ -162,7 +166,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
 
         self::assertNotNull($record->record->attachment);
         self::assertSame(EnvelopeCodec::MAX_BYTES, strlen($envelope));
-        self::assertLessThan(self::SEALED_MAX_BYTES, strlen($record->record->attachment->members));
+        self::assertLessThan(self::SEALED_MAX_BYTES, strlen((string) $record->record->attachment->members));
 
         $payload = app(StringEncrypter::class)->encryptString($envelope);
 
@@ -187,7 +191,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
         self::assertNotNull($decoded->record->attachment);
         self::assertSame($manifest->digest, $decoded->record->attachment->digest);
         self::assertSame($manifest->count, $decoded->record->attachment->memberCount);
-        self::assertSame(hash('sha256', $manifest->canonical), hash('sha256', app(StringEncrypter::class)->decryptString($decoded->record->attachment->members)));
+        self::assertSame(hash('sha256', $manifest->canonical), hash('sha256', app(StringEncrypter::class)->decryptString((string) $decoded->record->attachment->members)));
     }
 
     /**

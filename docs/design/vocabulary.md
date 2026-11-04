@@ -14,15 +14,19 @@ exported.
 - A code is lower-case dotted segments, each a letter followed by letters, digits or underscores, in at least two
   segments and at most 191 bytes (`EventCode::MAX_BYTES`), as `record-model.md` sets out.
 - The prefixes in the table below are reserved. Only `audit_log.` is enforced in code (`EventCode::RESERVED_PREFIX`):
-  a caller's code under it is refused. The others are reserved by convention for the codes the package's own capture
-  of Laravel's events and the integrations registered through its mapping seam record.
+  a caller's code under it is refused by `EventCode::of()`, and only `Querying\Enums\PackageActivity` mints one,
+  through `EventCode::package()`. `EventCode::forReading()` accepts one to look for, so a filter, a description or a
+  test's assertion can name it, and nothing is ever recorded under a code made that way. The others are reserved by
+  convention for the codes the package's own capture of Laravel's events and the integrations registered through its
+  mapping seam record.
 - Only the exact prefix is reserved: `audit_logs.pruned` and `app.audit_log.pruned` are ordinary codes.
 - Any other prefix belongs to the application, such as `invoice.` or `user.`; its codes are its own to name and
   define.
 - Every code the package ships is under a reserved prefix and is named here when it ships.
 - The package defines its own codes while the application boots, before anything is recorded, so an application or an
-  integration that defines one of them differently is refused at boot. An integration records its own activity under
-  codes it defines, never under the package's.
+  integration that defines one of them differently is refused at boot. The `audit_log.` codes are in the catalogue from
+  the moment it is made, before any registration and whatever the freeze. An integration records its own activity
+  under codes it defines, never under the package's.
 - A model's codes are under the segment it is watched as, which is never a reserved prefix's segment, so a model's
   change never collides with a code the package or an integration records.
 - A record of access to sensitive data maps to `sensitive_read`, and other sensitive operations to `sensitive_create`,
@@ -66,24 +70,34 @@ exported.
 
 ## Package Codes
 
-The package records these codes when it captures Laravel's own authentication and authorisation events. Each is defined
-by `Capture\Enums\CapturedActivity`, version 1, in the `security` category, and drops every property it does not list.
-The actor and the subject are read from the event, never from the authenticated user: "none, explicitly" means no actor
-is recorded and no contributor fills one in.
+The package records the first eleven codes when it captures Laravel's own authentication and authorisation events. Each
+is defined by `Capture\Enums\CapturedActivity`, version 1, in the `security` category, and drops every property it does
+not list. The actor and the subject are read from the event, never from the authenticated user: "none, explicitly" means
+no actor is recorded and no contributor fills one in.
 
-| Code                                      | Captured from                                                         | Outcome   | Actor                                 | Subject                        | Properties kept                          |
-|-------------------------------------------|-----------------------------------------------------------------------|-----------|---------------------------------------|--------------------------------|------------------------------------------|
-| `authentication.signed_in`                | `Login`                                                               | `success` | the user                              | the user                       | `remember`                               |
-| `authentication.session_restored`         | `Login`, when the named guard is a `SessionGuard` and `viaRemember()` | `success` | the user                              | the user                       | `remember`                               |
-| `authentication.sign_in_failed`           | `Failed`                                                              | `failure` | none, explicitly                      | the user when found, else none | none; the identifier is hashed           |
-| `authentication.signed_out`               | `Logout`, `CurrentDeviceLogout`                                       | `success` | the user, or none                     | the user, or none              | none                                     |
-| `authentication.signed_out_other_devices` | `OtherDeviceLogout`                                                   | `success` | the user, or none                     | the user, or none              | none                                     |
-| `authentication.locked_out`               | `Lockout`                                                             | `denied`  | none, explicitly                      | none                           | none; the IP, and the identifier hashed  |
-| `account.registered`                      | `Registered`                                                          | `success` | the user                              | the user                       | none                                     |
-| `account.email_verified`                  | `Verified`                                                            | `success` | the user                              | the user                       | none                                     |
-| `account.password_reset`                  | `PasswordReset`                                                       | `success` | the user                              | the user                       | none                                     |
-| `account.password_reset_requested`        | `PasswordResetLinkSent`                                               | `success` | none, explicitly                      | the user                       | none                                     |
-| `authorization.gate_denied`               | `GateEvaluated`, for a denial                                         | `denied`  | the event's user, or none, explicitly | none                           | `ability`, `arguments`, `argument_count` |
+The package records the five `audit_log.` codes on its read path, as [the reading guide](../guides/reading.md) sets out.
+Each is defined by `Querying\Enums\PackageActivity`, version 1, in the `audit` category, and drops every property it
+does not list, so each row's properties are exactly the ones its definition retains, in the order its record gives
+them. Each is recorded by the viewer, in the tenant of a scope that sees exactly one and otherwise in none.
+
+| Code                                      | Source                                                                | Outcome                        | Actor                                 | Subject                        | Properties kept                                                                                                                  |
+|-------------------------------------------|-----------------------------------------------------------------------|--------------------------------|---------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `authentication.signed_in`                | `Login`                                                               | `success`                      | the user                              | the user                       | `remember`                                                                                                                       |
+| `authentication.session_restored`         | `Login`, when the named guard is a `SessionGuard` and `viaRemember()` | `success`                      | the user                              | the user                       | `remember`                                                                                                                       |
+| `authentication.sign_in_failed`           | `Failed`                                                              | `failure`                      | none, explicitly                      | the user when found, else none | none; the identifier is hashed                                                                                                   |
+| `authentication.signed_out`               | `Logout`, `CurrentDeviceLogout`                                       | `success`                      | the user, or none                     | the user, or none              | none                                                                                                                             |
+| `authentication.signed_out_other_devices` | `OtherDeviceLogout`                                                   | `success`                      | the user, or none                     | the user, or none              | none                                                                                                                             |
+| `authentication.locked_out`               | `Lockout`                                                             | `denied`                       | none, explicitly                      | none                           | none; the IP, and the identifier hashed                                                                                          |
+| `account.registered`                      | `Registered`                                                          | `success`                      | the user                              | the user                       | none                                                                                                                             |
+| `account.email_verified`                  | `Verified`                                                            | `success`                      | the user                              | the user                       | none                                                                                                                             |
+| `account.password_reset`                  | `PasswordReset`                                                       | `success`                      | the user                              | the user                       | none                                                                                                                             |
+| `account.password_reset_requested`        | `PasswordResetLinkSent`                                               | `success`                      | none, explicitly                      | the user                       | none                                                                                                                             |
+| `authorization.gate_denied`               | `GateEvaluated`, for a denial                                         | `denied`                       | the event's user, or none, explicitly | none                           | `ability`, `arguments`, `argument_count`                                                                                         |
+| `audit_log.trail_read`                    | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `page`, `per_page`, `returned`, `outcome`      |
+| `audit_log.trail_counted`                 | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `returned`, `outcome`                          |
+| `audit_log.trail_exported`                | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `query_fingerprint`, `scope_fingerprint`, `fingerprint_key`, `policy`, `format`, `returned`, `file_sha256`, `outcome` |
+| `audit_log.export_verified`               | the read path                                                         | `success`, `denied`, `failure` | the viewer                            | none                           | `purpose`, `scope_fingerprint`, `fingerprint_key`, `policy`, `export_entry`, `verdict`, `findings`, `outcome`                    |
+| `audit_log.export_publish_failed`         | the read path                                                         | `failure`                      | the viewer                            | none                           | `export_entry`, `outcome`                                                                                                        |
 
 `Attempting`, `Validated` and `Authenticated` are never captured.
 
@@ -104,14 +118,22 @@ code is defined for the watch, version 1, in the `change` category.
 
 ## Implementation Anchors
 
-- `src/Records/EventCode.php`: `of()`, `RESERVED_PREFIX`.
+- `src/Records/EventCode.php`: `of()`, `package()`, `forReading()`, `RESERVED_PREFIX`.
 - `src/Capture/Enums/CapturedActivity.php`: `definition()`.
+- `src/Querying/Enums/PackageActivity.php`: `definition()`, `isRead()`.
+- `src/Definitions/EventCatalogue.php`: `__construct()`.
 - `src/Capture/Enums/ModelEvent.php`: `codeFor()`, `eloquentEvent()`.
 
 ## Authoritative Tests
 
 - `tests/Unit/Records/EventCodeTest.php` `testRefusesTheReservedPrefix`,
-  `testAcceptsCodesThatOnlyResembleTheReservedPrefix`, `testTheReservedPrefixIsCheckedAfterTheGrammar`
+  `testAcceptsCodesThatOnlyResembleTheReservedPrefix`, `testTheReservedPrefixIsCheckedAfterTheGrammar`,
+  `testPackageMintsAReservedCode`, `testOfStillRefusesTheReservedPrefix`, `testForReadingAcceptsAReservedCode`,
+  `testForReadingStillChecksTheGrammarAndLength`
+- `tests/Unit/Querying/Enums/PackageActivityTest.php` `testTheStoredValues`, `testEachIsUnderTheReservedPrefix`,
+  `testEachDefinitionIsVersionOneInTheAuditCategoryDroppingWhatItDoesNotList`, `testOnlyThePublishFailureIsNotARead`
+- `tests/Unit/Definitions/EventCatalogueTest.php` `testThePackageDefinitionsAreThereFromTheStart`,
+  `testANewCatalogueHoldsOnlyThePackageDefinitions`, `testThePackageDefinitionsSurviveTheFreeze`
 - `tests/Unit/Capture/Enums/CapturedActivityTest.php` `testTheCodesAreTheVocabularys`, `testEveryCaseDefinesItsOwnCode`,
   `testEveryDefinitionIsSecurityVersionOneAndDropsUnlisted`, `testTheSignInsRetainOnlyRemember`,
   `testTheGateDenialRetainsTheAbilityAndItsArguments`, `testTheOtherCodesRetainNothing`,
@@ -120,7 +142,8 @@ code is defined for the watch, version 1, in the `change` category.
   `testTheLongestSegmentFitsTheCodeColumn`, `testEachEloquentEvent`
 - `tests/Unit/Documentation/DocumentationTest.php` `testEveryReservedPrefixIsInTheVocabulary`,
   `testThePackagePrefixIsTheOneEventCodesReserve`, `testEveryShippedCodeIsUnderAReservedPrefix`,
-  `testEveryExampleCodeIsValidAndNeutral`
+  `testEveryExampleCodeIsValidAndNeutral`, `testEachPackageCodesRowKeepsItsDefinitionsProperties`
+- `tests/Unit/Documentation/TranslationsTest.php` `testEveryShippedCodeHasATitle`, `testTheWalkFindsBothDefiningEnums`
 
 ## Change Triggers
 
@@ -128,6 +151,7 @@ Update this note when any of the following change:
 
 - the code grammar or its length
 - a reserved prefix, or which prefixes are enforced in code
-- a code the package ships, or the OWASP names a prefix maps to
+- a code the package ships, its title, or the OWASP names a prefix maps to
+- how the package's own codes are minted, or what may look one up
 - what a package code is captured from, its outcome, its actor or subject, or the properties it keeps
 - a model code's suffix, the grammar of the segment a model is watched as, or the segments it may not be

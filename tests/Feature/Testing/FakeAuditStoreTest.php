@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
@@ -171,8 +172,8 @@ final class FakeAuditStoreTest extends TestCase
     }
 
     /**
-     * A code `event()` would refuse is refused here too, so a mistyped code
-     * fails rather than reads as nothing recorded.
+     * A malformed code is refused, so a mistyped code fails rather than reads
+     * as nothing recorded.
      *
      * @return void
      */
@@ -192,6 +193,26 @@ final class FakeAuditStoreTest extends TestCase
         $this->expectExceptionMessage('An event code enum must be backed by strings.');
 
         $fake->hasRecorded(StubNumberedActivity::FIRST);
+    }
+
+    /**
+     * One of the package's own codes can be asked about, as a string or as the
+     * activity, though no caller can record one.
+     *
+     * @return void
+     */
+    public function testAPackageCodeCanBeAsserted(): void
+    {
+        $fake = FakeAuditStore::fake();
+
+        self::assertFalse($fake->hasRecorded('audit_log.trail_read'));
+        self::assertFalse($fake->hasRecorded(PackageActivity::TRAIL_READ));
+
+        $fake->store($this->finalised('audit_log.trail_read'));
+
+        self::assertTrue($fake->hasRecorded('audit_log.trail_read'));
+        self::assertTrue($fake->hasRecorded(PackageActivity::TRAIL_READ));
+        self::assertFalse($fake->hasRecorded(PackageActivity::TRAIL_COUNTED));
     }
 
     /**

@@ -17,6 +17,8 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Records\DisclosureManifest;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\SeedsArtifacts;
@@ -27,11 +29,12 @@ use Tests\TestCase;
  * Feature tests for the check of the artifacts that verified entries' signed
  * manifests name, on whichever engine the suite runs against: bundles are
  * written as the store leaves them and changed through raw queries. They pin
- * the finding each change gives, that the members must decrypt to exactly the
- * canonical form the descriptor describes, that each finding names the earliest
- * entry, how a descriptor is read from a stored entry, and that the artifacts
- * are read in batches of entries and their members in sub-batches of bytes,
- * every statement on the writer and none for no manifest.
+ * the finding each change gives, for an artifact of every kind, that the
+ * members must decrypt to exactly the canonical form of the kind the descriptor
+ * names and describes, that each finding names the earliest entry, how a
+ * descriptor is read from a stored entry, and that the artifacts are read in
+ * batches of entries and their members in sub-batches of bytes, every statement
+ * on the writer and none for no manifest.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -148,201 +151,387 @@ final class ManifestVerifierTest extends TestCase
 
     /**
      * An artifact of the entry stored under another id than the one its
-     * manifest signed is a mismatch.
+     * manifest signed is swapped.
      *
      * @return void
      */
-    public function testAnotherArtifactIdIsManifestMismatch(): void
+    public function testAnotherArtifactIdIsManifestSwapped(): void
     {
         $entryId = $this->seedBundle();
 
         $this->tamperWithArtifact($entryId, ['id' => self::OTHER_ID]);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        self::assertSame([[Finding::MANIFEST_SWAPPED, $entryId]], $this->findingsOf([$entryId]));
     }
 
     /**
      * The artifact the manifest signed, moved to name another entry, is found
-     * by its id and is a mismatch, never merely missing.
+     * by its id and is swapped, never merely missing.
      *
      * @return void
      */
-    public function testAnArtifactOfAnotherEntryIsManifestMismatch(): void
+    public function testAnArtifactOfAnotherEntryIsManifestSwapped(): void
     {
         $entryId = $this->seedBundle();
 
         $this->tamperWithArtifact($entryId, ['entry_id' => self::OTHER_ID]);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        self::assertSame([[Finding::MANIFEST_SWAPPED, $entryId]], $this->findingsOf([$entryId]));
     }
 
     /**
      * Two bundles of the same members whose artifacts are swapped between their
-     * entries are each a mismatch, though each artifact's kind, count and
-     * digest are the ones signed: only the artifact's id tells them apart.
+     * entries are each swapped, though each artifact's kind, count and digest
+     * are the ones signed: only the artifact's id tells them apart. Their
+     * members are never read.
      *
      * @return void
      */
-    public function testArtifactsSwappedBetweenEntriesAreManifestMismatch(): void
+    public function testASwappedArtifactIsSwapped(): void
     {
         [$first, $second] = $this->seedBundles(2);
 
-        $this->tamperWithArtifact($first, ['entry_id' => self::OTHER_ID]);
-        $this->tamperWithArtifact($second, ['entry_id' => $first]);
-        $this->tamperWithArtifact(self::OTHER_ID, ['entry_id' => $second]);
+        $this->swapArtifacts($first, $second);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $first]], $this->findingsOf([$first]));
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $second]], $this->findingsOf([$second]));
-        self::assertSame([[Finding::MANIFEST_MISMATCH, min($first, $second)]], $this->findingsOf([$first, $second]));
+        $statements = $this->recordArtifactStatements();
+
+        self::assertSame([[Finding::MANIFEST_SWAPPED, $first]], $this->findingsOf([$first]));
+        self::assertSame([[Finding::MANIFEST_SWAPPED, $second]], $this->findingsOf([$second]));
+        self::assertSame([[Finding::MANIFEST_SWAPPED, min($first, $second)]], $this->findingsOf([$first, $second]));
+        self::assertCount(3, $statements);
     }
 
     /**
-     * An artifact of another kind than a bulk operation's is a mismatch.
+     * A disclosure's and an export's artifacts swapped between their entries
+     * are each swapped, before their kinds are compared: the stored kind of
+     * each is the other's, but the artifact is the wrong one first.
      *
      * @return void
      */
-    public function testAnotherKindIsManifestMismatch(): void
+    public function testArtifactsOfOtherKindsSwappedAreSwapped(): void
+    {
+        $disclosure = $this->seedBundle(2, ArtifactKind::DISCLOSURE);
+        $export     = $this->seedBundle(2, ArtifactKind::EXPORT);
+
+        $this->swapArtifacts($disclosure, $export);
+
+        self::assertSame([[Finding::MANIFEST_SWAPPED, $disclosure]], $this->findingsOf([$disclosure]));
+        self::assertSame([[Finding::MANIFEST_SWAPPED, $export]], $this->findingsOf([$export]));
+    }
+
+    /**
+     * A bulk operation's artifact stored as another kind than its descriptor
+     * names is the wrong kind.
+     *
+     * @return void
+     */
+    public function testAWrongKindIsWrongKind(): void
     {
         $entryId = $this->seedBundle();
 
         $this->tamperWithArtifact($entryId, ['kind' => 'export']);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        self::assertSame([[Finding::MANIFEST_WRONG_KIND, $entryId]], $this->findingsOf([$entryId]));
     }
 
     /**
-     * An artifact counting another number of members than its manifest signed
-     * is a mismatch, whether the stored count or the signed one changed.
+     * A disclosure's artifact, its evidence read by the disclosure's own
+     * reader, has no finding.
      *
      * @return void
      */
-    public function testAChangedSignedCountIsManifestMismatch(): void
+    public function testADisclosureArtifactVerifies(): void
     {
-        $entryId    = $this->seedBundle();
-        $descriptor = $this->descriptorsOf([$entryId])[$entryId];
+        $entryId = $this->seedBundle(3, ArtifactKind::DISCLOSURE);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->verifier()->findings([$entryId => ['count' => 4] + $descriptor]));
-
-        $this->tamperWithArtifact($entryId, ['member_count' => 4]);
-
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        self::assertSame('disclosure', $this->artifactOf($entryId)['kind'] ?? null);
+        self::assertSame([], $this->findingsOf([$entryId]));
     }
 
     /**
-     * An artifact holding another digest than its manifest signed is a
-     * mismatch, whether the stored digest or the signed one changed.
+     * An export's artifact, its manifest read by the export's own reader, has
+     * no finding.
      *
      * @return void
      */
-    public function testAChangedDigestIsManifestMismatch(): void
+    public function testAnExportArtifactVerifies(): void
     {
-        $entryId    = $this->seedBundle();
-        $descriptor = $this->descriptorsOf([$entryId])[$entryId];
+        $entryId = $this->seedBundle(2, ArtifactKind::EXPORT);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->verifier()->findings([$entryId => ['digest' => self::OTHER_DIGEST] + $descriptor]));
-
-        $this->tamperWithArtifact($entryId, ['digest' => self::OTHER_DIGEST]);
-
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        self::assertSame('export', $this->artifactOf($entryId)['kind'] ?? null);
+        self::assertSame([], $this->findingsOf([$entryId]));
     }
 
     /**
-     * An artifact whose columns differ from its manifest's is a mismatch
-     * without its members being read: protects against a check that opens every
-     * artifact.
+     * A disclosure of nothing and an export of no line, each counting no
+     * member, have no finding.
      *
      * @return void
      */
-    public function testTheMembersOfAMismatchedArtifactAreNeverRead(): void
+    public function testAnEmptyDisclosureVerifies(): void
+    {
+        $disclosure = $this->seedBundle(0, ArtifactKind::DISCLOSURE);
+        $export     = $this->seedBundle(0, ArtifactKind::EXPORT);
+
+        self::assertSame(0, (int) ($this->artifactOf($disclosure)['member_count'] ?? -1));
+        self::assertSame([], $this->findingsOf([$disclosure, $export]));
+    }
+
+    /**
+     * An artifact stored as a kind its descriptor does not name is the wrong
+     * kind, whether the stored kind or the signed one changed, and its members
+     * are never read by another kind's reader.
+     *
+     * @return void
+     */
+    public function testAKindTheDescriptorDoesNotNameIsTheWrongKind(): void
+    {
+        $disclosure = $this->seedBundle(3, ArtifactKind::DISCLOSURE);
+        $export     = $this->seedBundle(2, ArtifactKind::EXPORT);
+        $descriptor = $this->descriptorsOf([$disclosure])[$disclosure];
+
+        self::assertSame([[Finding::MANIFEST_WRONG_KIND, $disclosure]], $this->verifier()->findings([$disclosure => ['kind' => 'export'] + $descriptor]));
+        self::assertSame([[Finding::MANIFEST_WRONG_KIND, $disclosure]], $this->verifier()->findings([$disclosure => ['kind' => 'bulk'] + $descriptor]));
+
+        $this->tamperWithArtifact($export, ['kind' => 'disclosure']);
+
+        self::assertSame([[Finding::MANIFEST_WRONG_KIND, $export]], $this->findingsOf([$export]));
+    }
+
+    /**
+     * Rows of `[kind, another canonical form]`: each kind, and a canonical form
+     * of it counting two members, as its fixture does, but of other members.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind, 1: string}>
+     */
+    public static function provideKinds(): iterable
+    {
+        yield from [
+            'bulk'       => [ArtifactKind::BULK, Manifest::encode([[RecordFactory::MEMBER_TYPE, '7'], [RecordFactory::MEMBER_TYPE, '8']])],
+            'disclosure' => [ArtifactKind::DISCLOSURE, str_replace('000000000002', '000000000009', RecordFactory::canonical(ArtifactKind::DISCLOSURE, 2))],
+            'export'     => [ArtifactKind::EXPORT, str_replace('000000000002', '000000000009', RecordFactory::canonical(ArtifactKind::EXPORT, 2))],
+        ];
+    }
+
+    /**
+     * An artifact of every kind is checked: as written it has no finding,
+     * members that open to no canonical form of the kind are malformed, and
+     * another canonical form of the kind, of the signed count, is tampered.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  string  $other
+     * @return void
+     */
+    #[DataProvider('provideKinds')]
+    public function testEachKindOfArtifactIsChecked(ArtifactKind $kind, string $other): void
+    {
+        $verifies  = $this->seedBundle(2, $kind);
+        $malformed = $this->seedBundle(2, $kind);
+        $tampered  = $this->seedBundle(2, $kind);
+
+        self::assertNotSame(RecordFactory::canonical($kind, 2), $other);
+
+        $this->tamperWithArtifact($malformed, ['members' => self::sealed('{}')]);
+        $this->tamperWithArtifact($tampered, ['members' => self::sealed($other)]);
+
+        self::assertSame([], $this->findingsOf([$verifies]));
+        self::assertSame([[Finding::MANIFEST_MALFORMED, $malformed]], $this->findingsOf([$malformed]));
+        self::assertSame([[Finding::MANIFEST_TAMPERED, $tampered]], $this->findingsOf([$tampered]));
+    }
+
+    /**
+     * Rows of `[kind, canonical form, count]`: an artifact signed and stored as
+     * one kind whose plaintext is another kind's canonical form, or no
+     * canonical form of its version, its descriptor's count and digest those of
+     * that plaintext.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind, 1: string, 2: int}>
+     */
+    public static function provideOtherPlaintexts(): iterable
+    {
+        yield from [
+            'bulk members as a disclosure'       => [ArtifactKind::DISCLOSURE, RecordFactory::canonical(ArtifactKind::BULK, 1), 1],
+            'bulk members as an export'          => [ArtifactKind::EXPORT, RecordFactory::canonical(ArtifactKind::BULK, 1), 1],
+            'a disclosure as a bulk operation'   => [ArtifactKind::BULK, RecordFactory::canonical(ArtifactKind::DISCLOSURE, 1), 1],
+            'a disclosure as an export'          => [ArtifactKind::EXPORT, RecordFactory::canonical(ArtifactKind::DISCLOSURE, 0), 0],
+            'an export as a disclosure'          => [ArtifactKind::DISCLOSURE, RecordFactory::canonical(ArtifactKind::EXPORT, 0), 0],
+            'an export as a bulk operation'      => [ArtifactKind::BULK, RecordFactory::canonical(ArtifactKind::EXPORT, 1), 1],
+            'a disclosure of a version not read' => [ArtifactKind::DISCLOSURE, str_replace('_version":1', '_version":2', RecordFactory::canonical(ArtifactKind::DISCLOSURE, 0)), 0],
+            'a disclosure that is spaced'        => [ArtifactKind::DISCLOSURE, str_replace(',"', ', "', RecordFactory::canonical(ArtifactKind::DISCLOSURE, 0)), 0],
+            'an export of a version not read'    => [ArtifactKind::EXPORT, str_replace('_version":1', '_version":2', RecordFactory::canonical(ArtifactKind::EXPORT, 0)), 0],
+        ];
+    }
+
+    /**
+     * An artifact whose plaintext is not exactly a canonical form of the kind
+     * its descriptor names is malformed, even when its count and digest are the
+     * signed ones and another kind's reader would read it: each kind is read by
+     * its own reader.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  string  $canonical
+     * @param  int  $count
+     * @return void
+     */
+    #[DataProvider('provideOtherPlaintexts')]
+    public function testAPlaintextOfAnotherKindIsMalformed(ArtifactKind $kind, string $canonical, int $count): void
+    {
+        $entryId = $this->seedArtifactOfKind($kind, $canonical, $count);
+
+        self::assertSame([[Finding::MANIFEST_MALFORMED, $entryId]], $this->findingsOf([$entryId]));
+    }
+
+    /**
+     * Rows of `[members' plaintext]`: plaintexts a bulk operation's members
+     * open to that are no canonical form of it.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideMalformedPlaintexts(): iterable
+    {
+        yield from [
+            'not JSON'           => ['not json'],
+            'empty'              => [''],
+            'a JSON map'         => ['{"App\\\Models\\\Invoice":"1"}'],
+            'an empty list'      => ['[]'],
+            'a member twice'     => [self::plaintextOf([self::pairs(2)[0], self::pairs(2)[0], self::pairs(2)[1]])],
+            'out of order'       => [self::plaintextOf(array_reverse(self::pairs(3)))],
+            'spaced'             => [str_replace(',', ', ', Manifest::encode(self::pairs(3)))],
+            'an id not a string' => ['[["App\\\Models\\\Invoice",1]]'],
+        ];
+    }
+
+    /**
+     * Members that open but are no canonical form of the signed kind are
+     * malformed, whatever their count.
+     *
+     * @param  string  $plaintext
+     * @return void
+     */
+    #[DataProvider('provideMalformedPlaintexts')]
+    public function testAMalformedPlaintextIsMalformed(string $plaintext): void
     {
         $entryId = $this->seedBundle();
 
-        $this->tamperWithArtifact($entryId, ['kind' => 'export', 'members' => 'not a ciphertext']);
+        $this->tamperWithArtifact($entryId, ['members' => self::sealed($plaintext)]);
 
-        $statements = $this->recordArtifactStatements();
-
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
-        self::assertCount(1, $statements);
-        self::assertStringContainsString('length(', $statements[0]);
+        self::assertSame([[Finding::MANIFEST_MALFORMED, $entryId]], $this->findingsOf([$entryId]));
     }
 
     /**
-     * Members out of their canonical order are a mismatch, even holding every
-     * member signed and giving the stored digest.
+     * Members out of their canonical order are malformed, even holding every
+     * member signed and with the stored and the signed digest both theirs.
      *
      * @return void
      */
-    public function testMembersOutOfOrderAreManifestMismatch(): void
+    public function testMembersOutOfOrderAreMalformed(): void
     {
-        $entryId  = $this->seedBundle();
-        $reversed = self::plaintextOf(array_reverse(self::pairs(3)));
+        $entryId    = $this->seedBundle();
+        $reversed   = self::plaintextOf(array_reverse(self::pairs(3)));
+        $descriptor = ['digest' => hash('sha256', $reversed)] + $this->descriptorsOf([$entryId])[$entryId];
 
         $this->tamperWithArtifact($entryId, ['members' => self::sealed($reversed), 'digest' => hash('sha256', $reversed)]);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        self::assertSame([[Finding::MANIFEST_MALFORMED, $entryId]], $this->verifier()->findings([$entryId => $descriptor]));
     }
 
     /**
-     * Members holding one twice are a mismatch, though they are in order and as
-     * many as signed.
+     * Members in canonical form that are not the ones signed are tampered:
+     * fewer or more than signed, or as many of other subjects, which do not
+     * give the signed digest.
      *
      * @return void
      */
-    public function testADuplicateMemberIsManifestMismatch(): void
-    {
-        $entryId = $this->seedBundle();
-        $pairs   = self::pairs(2);
-
-        $this->tamperWithArtifact($entryId, ['members' => self::sealed(self::plaintextOf([$pairs[0], $pairs[0], $pairs[1]]))]);
-
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
-    }
-
-    /**
-     * Members in canonical form but fewer than signed are a mismatch, and so
-     * are more than signed.
-     *
-     * @return void
-     */
-    public function testFewerMembersThanSignedAreManifestMismatch(): void
+    public function testATamperedPlaintextIsTampered(): void
     {
         $fewer = $this->seedBundle();
         $more  = $this->seedBundle();
+        $other = $this->seedBundle();
 
         $this->tamperWithArtifact($fewer, ['members' => self::sealed(Manifest::encode(self::pairs(2)))]);
         $this->tamperWithArtifact($more, ['members' => self::sealed(Manifest::encode(self::pairs(4)))]);
+        $this->tamperWithArtifact($other, ['members' => self::sealed(Manifest::encode([['App\Models\Invoice', '7'], ['App\Models\Invoice', '8'], ['App\Models\Invoice', '9']]))]);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $fewer]], $this->findingsOf([$fewer]));
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $more]], $this->findingsOf([$more]));
+        self::assertSame([[Finding::MANIFEST_TAMPERED, $fewer]], $this->findingsOf([$fewer]));
+        self::assertSame([[Finding::MANIFEST_TAMPERED, $more]], $this->findingsOf([$more]));
+        self::assertSame([[Finding::MANIFEST_TAMPERED, $other]], $this->findingsOf([$other]));
     }
 
     /**
-     * Members in canonical form, as many as signed, but of other subjects do
-     * not give the signed digest and are a mismatch.
+     * Another disclosure of the same count, canonical and of a supported
+     * version, is tampered: its digest is not the one signed.
      *
      * @return void
      */
-    public function testOtherMembersOfTheSignedCountAreManifestMismatch(): void
+    public function testAnotherDisclosureOfTheSignedCountIsTampered(): void
     {
-        $entryId = $this->seedBundle();
+        $entryId = $this->seedBundle(0, ArtifactKind::DISCLOSURE);
 
-        $this->tamperWithArtifact($entryId, ['members' => self::sealed(Manifest::encode([['App\Models\Invoice', '7'], ['App\Models\Invoice', '8'], ['App\Models\Invoice', '9']]))]);
+        $this->tamperWithArtifact($entryId, ['members' => self::sealed(DisclosureManifest::of(['a' => 1], null, [])->canonical)]);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        self::assertSame([[Finding::MANIFEST_TAMPERED, $entryId]], $this->findingsOf([$entryId]));
     }
 
     /**
-     * Members that open but are not a manifest at all are a mismatch.
+     * An artifact counting another number of members, or holding another
+     * digest, than its manifest signed is a mismatch, whether the stored column
+     * or the signed value changed.
      *
      * @return void
      */
-    public function testMembersThatAreNotAManifestAreManifestMismatch(): void
+    public function testAColumnMismatchIsAMismatch(): void
+    {
+        $count      = $this->seedBundle();
+        $digest     = $this->seedBundle();
+        $descriptor = $this->descriptorsOf([$count])[$count];
+
+        self::assertSame([[Finding::MANIFEST_MISMATCH, $count]], $this->verifier()->findings([$count => ['count' => 4] + $descriptor]));
+        self::assertSame([[Finding::MANIFEST_MISMATCH, $count]], $this->verifier()->findings([$count => ['digest' => self::OTHER_DIGEST] + $descriptor]));
+
+        $this->tamperWithArtifact($count, ['member_count' => 4]);
+        $this->tamperWithArtifact($digest, ['digest' => self::OTHER_DIGEST]);
+
+        self::assertSame([[Finding::MANIFEST_MISMATCH, $count]], $this->findingsOf([$count]));
+        self::assertSame([[Finding::MANIFEST_MISMATCH, $digest]], $this->findingsOf([$digest]));
+    }
+
+    /**
+     * Rows of `[changed columns, finding]`: a change to an artifact's columns
+     * and the finding it gives without its members being read.
+     *
+     * @return iterable<string, array{0: array<string, int|string>, 1: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding}>
+     */
+    public static function provideColumnChanges(): iterable
+    {
+        yield from [
+            'another id'     => [['id' => self::OTHER_ID], Finding::MANIFEST_SWAPPED],
+            'another kind'   => [['kind' => 'export'], Finding::MANIFEST_WRONG_KIND],
+            'another count'  => [['member_count' => 4], Finding::MANIFEST_MISMATCH],
+            'another digest' => [['digest' => self::OTHER_DIGEST], Finding::MANIFEST_MISMATCH],
+        ];
+    }
+
+    /**
+     * An artifact whose columns differ from its manifest's gives its finding
+     * without its members being read: protects against a check that opens every
+     * artifact.
+     *
+     * @param  array<string, int|string>  $columns
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding
+     * @return void
+     */
+    #[DataProvider('provideColumnChanges')]
+    public function testTheMembersOfAMismatchedArtifactAreNeverRead(array $columns, Finding $finding): void
     {
         $entryId = $this->seedBundle();
 
-        $this->tamperWithArtifact($entryId, ['members' => self::sealed('not json')]);
+        $this->tamperWithArtifact($entryId, ['members' => 'not a ciphertext'] + $columns);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $entryId]], $this->findingsOf([$entryId]));
+        $statements = $this->recordArtifactStatements();
+
+        self::assertSame([[$finding, $entryId]], $this->findingsOf([$entryId]));
+        self::assertCount(1, $statements);
+        self::assertStringContainsString('length(', $statements[0]);
     }
 
     /**
@@ -407,13 +596,13 @@ final class ManifestVerifierTest extends TestCase
     /**
      * Each finding is given once, at the earliest of the entries it was found
      * at, bytewise, and the findings in the order of `Finding`, whatever order
-     * the entries come in.
+     * the entries come in: every artifact finding at once, each at two entries.
      *
      * @return void
      */
     public function testEachFindingNamesTheEarliestEntry(): void
     {
-        $ids = $this->seedBundles(6);
+        $ids = $this->seedBundles(14);
 
         foreach ([0, 1] as $index) {
             $this->artifactsTable()->where('entry_id', $ids[$index])->delete();
@@ -427,9 +616,29 @@ final class ManifestVerifierTest extends TestCase
             $this->tamperWithArtifact($ids[$index], ['digest' => self::OTHER_DIGEST]);
         }
 
+        foreach ([6, 7] as $index) {
+            $this->tamperWithArtifact($ids[$index], ['id' => sprintf('01932b4e-9000-7000-8000-%012d', $index)]);
+        }
+
+        foreach ([8, 9] as $index) {
+            $this->tamperWithArtifact($ids[$index], ['kind' => 'disclosure']);
+        }
+
+        foreach ([10, 11] as $index) {
+            $this->tamperWithArtifact($ids[$index], ['members' => self::sealed('not json')]);
+        }
+
+        foreach ([12, 13] as $index) {
+            $this->tamperWithArtifact($ids[$index], ['members' => self::sealed(Manifest::encode(self::pairs(2)))]);
+        }
+
         $expected = [
             [Finding::MANIFEST_MISSING, min($ids[0], $ids[1])],
             [Finding::MANIFEST_MISMATCH, min($ids[4], $ids[5])],
+            [Finding::MANIFEST_SWAPPED, min($ids[6], $ids[7])],
+            [Finding::MANIFEST_WRONG_KIND, min($ids[8], $ids[9])],
+            [Finding::MANIFEST_MALFORMED, min($ids[10], $ids[11])],
+            [Finding::MANIFEST_TAMPERED, min($ids[12], $ids[13])],
             [Finding::MANIFEST_UNREADABLE, min($ids[2], $ids[3])],
         ];
 
@@ -499,8 +708,9 @@ final class ManifestVerifierTest extends TestCase
 
     /**
      * Rows of `[descriptor]`: values a signed manifest descriptor is not, since
-     * it is exactly a lower-case UUID artifact id, a 64 lower-case hex digest
-     * and a positive integer count.
+     * it is exactly a lower-case UUID artifact id, a kind the package knows, a
+     * 64 lower-case hex digest and an integer count, positive for a bulk
+     * operation and never negative.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -508,7 +718,7 @@ final class ManifestVerifierTest extends TestCase
      */
     public static function provideMalformedDescriptors(): iterable
     {
-        $valid = ['artifact_id' => self::OTHER_ID, 'digest' => self::OTHER_DIGEST, 'count' => 3];
+        $valid = ['artifact_id' => self::OTHER_ID, 'kind' => 'bulk', 'digest' => self::OTHER_DIGEST, 'count' => 3];
 
         yield from [
             'empty'                       => [[]],
@@ -516,6 +726,12 @@ final class ManifestVerifierTest extends TestCase
             'no artifact id'              => [array_diff_key($valid, ['artifact_id' => true])],
             'no digest'                   => [array_diff_key($valid, ['digest' => true])],
             'no count'                    => [array_diff_key($valid, ['count' => true])],
+            'no kind'                     => [array_diff_key($valid, ['kind' => true])],
+            'an unknown kind'             => [['kind' => 'audit'] + $valid],
+            'an upper-case kind'          => [['kind' => 'BULK'] + $valid],
+            'a kind not a string'         => [['kind' => 1] + $valid],
+            'a negative disclosure'       => [['kind' => 'disclosure', 'count' => -1] + $valid],
+            'a negative export'           => [['kind' => 'export', 'count' => -1] + $valid],
             'an extra key'                => [$valid + ['extra' => 1]],
             'an upper-case artifact id'   => [['artifact_id' => strtoupper(self::OTHER_ID)] + $valid],
             'an artifact id not a UUID'   => [['artifact_id' => 'artifact'] + $valid],
@@ -531,7 +747,7 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * A malformed descriptor is a mismatch at its entry, found with no
+     * A malformed descriptor is malformed at its entry, found with no
      * statement, since a signed descriptor cannot be malformed without the key.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
@@ -540,42 +756,45 @@ final class ManifestVerifierTest extends TestCase
      * @return void
      */
     #[DataProvider('provideMalformedDescriptors')]
-    public function testAMalformedDescriptorIsManifestMismatch(array $descriptor): void
+    public function testAMalformedDescriptorIsMalformed(array $descriptor): void
     {
         $statements = $this->recordArtifactStatements();
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, self::ENTRY_ID]], $this->verifier()->findings([self::ENTRY_ID => $descriptor]));
+        self::assertSame([[Finding::MANIFEST_MALFORMED, self::ENTRY_ID]], $this->verifier()->findings([self::ENTRY_ID => $descriptor]));
         self::assertCount(0, $statements);
     }
 
     /**
      * A stored entry signing a manifest that is no map, or a map that is no
-     * descriptor, is checked and is a mismatch, never skipped.
+     * descriptor, a key added or its kind missing, is checked and is malformed,
+     * never skipped.
      *
      * @return void
      */
-    public function testAManifestThatIsNoMapIsManifestMismatch(): void
+    public function testAManifestThatIsNoMapIsMalformed(): void
     {
         $scalar = $this->seedEntrySigning('not a descriptor');
-        $extra  = $this->seedEntrySigning(['artifact_id' => self::OTHER_ID, 'digest' => self::OTHER_DIGEST, 'count' => 3, 'extra' => true]);
+        $extra  = $this->seedEntrySigning(['artifact_id' => self::OTHER_ID, 'kind' => 'bulk', 'digest' => self::OTHER_DIGEST, 'count' => 3, 'extra' => true]);
+        $three  = $this->seedEntrySigning(['artifact_id' => self::OTHER_ID, 'digest' => self::OTHER_DIGEST, 'count' => 3]);
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $scalar]], $this->findingsOf([$scalar]));
-        self::assertSame([[Finding::MANIFEST_MISMATCH, $extra]], $this->findingsOf([$extra]));
+        self::assertSame([[Finding::MANIFEST_MALFORMED, $scalar]], $this->findingsOf([$scalar]));
+        self::assertSame([[Finding::MANIFEST_MALFORMED, $extra]], $this->findingsOf([$extra]));
+        self::assertSame([[Finding::MANIFEST_MALFORMED, $three]], $this->findingsOf([$three]));
     }
 
     /**
-     * A manifest keyed by an entry id that is not a lower-case UUID is a
-     * mismatch, and no statement binds it: protects every engine's UUID column
+     * A manifest keyed by an entry id that is not a lower-case UUID is
+     * malformed, and no statement binds it: protects every engine's UUID column
      * from a value it would refuse.
      *
      * @return void
      */
-    public function testAnEntryIdThatIsNotAUuidIsManifestMismatch(): void
+    public function testAnEntryIdThatIsNotAUuidIsMalformed(): void
     {
-        $descriptor = ['artifact_id' => self::OTHER_ID, 'digest' => self::OTHER_DIGEST, 'count' => 3];
+        $descriptor = ['artifact_id' => self::OTHER_ID, 'kind' => 'bulk', 'digest' => self::OTHER_DIGEST, 'count' => 3];
         $statements = $this->recordArtifactStatements();
 
-        self::assertSame([[Finding::MANIFEST_MISMATCH, 'not-a-uuid']], $this->verifier()->findings(['not-a-uuid' => $descriptor]));
+        self::assertSame([[Finding::MANIFEST_MALFORMED, 'not-a-uuid']], $this->verifier()->findings(['not-a-uuid' => $descriptor]));
         self::assertCount(0, $statements);
     }
 

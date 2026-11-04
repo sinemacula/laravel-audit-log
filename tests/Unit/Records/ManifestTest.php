@@ -11,15 +11,18 @@ use PHPUnit\Framework\TestCase;
 use Ramsey\Uuid\Rfc4122\FieldsInterface;
 use Ramsey\Uuid\Uuid;
 use Ramsey\Uuid\UuidInterface;
+use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for a bulk operation's manifest: its canonical form and the golden
- * digest, de-duplication and bytewise order, the subjects it takes and refuses,
- * the count, input and byte bounds it refuses rather than truncates, its id,
- * its descriptor, and the plaintexts it reads back as canonical.
+ * Unit tests for an artifact's manifest: a bulk operation's canonical form and
+ * the golden digest, de-duplication and bytewise order, the subjects it takes
+ * and refuses, the count, input and byte bounds it refuses rather than
+ * truncates, the content of any kind taken as given, the counts each kind
+ * allows, its id, its descriptor naming its kind, and the plaintexts it reads
+ * back as canonical.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -438,29 +441,164 @@ final class ManifestTest extends TestCase
     }
 
     /**
-     * The descriptor is the artifact's id, the digest and the count, in that
-     * order and nothing else.
+     * The descriptor is the artifact's id, its kind, the digest and the count,
+     * in that order and nothing else.
      *
      * @return void
      *
      * @throws \JsonException
      */
-    public function testTheDescriptorHoldsTheIdDigestAndCount(): void
+    public function testTheDescriptorHoldsTheIdKindDigestAndCount(): void
     {
         $manifest = self::of([self::invoice('2'), self::invoice('1'), self::invoice('10')]);
 
-        self::assertSame(['artifact_id' => $manifest->id, 'digest' => self::GOLDEN_DIGEST, 'count' => 3], $manifest->descriptor());
+        self::assertSame(['artifact_id' => $manifest->id, 'kind' => 'bulk', 'digest' => self::GOLDEN_DIGEST, 'count' => 3], $manifest->descriptor());
+        self::assertSame(ArtifactKind::BULK, $manifest->kind);
     }
 
     /**
-     * The kind, the input factor and the flags are pinned: the flags are those
-     * every stored JSON column uses.
+     * Each kind's descriptor names that kind, beside the id, digest and count
+     * of the content it was given, in the same order.
+     *
+     * @return void
+     */
+    public function testTheDescriptorNamesItsKind(): void
+    {
+        foreach (ArtifactKind::cases() as $kind) {
+            $manifest = Manifest::ofContent($kind, '{"a":1}', 1);
+
+            self::assertSame(
+                ['artifact_id' => $manifest->id, 'kind' => $kind->value, 'digest' => hash('sha256', '{"a":1}'), 'count' => 1],
+                $manifest->descriptor(),
+                $kind->value,
+            );
+        }
+    }
+
+    /**
+     * Content of any kind is kept exactly as given, its digest the lower-case
+     * hex SHA-256 of those bytes, with the count given and the kind named.
+     *
+     * @return void
+     */
+    public function testContentOfAnyKindIsDigestedAsGiven(): void
+    {
+        $canonical = '{"disclosure_version":1,"filters":[],"members":[],"scope":null}';
+
+        foreach (ArtifactKind::cases() as $kind) {
+            $manifest = Manifest::ofContent($kind, $canonical, 7);
+
+            self::assertSame($kind, $manifest->kind, $kind->value);
+            self::assertSame($canonical, $manifest->canonical, $kind->value);
+            self::assertSame(hash('sha256', $canonical), $manifest->digest, $kind->value);
+            self::assertSame(7, $manifest->count, $kind->value);
+        }
+    }
+
+    /**
+     * A disclosure or an export of nothing is a manifest counting none.
+     *
+     * @return void
+     */
+    public function testAnEmptyDisclosureIsAccepted(): void
+    {
+        self::assertSame(0, Manifest::ofContent(ArtifactKind::DISCLOSURE, '{}', 0)->count);
+        self::assertSame(0, Manifest::ofContent(ArtifactKind::EXPORT, '{}', 0)->count);
+    }
+
+    /**
+     * A bulk operation of no subject is refused whichever way it is made.
+     *
+     * @return void
+     */
+    public function testAnEmptyBulkIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A bulk operation names at least one subject.');
+
+        Manifest::ofContent(ArtifactKind::BULK, '[]', 0);
+    }
+
+    /**
+     * Rows of `[kind, message]`: a negative count of each kind, and what it is
+     * refused with.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind, 1: string}>
+     */
+    public static function provideNegativeCounts(): iterable
+    {
+        yield from [
+            'a bulk operation' => [ArtifactKind::BULK, 'A bulk operation names at least one subject.'],
+            'a disclosure'     => [ArtifactKind::DISCLOSURE, 'An artifact counts no fewer than zero members.'],
+            'an export'        => [ArtifactKind::EXPORT, 'An artifact counts no fewer than zero members.'],
+        ];
+    }
+
+    /**
+     * A negative count is refused for every kind, a bulk operation's as one
+     * with no subject.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideNegativeCounts')]
+    public function testANegativeCountIsRefused(ArtifactKind $kind, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Manifest::ofContent($kind, '{}', -1);
+    }
+
+    /**
+     * An empty canonical form is refused for every kind: there is nothing to
+     * digest.
+     *
+     * @return void
+     */
+    public function testAnEmptyCanonicalFormIsRefused(): void
+    {
+        foreach (ArtifactKind::cases() as $kind) {
+            try {
+                Manifest::ofContent($kind, '', 1);
+
+                self::fail(sprintf('Expected an empty %s to be refused.', $kind->value));
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('An artifact\'s canonical form is never empty.', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Each content is its own artifact: a lower-case UUID version 7 made from
+     * the UUID factory, never the same twice for the same bytes.
+     *
+     * @return void
+     */
+    public function testEachContentHasItsOwnUuidV7(): void
+    {
+        $first  = Manifest::ofContent(ArtifactKind::EXPORT, '{}', 0);
+        $fields = Uuid::fromString($first->id)->getFields();
+
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/', $first->id);
+        self::assertInstanceOf(FieldsInterface::class, $fields);
+        self::assertSame(7, $fields->getVersion());
+        self::assertNotSame($first->id, Manifest::ofContent(ArtifactKind::EXPORT, '{}', 0)->id);
+
+        Str::createUuidsUsing(static fn (): UuidInterface => Uuid::fromString('01932B4E-8A40-7000-8000-00000000000A'));
+
+        self::assertSame('01932b4e-8a40-7000-8000-00000000000a', Manifest::ofContent(ArtifactKind::DISCLOSURE, '{}', 0)->id);
+    }
+
+    /**
+     * The input factor and the flags are pinned: the flags are those every
+     * stored JSON column uses.
      *
      * @return void
      */
     public function testTheConstantsArePinned(): void
     {
-        self::assertSame('bulk', Manifest::KIND);
         self::assertSame(4, Manifest::MAX_INPUT_FACTOR);
         self::assertSame(JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR, Manifest::JSON_FLAGS);
     }
@@ -535,16 +673,17 @@ final class ManifestTest extends TestCase
     }
 
     /**
-     * The canonical form is a sensitive parameter, and so are the subjects and
-     * members it is made of.
+     * The canonical form is a sensitive parameter, wherever it is given, and so
+     * are the subjects and members it is made of.
      *
      * @return void
      */
     public function testTheMembersAreSensitive(): void
     {
         $parameters = [
-            (new \ReflectionMethod(Manifest::class, '__construct'))->getParameters()[3],
+            (new \ReflectionMethod(Manifest::class, '__construct'))->getParameters()[4],
             (new \ReflectionMethod(Manifest::class, 'of'))->getParameters()[0],
+            (new \ReflectionMethod(Manifest::class, 'ofContent'))->getParameters()[1],
             (new \ReflectionMethod(Manifest::class, 'encode'))->getParameters()[0],
             (new \ReflectionMethod(Manifest::class, 'readCanonical'))->getParameters()[0],
         ];

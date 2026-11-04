@@ -111,7 +111,7 @@ final class BulkOperationTest extends TestCase
         usort($members, static fn (array $a, array $b): int => strcmp($a[1], $b[1]));
 
         self::assertSame([$record->id, 'bulk', self::SUBJECTS], [$artifact['entry_id'], $artifact['kind'], (int) $artifact['member_count']]);
-        self::assertSame(['artifact_id' => $artifact['id'], 'digest' => hash('sha256', $canonical), 'count' => self::SUBJECTS], $descriptor);
+        self::assertSame(['artifact_id' => $artifact['id'], 'kind' => 'bulk', 'digest' => hash('sha256', $canonical), 'count' => self::SUBJECTS], $descriptor);
         self::assertSame($artifact['digest'], hash('sha256', $canonical));
         self::assertSame(Manifest::encode($members), $canonical);
         self::assertSame(self::keysSorted($descriptor), self::keysSorted(self::storedProperties()['_audit']['manifest'] ?? null));

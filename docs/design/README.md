@@ -1,8 +1,8 @@
 # Design Notes
 
-These notes document the package's record, definition, redaction, storage, integrity, delivery, context and testing
-contracts that are easy to miss if you only read the quick-start material or skim the test suite. Task-oriented guides
-are in `docs/guides`.
+These notes document the package's record, definition, redaction, storage, integrity, delivery, reading, context and
+testing contracts that are easy to miss if you only read the quick-start material or skim the test suite.
+Task-oriented guides are in `docs/guides`.
 
 Each note is intentionally short and follows the same structure:
 
@@ -34,8 +34,12 @@ The current note set is:
 - `outcomes.md`: what storing a record returns or raises for each way a write can end, what the host transaction is left
   as, and what each timing, delivery mode and failure guarantees, captured records and model changes included.
 - `delivery.md`: the pipeline, the outbox and its drain, claims and receipts, the spill channel and replay, the stores
-  and what each can promise, how a captured record reports its failure, the bundle a bulk operation travels as, and the
-  formatters.
+  and what each can promise, how a captured record reports its failure, the bundle a record with an artifact travels as,
+  the package's own write path, and the formatters.
+- `reading.md`: reading the trail and controlling access to it: the viewer and the access policy, the scope algebra and
+  its one compiler, signed cursors, the record every read writes before anything it found is returned and what
+  acknowledges it, the read guard, the stored entry against the shown one, the export's snapshot, journal and
+  publication, its verification, and the seams the read path leaves.
 - `event-model.md`: what `AuditRecorded`, `AuditWriteFailed`, `AuditCaptureFailed` and `IntegrityCheckFailed` carry
   and when, by mode and by command, what a listener's failure does, and what the recursion guard refuses.
 - `context-resolution.md`: the capture pipeline, what contributors may fill, how the actor is read without loading a
@@ -45,7 +49,8 @@ The current note set is:
 - `threat-model.md`: what minimising does not promise: the limits of key matching, what a leaked key gives up, what
   remains in a stack trace or a note, and the spill and the outbox as personal data; and what integrity does not
   promise: no non-repudiation, fabricated and uncaptured records, deletion before a seal, the tail, a held key, the
-  exposure no timer bounds, and that installing the package is not compliance.
+  exposure no timer bounds, and that installing the package is not compliance; and what a PHP access policy cannot
+  stop: direct SQL, a replica dump or a backup, direct reads of the model, and timing.
 - `testing-helpers.md`: the fake store and its assertions, what runs with it and what it does not model, a failing fake
   under each mode, and how Laravel's test helpers change what a record holds.
 

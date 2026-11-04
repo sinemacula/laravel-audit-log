@@ -12,6 +12,7 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Definitions\FieldRule;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Export\ApprovedInvoiceMapper;
@@ -22,7 +23,8 @@ use Tests\Fixtures\Export\MisclassifyingMapper;
  * categories it keeps and refuses, its immutability, the rules its shorthands
  * add, the duplicate and unreachable rules it refuses in either order, the
  * order it keeps its rules in, which rule decides a field, which rule lies
- * beneath a path, the OCSF mapper it names and keeps, and equality.
+ * beneath a path, the OCSF mapper it names and keeps, equality, and how a
+ * definition of one of the package's own codes is made.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -566,6 +568,64 @@ final class EventDefinitionTest extends TestCase
         $this->expectExceptionMessage('Unlisted fields cannot be encrypted, because an encrypted field names its owner.');
 
         EventDefinition::for(self::CODE)->unlisted(FieldHandling::ENCRYPT);
+    }
+
+    /**
+     * `for()` still refuses each of the package's own codes, given as the
+     * activity or as its value, so a caller cannot define one.
+     *
+     * @return void
+     */
+    public function testForStillRefusesAPackageCode(): void
+    {
+        foreach ([PackageActivity::TRAIL_READ, PackageActivity::EXPORT_PUBLISH_FAILED->value] as $code) {
+            try {
+                EventDefinition::for($code);
+
+                self::fail('Expected the package code to be refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('The `audit_log.` prefix is reserved for the package\'s own event codes.', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * The chain a package definition is made with takes each of its rules: the
+     * permissive default of the minted code, unlisted fields dropped, the
+     * `audit` category and the retained fields, with nothing else changed.
+     *
+     * @return void
+     */
+    public function testAPermissiveDefinitionOfAPackageCodeTakesItsRules(): void
+    {
+        $definition = EventDefinition::permissive(EventCode::package(PackageActivity::EXPORT_PUBLISH_FAILED))
+            ->unlisted(FieldHandling::DROP)
+            ->category('audit')
+            ->retain('outcome', 'export_entry');
+
+        self::assertSame('audit_log.export_publish_failed', $definition->code);
+        self::assertSame(1, $definition->version);
+        self::assertSame('audit', $definition->category);
+        self::assertSame(FieldHandling::DROP, $definition->unlisted);
+        self::assertSame(['export_entry', 'outcome'], array_keys($definition->rules));
+        self::assertSame(FieldHandling::RETAIN, $definition->handlingFor(['outcome']));
+        self::assertSame(FieldHandling::DROP, $definition->handlingFor(['anything']));
+        self::assertNull($definition->ocsfMapper);
+        self::assertTrue($definition->equals(PackageActivity::EXPORT_PUBLISH_FAILED->definition()));
+    }
+
+    /**
+     * The category grammar is public, so every category a caller names is held
+     * to the one pattern, and it accepts exactly what a definition accepts.
+     *
+     * @return void
+     */
+    public function testTheCategoryPatternIsPublic(): void
+    {
+        self::assertSame('/\A[a-z][a-z0-9_]{0,63}\z/', EventDefinition::CATEGORY_PATTERN);
+        self::assertTrue((new \ReflectionClassConstant(EventDefinition::class, 'CATEGORY_PATTERN'))->isPublic());
+        self::assertSame(1, preg_match(EventDefinition::CATEGORY_PATTERN, 'audit'));
+        self::assertSame(0, preg_match(EventDefinition::CATEGORY_PATTERN, "audit\n"));
     }
 
     /**

@@ -303,6 +303,33 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
+     * A log holding two bundles whose artifacts were swapped between their
+     * entries after sealing exits non-zero, its seal tampered with
+     * `manifest_swapped` at the earlier of the two entries, and alarms once.
+     *
+     * @return void
+     */
+    public function testASwappedArtifactExitsNonZero(): void
+    {
+        $first  = $this->seedBundle();
+        $second = $this->seedBundle();
+
+        $this->seal();
+        $this->swapArtifacts($first, $second);
+
+        $earlier = min($first, $second);
+
+        self::assertSame(1, $this->verify());
+        self::assertStringContainsString(sprintf("integrity=tampered anchoring=unanchored members=2 finding=manifest_swapped first=%s\n", $earlier), $this->printed());
+        self::assertStringEndsWith("Verification failed.\n", $this->printed());
+        $alarm = $this->singleAlarm();
+
+        self::assertSame(self::integrity(['tampered' => 1]), $alarm->integrity);
+        self::assertSame('manifest_swapped', $alarm->finding);
+        self::assertSame($earlier, $alarm->firstBadId);
+    }
+
+    /**
      * A log with an entry missing and no prune record fails as incomplete.
      *
      * @return void

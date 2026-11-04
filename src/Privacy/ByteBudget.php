@@ -17,13 +17,13 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
  * the key, so the result depends on neither the order of the input nor anything
  * outside it. In the properties, keys no rule governs go first, then keys a
  * rule governs, itself or beneath it, and the note last of all. The identifier
- * hash, a bulk operation's manifest descriptor and the list of what was omitted
- * are never omitted, because all three are bounded: `METADATA_RESERVE_BYTES`
- * holds a hash, the largest descriptor and 32 paths of 128 bytes under the
- * largest count, so omitting until the rest fits beside that reserve brings the
- * final encoding within the budget, whatever the omissions themselves add. In
- * the context, which has no metadata and no reserve, application keys go before
- * the fixed names the package fills, and `_audit` is an ordinary key.
+ * hash, an artifact's manifest descriptor and the list of what was omitted are
+ * never omitted, because all three are bounded: `METADATA_RESERVE_BYTES` holds
+ * a hash, the largest descriptor and 32 paths of 128 bytes under the largest
+ * count, so omitting until the rest fits beside that reserve brings the final
+ * encoding within the budget, whatever the omissions themselves add. In the
+ * context, which has no metadata and no reserve, application keys go before the
+ * fixed names the package fills, and `_audit` is an ordinary key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,7 +32,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
  */
 final class ByteBudget
 {
-    /** @var int Bytes kept for the identifier hash, the manifest descriptor and the omitted list at their largest, with their braces and a comma: 4515 measured, rounded up. */
+    /** @var int Bytes kept for the identifier hash, the manifest descriptor and the omitted list at their largest, with their braces and a comma: 4535 measured with a `disclosure` descriptor, rounded up. */
     public const int METADATA_RESERVE_BYTES = 4600;
 
     /** @var int How far the context's costs must stay under its budget: its two braces, less the last key's comma. */
@@ -79,7 +79,7 @@ final class ByteBudget
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
      * @param  int  $maxBytes
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
-     * @param  ?array{artifact_id: string, digest: string, count: int}  $manifest
+     * @param  ?array{artifact_id: string, kind: string, digest: string, count: int}  $manifest
      * @return ?array<array-key, mixed>
      *
      * @throws \JsonException
@@ -168,7 +168,7 @@ final class ByteBudget
      * @param  array<array-key, mixed>|string|null  $note
      * @param  ?string  $identifierHash
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
-     * @param  ?array{artifact_id: string, digest: string, count: int}  $manifest
+     * @param  ?array{artifact_id: string, kind: string, digest: string, count: int}  $manifest
      * @return array<array-key, mixed>
      */
     private static function compose(

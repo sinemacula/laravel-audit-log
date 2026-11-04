@@ -29,14 +29,33 @@ them changes what every stored row means.
   is never bound into a query, because the grammar's format drops microseconds and the session's time zone would move
   the instant.
 - No timestamps and no foreign keys.
-- The ten secondary indexes are named after the configured table: `<table>_actor_index`, `_subject_index`,
-  `_principal_index`, `_tenant_index`, `_event_index`, `_category_index`, `_correlate_index`, `_occurred_index`,
-  `_recorded_index` over `recorded_at` and `id`, which sealing pages through in that order, and the unique
-  `_source_unique` over `source_id` and `source_record_id`. The longest suffix is 16 characters, so
-  `entries.table` is 1 to 47 lower-case letters, digits and underscores that does not start with a digit
-  (`Database\EntrySettings`), and `audit-log:check` holds the prefixed name to 47 too, so every name fits PostgreSQL's
-  63. Capitals are refused because every engine reports index names in lower case and MySQL's
-  `lower_case_table_names` treats a table name's case differently from one server to the next.
+- The ten secondary indexes are named after the configured table, `<table>` followed by each suffix below, with their
+  columns in this order:
+
+  | Suffix             | Columns                                               |
+  |--------------------|-------------------------------------------------------|
+  | `_actor_index`     | `actor_type`, `actor_id`, `occurred_at`, `id`         |
+  | `_subject_index`   | `subject_type`, `subject_id`, `occurred_at`, `id`     |
+  | `_principal_index` | `principal_type`, `principal_id`, `occurred_at`, `id` |
+  | `_tenant_index`    | `tenant_type`, `tenant_id`, `occurred_at`, `id`       |
+  | `_event_index`     | `event`, `occurred_at`, `id`                          |
+  | `_category_index`  | `category`, `occurred_at`, `id`                       |
+  | `_correlate_index` | `correlation_id`                                      |
+  | `_occurred_index`  | `occurred_at`, `id`                                   |
+  | `_recorded_index`  | `recorded_at`, `id`                                   |
+  | `_source_unique`   | `source_id`, `source_record_id`, unique               |
+
+- Each lookup index of the trail, the actor, subject, principal, tenant, event, category and occurred indexes, ends in
+  `occurred_at` and then `id`, the order a page of the trail is read in, so a keyset page reads its index in order and
+  is never sorted, entries of one microsecond included; no collation is applied to `id`, which compares in the type the
+  migration gives it. Sealing pages through `_recorded_index` over `recorded_at` and `id`, in that order.
+- A read that combines conditions, such as a scope of several tenants or a tenant with an actor or a code, uses one
+  index and filters the rest of its conditions row by row, so it costs the rows that index matches rather than the rows
+  returned; `tests/Integration/Querying/TrailPlansTest.php` reads each engine's plan.
+- The longest suffix is 16 characters, so `entries.table` is 1 to 47 lower-case letters, digits and underscores that
+  does not start with a digit (`Database\EntrySettings`), and `audit-log:check` holds the prefixed name to 47 too, so
+  every name fits PostgreSQL's 63. Capitals are refused because every engine reports index names in lower case and
+  MySQL's `lower_case_table_names` treats a table name's case differently from one server to the next.
 - On MySQL the table is `utf8mb4` with the collation `utf8mb4_0900_bin` and the `InnoDB` engine, so every character
   column, identifiers included, is binary and NO PAD: ids that differ only in case or by a trailing space stay
   distinct. MySQL must be 8.4 or later and run in strict mode, so a value that does not fit is refused instead of cut.
@@ -467,9 +486,10 @@ COMMIT;
 
 - `tests/Integration/Migration/EntriesTableSchemaTest.php` `testCreatesEveryColumnWithItsNullability`,
   `testSizesEveryStringColumn`, `testStoresBothTimesToTheMicrosecond`, `testThePayloadColumnsAreJsonNeverJsonb`,
-  `testIndexesEveryLookupUnderItsOwnShortName`, `testEveryIndexNameFitsAtTheLongestTableName`,
-  `testHasNoTimestampsAndNoForeignKeys`, `testOnMySqlEveryCharacterColumnIsBinaryWithoutPadding`,
-  `testOnMySqlTheTableIsInnoDb`, `testIdsDifferingOnlyByATrailingSpaceAreDistinct`
+  `testIndexesEveryLookupUnderItsOwnShortName`, `testNoIndexAppliesACollationToTheId`,
+  `testEveryIndexNameFitsAtTheLongestTableName`, `testHasNoTimestampsAndNoForeignKeys`,
+  `testOnMySqlEveryCharacterColumnIsBinaryWithoutPadding`, `testOnMySqlTheTableIsInnoDb`,
+  `testIdsDifferingOnlyByATrailingSpaceAreDistinct`
 - `tests/Integration/Migration/EntriesMigrationCollisionTest.php`
   `testAnExistingTableStopsTheMigrationNamingTheSettingThatRenamesIt`, `testTheExistingTableIsLeftAsItWas`
 - `tests/Unit/Database/MigrationCollisionGuardTest.php` `testEnsureNotExistsThrowsWhenTableExists`
@@ -490,7 +510,12 @@ COMMIT;
   `testStoringInsideATransactionAddsOnlyASavepoint`,
   `testEachRecordInsideOneTransactionHoldsASavepointUntilTheHostCommits`
 - `tests/Feature/Console/SchemaChecksTest.php` `testTheShippedMigrationHasNoProblems`,
-  `testTheShippedArtifactsMigrationHasNoProblems`, `testAMissingArtifactsColumnIsAProblem`
+  `testTheShippedArtifactsMigrationHasNoProblems`, `testAMissingArtifactsColumnIsAProblem`,
+  `testAnIndexWithoutItsIdIsReported`, `testAnInstallWithTheOldIndexesReportsEachOfThem`
+- `tests/Integration/Querying/TrailPlansTest.php` `testASingleTenantReadUsesTheTenantIndex`,
+  `testAnActorReadUsesTheActorIndex`, `testAnEventReadUsesTheEventIndex`, `testAPageReadsNoFilesort`,
+  `testAMultiTenantReadUsesAnIndexAndFiltersTheRest`,
+  `testASelectiveFilterUnderATenantScopeUsesOneIndexAndFiltersTheRest`
 - `tests/Feature/Console/CheckCommandTest.php` `testAMissingArtifactsTableFailsTheSchemaSubject`
 - `tests/Integration/Migration/ArtifactsTableSchemaTest.php` `testTheColumnsHaveTheirTypes`, `testTheIdIsThePrimaryKey`,
   `testAnEntryHasOneArtifact`, `testOnMySqlTheTableIsBinaryAndInnoDb`, `testTheTableIsOnTheStorageConnection`,

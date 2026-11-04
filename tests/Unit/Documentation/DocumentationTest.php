@@ -4,12 +4,16 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Documentation;
 
+use Illuminate\Container\Container;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Access\AccessScope;
+use SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose;
 use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
 use SineMacula\Laravel\AuditLog\Capture\Enums\ModelEvent;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatch;
+use SineMacula\Laravel\AuditLog\Console\ExportCommand;
 use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
@@ -17,16 +21,28 @@ use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
+use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
+use SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
+use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
+use SineMacula\Laravel\AuditLog\Querying\Describer;
+use SineMacula\Laravel\AuditLog\Querying\Enums\Acknowledgement;
+use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
+use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
+use SineMacula\Laravel\AuditLog\Querying\Enums\ReadRefusal;
+use SineMacula\Laravel\AuditLog\Querying\ExportVerification;
+use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
+use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
@@ -34,8 +50,11 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
+use SineMacula\Laravel\AuditLog\Testing\Concerns\InteractsWithAuditLog;
+use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Stores\DocumentedSpillChannel;
 
@@ -68,7 +87,14 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
  * names every package code and states every gap in capture, the extending guide
  * has its sections and documents the correlation id format, which the builder
  * holds to, every capture setting's environment variable is in the README, and
- * the segments a watched model may not use are the vocabulary's prefixes.
+ * the segments a watched model may not use are the vocabulary's prefixes. The
+ * reading guide has its sections, makes each of its statements, names every
+ * value of the read path, every export option and both read settings'
+ * environment variables, and shows no call that does not exist; the threat
+ * model states the limits of a PHP access policy; the reading note names the
+ * seams it leaves; each package code's row in the vocabulary keeps what its
+ * definition retains; and no document says the immediate path is outside the
+ * caller's transaction.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -98,6 +124,12 @@ final class DocumentationTest extends TestCase
         AnchorStatus::class,
         Finding::class,
         AnchorDriver::class,
+        ReadPurpose::class,
+        FieldState::class,
+        ExportFormat::class,
+        ExportFinding::class,
+        Acknowledgement::class,
+        ReadRefusal::class,
     ];
 
     /** @var list<string> The sections of every design note, in order. */
@@ -117,6 +149,7 @@ final class DocumentationTest extends TestCase
         'redaction.md',
         'threat-model.md',
         'testing-helpers.md',
+        'reading.md',
     ];
 
     /** @var string The sentence the threat model opens with. */
@@ -268,6 +301,10 @@ final class DocumentationTest extends TestCase
         'captured-report',
         'captured-host-fatal',
         'captured-model-after-commit',
+        'read-sync',
+        'read-outbox',
+        'read-open-transaction',
+        'read-failed-write',
     ];
 
     /** @var list<string> The facade calls the documentation may show before they ship; empty once every planned call shipped. */
@@ -309,6 +346,83 @@ final class DocumentationTest extends TestCase
 
     /** @var string The name of another package of the suite, in prose as much as in code. */
     private const string SIBLING = '/\blaravel-(?:authentication|authorization|mfa|sso|iam)\b/i';
+
+    /** @var string The reading guide. */
+    private const string READING_GUIDE = '/docs/guides/reading.md';
+
+    /** @var string The reading note. */
+    private const string READING_NOTE = '/docs/design/reading.md';
+
+    /** @var list<string> The sections of the reading guide, in order. */
+    private const array READING_SECTIONS = [
+        'Reading the trail',
+        'Viewers and the access policy',
+        'Scopes',
+        'Pages and cursors',
+        'Counting',
+        'Describing entries',
+        'Encrypted fields',
+        'Audited reads',
+        'Package codes',
+        'Exporting',
+        'Verifying an export',
+        'Answering a subject access request',
+        'Limits',
+    ];
+
+    /** @var array<string, string> What the reading guide must say, by what each statement is about. */
+    private const array READING_STATEMENTS = [
+        'assertion'        => 'The application authenticates the viewer: a `Reference` viewer is an assertion, not authentication.',
+        'onlyAbout'        => '`onlyAbout()` selects rows by actor or subject only; it is not a complete disclosure policy.',
+        'late rows'        => 'a row inserted later into an interval already walked may be missed',
+        'read-your-writes' => 'the trail is not read-your-writes',
+        'accepted'         => 'A committed outbox row means the read was accepted, not yet delivered.',
+        'bulk members'     => 'Verification proves the integrity of the row envelopes, not the completeness of the bulk members they reference.',
+        'anchoring'        => 'Anchoring is a later, observed state, never claimed at export time.',
+        'subject copy'     => 'The canonical evidence export is not a copy for the data subject.',
+        'console viewer'   => '`--viewer-type` and `--viewer-id` assert a reference; they do not prove who runs the command.',
+        'queued listener'  => 'A queued listener runs outside the read guard: a listener that reads the trail ignores `audit_log.` codes.',
+        'wal'              => 'On SQLite use WAL: in rollback-journal mode an export\'s snapshot blocks every writer\'s commit until it ends.',
+        'open transaction' => 'A trail is never read inside a transaction the application has open on the storage connection or the outbox connection.',
+    ];
+
+    /** @var array<string, string> What the threat model says a PHP access policy cannot do, by what each statement is about. */
+    private const array PHP_POLICY_LIMITS = [
+        'direct access'  => 'A PHP policy cannot stop direct SQL, a replica dump or a backup',
+        'database roles' => 'database roles and the database\'s own auditing must cover them',
+        'AuditEntry'     => 'Reading `AuditEntry` directly bypasses the trail, as any query does',
+        'timing'         => 'Plan-dependent timing is not constant',
+    ];
+
+    /** @var list<string> What the reading note says the read path leaves for others to build. */
+    private const array READING_SEAMS = [
+        'The decrypting `Contracts\FieldReader`',
+        '`erased` once an erasure has destroyed the owner\'s keys',
+        'must keep the export evidence',
+        'or durably reference it',
+        'must never prune it as an ordinary event',
+    ];
+
+    /** @var list<class-string> The classes whose methods the reading guide's examples call. */
+    private const array READING_CLASSES = [
+        AuditTrail::class,
+        AccessScope::class,
+        TrailPage::class,
+        TrailEntry::class,
+        Describer::class,
+        ExportVerification::class,
+        Reference::class,
+        FakeAuditStore::class,
+        InteractsWithAuditLog::class,
+        Recorder::class,
+        Container::class,
+    ];
+
+    /** @var list<string> The calls the reading guide's examples make that are the example application's own, or Carbon's, answered by magic. */
+    private const array APPLICATION_CALLS = ['isAuditor', 'subDays'];
+
+    /** @var string A way of saying the immediate path is outside the caller's transaction, which it is not, however the words are wrapped. */
+    private const string OUTSIDE_THE_CALLER = '/\boutside\s+(?:of\s+)?(?:the|a|any)\s+caller(?:\'|’)?s?\s+transactions?\b/iu';
 
     /** @var ?string The README, the guides and the design notes, read once. */
     private static ?string $documentation = null;
@@ -1073,16 +1187,17 @@ final class DocumentationTest extends TestCase
     {
         yield from [
             'redaction'    => [self::REDACTION_NOTE, ['Key Matching', 'Field Rules', 'Budgets And Omission', 'IP Modes']],
-            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox', 'Limits Of Integrity']],
+            'threat model' => [self::THREAT_MODEL, ['Limits Of Key Matching', 'Keys And Brute Force', 'Spill And Outbox', 'Limits Of Integrity', 'Limits Of A PHP Access Policy']],
             'delivery'     => [self::DELIVERY_NOTE, ['Spill Channel', 'Claims And Receipts', 'Replay', 'Stores And Capabilities', 'Captures And Bundles', 'Formatters']],
             'integrity'    => [self::INTEGRITY_NOTE, ['Seals', 'Anchors', 'Verification', 'Pruning And Erasure', 'Alerting And Progress', 'Seams Left']],
+            'reading'      => [self::READING_NOTE, ['Seams Left']],
         ];
     }
 
     /**
-     * The redaction note, the threat model, the delivery note and the integrity
-     * note have their own sections, in order, between the failure and edge
-     * cases and the implementation anchors.
+     * The redaction note, the threat model, the delivery note, the integrity
+     * note and the reading note have their own sections, in order, between the
+     * failure and edge cases and the implementation anchors.
      *
      * @param  string  $note
      * @param  list<string>  $extra
@@ -1838,6 +1953,325 @@ final class DocumentationTest extends TestCase
     }
 
     /**
+     * The reading guide opens with its title and has its sections, in order.
+     *
+     * @return void
+     */
+    public function testTheReadingGuideHasItsSections(): void
+    {
+        $guide = self::withoutCodeBlocks(self::read(self::READING_GUIDE));
+
+        preg_match_all('/^## (.+)$/m', $guide, $sections);
+
+        self::assertStringStartsWith("# Reading\n", $guide);
+        self::assertSame(self::READING_SECTIONS, $sections[1]);
+    }
+
+    /**
+     * Rows of `[statement]`: what the reading guide must say, each a limit or a
+     * rule of reading the trail a reader would otherwise assume away.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideReadingStatements(): iterable
+    {
+        foreach (self::READING_STATEMENTS as $about => $statement) {
+            yield $about => [$statement];
+        }
+    }
+
+    /**
+     * The reading guide makes each of those statements, however the line is
+     * wrapped.
+     *
+     * @param  string  $statement
+     * @return void
+     */
+    #[DataProvider('provideReadingStatements')]
+    public function testEachReadingStatementIsMade(string $statement): void
+    {
+        self::assertStringContainsString($statement, self::prose(self::READING_GUIDE));
+    }
+
+    /**
+     * The reading guide's sections say what each of their own rules pins: the
+     * scopes narrow only through the instance methods and warn of a static
+     * factory, the verification names what the viewer's scope must reach and
+     * the offline steps, and the subject access procedure has its three blocks
+     * and its limits.
+     *
+     * @return void
+     */
+    public function testTheReadingGuidesSectionsSayWhatTheyMust(): void
+    {
+        $guide        = self::read(self::READING_GUIDE);
+        $scopes       = self::collapsed(self::section($guide, 'Scopes'));
+        $verification = self::collapsed(self::section($guide, 'Verifying an export'));
+        $procedure    = self::collapsed(self::section($guide, 'Answering a subject access request'));
+
+        self::assertStringContainsString('Narrow a scope only through its instance methods', $scopes);
+        self::assertStringContainsString('A static factory reached through an instance starts a fresh scope', $scopes);
+        self::assertStringContainsString('The verifying viewer\'s scope must reach the export entry: the category `audit`, and the exporter\'s single tenant', $verification);
+
+        foreach (['`file_sha256`', '`membership_sha256`', '`properties._audit.manifest`', 'Whoever holds the key recomputes the entry\'s HMAC'] as $step) {
+            self::assertStringContainsString($step, $verification);
+        }
+
+        foreach (['<!-- procedure:policy -->', '<!-- procedure:select -->', '<!-- procedure:review -->'] as $marker) {
+            self::assertSame(1, substr_count($procedure, $marker), sprintf('The procedure does not hold %s once.', $marker));
+        }
+
+        self::assertStringContainsString('principal references, owned fragments and bulk members are not found by `onlyAbout()`', $procedure);
+        self::assertStringContainsString('Owner discovery and erasure are the erasure feature\'s', $procedure);
+    }
+
+    /**
+     * The reading guide itself names every purpose, field state, export format,
+     * export finding and acknowledgement, in code type, where a reader of the
+     * guide looks for them.
+     *
+     * @return void
+     */
+    public function testTheReadingGuideNamesEveryReadValue(): void
+    {
+        $guide   = self::read(self::READING_GUIDE);
+        $missing = [];
+
+        foreach ([ReadPurpose::class, FieldState::class, ExportFormat::class, ExportFinding::class, Acknowledgement::class] as $enum) {
+            foreach ($enum::cases() as $case) {
+                if (str_contains($guide, '`' . $case->value . '`')) {
+                    continue;
+                }
+
+                $missing[] = $enum . '::' . $case->name;
+            }
+        }
+
+        self::assertSame([], $missing, 'The reading guide does not name every value of the read path.');
+    }
+
+    /**
+     * Every call the reading guide's examples make is a method of a class they
+     * use, or one of the example application's own, so no example shows a call
+     * that does not exist.
+     *
+     * @return void
+     */
+    public function testEveryCallTheReadingGuideShowsExists(): void
+    {
+        preg_match_all('/^ *```php\n(.*?)^ *```[ \t]*$/ms', self::read(self::READING_GUIDE), $blocks);
+        preg_match_all('/(?:->|\?->|::)\s*([a-zA-Z_]\w*)\s*\(/', implode("\n", $blocks[1]), $calls);
+
+        $unknown = [];
+
+        foreach (array_values(array_unique($calls[1])) as $call) {
+
+            if (in_array($call, self::APPLICATION_CALLS, true) || self::isDeclaredByAReadingClass($call)) {
+                continue;
+            }
+
+            $unknown[] = $call;
+        }
+
+        self::assertNotSame([], $calls[1], 'The reading guide shows no call.');
+        self::assertSame([], $unknown, 'The reading guide shows calls that do not exist.');
+    }
+
+    /**
+     * The check above knows a method of the trail, a scope's factory and a
+     * container binding, and none that does not exist, so it is not empty by
+     * construction.
+     *
+     * @return void
+     */
+    public function testTheReadingCallCheckKnowsOnlyRealMethods(): void
+    {
+        foreach (['cursorPaginate', 'onlyAbout', 'tenants', 'hasMore', 'describe', 'isVerified', 'assertAudited', 'instance', 'trail'] as $call) {
+            self::assertTrue(self::isDeclaredByAReadingClass($call), $call);
+        }
+
+        foreach (['permitted', 'paginate', 'onlyTenants', 'total'] as $call) {
+            self::assertFalse(self::isDeclaredByAReadingClass($call), $call);
+        }
+    }
+
+    /**
+     * Rows of `[statement]`: what the threat model says a PHP access policy
+     * cannot do, each a limit a reader of the trail's guarantees would
+     * otherwise assume away.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function providePhpPolicyLimits(): iterable
+    {
+        foreach (self::PHP_POLICY_LIMITS as $about => $statement) {
+            yield $about => [$statement];
+        }
+    }
+
+    /**
+     * The threat model states each of those limits in its own section, however
+     * the lines are wrapped.
+     *
+     * @param  string  $statement
+     * @return void
+     */
+    #[DataProvider('providePhpPolicyLimits')]
+    public function testTheThreatModelStatesTheLimitsOfAPhpPolicy(string $statement): void
+    {
+        self::assertStringContainsString($statement, self::collapsed(self::section(self::read(self::THREAT_MODEL), 'Limits Of A PHP Access Policy')));
+    }
+
+    /**
+     * Rows of `[text]`: the name of the export command and each of its options,
+     * in code type, as the command declares them.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideExportOptions(): iterable
+    {
+        $command = new ExportCommand;
+        $name    = (string) $command->getName();
+
+        yield $name => ['`' . $name . '`'];
+
+        foreach ($command->getDefinition()->getOptions() as $option) {
+            yield $name . ' --' . $option->getName() => ['`--' . $option->getName() . '`'];
+        }
+    }
+
+    /**
+     * The export command and each of its options is named in the reading guide.
+     *
+     * @param  string  $text
+     * @return void
+     */
+    #[DataProvider('provideExportOptions')]
+    public function testEveryExportOptionIsDocumented(string $text): void
+    {
+        self::assertStringContainsString($text, self::read(self::READING_GUIDE), sprintf('The reading guide does not name %s.', $text));
+    }
+
+    /**
+     * The export command's rows are read from what it declares, its name and
+     * every option, so the check above is not empty by construction.
+     *
+     * @return void
+     */
+    public function testTheExportRowsAreEveryDeclaredOption(): void
+    {
+        $rows = array_map(static fn (array $row): string => $row[0], iterator_to_array(self::provideExportOptions()));
+
+        self::assertSame(['`audit-log:export`', '`--viewer-type`', '`--viewer-id`', '`--format`', '`--force`', '`--verify`'], array_values($rows));
+    }
+
+    /**
+     * The read and export settings read from the environment are named in the
+     * README and in the reading guide, and there are as many as the settings
+     * that read one.
+     *
+     * @return void
+     */
+    public function testEveryReadLeafNamesItsEnvVarInTheReadme(): void
+    {
+        preg_match_all('/\bAUDIT_LOG_(?:READ|EXPORT)_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
+
+        self::assertSame(['AUDIT_LOG_READ_MAX_PER_PAGE', 'AUDIT_LOG_EXPORT_CHUNK'], $variables[0], 'The configuration does not read the read environment variables it should.');
+
+        foreach ($variables[0] as $variable) {
+            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+            self::assertStringContainsString('`' . $variable . '`', self::read(self::READING_GUIDE));
+        }
+    }
+
+    /**
+     * No document says an immediate write runs outside the caller's
+     * transaction, because one open on its connection holds it, and a read's
+     * record is refused there for that reason.
+     *
+     * @return void
+     */
+    public function testNoDocumentSaysTheImmediatePathIsOutsideTheCallersTransaction(): void
+    {
+        self::assertSame(0, preg_match(self::OUTSIDE_THE_CALLER, self::documentation()), 'A document says the immediate path is outside the caller\'s transaction.');
+    }
+
+    /**
+     * The phrase the immediate path is never described with is found in each of
+     * its forms, across a wrapped line, and not in a phrase that merely
+     * resembles it.
+     *
+     * @return void
+     */
+    public function testTheOutsideTheCallerPatternFindsEachForm(): void
+    {
+        $forms = ['outside the caller\'s transaction', "Outside the\n  caller's transaction", 'outside of the callers transactions', 'outside any caller’s transaction'];
+
+        foreach ($forms as $phrase) {
+            self::assertSame(1, preg_match(self::OUTSIDE_THE_CALLER, $phrase), $phrase);
+        }
+
+        foreach (['what the caller\'s transaction is left as', 'outside the read guard', 'inside the caller\'s transaction'] as $phrase) {
+            self::assertSame(0, preg_match(self::OUTSIDE_THE_CALLER, $phrase), $phrase);
+        }
+    }
+
+    /**
+     * The reading note names, in its own section, the seams the read path
+     * leaves: the decrypting field reader, and the export evidence the
+     * lifecycle journal must keep and never prune as an ordinary event.
+     *
+     * @return void
+     */
+    public function testTheReadingNoteNamesTheSeamsLeft(): void
+    {
+        $section = self::collapsed(self::section(self::read(self::READING_NOTE), 'Seams Left'));
+
+        foreach (self::READING_SEAMS as $seam) {
+            self::assertStringContainsString($seam, $section, sprintf('The reading note\'s seams do not say: %s.', $seam));
+        }
+    }
+
+    /**
+     * Rows of `[activity]`: every code the package records of its read path.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity}>
+     */
+    public static function providePackageActivities(): iterable
+    {
+        foreach (PackageActivity::cases() as $activity) {
+            yield $activity->value => [$activity];
+        }
+    }
+
+    /**
+     * Each code of the read path has its row in the vocabulary's table of
+     * package codes, and the properties the row says it keeps are exactly the
+     * ones its definition retains, every other dropped.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
+     * @return void
+     */
+    #[DataProvider('providePackageActivities')]
+    public function testEachPackageCodesRowKeepsItsDefinitionsProperties(PackageActivity $activity): void
+    {
+        $section = self::section(self::read('/docs/design/vocabulary.md'), 'Package Codes');
+        $row     = '/^\| `' . preg_quote($activity->value, '/') . '` +\|(?:[^|\n]*\|){4}([^|\n]*)\|$/m';
+
+        self::assertSame(1, preg_match($row, $section, $matches), sprintf('The vocabulary has no row for `%s`.', $activity->value));
+
+        preg_match_all('/`([a-z][a-z0-9_]*)`/', $matches[1], $properties);
+
+        $documented = EventDefinition::permissive(EventCode::package($activity))
+            ->unlisted(FieldHandling::DROP)
+            ->category('audit')
+            ->retain(...$properties[1]);
+
+        self::assertNotSame([], $properties[1]);
+        self::assertTrue($documented->equals($activity->definition()), sprintf('The vocabulary\'s row for `%s` does not keep what its definition retains.', $activity->value));
+    }
+
+    /**
      * Rows of `[note, statement]`: what the integrity note must say, each a
      * rule of sealing, anchoring and verification, and the inputs the golden
      * vectors are computed from.
@@ -1944,6 +2378,24 @@ final class DocumentationTest extends TestCase
         }
 
         return $keys;
+    }
+
+    /**
+     * Whether one of the classes the reading guide's examples use declares the
+     * method, its traits' included.
+     *
+     * @param  string  $method
+     * @return bool
+     */
+    private static function isDeclaredByAReadingClass(string $method): bool
+    {
+        foreach (self::READING_CLASSES as $class) {
+            if (method_exists($class, $method)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
