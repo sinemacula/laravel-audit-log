@@ -83,11 +83,32 @@ vendor/bin/phpunit tests/Feature/AuditLogServiceProviderTest.php
 vendor/bin/phpunit --filter testMethodName tests/Unit/SomeTest.php
 ```
 
+The suites run on in-memory SQLite unless `DB_CONNECTION` names another engine. CI runs every suite on MySQL 8.4 and
+PostgreSQL 17 as well; to run them locally, start the engine and point the tests at it with a user that can create
+databases and users and grant them privileges (`root` or `postgres`), since each paratest worker creates a database of
+its own and the least-privilege tests create their own users:
+
+```bash
+export DB_CONNECTION=mysql DB_HOST=127.0.0.1 DB_PORT=3306 DB_DATABASE=laravel_audit_log_test DB_USERNAME=root DB_PASSWORD=password
+vendor/bin/paratest --exclude-testsuite Performance # every other suite, in parallel
+vendor/bin/phpunit --testsuite Performance          # the budgets, serially
+```
+
+For PostgreSQL set `DB_CONNECTION=pgsql`, `DB_PORT=5432` and `DB_USERNAME=postgres`. The Performance suite times its
+budgets, so run it serially with `phpunit`, never with `paratest`.
+
 ### Standards
 
 - PHPStan level 8 compliance
 - Full type hints on all public method parameters and return types
 - PHPDoc on all methods and classes
+- Namespaces keep to the dependency rules in `tests/Unit/Architecture/NamespaceDependenciesTest.php`: each rule in
+  `RULES` (and `FRAMEWORK_RULES` for the framework) says which namespaces may not name which others, and a class that
+  moves or a dependency that narrows changes a rule there, never the test's scanner. Every name a rule gives must exist,
+  so a rule left behind by a move fails.
+- Nothing shipped (`src`, `config`, `database`, `lang`, `docs`, the README or `composer.json`) names, requires or
+  detects another Sine Macula package; `PackageBoundaryTest` and `DocumentationTest` hold the code and the docs to it.
+  Examples use neutral names such as `invoice.approved` and `app:ticket-123`.
 - New code is expected to ship with tests covering the behavioural surface; the package's mutation-testing gate
   (`composer test:mutation`) is the enforced floor. Behaviour that spans the capture lifecycle (events, the write path,
   transactions, queues) should be covered by integration tests that exercise the package the way a consuming

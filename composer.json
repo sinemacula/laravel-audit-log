@@ -1,12 +1,13 @@
 {
     "name": "sinemacula/laravel-audit-log",
     "type": "library",
-    "description": "Event-driven audit logging of user activity for Laravel 12 and 13: automatic capture of authentication events, a manual capture API, and a pluggable store with a database default.",
+    "description": "Event-driven audit logging of user activity for Laravel 12 and 13: automatic capture of authentication events, a manual capture API, append-only storage with signed and sealed entries, audited reads, retention, holds and erasure.",
     "keywords": [
         "sine macula",
         "laravel",
         "audit",
         "audit log",
+        "audit trail",
         "activity log"
     ],
     "license": "Apache-2.0",
