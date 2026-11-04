@@ -81,8 +81,9 @@ final class ReadmeSnippetsTest extends TestCase
 
     /**
      * The scanner finds a missing import, an unknown class, an unknown static
-     * method or constant, a call the facade does not offer and a method no
-     * class declares, and nothing in a snippet that names only what exists.
+     * method or constant, an unknown `::class` name, a call the facade does not
+     * offer and a method no class declares, and nothing in a snippet that names
+     * only what exists, an aliased import among them.
      *
      * @return void
      */
@@ -91,11 +92,13 @@ final class ReadmeSnippetsTest extends TestCase
         $valid = <<<'PHP'
             use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
             use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
+            use SineMacula\Laravel\AuditLog\Records\Reference as Ref;
 
             AuditLog::event('invoice.approved')->on($invoice)->by($user)->record();
             $page = AuditLog::trail()->visibleTo($user)->forSubject(Invoice::class)->cursorPaginate();
             $owner = KeyOwner::ACTOR;
-            $authority = new Authority(Reference::to($user), 'case.closed');
+            $authority = new Authority(Ref::to($user), 'case.closed');
+            AuditLog::contribute(OrganisationContributor::class);
             Schedule::command('audit-log:drain')->everyMinute();
             PHP;
 
@@ -109,6 +112,7 @@ final class ReadmeSnippetsTest extends TestCase
             $authority = new Authorities('case.closed');
             final class Policy implements AuditPolicy {}
             AuditLog::event('invoice.approved')->recordd();
+            AuditLog::contribute(MissingContributor::class);
             PHP;
 
         self::assertSame([], self::problemsIn($valid));
@@ -119,6 +123,7 @@ final class ReadmeSnippetsTest extends TestCase
             'AuditLog::recordAll',
             'HoldScope::nowhere',
             'KeyOwner::NOBODY',
+            'MissingContributor::class',
             'method recordd',
         ], self::problemsIn($invalid));
     }
@@ -139,19 +144,19 @@ final class ReadmeSnippetsTest extends TestCase
 
     /**
      * The classes the snippet imports from a namespace, by the short name each
-     * is imported as.
+     * is imported as: its alias, or else its last segment.
      *
      * @param  string  $code
      * @return array<string, string>
      */
     private static function importsIn(string $code): array
     {
-        preg_match_all('/^\s*use\s+([A-Za-z_][\w\\\]*\\\[\w\\\]+)\s*;/m', $code, $matches);
+        preg_match_all('/^\s*use\s+([A-Za-z_][\w\\\]*\\\[\w\\\]+)(?:\s+as\s+(\w+))?\s*;/m', $code, $matches, PREG_SET_ORDER);
 
         $imports = [];
 
-        foreach ($matches[1] as $import) {
-            $imports[substr((string) strrchr('\\' . $import, '\\'), 1)] = $import;
+        foreach ($matches as $match) {
+            $imports[($match[2] ?? '') !== '' ? $match[2] : substr((string) strrchr('\\' . $match[1], '\\'), 1)] = $match[1];
         }
 
         return $imports;
@@ -188,8 +193,9 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The static members the snippet reads, but `::class`, that do not exist on
-     * the class their short name stands for.
+     * The static members the snippet reads that do not exist on the class their
+     * short name stands for, and the `::class` names that are no class the
+     * snippet may name.
      *
      * @param  string  $code
      * @param  array<string, string>  $imports
@@ -205,7 +211,7 @@ final class ReadmeSnippetsTest extends TestCase
 
             [$class, $member] = explode('::', $static);
 
-            return $member !== 'class' && !self::isKnownStatic($class, $member, $imports);
+            return $member === 'class' ? !self::isKnownClass($class, $imports) : !self::isKnownStatic($class, $member, $imports);
         }));
     }
 
