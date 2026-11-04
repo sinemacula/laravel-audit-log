@@ -29,7 +29,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
- * @implements \Illuminate\Contracts\Support\Arrayable<string, array<array-key, array<array-key, int|string|null>|int>|bool|int|string|null>
+ * @implements \Illuminate\Contracts\Support\Arrayable<string, array<array-key, array<array-key, array<array-key, int|string|null>|int>|int|string>|bool|int|string|null>
  */
 final readonly class PruneResult implements Arrayable
 {

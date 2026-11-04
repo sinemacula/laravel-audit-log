@@ -12,6 +12,8 @@ use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
+use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
 use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
@@ -28,7 +30,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * finished within the days looked back, the record of its code is written
  * through `LifecycleRecorder` unless an entry of that code already names the
  * operation, or the record's id, derived from its code and its operation, is
- * already stored or queued in the outbox.
+ * already stored or, in outbox mode, queued in the outbox.
  *
  * The journal's rows of those kinds, and the starts of runs and imports, are
  * read by kind and time on the storage connection's writer, a page at a time;
@@ -39,12 +41,13 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * the window. The entries of the four codes within the window are read by event
  * and time, and the operation each names is read from its decoded properties in
  * PHP, never by a JSON path query, so every engine reads them alike. The
- * derived ids are looked for by primary key in the entries and in the outbox, a
- * page at a time, so a record still waiting for its delivery counts as
- * recorded. An operation is recorded at most once per run, so a second run
- * records nothing, whether or not the outbox drained between them; a prune run
- * that started and has not finished has nothing to record and is counted
- * `unfinished`.
+ * derived ids are looked for by primary key in the entries and, in outbox mode,
+ * in the outbox, a page at a time, so a record still waiting for its delivery
+ * counts as recorded; in sync mode no record is ever queued there, and the
+ * writer holds no grant on the outbox, so it is never read. An operation is
+ * recorded at most once per run, so a second run records nothing, whether or
+ * not the outbox drained between them; a prune run that started and has not
+ * finished has nothing to record and is counted `unfinished`.
  *
  * A record is written again with the properties its journal rows give, a
  * prune's tenants affected and the reason a failed prune gave included, since
@@ -87,6 +90,7 @@ final readonly class Reconciler
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalSigner  $signer
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecorder  $recorder
      * @param  \SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\DeliverySettings  $delivery
      */
     public function __construct(
 
@@ -101,6 +105,9 @@ final readonly class Reconciler
 
         /** The time the window ends at. */
         private Clock $clock,
+
+        /** The delivery mode, which says whether a record may wait in the outbox. */
+        private DeliverySettings $delivery,
     ) {}
 
     /**
@@ -320,7 +327,7 @@ final readonly class Reconciler
      * Each operation recorded already, by its code and its operation id: those
      * an entry of the four codes since the time names in its decoded
      * properties, and those among the operations given whose record's derived
-     * id the entries or the outbox hold.
+     * id the entries hold, or the outbox in outbox mode.
      *
      * @formatter:off
      *
@@ -370,13 +377,15 @@ final readonly class Reconciler
             array_chunk(array_keys($keys), self::PAGE),
         ));
 
-        $outbox = $this->database->connection(DeliveryTables::resolvedOutboxConnection());
+        $ids = $present($connection, EntrySettings::table());
 
-        foreach ([...$present($connection, EntrySettings::table()), ...$present($outbox, DeliveryTables::outboxTable())] as $id) {
-            $recorded[$keys[(string) $id] ?? ''] = true;
+        if ($this->delivery->mode() === DeliveryMode::OUTBOX) {
+            $ids = [...$ids, ...$present($this->database->connection(DeliveryTables::resolvedOutboxConnection()), DeliveryTables::outboxTable())];
         }
 
-        unset($recorded['']);
+        foreach (array_intersect_key($keys, array_flip($ids)) as $key) {
+            $recorded[$key] = true;
+        }
 
         return $recorded;
     }

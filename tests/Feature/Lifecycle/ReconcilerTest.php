@@ -650,6 +650,35 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
+     * In sync mode no record waits in the outbox, and the writer holds no grant
+     * on it, so the outbox is never read: an operation is recorded through the
+     * entries alone, and a second run finds its record there.
+     *
+     * @return void
+     */
+    public function testInSyncModeTheOutboxIsNeverRead(): void
+    {
+        $this->holdRow();
+
+        $read = [];
+
+        DB::listen(static function (QueryExecuted $query) use (&$read): void {
+            if (!str_contains($query->sql, DeliveryTables::outboxTable())) {
+                return;
+            }
+
+            $read[] = $query->sql;
+        });
+
+        $first  = $this->reconciler()->reconcile();
+        $second = $this->reconciler()->reconcile();
+
+        self::assertSame([1, 0], [$first->recorded, $first->alreadyRecorded]);
+        self::assertSame([0, 1], [$second->recorded, $second->alreadyRecorded]);
+        self::assertSame([], $read);
+    }
+
+    /**
      * A record written meanwhile by another run, under the same derived id, is
      * never written twice: the second write meets the primary key and finds the
      * record stored already, so one record is stored.
