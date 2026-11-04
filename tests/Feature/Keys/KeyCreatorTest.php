@@ -73,6 +73,7 @@ final class KeyCreatorTest extends TestCase
         'release_lock('          => 'release',
         'lock_timeout'           => 'timeout',
         'pg_advisory_xact_lock(' => 'lock',
+        'isolation level'        => 'isolation',
         'max('                   => 'generation',
     ];
 
@@ -282,8 +283,10 @@ final class KeyCreatorTest extends TestCase
      * The owner's marker, the unit's live key and its largest generation are
      * read, and the key inserted, in one transaction, the owner's lock taken
      * before the reads: on MySQL on the session before the transaction begins
-     * and released after it commits, on PostgreSQL first inside it with its
-     * wait bounded, and on SQLite by the transaction itself.
+     * and released after it commits, until `release_lock()` says the session no
+     * longer holds it, on PostgreSQL inside it with its wait bounded, once the
+     * transaction is set to `read committed`, and on SQLite by the transaction
+     * itself.
      *
      * @return void
      */
@@ -297,8 +300,8 @@ final class KeyCreatorTest extends TestCase
         $kinds  = array_map(fn (array $event): string => $this->kindOf($event), $this->events);
 
         $expected = match ($driver) {
-            'mysql' => ['lock', 'begin', 'marker', 'live', 'generation', 'insert', 'commit', 'release'],
-            'pgsql' => ['begin', 'timeout', 'lock', 'marker', 'live', 'generation', 'insert', 'commit'],
+            'mysql' => ['lock', 'begin', 'marker', 'live', 'generation', 'insert', 'commit', 'release', 'release'],
+            'pgsql' => ['begin', 'isolation', 'timeout', 'lock', 'marker', 'live', 'generation', 'insert', 'commit'],
             default => ['begin', 'marker', 'live', 'generation', 'insert', 'commit'],
         };
 
@@ -449,7 +452,7 @@ final class KeyCreatorTest extends TestCase
         $kinds  = array_map(fn (array $event): string => $this->kindOf($event), $this->events);
         $driver = $this->keyConnection()->getDriverName();
 
-        self::assertSame($driver === 'mysql' ? ['rollback', 'release'] : ['rollback'], array_slice($kinds, $driver === 'mysql' ? -2 : -1));
+        self::assertSame($driver === 'mysql' ? ['rollback', 'release', 'release'] : ['rollback'], array_slice($kinds, $driver === 'mysql' ? -3 : -1));
         self::assertSame([], $this->storedSubjectKeys());
         self::assertSame(0, $this->keyConnection()->transactionLevel());
         self::assertSame([], array_values(array_filter(array_keys(DB::getConnections()), static fn (string $name): bool => str_starts_with($name, KeySession::SESSION_PREFIX))));

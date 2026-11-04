@@ -204,9 +204,41 @@ trait RunsDocumentedSql
     }
 
     /**
-     * Drop every trigger the engine's documented triggers create, by its
-     * documented name, when it exists, and on PostgreSQL the functions they
-     * call too.
+     * Run the engine's documented grants as an operator runs them: the grants
+     * block, then the key block, which grants the owners' key tables, with
+     * their placeholders replaced by the names given.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  array<string, string>  $names
+     * @return void
+     */
+    protected static function runDocumentedGrants(Connection $connection, array $names): void
+    {
+        foreach (self::documentedMarkers($connection, 'grants') as $marker) {
+            self::runDocumentedSql($connection, $marker, $names);
+        }
+    }
+
+    /**
+     * Run the engine's documented triggers as an operator runs them: the
+     * triggers block, then the key block, which guards the owners' key tables,
+     * with their placeholders replaced by the names given.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  array<string, string>  $names
+     * @return void
+     */
+    protected static function runDocumentedTriggers(Connection $connection, array $names): void
+    {
+        foreach (self::documentedMarkers($connection, 'triggers') as $marker) {
+            self::runDocumentedSql($connection, $marker, $names);
+        }
+    }
+
+    /**
+     * Drop every trigger the engine's documented triggers create, the key
+     * tables' included, by its documented name, when it exists, and on
+     * PostgreSQL the functions they call too.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -214,15 +246,34 @@ trait RunsDocumentedSql
     protected static function dropDocumentedTriggers(Connection $connection): void
     {
         $driver = $connection->getDriverName();
-        $sql    = self::documentedSql($driver . '-triggers');
 
-        foreach (self::documentedTriggers($sql) as $trigger => $table) {
-            $connection->unprepared(sprintf($driver === 'pgsql' ? 'DROP TRIGGER IF EXISTS %s ON %s' : 'DROP TRIGGER IF EXISTS %s', $trigger, $table));
-        }
+        foreach (self::documentedMarkers($connection, 'triggers') as $marker) {
+            $sql = self::documentedSql($marker);
 
-        foreach (self::documentedFunctions($sql) as $function) {
-            $connection->unprepared(sprintf('DROP FUNCTION IF EXISTS %s() CASCADE', $function));
+            foreach (self::documentedTriggers($sql) as $trigger => $table) {
+                $connection->unprepared(sprintf($driver === 'pgsql' ? 'DROP TRIGGER IF EXISTS %s ON %s' : 'DROP TRIGGER IF EXISTS %s', $trigger, $table));
+            }
+
+            foreach (self::documentedFunctions($sql) as $function) {
+                $connection->unprepared(sprintf('DROP FUNCTION IF EXISTS %s() CASCADE', $function));
+            }
         }
+    }
+
+    /**
+     * The markers of the engine's documented blocks of the kind, `grants` or
+     * `triggers`, in the order they are run: the engine's block, then its key
+     * block.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  'grants'|'triggers'  $kind
+     * @return list<string>
+     */
+    protected static function documentedMarkers(Connection $connection, string $kind): array
+    {
+        $driver = $connection->getDriverName();
+
+        return [$driver . '-' . $kind, 'keys-' . $kind . ':' . $driver];
     }
 
     /**

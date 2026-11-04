@@ -340,7 +340,9 @@ ring decides for how long the log can be verified.
 ## Grants and triggers
 
 The Grants And Triggers section of [the storage note](../design/storage.md) has the grants and the optional append-only
-triggers for each engine, as SQL that its tests run as written.
+triggers for each engine, as SQL that its tests run as written. Run both of your engine's grant blocks, the key block
+after the other: verification reads the owners' key tables while the package's key store is in use, so a user granted
+the first block alone cannot verify.
 
 - The application's user inserts and selects entries, artifacts, seals and members, may update only a seal's four
   anchor columns, and needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the integrity state table; it is granted no
@@ -354,7 +356,8 @@ triggers for each engine, as SQL that its tests run as written.
   inserts the owner markers, all inside its journalled transactions.
 - The maintenance credentials can still delete rows outside the package, and the journal and the seals make that
   detectable, not impossible: keep them to whoever may prune, hold, release, erase, reinstate and rewrap.
-- Run `audit-log:verify` as a user that can read the tables and write the integrity state table.
+- Run `audit-log:verify` as a user that can read the tables, the key tables included, and write the integrity state
+  table.
 - The triggers guard against the application's users. The tables' owner can drop them, so keep the owner's credentials
   out of the application.
 

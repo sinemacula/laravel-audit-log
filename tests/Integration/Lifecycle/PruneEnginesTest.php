@@ -285,8 +285,8 @@ final class PruneEnginesTest extends TestCase
             self::createLogin($root, $this->names[$placeholder]);
         }
 
-        self::runDocumentedSql($root, $root->getDriverName() . '-grants', $this->names);
-        self::runDocumentedSql($root, $root->getDriverName() . '-triggers', $this->names);
+        self::runDocumentedGrants($root, $this->names);
+        self::runDocumentedTriggers($root, $this->names);
 
         $this->triggers = true;
 
