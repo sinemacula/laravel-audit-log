@@ -70,6 +70,10 @@ return new class extends Migration {
             // due. Named short, so it fits PostgreSQL's 63 characters at the
             // longest table name.
             $blueprint->index(['failed_at', 'available_at'], $table . '_due_index');
+
+            // What a monitor reads the backlog's age by: rows not failed, in
+            // the order they were queued, which a retry never moves.
+            $blueprint->index(['failed_at', 'created_at'], $table . '_queued_index');
         });
     }
 

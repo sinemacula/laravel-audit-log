@@ -94,6 +94,20 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * store or an anchor that cannot be resolved or read, is named with the class
  * of what was thrown, never its message.
  *
+ * In production, a `[production]` subject follows `[privacy]`: the testing fake
+ * store bound as the store, or as a destination of a stack, is a problem, and
+ * each disabled seal, sweep or verification schedule is noted as
+ * `[production] note: …` after the privacy notes; see `ProductionChecks`. The
+ * monitoring settings are read under `[config]` too, last.
+ *
+ * With `--freshness` only the freshness checks run, for a scheduled monitor
+ * rather than a deploy: one line per signal, `[freshness] <signal>: <status>`
+ * with its age and limit in seconds, or with `--json` one JSON object of
+ * `signal`, `status`, `age_seconds` and `limit_seconds` per line; see
+ * `FreshnessChecks`. It exits non-zero on a problem or a malformed setting,
+ * which is named under `[config]`, and writes nothing. `--json` without
+ * `--freshness` is refused with exit code 2.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -103,14 +117,19 @@ use Symfony\Component\Console\Attribute\AsCommand;
 final class CheckCommand extends Command
 {
     /** @var string The name and signature of the console command. */
-    protected $signature = 'audit-log:check';
+    protected $signature = <<<'EOD'
+        audit-log:check
+                {--freshness : Check only that sealing, the sweep, verification, retention, anchoring and the outbox are still running}
+                {--json : With --freshness, write each signal as one JSON object}
+        EOD;
 
     /** @var string The console command description. */
     protected $description = 'Check the audit log settings, connections, schema, integrity keys, tables and anchor, delivery, lifecycle and privacy';
 
     /**
      * Run every check, then report each problem, or that a subject has none,
-     * and last the notes on the spill channel, the lifecycle and privacy.
+     * and last the notes on the spill channel, the lifecycle, privacy and
+     * production; or, with `--freshness`, run the freshness checks alone.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @param  \Illuminate\Database\DatabaseManager  $database
@@ -118,7 +137,11 @@ final class CheckCommand extends Command
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityChecks  $integrity
      * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
      * @param  \SineMacula\Laravel\AuditLog\Console\PrivacyChecks  $privacy
+     * @param  \SineMacula\Laravel\AuditLog\Console\ProductionChecks  $production
+     * @param  \SineMacula\Laravel\AuditLog\Console\FreshnessChecks  $freshness
      * @return int
+     *
+     * @throws \JsonException
      */
     public function handle(
         ConfigRepository $config,
@@ -127,16 +150,24 @@ final class CheckCommand extends Command
         IntegrityChecks $integrity,
         LifecycleChecks $lifecycle,
         PrivacyChecks $privacy,
+        ProductionChecks $production,
+        FreshnessChecks $freshness,
     ): int {
+        if ($this->option('freshness') === true) {
+            return $this->freshness($freshness);
+        }
+
+        if ($this->option('json') === true) {
+            $this->error('`--json` is given only with `--freshness`.');
+
+            return self::INVALID;
+        }
+
         $found = [];
 
-        foreach ($this->checks($config, $database, $delivery, $integrity, $lifecycle, $privacy) as $subject => $checks) {
+        foreach ([...$this->checks($config, $database, $delivery, $integrity, $lifecycle, $privacy), ...$production->subject()] as $subject => $checks) {
 
-            $problems = [];
-
-            foreach ($checks as $check) {
-                $problems = [...$problems, ...self::problemsOf($check)];
-            }
+            $problems = array_merge(...array_map(self::problemsOf(...), $checks));
 
             $found[$subject] = self::prefixed($subject, array_keys(array_flip($problems)));
         }
@@ -152,7 +183,7 @@ final class CheckCommand extends Command
             }
         }
 
-        $this->notes($delivery, $lifecycle, $privacy);
+        $this->notes($delivery, $lifecycle, $privacy, $production);
 
         return array_merge(...array_values($found)) === [] ? self::SUCCESS : self::FAILURE;
     }
@@ -341,10 +372,10 @@ final class CheckCommand extends Command
      * then the capture settings, the artifacts table's name and the guards the
      * automatic capture skips, then the read and export settings, then the
      * lifecycle tables' names and the retention and import settings, then the
-     * owners' key settings. Only the delivery subject depends on any of them:
-     * the failure and delivery settings, the delivery tables' names and the
-     * outbox connection; the lifecycle and privacy subjects' tables are read by
-     * setting checks of their own.
+     * owners' key settings, then the monitoring settings. Only the delivery
+     * subject depends on any of them: the failure and delivery settings, the
+     * delivery tables' names and the outbox connection; the lifecycle and
+     * privacy subjects' tables are read by setting checks of their own.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -380,6 +411,7 @@ final class CheckCommand extends Command
             ...array_map(self::reading(...), ReadChecks::readers($config)),
             ...array_map(self::reading(...), LifecycleChecks::readers($config)),
             ...array_map(self::reading(...), PrivacyChecks::readers($config)),
+            ...array_map(self::reading(...), FreshnessChecks::readers($config)),
         ];
     }
 
@@ -516,18 +548,58 @@ final class CheckCommand extends Command
     }
 
     /**
+     * Run the freshness checks alone and report each signal, as a line or, with
+     * `--json`, as one JSON object a line, failing on a problem. A malformed
+     * setting fails the run and is named by its key, and progress that cannot
+     * be read by the class of what was thrown.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Console\FreshnessChecks  $freshness
+     * @return int
+     *
+     * @throws \JsonException
+     */
+    private function freshness(FreshnessChecks $freshness): int
+    {
+        try {
+            $signals = $freshness->signals();
+        } catch (\InvalidArgumentException $exception) {
+            $this->error('[config] ' . $exception->getMessage());
+
+            return self::FAILURE;
+        } catch (\PDOException|\UnexpectedValueException $exception) { // @phpstan-ignore catch.neverThrown
+            // A `QueryException`'s message holds the statement
+            $this->error(sprintf('[freshness] The progress could not be read (%s).', $exception::class));
+
+            return self::FAILURE;
+        }
+
+        foreach ($signals as $signal) {
+            if ($this->option('json') === true) {
+                $this->line(json_encode($signal->toArray(), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+
+                continue;
+            }
+
+            $signal->problem ? $this->error($signal->line()) : $this->info($signal->line());
+        }
+
+        return array_filter($signals, static fn (FreshnessSignal $signal): bool => $signal->problem) === [] ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
      * Say whether the spill channel is the one the documentation gives, by
      * `info()`, or that replaying what it holds is unverified, by `warn()`,
      * saying nothing of it while the channel setting is malformed, which
-     * `config` reports; then give each lifecycle note, and each privacy note,
-     * by `warn()`.
+     * `config` reports; then give each lifecycle note, each privacy note and
+     * each production note, by `warn()`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
      * @param  \SineMacula\Laravel\AuditLog\Console\PrivacyChecks  $privacy
+     * @param  \SineMacula\Laravel\AuditLog\Console\ProductionChecks  $production
      * @return void
      */
-    private function notes(DeliveryChecks $delivery, LifecycleChecks $lifecycle, PrivacyChecks $privacy): void
+    private function notes(DeliveryChecks $delivery, LifecycleChecks $lifecycle, PrivacyChecks $privacy, ProductionChecks $production): void
     {
         try {
             $note = $delivery->spillNote();
@@ -544,6 +616,10 @@ final class CheckCommand extends Command
 
         foreach ($privacy->notes() as $privacyNote) {
             $this->warn("[privacy] note: {$privacyNote}");
+        }
+
+        foreach ($production->notes() as $productionNote) {
+            $this->warn("[production] note: {$productionNote}");
         }
     }
 
@@ -572,7 +648,7 @@ final class CheckCommand extends Command
 
         foreach ($guards as $guard) {
 
-            if (self::isGuardConfigured($config, $guard)) {
+            if (is_array($config->get("auth.guards.{$guard}"))) {
                 continue;
             }
 
@@ -593,24 +669,12 @@ final class CheckCommand extends Command
     {
         $guard = $config->get('auth.defaults.guard');
 
-        if (is_string($guard) && self::isGuardConfigured($config, $guard)) {
+        // Looked up by the same dotted path `AuthManager` resolves it by
+        if (is_string($guard) && is_array($config->get("auth.guards.{$guard}"))) {
             return [];
         }
 
         return [sprintf('The default guard [%s] is not configured in `auth.guards`, and the actor is read from it.', is_string($guard) ? $guard : get_debug_type($guard))];
-    }
-
-    /**
-     * Whether the guard is configured, looked up by the same dotted path
-     * `AuthManager` resolves it by.
-     *
-     * @param  \Illuminate\Config\Repository  $config
-     * @param  string  $guard
-     * @return bool
-     */
-    private static function isGuardConfigured(ConfigRepository $config, string $guard): bool
-    {
-        return is_array($config->get("auth.guards.{$guard}"));
     }
 
     /**

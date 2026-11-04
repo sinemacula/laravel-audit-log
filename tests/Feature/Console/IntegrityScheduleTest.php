@@ -489,6 +489,51 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
+     * Whether the prune can delete something is read whatever its schedule:
+     * with the configured policy, exactly when something is retained for less
+     * than forever, even with no prune scheduled.
+     *
+     * @param  array<string, array<string, int>|int>  $retention
+     * @param  bool  $scheduled
+     * @return void
+     */
+    #[DataProvider('provideRetentions')]
+    public function testThePruneCanDeleteWhateverItsSchedule(array $retention, bool $scheduled): void
+    {
+        $this->useConfiguredPolicy();
+        $this->config()->set('audit-log.retention.schedule', null);
+
+        foreach ($retention as $setting => $value) {
+            $this->config()->set('audit-log.retention.' . $setting, $value);
+        }
+
+        self::assertSame($scheduled, $this->schedule()->prunes());
+    }
+
+    /**
+     * Whether the prune can delete something reports nothing: what resolving a
+     * bound policy throws is thrown, for the caller to name.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testThePruneCanDeleteThrowsAnUnresolvedPolicyUnreported(): void
+    {
+        $this->app?->bind(RetentionPolicy::class, static fn (): RetentionPolicy => throw new \RuntimeException('The policy cannot be built.'));
+
+        try {
+            $this->schedule()->prunes();
+
+            self::fail('An unresolved policy must be thrown.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The policy cannot be built.', $exception->getMessage());
+        }
+
+        self::assertSame([], $this->reported);
+    }
+
+    /**
      * A policy left unbound counts as the configured one: it is scheduled
      * exactly when the configuration keeps something for less than forever.
      *

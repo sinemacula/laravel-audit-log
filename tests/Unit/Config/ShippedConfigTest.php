@@ -8,6 +8,7 @@ use Illuminate\Config\Repository;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
+use SineMacula\Laravel\AuditLog\Console\MonitorSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
@@ -228,6 +229,15 @@ final class ShippedConfigTest extends TestCase
     /** @var string Env var naming the receipts table. */
     private const string DELIVERIES_TABLE_ENV = 'AUDIT_LOG_DELIVERY_DELIVERIES_TABLE';
 
+    /** @var string Env var holding how old the last seal run may grow. */
+    private const string MONITOR_SEAL_ENV = 'AUDIT_LOG_MONITOR_SEAL_MINUTES';
+
+    /** @var string Env var holding how old the last daily run may grow. */
+    private const string MONITOR_DAILY_ENV = 'AUDIT_LOG_MONITOR_DAILY_MINUTES';
+
+    /** @var string Env var holding how long the oldest outbox row may wait. */
+    private const string MONITOR_OUTBOX_ENV = 'AUDIT_LOG_MONITOR_OUTBOX_MINUTES';
+
     /** @var list<string> Every env var the shipped file reads. */
     private const array ENVS = [
         self::CONNECTION_ENV,
@@ -294,6 +304,9 @@ final class ShippedConfigTest extends TestCase
         self::OUTBOX_ATTEMPTS_ENV,
         self::OUTBOX_BACKOFF_ENV,
         self::DELIVERIES_TABLE_ENV,
+        self::MONITOR_SEAL_ENV,
+        self::MONITOR_DAILY_ENV,
+        self::MONITOR_OUTBOX_ENV,
     ];
 
     /**
@@ -1194,6 +1207,9 @@ final class ShippedConfigTest extends TestCase
             'delivery.outbox.max_attempts',
             'delivery.outbox.backoff_seconds',
             'delivery.deliveries_table',
+            'monitor.seal_minutes',
+            'monitor.daily_minutes',
+            'monitor.outbox_minutes',
         ], self::leavesOf($this->config()));
     }
 
@@ -1536,6 +1552,46 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * With nothing in the environment the monitoring limits are 30 minutes for
+     * sealing, a day and two hours for the daily runs and 15 minutes for the
+     * outbox, as integers, and they pass.
+     *
+     * @return void
+     */
+    public function testTheMonitorLeavesHaveTheirDefaults(): void
+    {
+        self::assertSame(['seal_minutes' => 30, 'daily_minutes' => 1560, 'outbox_minutes' => 15], $this->config()['monitor']);
+
+        $settings = new MonitorSettings(new Repository(['audit-log' => $this->config()]));
+
+        self::assertSame([30, 1560, 15], [$settings->sealMinutes(), $settings->dailyMinutes(), $settings->outboxMinutes()]);
+    }
+
+    /**
+     * Each monitoring limit is read from its own env var, raw, so a malformed
+     * number fails closed when it is read rather than casting to `0`.
+     *
+     * @return void
+     */
+    public function testTheMonitorLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::MONITOR_SEAL_ENV . '=10');
+        putenv(self::MONITOR_DAILY_ENV . '=120');
+        putenv(self::MONITOR_OUTBOX_ENV . '=five');
+
+        self::assertSame(['seal_minutes' => '10', 'daily_minutes' => '120', 'outbox_minutes' => 'five'], $this->config()['monitor']);
+
+        $settings = new MonitorSettings(new Repository(['audit-log' => $this->config()]));
+
+        self::assertSame([10, 120], [$settings->sealMinutes(), $settings->dailyMinutes()]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('`audit-log.monitor.outbox_minutes` must be an integer from 1 to 1440.');
+
+        $settings->outboxMinutes();
+    }
+
+    /**
      * The anchor settings over the shipped configuration as the environment
      * gives it now, with `local` as the default disk.
      *
@@ -1611,7 +1667,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}, monitor: array{seal_minutes: int|string, daily_minutes: int|string, outbox_minutes: int|string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -1619,7 +1675,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}, monitor: array{seal_minutes: int|string, daily_minutes: int|string, outbox_minutes: int|string}} $config */
         $config = require self::CONFIG;
 
         return $config;

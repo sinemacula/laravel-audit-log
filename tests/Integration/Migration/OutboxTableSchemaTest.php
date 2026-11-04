@@ -202,18 +202,23 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * The only index beside the primary key is the one a drain claims by:
-     * whether the row has failed, then when it falls due.
+     * The only indexes beside the primary key are the one a drain claims by,
+     * whether the row has failed, then when it falls due, and the one the
+     * backlog's age is read by, whether the row has failed, then when it was
+     * queued.
      *
      * @return void
      */
-    public function testIndexesWhatTheDrainReads(): void
+    public function testIndexesWhatTheDrainAndTheMonitorRead(): void
     {
         $secondary = array_values(array_filter(Schema::getIndexes(self::TABLE), static fn (array $index): bool => !$index['primary']));
+        $indexes   = array_map(static fn (array $index): array => [$index['name'], $index['columns'], $index['unique']], $secondary);
+
+        usort($indexes, static fn (array $one, array $other): int => strcmp($one[0], $other[0]));
 
         self::assertSame(
-            [[self::TABLE . '_due_index', ['failed_at', 'available_at'], false]],
-            array_map(static fn (array $index): array => [$index['name'], $index['columns'], $index['unique']], $secondary),
+            [[self::TABLE . '_due_index', ['failed_at', 'available_at'], false], [self::TABLE . '_queued_index', ['failed_at', 'created_at'], false]],
+            $indexes,
         );
     }
 
@@ -233,9 +238,9 @@ final class OutboxTableSchemaTest extends TestCase
         $indexes = array_filter(Schema::getIndexes(self::TABLE), static fn (array $index): bool => !$sqlite || !$index['primary']);
         $lengths = array_map(strlen(...), array_column($indexes, 'name'));
 
-        self::assertCount($sqlite ? 1 : 2, $lengths);
+        self::assertCount($sqlite ? 2 : 3, $lengths);
         self::assertLessThanOrEqual(63, max($lengths));
-        self::assertContains(strlen(self::TABLE . '_due_index'), $lengths);
+        self::assertContains(strlen(self::TABLE . '_queued_index'), $lengths);
     }
 
     /**

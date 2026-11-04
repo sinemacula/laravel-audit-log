@@ -797,6 +797,22 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
+     * The index the backlog's age is read by is a problem when it is missing.
+     *
+     * @return void
+     */
+    public function testAMissingOutboxBacklogIndexIsAProblem(): void
+    {
+        $this->migrateDeliveryTables();
+
+        Schema::connection(self::CONNECTION)->table(self::OUTBOX, static function (Blueprint $table): void {
+            $table->dropIndex(self::OUTBOX . '_queued_index');
+        });
+
+        self::assertSame(['Index `audit_check_outbox_queued_index` is missing.'], $this->problems(self::OUTBOX, self::CONNECTION, TableShape::outbox()));
+    }
+
+    /**
      * A deliveries table keyed by the entry alone is a problem, since it would
      * keep one receipt for a record however many destinations it has.
      *

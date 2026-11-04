@@ -559,4 +559,26 @@ return [
         'deliveries_table' => env('AUDIT_LOG_DELIVERY_DELIVERIES_TABLE', 'audit_log_deliveries'),
     ],
 
+    /*
+    |---------------------------------------------------------------------------
+    | Monitor
+    |---------------------------------------------------------------------------
+    |
+    | How old the progress `audit-log:check --freshness` reads may grow before
+    | it calls a run stale, in minutes. `seal_minutes` is the last seal run's
+    | limit, from 5 to 1440 and 30 by default. `daily_minutes` is the limit of
+    | the last sweep, the last full verification and the last prune, from 60 to
+    | 10080 and 1560 (a day and two hours) by default. `outbox_minutes` is how
+    | long the oldest outbox row may wait for a drain in outbox mode, from 1 to
+    | 1440 and 15 by default. A malformed value fails the freshness check, and
+    | `audit-log:check` reports it. They may change on any deploy.
+    |
+    */
+
+    'monitor' => [
+        'seal_minutes'   => env('AUDIT_LOG_MONITOR_SEAL_MINUTES', 30),
+        'daily_minutes'  => env('AUDIT_LOG_MONITOR_DAILY_MINUTES', 1560),
+        'outbox_minutes' => env('AUDIT_LOG_MONITOR_OUTBOX_MINUTES', 15),
+    ],
+
 ];
