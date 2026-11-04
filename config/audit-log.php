@@ -12,15 +12,15 @@ return [
     | The connection the package's tables live on (`null` or empty for the
     | default): the model reads them there, the store writes them there, and the
     | published migrations create them there. The maintenance connection is the
-    | one pruning, holds and erasure will run through (`null` or empty for the
-    | storage connection). It must reach the same database with a user of its
-    | own, so the application's user needs only `SELECT` and `INSERT` on the
-    | entries table; nothing writes through it yet. A value that is neither a
+    | one pruning, holds and the lifecycle journal run through (`null` or empty
+    | for the storage connection). It must reach the same database with a user
+    | of its own, so the application's user needs only `SELECT` and `INSERT` on
+    | the entries table and never deletes one. A value that is neither a
     | connection name nor `null` or empty fails closed when it is read, and
     | `audit-log:check` reports it, as it does a name `database.connections`
     | does not configure. Keep both fixed while the application runs: moving the
-    | tables is a deploy, with a migration the application performs and a
-    | worker restart.
+    | tables is a deploy, with a migration the application performs and a worker
+    | restart.
     |
     */
 
@@ -149,6 +149,99 @@ return [
             'path'   => env('AUDIT_LOG_INTEGRITY_ANCHOR_PATH', 'audit-log-anchors'),
             'batch'  => env('AUDIT_LOG_INTEGRITY_ANCHOR_BATCH', 100),
         ],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Lifecycle
+    |---------------------------------------------------------------------------
+    |
+    | The tables the lifecycle works from, all on the storage connection, with
+    | the entries table's grammar. `journal_table` (`audit_log_lifecycle` by
+    | default) is the signed, chained journal of every hold, release, prune and
+    | import, which every seal commits to; `holds_table` (`audit_log_holds`)
+    | lists the active holds for `audit-log:holds` and `audit-log:check`, and is
+    | never trusted for a decision; and `lock_table`
+    | (`audit_log_lifecycle_lock`) holds the one row every lifecycle transaction
+    | locks first. Any other value fails closed when it is read, and
+    | `audit-log:check` reports it. Set them before migrating: changing one
+    | later moves no table.
+    |
+    */
+
+    'lifecycle' => [
+        'journal_table' => env('AUDIT_LOG_LIFECYCLE_JOURNAL_TABLE', 'audit_log_lifecycle'),
+        'holds_table'   => env('AUDIT_LOG_LIFECYCLE_HOLDS_TABLE', 'audit_log_holds'),
+        'lock_table'    => env('AUDIT_LOG_LIFECYCLE_LOCK_TABLE', 'audit_log_lifecycle_lock'),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Retention
+    |---------------------------------------------------------------------------
+    |
+    | How long entries are kept. Everything is kept forever by default.
+    | `after_days` is how many days an entry of a category not listed is kept,
+    | and `categories` maps a category to its own: each from 1 to 36500 days, or
+    | `0` for forever, the default. A prune deletes entry by entry, and only
+    | sealed ones: never one of `audit_log.trail_exported`, never one a hold
+    | keeps, and never one still waiting to be delivered. `preserve` maps a
+    | category to how many days its entries must stay readable, `0` meaning
+    | forever, and a category is never kept for less than it is preserved: such
+    | a setting is refused. For example:
+    |
+    |     'categories' => [
+    |         'security'          => 730,
+    |         'access_management' => 1095,
+    |         'audit'             => 0,
+    |     ],
+    |     'preserve' => ['security' => 365],
+    |
+    | `batch` is the most entries one transaction of a prune deletes, from 100
+    | to 10000 and 1000 by default, and `max_seconds` how long a run goes on
+    | before it stops between chunks, for the next run to resume, from 60 to
+    | 86400 and 3000 by default. `schedule` (daily) is when the package
+    | schedules `audit-log:prune`, which it does only when something is kept for
+    | less than forever, or a policy of the application's own is bound: a cron
+    | expression, or `null` or empty to schedule nothing. An invalid value
+    | prunes nothing, and `audit-log:check` reports it. They may change on any
+    | deploy; a change of `after_days`, `categories` or `preserve` is a new
+    | policy version, which the next run journals.
+    |
+    */
+
+    'retention' => [
+        'after_days'  => env('AUDIT_LOG_RETENTION_AFTER_DAYS', 0),
+        'categories'  => [],
+        'preserve'    => [],
+        'batch'       => env('AUDIT_LOG_RETENTION_BATCH', 1000),
+        'max_seconds' => env('AUDIT_LOG_RETENTION_MAX_SECONDS', 3000),
+        'schedule'    => env('AUDIT_LOG_RETENTION_SCHEDULE', '30 3 * * *'),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Import
+    |---------------------------------------------------------------------------
+    |
+    | How `audit-log:import` takes in another system's records. `batches_table`
+    | (`audit_log_import_batches` by default) holds one row per import, on the
+    | storage connection, with the entries table's grammar; set it before
+    | migrating. `chunk` is how many lines one transaction writes, from 100 to
+    | 5000 and 500 by default. `max_skew_seconds` is how far after the clock an
+    | imported entry may claim to have happened, from 0 to 86400 and 300 by
+    | default. `max_line_bytes` is the longest line read, from 1024 to 16777216
+    | and 1048576 by default; a longer one is rejected without being held. A
+    | malformed value fails closed when an import runs, before it reads a line,
+    | and `audit-log:check` reports it. The numbers may change on any deploy.
+    |
+    */
+
+    'import' => [
+        'batches_table'    => env('AUDIT_LOG_IMPORT_BATCHES_TABLE', 'audit_log_import_batches'),
+        'chunk'            => env('AUDIT_LOG_IMPORT_CHUNK', 500),
+        'max_skew_seconds' => env('AUDIT_LOG_IMPORT_MAX_SKEW_SECONDS', 300),
+        'max_line_bytes'   => env('AUDIT_LOG_IMPORT_MAX_LINE_BYTES', 1048576),
     ],
 
     /*

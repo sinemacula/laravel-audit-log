@@ -71,6 +71,7 @@ final class RowCodecTest extends TestCase
         'source_region'     => 'nullable',
         'source_record_id'  => 'nullable',
         'import_batch_id'   => 'nullable',
+        'source_digest'     => 'nullable',
         'ip'                => 'nullable',
         'user_agent'        => 'nullable',
         'context'           => 'json',
@@ -122,7 +123,7 @@ final class RowCodecTest extends TestCase
     {
         self::assertSame(self::COLUMNS, RowCodec::COLUMNS);
         self::assertSame(array_keys(self::COLUMNS), array_keys(self::finalised()->toArray()));
-        self::assertCount(36, RowCodec::COLUMNS);
+        self::assertCount(37, RowCodec::COLUMNS);
     }
 
     /**
@@ -163,6 +164,7 @@ final class RowCodecTest extends TestCase
             'source_region'     => 'eu-west-2',
             'source_record_id'  => null,
             'import_batch_id'   => null,
+            'source_digest'     => null,
             'ip'                => '203.0.113.7',
             'user_agent'        => 'Mozilla/5.0',
             'context'           => '{"route":"invoices.approve","method":"POST"}',
@@ -282,6 +284,28 @@ final class RowCodecTest extends TestCase
         self::assertSame(RecordFactory::OCCURRED_AT, $envelope['occurred_at']);
         self::assertSame(1, $envelope['record_version']);
         self::assertInstanceOf(\stdClass::class, $envelope['context']);
+    }
+
+    /**
+     * An imported record's row carries its source fields and source digest as
+     * text, and decodes back to its envelope, its digest read as text.
+     *
+     * @return void
+     */
+    public function testAnImportedRecordsSourceDigestRoundTripsAsText(): void
+    {
+        $codec     = new RowCodec;
+        $finalised = new FinalisedRecord(RecordFactory::imported(origin: null), RecordFactory::IMPORTED_AT, 1, self::KEY_ID, self::HMAC);
+        $row       = $codec->encode($finalised);
+        $envelope  = $codec->decode($row);
+        $digest    = RecordFactory::source()->sourceDigest;
+
+        self::assertSame($digest, $row['source_digest']);
+        self::assertSame(['imported', 'legacy-app', 'legacy-0042', RecordFactory::IMPORT_BATCH_ID, null], [
+            $row['provenance'], $row['source_id'], $row['source_record_id'], $row['import_batch_id'], $row['origin'],
+        ]);
+        self::assertSame($digest, $envelope['source_digest']);
+        self::assertSame(CanonicalEncoder::encode($finalised->toArray()), CanonicalEncoder::encode($envelope));
     }
 
     /**
@@ -499,6 +523,7 @@ final class RowCodecTest extends TestCase
             'null as the hmac'                => ['hmac', null, 'a string', null],
             'an integer in a nullable column' => ['reason', 42, 'a string or null', null],
             'an array in a nullable column'   => ['actor_id', ['42'], 'a string or null', null],
+            'an integer as the source digest' => ['source_digest', 42, 'a string or null', null],
             'null in an integer column'       => ['record_version', null, 'an integer', null],
             'a padded integer'                => ['event_version', '01', 'an integer', null],
             'invalid JSON'                    => ['context', '{', 'JSON or null', \JsonException::class],

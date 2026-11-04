@@ -21,7 +21,11 @@ use SineMacula\Laravel\AuditLog\Export\NdjsonFormatter;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
+use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\PruneCoverage;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
+use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\LogAuditStore;
@@ -752,7 +756,12 @@ final class StackAuditStoreTest extends TestCase
      */
     private static function database(): AuditStore
     {
-        return new DatabaseAuditStore(new ConnectionResolver, new RowCodec, new RecordSigner(new KeyRing(new IntegritySettings(new Repository([])))));
+        $connections = new ConnectionResolver;
+        $ring        = new KeyRing(new IntegritySettings(new Repository([])));
+
+        $tombstones = new PruneTombstones($connections, new NullPruneLedger, new PruneCoverage(new SealSigner($ring)));
+
+        return new DatabaseAuditStore($connections, new RowCodec, new RecordSigner($ring), $tombstones);
     }
 
     /**

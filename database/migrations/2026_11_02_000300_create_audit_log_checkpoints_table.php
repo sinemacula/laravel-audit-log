@@ -11,8 +11,9 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
  * Create the checkpoints table: one signed seal per row, each chained to the
- * one before it, over the entries its members name. A seal is written once and
- * only its anchor columns change after.
+ * one before it, over the entries its members name and committing to the
+ * lifecycle journal's head. A seal is written once and only its anchor columns
+ * change after.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,10 +60,18 @@ return new class extends Migration {
             $blueprint->dateTime('last_recorded_at', 6);
             $blueprint->dateTime('sealed_at', 6);
 
-            // How the seal is signed, by which key, and the signature in hex.
+            // How the seal is signed and by which key.
             $blueprint->string('signer', 16);
             $blueprint->string('key_id', 32);
             $blueprint->smallInteger('algorithm_version');
+
+            // The lifecycle journal's head when the seal was made, its sequence
+            // and its HMAC, both null when the journal was empty; signed with
+            // the seal. Nullable, so a seal written without them still inserts.
+            $blueprint->bigInteger('journal_sequence')->nullable();
+            $blueprint->string('journal_head', 64)->nullable();
+
+            // The signature over the seal, in hex.
             $blueprint->string('signature', 64);
 
             // The only columns written after the row is inserted: a cache of
@@ -82,11 +91,13 @@ return new class extends Migration {
             }
 
             // One seal per sequence, so two sealers can never both extend the
-            // head, and what the anchorer reads: the seals not yet anchored, in
-            // order. Named short, so each fits PostgreSQL's 63 characters at
-            // the longest table name.
+            // head, what the anchorer reads: the seals not yet anchored, in
+            // order, and the highest commitment to the lifecycle journal, which
+            // every destructive operation checks. Named short, so each fits
+            // PostgreSQL's 63 characters at the longest table name.
             $blueprint->unique(['sequence'], $table . '_sequence_unique');
             $blueprint->index(['anchored_at', 'sequence'], $table . '_anchored_index');
+            $blueprint->index(['journal_sequence'], $table . '_journal_index');
         });
     }
 

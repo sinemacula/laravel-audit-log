@@ -46,11 +46,12 @@ final class SealerEnginesTest extends TestCase
     /** @var string A second connection to the test's database, for a writer whose transaction commits late. */
     private const string LATE_WRITER = 'late_writer';
 
-    /** @var list<string> The shipped integrity migrations, which the split needs on both of its files. */
+    /** @var list<string> The shipped integrity migrations and the lifecycle journal's, whose head every seal commits to, which the split needs on both of its files. */
     private const array INTEGRITY_MIGRATIONS = [
         __DIR__ . '/../../../database/migrations/2026_11_02_000300_create_audit_log_checkpoints_table.php',
         __DIR__ . '/../../../database/migrations/2026_11_02_000400_create_audit_log_checkpoint_members_table.php',
         __DIR__ . '/../../../database/migrations/2026_11_02_000500_create_audit_log_integrity_state_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_000700_create_audit_log_lifecycle_table.php',
     ];
 
     /**
@@ -205,7 +206,7 @@ final class SealerEnginesTest extends TestCase
      * Sealing reads and writes the writer: with a replica that lags behind the
      * primary, the head the second run chains onto, the candidates it seals,
      * the seals, the members and the progress are all on the primary, and the
-     * replica sees none of them.
+     * replica sees none of them, holding only what its migrations seeded.
      *
      * @return void
      */
@@ -214,7 +215,8 @@ final class SealerEnginesTest extends TestCase
         $this->useReadWriteSplit();
         $this->migrateIntegrityOnTheSplit();
 
-        $first = $this->storeEntries(2);
+        $seeded = DB::connection(self::REPLICA_CONNECTION)->table(IntegrityTables::stateTable())->get()->all();
+        $first  = $this->storeEntries(2);
 
         $this->sealer()->seal();
 
@@ -236,7 +238,7 @@ final class SealerEnginesTest extends TestCase
         self::assertSame(1, $primary->table(IntegrityTables::stateTable())->where('name', IntegrityProgress::SEAL_LAST)->count());
         self::assertSame(0, $replica->table(IntegrityTables::checkpointsTable())->count());
         self::assertSame(0, $replica->table(IntegrityTables::membersTable())->count());
-        self::assertSame(0, $replica->table(IntegrityTables::stateTable())->count());
+        self::assertEquals($seeded, $replica->table(IntegrityTables::stateTable())->get()->all());
         self::assertSame(0, $replica->table(EntrySettings::table())->count());
     }
 

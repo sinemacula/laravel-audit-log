@@ -11,6 +11,8 @@ use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
+use SineMacula\Laravel\AuditLog\Lifecycle\ImportSettings;
+use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use SineMacula\Laravel\AuditLog\Querying\ReadSettings;
 
 /**
@@ -94,6 +96,39 @@ final class ShippedConfigTest extends TestCase
 
     /** @var string Env var holding how many seals one run anchors. */
     private const string ANCHOR_BATCH_ENV = 'AUDIT_LOG_INTEGRITY_ANCHOR_BATCH';
+
+    /** @var string Env var naming the lifecycle journal's table. */
+    private const string JOURNAL_TABLE_ENV = 'AUDIT_LOG_LIFECYCLE_JOURNAL_TABLE';
+
+    /** @var string Env var naming the holds table. */
+    private const string HOLDS_TABLE_ENV = 'AUDIT_LOG_LIFECYCLE_HOLDS_TABLE';
+
+    /** @var string Env var naming the lifecycle lock's table. */
+    private const string LOCK_TABLE_ENV = 'AUDIT_LOG_LIFECYCLE_LOCK_TABLE';
+
+    /** @var string Env var holding how many days an entry of a category not listed is kept. */
+    private const string RETENTION_AFTER_DAYS_ENV = 'AUDIT_LOG_RETENTION_AFTER_DAYS';
+
+    /** @var string Env var holding the most entries one transaction of a prune deletes. */
+    private const string RETENTION_BATCH_ENV = 'AUDIT_LOG_RETENTION_BATCH';
+
+    /** @var string Env var holding how long a prune runs before it stops between chunks. */
+    private const string RETENTION_MAX_SECONDS_ENV = 'AUDIT_LOG_RETENTION_MAX_SECONDS';
+
+    /** @var string Env var holding when the prune runs. */
+    private const string RETENTION_SCHEDULE_ENV = 'AUDIT_LOG_RETENTION_SCHEDULE';
+
+    /** @var string Env var naming the import batches table. */
+    private const string IMPORT_BATCHES_TABLE_ENV = 'AUDIT_LOG_IMPORT_BATCHES_TABLE';
+
+    /** @var string Env var holding how many lines one transaction of an import writes. */
+    private const string IMPORT_CHUNK_ENV = 'AUDIT_LOG_IMPORT_CHUNK';
+
+    /** @var string Env var holding how far after the clock an imported entry may have happened. */
+    private const string IMPORT_MAX_SKEW_ENV = 'AUDIT_LOG_IMPORT_MAX_SKEW_SECONDS';
+
+    /** @var string Env var holding the longest line an import reads. */
+    private const string IMPORT_MAX_LINE_BYTES_ENV = 'AUDIT_LOG_IMPORT_MAX_LINE_BYTES';
 
     /** @var string Env var turning on trust in an inbound request id. */
     private const string TRUST_REQUEST_ID_ENV = 'AUDIT_LOG_CONTEXT_TRUST_REQUEST_ID';
@@ -197,6 +232,17 @@ final class ShippedConfigTest extends TestCase
         self::ANCHOR_DISK_ENV,
         self::ANCHOR_PATH_ENV,
         self::ANCHOR_BATCH_ENV,
+        self::JOURNAL_TABLE_ENV,
+        self::HOLDS_TABLE_ENV,
+        self::LOCK_TABLE_ENV,
+        self::RETENTION_AFTER_DAYS_ENV,
+        self::RETENTION_BATCH_ENV,
+        self::RETENTION_MAX_SECONDS_ENV,
+        self::RETENTION_SCHEDULE_ENV,
+        self::IMPORT_BATCHES_TABLE_ENV,
+        self::IMPORT_CHUNK_ENV,
+        self::IMPORT_MAX_SKEW_ENV,
+        self::IMPORT_MAX_LINE_BYTES_ENV,
         self::TRUST_REQUEST_ID_ENV,
         self::REQUEST_ID_HEADER_ENV,
         self::TRUST_TRACEPARENT_ENV,
@@ -597,6 +643,173 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * With nothing in the environment the lifecycle tables have their default
+     * names.
+     *
+     * @return void
+     */
+    public function testTheLifecycleTablesHaveTheirDefaults(): void
+    {
+        self::assertSame([
+            'journal_table' => 'audit_log_lifecycle',
+            'holds_table'   => 'audit_log_holds',
+            'lock_table'    => 'audit_log_lifecycle_lock',
+        ], $this->config()['lifecycle']);
+    }
+
+    /**
+     * Each lifecycle table is read from its own env var.
+     *
+     * @return void
+     */
+    public function testTheLifecycleTablesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::JOURNAL_TABLE_ENV . '=audit_journal');
+        putenv(self::HOLDS_TABLE_ENV . '=audit_holds');
+        putenv(self::LOCK_TABLE_ENV . '=audit_lock');
+
+        self::assertSame([
+            'journal_table' => 'audit_journal',
+            'holds_table'   => 'audit_holds',
+            'lock_table'    => 'audit_lock',
+        ], $this->config()['lifecycle']);
+    }
+
+    /**
+     * With nothing in the environment everything is kept forever, no category
+     * has a retention or a preservation of its own, a prune deletes 1000
+     * entries per transaction, runs for 3000 seconds and is due daily at 03:30,
+     * as integers; and the shipped retention settings pass, keeping nothing for
+     * less than forever, so no prune is scheduled.
+     *
+     * @return void
+     */
+    public function testTheRetentionLeavesHaveTheirDefaults(): void
+    {
+        self::assertSame([
+            'after_days'  => 0,
+            'categories'  => [],
+            'preserve'    => [],
+            'batch'       => 1000,
+            'max_seconds' => 3000,
+            'schedule'    => '30 3 * * *',
+        ], $this->config()['retention']);
+
+        $settings = $this->retentionSettings();
+
+        $settings->validate();
+
+        self::assertSame('30 3 * * *', $settings->schedule());
+        self::assertFalse($settings->retainsAnythingForLess());
+    }
+
+    /**
+     * Each retention setting with an env var is read from it, raw, so a
+     * malformed number fails closed when it is read rather than casting to `0`.
+     *
+     * @return void
+     */
+    public function testTheRetentionLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::RETENTION_AFTER_DAYS_ENV . '=365');
+        putenv(self::RETENTION_BATCH_ENV . '=500');
+        putenv(self::RETENTION_MAX_SECONDS_ENV . '=600');
+        putenv(self::RETENTION_SCHEDULE_ENV . '=0 2 * * *');
+
+        self::assertSame([
+            'after_days'  => '365',
+            'categories'  => [],
+            'preserve'    => [],
+            'batch'       => '500',
+            'max_seconds' => '600',
+            'schedule'    => '0 2 * * *',
+        ], $this->config()['retention']);
+
+        $settings = $this->retentionSettings();
+
+        self::assertSame([365, 500, 600, '0 2 * * *'], [$settings->afterDays(), $settings->batch(), $settings->maxSeconds(), $settings->schedule()]);
+        self::assertTrue($settings->retainsAnythingForLess());
+
+        putenv(self::RETENTION_AFTER_DAYS_ENV . '=1e3');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('`audit-log.retention.after_days` must be an integer from 0 to 36500.');
+
+        $this->retentionSettings()->afterDays();
+    }
+
+    /**
+     * An empty env line for the prune's schedule turns it off, and `null`,
+     * which `env()` reads as `null`, does too.
+     *
+     * @return void
+     */
+    public function testAnEmptyRetentionScheduleEnvSchedulesNoPrune(): void
+    {
+        putenv(self::RETENTION_SCHEDULE_ENV . '=');
+
+        self::assertSame('', $this->config()['retention']['schedule']);
+        self::assertNull($this->retentionSettings()->schedule());
+
+        putenv(self::RETENTION_SCHEDULE_ENV . '=null');
+
+        self::assertNull($this->config()['retention']['schedule']);
+        self::assertNull($this->retentionSettings()->schedule());
+    }
+
+    /**
+     * With nothing in the environment the import batches live in
+     * `audit_log_import_batches`, an import writes 500 lines per transaction,
+     * allows five minutes of skew and reads lines of up to 1 MiB, as integers;
+     * and the shipped import settings pass.
+     *
+     * @return void
+     */
+    public function testTheImportLeavesHaveTheirDefaults(): void
+    {
+        self::assertSame([
+            'batches_table'    => 'audit_log_import_batches',
+            'chunk'            => 500,
+            'max_skew_seconds' => 300,
+            'max_line_bytes'   => 1048576,
+        ], $this->config()['import']);
+
+        $this->importSettings()->validate();
+    }
+
+    /**
+     * Each import setting is read from its own env var, raw, so a malformed
+     * number fails closed when it is read rather than casting to `0`.
+     *
+     * @return void
+     */
+    public function testTheImportLeavesAreReadFromTheEnvironment(): void
+    {
+        putenv(self::IMPORT_BATCHES_TABLE_ENV . '=audit_imports');
+        putenv(self::IMPORT_CHUNK_ENV . '=1000');
+        putenv(self::IMPORT_MAX_SKEW_ENV . '=60');
+        putenv(self::IMPORT_MAX_LINE_BYTES_ENV . '=4096');
+
+        self::assertSame([
+            'batches_table'    => 'audit_imports',
+            'chunk'            => '1000',
+            'max_skew_seconds' => '60',
+            'max_line_bytes'   => '4096',
+        ], $this->config()['import']);
+
+        $settings = $this->importSettings();
+
+        self::assertSame([1000, 60, 4096], [$settings->chunk(), $settings->maxSkewSeconds(), $settings->maxLineBytes()]);
+
+        putenv(self::IMPORT_CHUNK_ENV . '=five');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('`audit-log.import.chunk` must be an integer from 100 to 5000.');
+
+        $this->importSettings()->chunk();
+    }
+
+    /**
      * With nothing configured the actor is read from the default guard.
      *
      * @return void
@@ -905,6 +1118,19 @@ final class ShippedConfigTest extends TestCase
             'integrity.anchor.disk',
             'integrity.anchor.path',
             'integrity.anchor.batch',
+            'lifecycle.journal_table',
+            'lifecycle.holds_table',
+            'lifecycle.lock_table',
+            'retention.after_days',
+            'retention.categories',
+            'retention.preserve',
+            'retention.batch',
+            'retention.max_seconds',
+            'retention.schedule',
+            'import.batches_table',
+            'import.chunk',
+            'import.max_skew_seconds',
+            'import.max_line_bytes',
             'actor.guards',
             'context.trust_request_id',
             'context.request_id_header',
@@ -1206,6 +1432,28 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * The retention settings over the shipped configuration as the environment
+     * gives it now.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings
+     */
+    private function retentionSettings(): RetentionSettings
+    {
+        return new RetentionSettings(new Repository(['audit-log' => $this->config()]));
+    }
+
+    /**
+     * The import settings over the shipped configuration as the environment
+     * gives it now.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\ImportSettings
+     */
+    private function importSettings(): ImportSettings
+    {
+        return new ImportSettings(new Repository(['audit-log' => $this->config()]));
+    }
+
+    /**
      * The dotted leaves of a settings map, a list or an empty map being one
      * leaf.
      *
@@ -1235,7 +1483,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -1243,7 +1491,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}} $config */
         $config = require self::CONFIG;
 
         return $config;

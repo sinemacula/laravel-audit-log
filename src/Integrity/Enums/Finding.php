@@ -99,6 +99,21 @@ enum Finding: string
     // but not the one its manifest signed
     case MANIFEST_TAMPERED = 'manifest_tampered';
 
+    // A journal row's sequence is missing, repeated or out of order, its
+    // previous HMAC is not its predecessor's, or it names another log
+    case JOURNAL_GAP = 'journal_gap';
+
+    // A journal row's HMAC, or its payload's digest, does not match
+    case JOURNAL_SIGNATURE = 'journal_signature';
+
+    // A seal's journal commitment names no row of the chain, runs backwards, or
+    // is empty after a seal that committed to a row
+    case JOURNAL_COMMITMENT = 'journal_commitment';
+
+    // A journal row is a transition its chain does not allow, such as the
+    // release of a hold that is not active or a hold placed twice
+    case JOURNAL_TRANSITION = 'journal_transition';
+
     // A prune record is signed under a key the ring does not hold
     case PRUNE_KEY = 'prune_key';
 
@@ -111,6 +126,12 @@ enum Finding: string
     // An entry's artifact cannot be decrypted with the application's keys
     case MANIFEST_UNREADABLE = 'manifest_unreadable';
 
+    // A journal row is signed under a key the ring does not hold
+    case JOURNAL_KEY = 'journal_key';
+
+    // A journal row cannot be read as a journal row
+    case JOURNAL_MALFORMED = 'journal_malformed';
+
     // A sealed entry is missing, with no prune record to account for it
     case MISSING_ENTRY = 'missing_entry';
 
@@ -121,10 +142,14 @@ enum Finding: string
     // takes them
     case FUTURE_UNSEALED = 'future_unsealed';
 
+    // A member a valid prune record covers is still, or again, present
+    case RESURRECTED = 'resurrected';
+
     /**
      * The integrity status the finding gives: `tampered` for a check that shows
      * the log was altered, `unverifiable` for one that could not be made, and
-     * `incomplete` for entries that are missing or unsealed.
+     * `incomplete` for entries that are missing, unsealed, or present after
+     * their prune.
      *
      * @return \SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus
      */
@@ -138,11 +163,14 @@ enum Finding: string
             self::PRUNE_KEY,
             self::ENTRY_MALFORMED,
             self::ENTRY_KEY,
-            self::MANIFEST_UNREADABLE => IntegrityStatus::UNVERIFIABLE,
+            self::MANIFEST_UNREADABLE,
+            self::JOURNAL_KEY,
+            self::JOURNAL_MALFORMED => IntegrityStatus::UNVERIFIABLE,
             self::MISSING_ENTRY,
             self::OVERDUE_UNSEALED,
-            self::FUTURE_UNSEALED => IntegrityStatus::INCOMPLETE,
-            default               => IntegrityStatus::TAMPERED,
+            self::FUTURE_UNSEALED,
+            self::RESURRECTED => IntegrityStatus::INCOMPLETE,
+            default           => IntegrityStatus::TAMPERED,
         };
     }
 }

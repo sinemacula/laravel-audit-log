@@ -490,6 +490,7 @@ final class DescriberTest extends TestCase
             sourceRegion: null,
             sourceRecordId: null,
             importBatchId: null,
+            sourceDigest: null,
             ip: null,
             userAgent: null,
             context: [],

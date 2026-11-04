@@ -16,6 +16,7 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
@@ -55,7 +56,8 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
  * trail, resolved from the current container on each call, which reads nothing
  * until a viewer is named and a terminal call made, and which every read
  * authorises through the bound access policy and records before anything it
- * found is returned.
+ * found is returned. `lifecycle()` likewise gives a fresh way into the log's
+ * lifecycle, its holds, prunes and imports, on each call.
  *
  * A singleton that outlives requests under Octane, so it holds only frozen
  * registration data, its definitions and contributors. The event mappers and
@@ -318,6 +320,21 @@ final readonly class Recorder
     public function trail(): AuditTrail
     {
         return Container::getInstance()->make(AuditTrail::class);
+    }
+
+    /**
+     * A fresh way into the log's lifecycle, resolved from the current
+     * container: holds, prunes, imports and their reconciliation, each a
+     * privileged operation the caller must have authorised, since the package
+     * authorises none of them.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    public function lifecycle(): AuditLifecycle
+    {
+        return Container::getInstance()->make(AuditLifecycle::class);
     }
 
     /**

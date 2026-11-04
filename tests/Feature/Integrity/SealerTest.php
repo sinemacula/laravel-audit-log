@@ -17,6 +17,7 @@ use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
@@ -32,16 +33,17 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Feature tests for the sealer, on whichever engine the suite runs against:
- * the recent pass starts the lookback before the last seal, or at the
- * beginning; the sweep resumes from its cursor, saved after every window, and
- * clears it once complete; batches follow each other without restarting, up to
- * the most seals a run writes; nothing recorded after the settle bound is
- * sealed; an attempt lost to a concurrent writer is rolled back whole and made
- * again from a fresh head after a bounded jittered wait, and exhaustion is
- * contention; a lost connection and any other failure are never retried; no
- * savepoint is ever used; progress records each seal and the run; and keys
- * mixed in a seal or rotated between seals each sign as they should.
+ * Feature tests for the sealer, on whichever engine the suite runs against: the
+ * recent pass starts the lookback before the last seal, or at the beginning;
+ * the sweep resumes from its cursor, saved after every window, and clears it
+ * once complete; batches follow each other without restarting, up to the most
+ * seals a run writes; nothing recorded after the settle bound is sealed; an
+ * attempt lost to a concurrent writer is rolled back whole and made again from
+ * a fresh head after a bounded jittered wait, and exhaustion is contention; a
+ * lost connection and any other failure are never retried; no savepoint is ever
+ * used; progress records each seal and the run; each run ensures the
+ * installation's id, written once; and keys mixed in a seal or rotated between
+ * seals each sign as they should.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -141,6 +143,77 @@ final class SealerTest extends TestCase
 
         self::assertSame([], $statements->getArrayCopy());
         self::assertSame(1, $connection->transactionLevel());
+    }
+
+    /**
+     * A run leaves the installation's id the migrations seed as it is; on an
+     * installation that lost it, a run, the recent pass and the sweep alike,
+     * writes it on the first run, before its first batch, at the run's time,
+     * and never replaces it: every later run reads the same id, and a run with
+     * nothing to seal ensures it too.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testARunWritesTheInstallationIdOnce(): void
+    {
+        $seeded = $this->installationRows();
+
+        $this->sealer()->seal();
+
+        self::assertCount(1, $seeded);
+        self::assertEquals($seeded, $this->installationRows());
+
+        DB::connection(StorageConnection::name())->table(IntegrityTables::stateTable())->where('name', InstallationIdentity::NAME)->delete();
+
+        self::assertSame([], $this->installationRows());
+
+        $this->sealer()->seal();
+
+        $rows = $this->installationRows();
+
+        self::assertCount(1, $rows);
+
+        $value = json_decode((string) $rows[0]->value, true, 512, JSON_THROW_ON_ERROR);
+        $id    = is_array($value) ? $value['id'] ?? null : null;
+
+        self::assertIsString($id);
+        self::assertMatchesRegularExpression(SealEnvelope::UUID_PATTERN, $id);
+        self::assertSame('2026-11-01 13:00:00', substr((string) $rows[0]->updated_at, 0, 19));
+
+        $this->storeEntries(2);
+        $this->sealer()->seal();
+        $this->sealAt('2026-11-01 14:00:00');
+        $this->sealer()->sweep();
+
+        self::assertEquals($rows, $this->installationRows());
+        self::assertSame($id, app(InstallationIdentity::class)->idThrough(StorageConnection::resolvedName()));
+    }
+
+    /**
+     * The installation's id is ensured before the run's first batch: its read
+     * is the first statement of a run that has nothing to seal.
+     *
+     * @return void
+     */
+    public function testTheInstallationIdIsEnsuredBeforeTheFirstBatch(): void
+    {
+        $this->sealer()->seal();
+
+        /** @var \ArrayObject<int, array{0: string, 1: array<array-key, scalar|null>}> $statements */
+        $statements = new \ArrayObject;
+
+        DB::connection(StorageConnection::name())->beforeExecuting(static function (string $query, array $bindings) use ($statements): void {
+            $statements->append([$query, $bindings]);
+        });
+
+        $this->sealer()->sweep();
+
+        [$query, $bindings] = $statements->getArrayCopy()[0] ?? ['', []];
+
+        self::assertStringContainsString(IntegrityTables::stateTable(), $query);
+        self::assertSame([InstallationIdentity::NAME], $bindings);
     }
 
     /**
@@ -1165,6 +1238,19 @@ final class SealerTest extends TestCase
         });
 
         return $statements;
+    }
+
+    /**
+     * The installation id's rows in the state table, as the engine returns
+     * them, read afresh on every call.
+     *
+     * @return list<\stdClass>
+     *
+     * @phpstan-impure
+     */
+    private function installationRows(): array
+    {
+        return array_values(DB::connection(StorageConnection::name())->table(IntegrityTables::stateTable())->where('name', InstallationIdentity::NAME)->get()->all());
     }
 
     /**

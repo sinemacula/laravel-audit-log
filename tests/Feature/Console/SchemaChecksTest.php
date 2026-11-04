@@ -22,9 +22,10 @@ use Tests\TestCase;
 /**
  * Feature tests for the schema checks of `audit-log:check`: each table a
  * shipped migration creates, the entries, the artifacts, the outbox, the
- * deliveries, the checkpoints, the checkpoint members and the integrity state,
- * has no problem, and each way a table can differ from it, one at a time, is
- * the one problem reported.
+ * deliveries, the checkpoints, the checkpoint members, the integrity state, the
+ * lifecycle journal, the holds, the lifecycle lock and the import batches, has
+ * no problem, and each way a table can differ from it, one at a time, is the
+ * one problem reported.
  *
  * Each test runs the shipped migration under a table name of its own, then
  * changes the table in one way; Laravel rebuilds the table on SQLite for a
@@ -77,6 +78,14 @@ final class SchemaChecksTest extends TestCase
 
     /** @var string The integrity state table a test migrates and checks. */
     private const string STATE = 'audit_check_state';
+
+    /** @var array<string, array{0: string, 1: string}> Each shipped lifecycle migration, by the table a test migrates it under, with its setting. */
+    private const array LIFECYCLE_MIGRATIONS = [
+        'audit_check_journal' => ['2026_11_02_000700_create_audit_log_lifecycle_table.php', 'audit-log.lifecycle.journal_table'],
+        'audit_check_holds'   => ['2026_11_02_000800_create_audit_log_holds_table.php', 'audit-log.lifecycle.holds_table'],
+        'audit_check_lock'    => ['2026_11_02_000900_create_audit_log_lifecycle_lock_table.php', 'audit-log.lifecycle.lock_table'],
+        'audit_check_batches' => ['2026_11_02_001000_create_audit_log_import_batches_table.php', 'audit-log.import.batches_table'],
+    ];
 
     /** @var string The outbox table a test migrates and checks. */
     private const string OUTBOX = 'audit_check_outbox';
@@ -181,6 +190,8 @@ final class SchemaChecksTest extends TestCase
             'signer'             => ['varchar', 'varchar(16)', 'utf8mb4_0900_bin'],
             'key_id'             => ['varchar', 'varchar(32)', 'utf8mb4_0900_bin'],
             'algorithm_version'  => ['smallint', 'smallint', null],
+            'journal_sequence'   => ['bigint', 'bigint', null],
+            'journal_head'       => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
             'signature'          => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
             'anchor'             => ['varchar', 'varchar(64)', 'utf8mb4_0900_bin'],
             'anchor_receipt'     => ['json', 'json', null],
@@ -202,6 +213,8 @@ final class SchemaChecksTest extends TestCase
             'signer'             => ['varchar', 'character varying(16)', null],
             'key_id'             => ['varchar', 'character varying(32)', null],
             'algorithm_version'  => ['int2', 'smallint', null],
+            'journal_sequence'   => ['int8', 'bigint', null],
+            'journal_head'       => ['varchar', 'character varying(64)', null],
             'signature'          => ['varchar', 'character varying(64)', null],
             'anchor'             => ['varchar', 'character varying(64)', null],
             'anchor_receipt'     => ['json', 'json', null],
@@ -240,6 +253,10 @@ final class SchemaChecksTest extends TestCase
         Schema::connection(self::CONNECTION)->dropIfExists(self::CHECKPOINTS);
         Schema::connection(self::CONNECTION)->dropIfExists(self::MEMBERS);
         Schema::connection(self::CONNECTION)->dropIfExists(self::STATE);
+
+        foreach (array_keys(self::LIFECYCLE_MIGRATIONS) as $table) {
+            Schema::connection(self::CONNECTION)->dropIfExists($table);
+        }
 
         if (app(ConfigRepository::class)->has('database.connections.prefixed')) {
             Schema::connection('prefixed')->dropIfExists(self::LONG_TABLE);
@@ -1429,6 +1446,177 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
+     * An entries table without the source digest is a problem, since an
+     * imported record's digest would have nowhere to go.
+     *
+     * @return void
+     */
+    public function testAMissingSourceDigestIsAProblem(): void
+    {
+        $this->alter(static function (Blueprint $table): void {
+            $table->dropColumn('source_digest');
+        });
+
+        self::assertSame(['Column `source_digest` is missing.'], $this->problems());
+    }
+
+    /**
+     * A checkpoints table without the journal head a seal commits to is a
+     * problem for each of its two columns and for the index the highest
+     * commitment is read by.
+     *
+     * @return void
+     */
+    public function testAMissingJournalHeadIsAProblem(): void
+    {
+        $this->migrateIntegrityTables();
+
+        Schema::connection(self::CONNECTION)->table(self::CHECKPOINTS, static function (Blueprint $table): void {
+            $table->dropIndex(self::CHECKPOINTS . '_journal_index');
+        });
+
+        Schema::connection(self::CONNECTION)->table(self::CHECKPOINTS, static function (Blueprint $table): void {
+            $table->dropColumn(['journal_sequence', 'journal_head']);
+        });
+
+        $problems = $this->problems(self::CHECKPOINTS, self::CONNECTION, TableShape::checkpoints());
+
+        self::assertSame(['Column `journal_sequence` is missing.', 'Column `journal_head` is missing.', 'Index `' . self::CHECKPOINTS . '_journal_index` is missing.'], $problems);
+    }
+
+    /**
+     * Rows of `[the table, its shape]`: each lifecycle table under the name a
+     * test migrates it as.
+     *
+     * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Console\TableShape}>
+     */
+    public static function provideLifecycleTables(): iterable
+    {
+        yield from [
+            'the lifecycle journal' => ['audit_check_journal', TableShape::journal()],
+            'the holds'             => ['audit_check_holds', TableShape::holds()],
+            'the lifecycle lock'    => ['audit_check_lock', TableShape::lock()],
+            'the import batches'    => ['audit_check_batches', TableShape::importBatches()],
+        ];
+    }
+
+    /**
+     * Each lifecycle table the shipped migration creates has no problem.
+     *
+     * @param  string  $table
+     * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
+     * @return void
+     */
+    #[DataProvider('provideLifecycleTables')]
+    public function testEachShippedLifecycleMigrationHasNoProblems(string $table, TableShape $shape): void
+    {
+        $this->migrateLifecycleTables();
+
+        self::assertSame([], $this->problems($table, self::CONNECTION, $shape));
+    }
+
+    /**
+     * A lifecycle table that does not exist is the one problem, naming it by
+     * its label.
+     *
+     * @param  string  $table
+     * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
+     * @return void
+     */
+    #[DataProvider('provideLifecycleTables')]
+    public function testAMissingLifecycleTableIsNamedByItsLabel(string $table, TableShape $shape): void
+    {
+        self::assertSame([
+            sprintf('The %s table `%s` does not exist on connection [testing]; publish and run the migrations', $shape->label, $table)
+                . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
+        ], $this->problems($table, self::CONNECTION, $shape));
+    }
+
+    /**
+     * A journal whose sequence is not unique is a problem, since two operations
+     * could then both extend the head.
+     *
+     * @return void
+     */
+    public function testAJournalWithoutItsUniqueSequenceIsAProblem(): void
+    {
+        $this->migrateLifecycleTables();
+
+        Schema::connection(self::CONNECTION)->table('audit_check_journal', static function (Blueprint $table): void {
+            $table->dropUnique('audit_check_journal_sequence_unique');
+        });
+
+        self::assertSame(['Index `audit_check_journal_sequence_unique` is missing.'], $this->problems('audit_check_journal', self::CONNECTION, TableShape::journal()));
+    }
+
+    /**
+     * A journal whose payload is a JSON column is a problem on MySQL and
+     * PostgreSQL, since the engine may rewrite the text the digest covers;
+     * SQLite keeps JSON as text, so there it cannot be told apart. PostgreSQL
+     * casts the text column to JSON only when told how.
+     *
+     * @return void
+     */
+    public function testAJsonJournalPayloadIsAProblem(): void
+    {
+        $this->migrateLifecycleTables();
+
+        if ($this->driver() === 'pgsql') {
+            Schema::connection(self::CONNECTION)->getConnection()->statement('alter table "audit_check_journal" alter column "payload" type json using "payload"::json');
+        } else {
+            Schema::connection(self::CONNECTION)->table('audit_check_journal', static function (Blueprint $table): void {
+                $table->json('payload')->change();
+            });
+        }
+
+        $expected = match ($this->driver()) {
+            'mysql' => ['Column `payload` is json; expected longtext.'],
+            'pgsql' => ['Column `payload` is json; expected text.'],
+            default => [],
+        };
+
+        self::assertSame($expected, $this->problems('audit_check_journal', self::CONNECTION, TableShape::journal()));
+    }
+
+    /**
+     * Rows of `[a driver, the boolean's type name, its full type, the
+     * problem]`: what MySQL and PostgreSQL report for the import batches'
+     * boolean, and for an integer in its place.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: string, 3: string}>
+     */
+    public static function provideReportedBooleans(): iterable
+    {
+        yield from [
+            'a boolean on MySQL'       => ['mysql', 'tinyint', 'tinyint(1)', ''],
+            'a boolean on PostgreSQL'  => ['pgsql', 'bool', 'boolean', ''],
+            'an integer on MySQL'      => ['mysql', 'int', 'int', 'Column `externally_verified` is int; expected tinyint(1).'],
+            'an integer on PostgreSQL' => ['pgsql', 'int4', 'integer', 'Column `externally_verified` is int4; expected bool.'],
+            'a wider tinyint on MySQL' => ['mysql', 'tinyint', 'tinyint(4)', 'Column `externally_verified` is tinyint(4); expected tinyint(1).'],
+        ];
+    }
+
+    /**
+     * The import batches' boolean, as MySQL and PostgreSQL report it, is no
+     * problem, and another type in its place is, in the engine's own terms.
+     *
+     * @param  string  $driver
+     * @param  string  $typeName
+     * @param  string  $type
+     * @param  string  $problem
+     * @return void
+     */
+    #[DataProvider('provideReportedBooleans')]
+    public function testTheBatchesBooleanAsEachEngineReportsIt(string $driver, string $typeName, string $type, string $problem): void
+    {
+        $this->migrateLifecycleTables();
+
+        $this->fake($driver, self::reportedBatches($driver, [$typeName, $type]), 'audit_check_batches');
+
+        self::assertSame($problem === '' ? [] : [$problem], $this->problems('audit_check_batches', 'fake', TableShape::importBatches()));
+    }
+
+    /**
      * The problems the checks find on the connection's table, against the shape
      * given or, when none is, the entries table's.
      *
@@ -1677,6 +1865,70 @@ final class SchemaChecksTest extends TestCase
 
             $migration->up(); // @phpstan-ignore method.notFound
         }
+    }
+
+    /**
+     * Run the shipped lifecycle migrations under the tables' names of this
+     * test, on the test's connection.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateLifecycleTables(): void
+    {
+        foreach (self::LIFECYCLE_MIGRATIONS as $table => [$file, $setting]) {
+
+            app(ConfigRepository::class)->set($setting, $table);
+
+            $migration = include __DIR__ . '/../../../database/migrations/' . $file;
+
+            if (!$migration instanceof Migration) {
+                self::fail('A lifecycle migration file did not return a Migration instance.');
+            }
+
+            $migration->up(); // @phpstan-ignore method.notFound
+        }
+    }
+
+    /**
+     * The import batches table's columns as the driver reports them, its
+     * boolean as the type name and full type given: the shape's own types for
+     * the rest, its nullability as the test's engine created it, and MySQL's
+     * collation on its character columns.
+     *
+     * @param  string  $driver
+     * @param  array{0: string, 1: string}  $boolean
+     * @return list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>
+     */
+    private static function reportedBatches(string $driver, array $boolean): array
+    {
+        $names = [
+            'uuid'     => $driver === 'pgsql' ? ['uuid', 'uuid'] : ['char', 'char(36)'],
+            'integer'  => $driver === 'pgsql' ? ['int4', 'integer'] : ['int', 'int'],
+            'text'     => ['text', 'text'],
+            'datetime' => $driver === 'pgsql' ? ['timestamp', 'timestamp(6) without time zone'] : ['datetime', 'datetime(6)'],
+        ];
+
+        $columns = [];
+
+        foreach (Schema::connection(self::CONNECTION)->getColumns('audit_check_batches') as $column) {
+
+            [$family, $length] = TableShape::importBatches()->columns[$column['name']];
+
+            [$typeName, $type] = match ($family) {
+                'boolean' => $boolean,
+                'string'  => ['varchar', $driver === 'pgsql' ? "character varying({$length})" : "varchar({$length})"],
+                default   => $names[$family],
+            };
+
+            $collation = $driver === 'mysql' && in_array($family, ['string', 'uuid', 'text'], true) ? 'utf8mb4_0900_bin' : null;
+
+            $columns[] = ['name' => $column['name'], 'type' => $type, 'type_name' => $typeName, 'collation' => $collation, 'nullable' => $column['nullable']];
+        }
+
+        return $columns;
     }
 
     /**

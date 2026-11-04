@@ -85,6 +85,39 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
+     * An imported record, with no origin, its source fields and its source
+     * digest, verifies once read back, its digest as written: the engine keeps
+     * the 64 characters of text the signature covers.
+     *
+     * @return void
+     */
+    public function testAnImportedRecordVerifiesAfterTheRoundTrip(): void
+    {
+        $record = RecordFactory::imported(origin: null);
+        $stored = $this->assertRoundTripVerifies($record);
+
+        self::assertSame($record->sourceDigest, $stored['source_digest']);
+        self::assertSame(64, strlen((string) $stored['source_digest']));
+        self::assertNull($stored['origin']);
+        self::assertSame('imported', $stored['provenance']);
+    }
+
+    /**
+     * A captured record's source digest is stored and read back as `null`,
+     * never as an empty string.
+     *
+     * @return void
+     */
+    public function testACapturedRecordsSourceDigestStaysNull(): void
+    {
+        $stored = $this->assertRoundTripVerifies(RecordFactory::captured(id: self::ID));
+
+        self::assertArrayHasKey('source_digest', $stored);
+        self::assertNull($stored['source_digest']);
+        self::assertNull($this->storageConnection()->table(EntrySettings::table())->where('id', self::ID)->value('source_digest'));
+    }
+
+    /**
      * Nested properties whose keys MySQL's JSON reorders (by length, then
      * bytes) and numeric keys among them still verify: the canonical encoding
      * sorts the keys itself.

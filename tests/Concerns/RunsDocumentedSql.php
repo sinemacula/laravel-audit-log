@@ -14,17 +14,18 @@ use Illuminate\Database\QueryException;
  * its marker, so the grants and triggers a reader copies are the ones the tests
  * prove.
  *
- * The documented SQL names the database `app_db`, the writer `audit_writer` and
- * the maintenance user `audit_maintenance`; a test replaces those whole words
- * with its own before it runs a block. A MySQL script is run statement by
- * statement, split on the delimiter it declares, as the `mysql` client splits
- * it; a PostgreSQL or SQLite block is run whole, as one script.
+ * The documented SQL names the database `app_db`, the writer `audit_writer`,
+ * the maintenance user `audit_maintenance` and the verifier `audit_verifier`; a
+ * test replaces those whole words with its own before it runs a block. A MySQL
+ * script is run statement by statement, split on the delimiter it declares, as
+ * the `mysql` client splits it; a PostgreSQL or SQLite block is run whole, as
+ * one script.
  *
  * On MySQL and PostgreSQL each worker creates logins of its own,
- * `audit_writer_<token>` and `audit_maintenance_<token>`, which a test drops
- * when it ends, and a test tells a refusal by the grants, the engine's
- * privilege error, from a refusal by a documented trigger, which names its
- * table and statement.
+ * `audit_writer_<token>`, `audit_maintenance_<token>` and
+ * `audit_verifier_<token>`, which a test drops when it ends, and a test tells a
+ * refusal by the grants, the engine's privilege error, from a refusal by a
+ * documented trigger, which names its table and statement.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +38,7 @@ trait RunsDocumentedSql
     protected const string STORAGE_NOTE = '/docs/design/storage.md';
 
     /** @var list<string> The names the documented SQL uses, which a test replaces with its own. */
-    protected const array PLACEHOLDERS = ['app_db', 'audit_writer', 'audit_maintenance'];
+    protected const array PLACEHOLDERS = ['app_db', 'audit_writer', 'audit_maintenance', 'audit_verifier'];
 
     /** @var array<string, int|string|null> Each immutable checkpoint column, in order, with a value no stored seal has. */
     protected const array IMMUTABLE_COLUMNS = [
@@ -55,14 +56,38 @@ trait RunsDocumentedSql
         'signer'            => 'other',
         'key_id'            => 'other',
         'algorithm_version' => 9,
+        'journal_sequence'  => 99,
+        'journal_head'      => 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
         'signature'         => 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
     ];
 
     /** @var list<string> The checkpoint columns the anchorer writes after a seal is inserted. */
     protected const array ANCHOR_COLUMNS = ['anchor', 'anchor_receipt', 'anchored_at', 'anchor_error_class'];
 
+    /** @var array<string, bool|string> Each immutable import batch column, in order, with a value no stored batch has. */
+    protected const array IMMUTABLE_BATCH_COLUMNS = [
+        'id'                  => '01932b4e-9000-7000-8000-00000000ffff',
+        'source_id'           => 'another-source',
+        'source_region'       => 'another-region',
+        'input_format'        => 'another-format/v9',
+        'importer_type'       => 'another-importer',
+        'importer_id'         => 'another-id',
+        'reason'              => 'another_reason',
+        'external_reference'  => 'another-reference',
+        'file_sha256'         => 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        'externally_verified' => true,
+        'hold_id'             => '01932b4e-9000-7000-8000-00000000fffe',
+        'started_at'          => '2026-01-01 00:00:00.000000',
+    ];
+
+    /** @var list<string> The import batch columns the writer updates as an import runs: its status, its counts, its conflict ids and its times. */
+    protected const array BATCH_PROGRESS_COLUMNS = ['status', 'lines_read', 'imported', 'duplicates', 'conflicts', 'rejected', 'conflict_ids', 'updated_at', 'finished_at'];
+
+    /** @var list<string> The lifecycle lock columns every lifecycle transaction updates. */
+    protected const array LOCK_COLUMNS = ['token', 'locked_at'];
+
     /** @var string The line of the SQLite prune where the prune's own statements go. */
-    protected const string PRUNE_STATEMENTS = '-- the prune\'s deletes and its record go here';
+    protected const string PRUNE_STATEMENTS = '-- the prune\'s deletes (artifacts, receipts, then entries) and its journal row go here';
 
     /** @var list<int> The MySQL errors that refuse a statement for want of a privilege. */
     protected const array MYSQL_PRIVILEGE_ERRORS = [1142, 1143, 1419];
@@ -273,18 +298,23 @@ trait RunsDocumentedSql
 
     /**
      * The names this worker gives the placeholders: the database the root
-     * connection is on, and logins named after the writer and the maintenance
-     * user with the worker's token, `0` outside paratest.
+     * connection is on, and logins named after the writer, the maintenance user
+     * and the verifier with the worker's token, `0` outside paratest.
      *
      * @param  \Illuminate\Database\Connection  $root
-     * @return array{app_db: string, audit_writer: string, audit_maintenance: string}
+     * @return array{app_db: string, audit_writer: string, audit_maintenance: string, audit_verifier: string}
      */
     protected static function documentedNames(Connection $root): array
     {
         $token  = getenv('TEST_TOKEN');
         $suffix = '_' . ($token === false || $token === '' ? '0' : $token);
 
-        return ['app_db' => $root->getDatabaseName(), 'audit_writer' => 'audit_writer' . $suffix, 'audit_maintenance' => 'audit_maintenance' . $suffix];
+        return [
+            'app_db'            => $root->getDatabaseName(),
+            'audit_writer'      => 'audit_writer' . $suffix,
+            'audit_maintenance' => 'audit_maintenance' . $suffix,
+            'audit_verifier'    => 'audit_verifier' . $suffix,
+        ];
     }
 
     /**

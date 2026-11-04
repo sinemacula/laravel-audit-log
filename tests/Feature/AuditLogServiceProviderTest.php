@@ -55,6 +55,12 @@ use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\DrainCommand;
 use SineMacula\Laravel\AuditLog\Console\ExportCommand;
+use SineMacula\Laravel\AuditLog\Console\HoldCommand;
+use SineMacula\Laravel\AuditLog\Console\HoldsCommand;
+use SineMacula\Laravel\AuditLog\Console\ImportCommand;
+use SineMacula\Laravel\AuditLog\Console\PruneCommand;
+use SineMacula\Laravel\AuditLog\Console\ReconcileCommand;
+use SineMacula\Laravel\AuditLog\Console\ReleaseCommand;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
 use SineMacula\Laravel\AuditLog\Console\SealCommand;
 use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
@@ -65,6 +71,7 @@ use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
+use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
@@ -74,7 +81,8 @@ use SineMacula\Laravel\AuditLog\Http\Middleware\EnterHttpFrame;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
-use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
+use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
 use SineMacula\Laravel\AuditLog\Listeners\RecordGateDenial;
@@ -144,6 +152,20 @@ final class AuditLogServiceProviderTest extends TestCase
         '2026_11_02_000400_create_audit_log_checkpoint_members_table.php',
         '2026_11_02_000500_create_audit_log_integrity_state_table.php',
         '2026_11_02_000600_create_audit_log_artifacts_table.php',
+        '2026_11_02_000700_create_audit_log_lifecycle_table.php',
+        '2026_11_02_000800_create_audit_log_holds_table.php',
+        '2026_11_02_000900_create_audit_log_lifecycle_lock_table.php',
+        '2026_11_02_001000_create_audit_log_import_batches_table.php',
+    ];
+
+    /** @var array<string, class-string> Each lifecycle command the provider registers, by name, with its class. */
+    private const array LIFECYCLE_COMMANDS = [
+        'audit-log:hold'      => HoldCommand::class,
+        'audit-log:holds'     => HoldsCommand::class,
+        'audit-log:import'    => ImportCommand::class,
+        'audit-log:prune'     => PruneCommand::class,
+        'audit-log:reconcile' => ReconcileCommand::class,
+        'audit-log:release'   => ReleaseCommand::class,
     ];
 
     /**
@@ -238,6 +260,24 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * The provider publishes every migration the package ships, and nothing
+     * else, in the order their names run in: the four lifecycle tables after
+     * the seven before them, the import batches last.
+     *
+     * @return void
+     */
+    public function testTheMigrationsAreEveryShippedMigration(): void
+    {
+        $published = (new \ReflectionClassConstant(AuditLogServiceProvider::class, 'MIGRATIONS'))->getValue();
+        $shipped   = array_map(basename(...), glob(dirname(__DIR__, 2) . '/database/migrations/*.php') ?: []);
+
+        sort($shipped, SORT_STRING);
+
+        self::assertSame(self::SHIPPED_MIGRATIONS, $published);
+        self::assertSame($shipped, $published);
+    }
+
+    /**
      * The provider never loads the migrations from the package: the class runs
      * none of its own, so the migrator knows no path, and the application runs
      * only what it published.
@@ -321,6 +361,61 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * Rows of `[name, class]`: each lifecycle command the provider registers.
+     *
+     * @return iterable<string, array{0: string, 1: class-string}>
+     */
+    public static function provideLifecycleCommands(): iterable
+    {
+        foreach (self::LIFECYCLE_COMMANDS as $name => $class) {
+            yield $name => [$name, $class];
+        }
+    }
+
+    /**
+     * Running in the console, as a test does, each lifecycle command is there
+     * under its name, as its own class.
+     *
+     * @param  string  $name
+     * @param  class-string  $class
+     * @return void
+     */
+    #[DataProvider('provideLifecycleCommands')]
+    public function testTheLifecycleCommandsAreRegistered(string $name, string $class): void
+    {
+        self::assertArrayHasKey($name, Artisan::all());
+        self::assertInstanceOf($class, Artisan::all()[$name]);
+    }
+
+    /**
+     * The package registers exactly its twelve commands, the six lifecycle ones
+     * among them, and no other under its prefix.
+     *
+     * @return void
+     */
+    public function testThePackageRegistersExactlyItsTwelveCommands(): void
+    {
+        $names = array_values(array_filter(array_keys(Artisan::all()), static fn (string $name): bool => str_starts_with($name, 'audit-log:')));
+
+        sort($names, SORT_STRING);
+
+        self::assertSame([
+            'audit-log:check',
+            'audit-log:drain',
+            'audit-log:export',
+            'audit-log:hold',
+            'audit-log:holds',
+            'audit-log:import',
+            'audit-log:prune',
+            'audit-log:reconcile',
+            'audit-log:release',
+            'audit-log:replay',
+            'audit-log:seal',
+            'audit-log:verify',
+        ], $names);
+    }
+
+    /**
      * Outside the console no command is registered.
      *
      * @return void
@@ -354,7 +449,8 @@ final class AuditLogServiceProviderTest extends TestCase
             'the key ring'           => [KeyRing::class, KeyRing::class],
             'the store'              => [AuditStore::class, DatabaseAuditStore::class],
             'the field encrypter'    => [FieldEncrypter::class, NoFieldEncrypter::class],
-            'the prune ledger'       => [PruneLedger::class, NullPruneLedger::class],
+            'the retention policy'   => [RetentionPolicy::class, ConfiguredRetentionPolicy::class],
+            'the prune ledger'       => [PruneLedger::class, JournalPruneLedger::class],
             'the access policy'      => [AuditAccessPolicy::class, DenyAllPolicy::class],
             'the field reader'       => [FieldReader::class, SealedFieldReader::class],
             'the catalogue'          => [EventCatalogue::class, EventCatalogue::class],
@@ -422,7 +518,8 @@ final class AuditLogServiceProviderTest extends TestCase
     /**
      * Running in the console, the application's schedule holds sealing every
      * five minutes, the sweep and the strict verification daily, and nothing
-     * else of the package's.
+     * else of the package's: with the shipped retention everything is kept
+     * forever, so no prune is scheduled.
      *
      * @return void
      */
@@ -432,6 +529,23 @@ final class AuditLogServiceProviderTest extends TestCase
             'audit-log:seal'                          => '*/5 * * * *',
             'audit-log:seal --sweep'                  => '15 3 * * *',
             'audit-log:verify --strict --sweep-first' => '45 3 * * *',
+        ], self::packageRuns(app(Schedule::class)));
+    }
+
+    /**
+     * Once retention keeps a category for less than forever, the schedule also
+     * holds the prune, daily, after the three runs.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('keepSecurityForAYear')]
+    public function testTheScheduleHoldsThePruneOnceRetentionKeepsLess(): void
+    {
+        self::assertSame([
+            'audit-log:seal'                          => '*/5 * * * *',
+            'audit-log:seal --sweep'                  => '15 3 * * *',
+            'audit-log:verify --strict --sweep-first' => '45 3 * * *',
+            'audit-log:prune'                         => '30 3 * * *',
         ], self::packageRuns(app(Schedule::class)));
     }
 
@@ -1139,6 +1253,17 @@ final class AuditLogServiceProviderTest extends TestCase
             'audit-log.integrity.anchor.driver'        => 's3',
             'audit-log.integrity.anchor.path'          => '../anchors',
         ]);
+    }
+
+    /**
+     * Keep the entries of the `security` category for a year.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function keepSecurityForAYear(Application $app): void
+    {
+        $app->make(ConfigRepository::class)->set('audit-log.retention.categories', ['security' => 365]);
     }
 
     /**

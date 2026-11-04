@@ -11,8 +11,8 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 
 /**
- * Unit tests for the prune ledger the package binds by default: it is the prune
- * ledger, it has pruned nothing, and it keeps no state.
+ * Unit tests for the prune ledger of an application that never prunes: it is a
+ * prune ledger, it has no record of any seal, and it keeps no state.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,12 +48,12 @@ final class NullPruneLedgerTest extends TestCase
      * @return void
      */
     #[DataProvider('provideSealIds')]
-    public function testNothingIsEverPruned(string $sealId): void
+    public function testItHasNoRecords(string $sealId): void
     {
         $ledger = new NullPruneLedger;
 
         self::assertInstanceOf(PruneLedger::class, $ledger);
-        self::assertNull($ledger->recordFor($sealId));
+        self::assertSame([], $ledger->recordsFor($sealId));
     }
 
     /**
@@ -66,8 +66,8 @@ final class NullPruneLedgerTest extends TestCase
     {
         $ledger = new NullPruneLedger;
 
-        self::assertNull($ledger->recordFor('01932b4e-9000-7000-8000-000000000001'));
-        self::assertNull($ledger->recordFor('01932b4e-9000-7000-8000-000000000001'));
+        self::assertSame([], $ledger->recordsFor('01932b4e-9000-7000-8000-000000000001'));
+        self::assertSame([], $ledger->recordsFor('01932b4e-9000-7000-8000-000000000001'));
         self::assertSame([], (new \ReflectionObject($ledger))->getProperties());
     }
 }

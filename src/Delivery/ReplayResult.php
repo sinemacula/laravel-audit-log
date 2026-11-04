@@ -8,9 +8,10 @@ use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 
 /**
  * The tally of one replay: the records replayed, those a dry run would replay,
- * those the store or a destination did not take, those another drain has in
- * hand, and the lines skipped, counted apart by why, since an altered record is
- * never to be confused with one whose key was removed.
+ * those retention has already pruned, which are never stored again, those the
+ * store or a destination did not take, those another drain has in hand, and the
+ * lines skipped, counted apart by why, since an altered record is never to be
+ * confused with one whose key was removed.
  *
  * It also holds a bounded list of what happened, one event per outcome, saying
  * where, what and which record. An event holds a record's id only when that id
@@ -36,6 +37,9 @@ final class ReplayResult
 
     /** @var int Records a dry run found it would replay. */
     private int $wouldReplay = 0;
+
+    /** @var int Records retention has already pruned, which are not stored again, a dry run's included. */
+    private int $pruned = 0;
 
     /** @var int Records the store refused, or a drain could not deliver this time. */
     private int $failed = 0;
@@ -81,6 +85,20 @@ final class ReplayResult
     }
 
     /**
+     * Count a record retention has already pruned, which is not stored again.
+     *
+     * @param  string  $where
+     * @param  string  $id
+     * @return void
+     */
+    public function addPruned(string $where, string $id): void
+    {
+        $this->pruned++;
+
+        $this->listEvent($where, 'pruned', $id);
+    }
+
+    /**
      * Count a record the store refused, by its id and the class of the failure.
      *
      * @param  string  $where
@@ -112,11 +130,11 @@ final class ReplayResult
     }
 
     /**
-     * Map a drain's tally across: a row delivered is replayed; a row failed, or
-     * released for a later attempt because a destination failed again, is one
-     * this replay did not deliver; and a row another drain took over or claimed
-     * first is that drain's. A drain does not say which row ended how, so it
-     * lists no event.
+     * Map a drain's tally across: a row delivered is replayed; a row whose
+     * record was pruned is pruned; a row failed, or released for a later
+     * attempt because a destination failed again, is one this replay did not
+     * deliver; and a row another drain took over or claimed first is that
+     * drain's. A drain does not say which row ended how, so it lists no event.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\DrainResult  $drain
      * @return void
@@ -124,6 +142,7 @@ final class ReplayResult
     public function addDrain(DrainResult $drain): void
     {
         $this->replayed += $drain->delivered();
+        $this->pruned   += $drain->pruned();
         $this->failed   += $drain->failed() + $drain->retried();
         $this->deferred += $drain->stale()  + $drain->missed();
     }
@@ -146,6 +165,16 @@ final class ReplayResult
     public function wouldReplay(): int
     {
         return $this->wouldReplay;
+    }
+
+    /**
+     * The records retention has already pruned, which were not stored again.
+     *
+     * @return int
+     */
+    public function pruned(): int
+    {
+        return $this->pruned;
     }
 
     /**
@@ -203,8 +232,9 @@ final class ReplayResult
 
     /**
      * Whether any line was skipped or any record failed, which is what makes a
-     * replay unsuccessful: a dry run counts the lines it would skip too, and a
-     * row another drain has in hand is still to come.
+     * replay unsuccessful: a dry run counts the lines it would skip too, a row
+     * another drain has in hand is still to come, and a pruned record is
+     * complete.
      *
      * @return bool
      */

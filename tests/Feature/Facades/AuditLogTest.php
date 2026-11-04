@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
@@ -21,8 +22,9 @@ use Tests\Unit\Stubs\StubAuthUser;
 /**
  * Feature tests for the facade: it resolves the recorder, gives it typed, and
  * has a real static `fake()`, with which a record, a bulk record and its
- * attachment included, still runs the whole pipeline up to the store; and it is
- * the way into the trail, whose reads the fake records.
+ * attachment included, still runs the whole pipeline up to the store; it is the
+ * way into the trail, whose reads the fake records; and it is the way into the
+ * lifecycle.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -256,5 +258,20 @@ final class AuditLogTest extends TestCase
         self::assertSame('audit_log.trail_counted', $recorded[0]->event);
         self::assertSame('denied', $recorded[0]->outcome);
         self::assertSame('no_scope', $recorded[0]->reason);
+    }
+
+    /**
+     * `lifecycle()` gives a new way into the lifecycle through the facade on
+     * each call, and the recorder's own when called on it.
+     *
+     * @return void
+     */
+    public function testLifecycleIsReachedThroughTheFacade(): void
+    {
+        $lifecycle = AuditLog::lifecycle();
+
+        self::assertInstanceOf(AuditLifecycle::class, $lifecycle);
+        self::assertNotSame($lifecycle, AuditLog::lifecycle());
+        self::assertInstanceOf(AuditLifecycle::class, AuditLog::recorder()->lifecycle());
     }
 }

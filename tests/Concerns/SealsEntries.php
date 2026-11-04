@@ -10,6 +10,7 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\DB;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
@@ -108,8 +109,9 @@ trait SealsEntries
     }
 
     /**
-     * A sealer built from the container's collaborators, on the frozen clock
-     * when the test has frozen one, and on the container's clock otherwise.
+     * A sealer built from the container's collaborators, the installation's
+     * identity among them, on the frozen clock when the test has frozen one,
+     * and on the container's clock otherwise.
      *
      * @return \SineMacula\Laravel\AuditLog\Integrity\Sealer
      */
@@ -120,7 +122,7 @@ trait SealsEntries
         $settings = app(SealSettings::class);
         $writer   = new CheckpointWriter($database, app(SealSigner::class), $settings, $clock);
 
-        return new Sealer($writer, app(IntegrityProgress::class), $settings, app(FailureClassifier::class), $clock, $database);
+        return new Sealer($writer, app(IntegrityProgress::class), $settings, app(FailureClassifier::class), $clock, $database, new InstallationIdentity($database));
     }
 
     /**

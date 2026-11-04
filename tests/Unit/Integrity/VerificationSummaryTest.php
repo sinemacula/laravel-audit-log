@@ -11,6 +11,7 @@ use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
+use SineMacula\Laravel\AuditLog\Integrity\JournalSummary;
 use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
@@ -19,8 +20,8 @@ use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
 /**
  * Unit tests for what one verification run established: when it fails, with and
  * without `strict`, with and without an anchor configured, the anchoring grace
- * and the empty remote it excuses, its summary line and the event it gives
- * listeners.
+ * and the empty remote it excuses, its summary line with the journal's part,
+ * the journal's finding failing it, and the event it gives listeners.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -274,8 +275,9 @@ final class VerificationSummaryTest extends TestCase
 
     /**
      * The summary line names the range, both heads, how the anchor compared,
-     * whether the run was complete and strict, every count, the first failure
-     * and whether it passed, in that order of keys.
+     * whether the run was complete and strict, every count, what was read of
+     * the journal, the first failure and whether it passed, in that order of
+     * keys.
      *
      * @return void
      */
@@ -287,7 +289,7 @@ final class VerificationSummaryTest extends TestCase
         $tally->add(self::report(IntegrityStatus::TAMPERED, AnchorStatus::ANCHORED, false, Finding::ENTRY_HMAC, self::ENTRY_ID));
         $tally->unsealed(3, 1);
 
-        $summary = VerificationSummary::of([2, 4], 5, 4, AnchorStatus::ANCHORED, false, true, $tally);
+        $summary = VerificationSummary::of([2, 4], 5, 4, AnchorStatus::ANCHORED, false, true, $tally)->withJournal(new JournalSummary(3, 3, 2));
 
         self::assertSame([
             'type'            => 'summary',
@@ -303,10 +305,58 @@ final class VerificationSummaryTest extends TestCase
             'awaiting_anchor' => 1,
             'pending'         => 3,
             'overdue'         => 1,
+            'journal'         => ['rows' => 3, 'head' => 3, 'committed' => 2],
             'first_finding'   => 'entry_hmac',
             'first_bad_id'    => self::ENTRY_ID,
             'passed'          => false,
         ], $summary->toArray(true));
+    }
+
+    /**
+     * A summary built with no journal summary names none, and one given the
+     * journal's keeps it with everything else as it was.
+     *
+     * @return void
+     */
+    public function testTheJournalIsKeptWhenGiven(): void
+    {
+        $tally = new VerificationTally;
+
+        $tally->add(self::report(IntegrityStatus::VALID, AnchorStatus::UNANCHORED, true));
+        $tally->unsealed(2, 0);
+
+        $journal = new JournalSummary(0, null, null);
+        $none    = VerificationSummary::of([3, 3], 4, 3, AnchorStatus::ANCHORED, false, true, $tally);
+        $kept    = $none->withJournal($journal);
+
+        self::assertNull($none->journal);
+        self::assertNull($none->toArray(false)['journal']);
+        self::assertSame($journal, $kept->journal);
+        self::assertSame(['rows' => 0, 'head' => null, 'committed' => null], $kept->toArray(false)['journal']);
+        self::assertSame([...$none->toArray(true), 'journal' => $journal->toArray()], $kept->toArray(true));
+        self::assertSame($none->anchorConfigured, $kept->anchorConfigured);
+        self::assertSame($none->discovers, $kept->discovers);
+        self::assertSame($none->firstFinding, $kept->firstFinding);
+        self::assertSame($none->fails(true), $kept->fails(true));
+    }
+
+    /**
+     * A journal finding is a finding of the run, so it fails the run under
+     * either strictness, and is the event's first finding.
+     *
+     * @return void
+     */
+    public function testAJournalFindingFailsTheRun(): void
+    {
+        $tally = new VerificationTally;
+
+        $tally->addFinding(new RunFinding(Finding::JOURNAL_GAP, self::ENTRY_ID));
+
+        $summary = VerificationSummary::of([1, 0], null, null, null, true, false, $tally)->withJournal(new JournalSummary(2, 1, null));
+
+        self::assertTrue($summary->fails(false));
+        self::assertFalse($summary->toArray(false)['passed']);
+        self::assertSame('journal_gap', $summary->toEvent('verify')->finding);
     }
 
     /**

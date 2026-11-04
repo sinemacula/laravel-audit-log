@@ -12,12 +12,14 @@ use Illuminate\Support\Facades\Config;
  * on, so the two cannot disagree.
  *
  * The entries live on `audit-log.storage.connection` (`null` or empty for the
- * default connection). Pruning, holds and erasure run on
- * `audit-log.storage.maintenance_connection` when it names one, and on the
- * storage connection otherwise: a connection of their own lets them use
- * credentials of their own, with privileges the writer never holds, but it must
- * reach the same physical database as the storage connection. Nothing writes
- * through the maintenance connection yet; it is read and validated.
+ * default connection). Pruning, holds, the lifecycle journal and an import's
+ * journal rows run through `audit-log.storage.maintenance_connection` when it
+ * names one, and through the storage connection otherwise, each in a
+ * transaction of its own behind the lifecycle lock: a connection of their own
+ * lets them use credentials of their own, with privileges the writer never
+ * holds, but it must reach the same physical database as the storage
+ * connection, which every lifecycle operation confirms by the installation id
+ * before it takes the lock.
  *
  * The settings must stay the same for the life of a process: moving the tables
  * is a deploy, with a worker restart and a migration the application performs,
@@ -50,7 +52,8 @@ final class StorageConnection
     }
 
     /**
-     * The connection pruning, holds and erasure run on: the one
+     * The connection pruning, holds, the lifecycle journal and an import's
+     * journal rows run through: the one
      * `audit-log.storage.maintenance_connection` names, or the storage
      * connection.
      *

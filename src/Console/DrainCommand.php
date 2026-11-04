@@ -21,14 +21,15 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * `--until-empty`, batch after batch of that many until no row that was due
  * when the run began is left to claim.
  *
- * It prints how many rows were delivered, retried, failed, taken over by
- * another drain and missed because another drain claimed them first, and exits
- * non-zero when any row failed. A limit it refuses is said before anything is
- * drained. Whatever stops the run, such as a missing table or a transaction
- * left open, is named by its class alone and reported as a payload-free
- * `AuditWriteFailedException`, so a scheduled run whose output is discarded
- * still raises it, and the tally of the rows already worked is printed after
- * it; the command never prints a message, a payload or a binding.
+ * It prints how many rows were delivered, completed as pruned because retention
+ * had already pruned their record, retried, failed, taken over by another drain
+ * and missed because another drain claimed them first, and exits non-zero when
+ * any row failed; a pruned row is no failure. A limit it refuses is said before
+ * anything is drained. Whatever stops the run, such as a missing table or a
+ * transaction left open, is named by its class alone and reported as a
+ * payload-free `AuditWriteFailedException`, so a scheduled run whose output is
+ * discarded still raises it, and the tally of the rows already worked is
+ * printed after it; the command never prints a message, a payload or a binding.
  *
  * The package neither schedules the command nor dispatches a job to run it: the
  * application runs it, from its scheduler or a worker of its own, as often as
@@ -121,8 +122,9 @@ final class DrainCommand extends Command
     private static function tally(DrainResult $result): string
     {
         return sprintf(
-            'Delivered %d, retried %d, failed %d, stale %d, missed %d.',
+            'Delivered %d, pruned %d, retried %d, failed %d, stale %d, missed %d.',
             $result->delivered(),
+            $result->pruned(),
             $result->retried(),
             $result->failed(),
             $result->stale(),

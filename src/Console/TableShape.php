@@ -12,10 +12,11 @@ namespace SineMacula\Laravel\AuditLog\Console;
  * its name's suffix, the primary key's columns, and the sentence that describes
  * a column the package does not write.
  *
- * There is one shape for each of seven tables: the entries, the artifacts, the
- * outbox, the deliveries, the checkpoints, the checkpoint members and the
- * integrity state. Each is built by its named constructor, and none can be
- * built otherwise.
+ * There is one shape for each of eleven tables: the entries, the artifacts, the
+ * outbox, the deliveries, the checkpoints, the checkpoint members, the
+ * integrity state, the lifecycle journal, the holds, the lifecycle lock and the
+ * import batches. Each is built by its named constructor, and none can be built
+ * otherwise.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,6 +54,7 @@ final readonly class TableShape
         'source_region'     => ['string', 32, true],
         'source_record_id'  => ['string', 191, true],
         'import_batch_id'   => ['uuid', 36, true],
+        'source_digest'     => ['string', 64, true],
         'ip'                => ['string', 255, true],
         'user_agent'        => ['string', 512, true],
         'context'           => ['json', null, true],
@@ -133,6 +135,8 @@ final readonly class TableShape
         'signer'             => ['string', 16, false],
         'key_id'             => ['string', 32, false],
         'algorithm_version'  => ['smallint', null, false],
+        'journal_sequence'   => ['bigint', null, true],
+        'journal_head'       => ['string', 64, true],
         'signature'          => ['string', 64, false],
         'anchor'             => ['string', 64, true],
         'anchor_receipt'     => ['json', null, true],
@@ -144,6 +148,7 @@ final readonly class TableShape
     private const array CHECKPOINTS_INDEXES = [
         '_sequence_unique' => [['sequence'], true],
         '_anchored_index'  => [['anchored_at', 'sequence'], false],
+        '_journal_index'   => [['journal_sequence'], false],
     ];
 
     /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each checkpoint members column the package writes, in order, with its type family, length or precision, and nullability. */
@@ -160,6 +165,90 @@ final readonly class TableShape
         'updated_at' => ['datetime', 6, false],
     ];
 
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each lifecycle journal column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array JOURNAL_COLUMNS = [
+        'id'                 => ['uuid', 36, false],
+        'sequence'           => ['bigint', null, false],
+        'log_id'             => ['string', 64, false],
+        'kind'               => ['string', 32, false],
+        'operation_id'       => ['uuid', 36, false],
+        'occurred_at'        => ['datetime', 6, false],
+        'authority_type'     => ['string', 191, true],
+        'authority_id'       => ['string', 191, true],
+        'reason'             => ['string', 64, true],
+        'external_reference' => ['string', 191, true],
+        'seal_id'            => ['uuid', 36, true],
+        'hold_id'            => ['uuid', 36, true],
+        'payload'            => ['longtext', null, false],
+        'payload_digest'     => ['string', 64, false],
+        'previous_hmac'      => ['string', 64, true],
+        'key_id'             => ['string', 32, false],
+        'hmac'               => ['string', 64, false],
+    ];
+
+    /** @var array<string, array{0: non-empty-list<string>, 1: bool}> Each index the lifecycle journal migration creates, by its name's suffix, with its columns and uniqueness. */
+    private const array JOURNAL_INDEXES = [
+        '_sequence_unique' => [['sequence'], true],
+        '_seal_index'      => [['seal_id'], false],
+        '_hold_index'      => [['hold_id'], false],
+        '_kind_index'      => [['kind', 'occurred_at'], false],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each holds column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array HOLDS_COLUMNS = [
+        'hold_id'            => ['uuid', 36, false],
+        'scope'              => ['longtext', null, false],
+        'scope_digest'       => ['string', 64, false],
+        'basis'              => ['string', 32, false],
+        'import_batch_id'    => ['uuid', 36, true],
+        'placed_at'          => ['datetime', 6, false],
+        'review_by'          => ['datetime', 6, true],
+        'authority_type'     => ['string', 191, false],
+        'authority_id'       => ['string', 191, false],
+        'reason'             => ['string', 64, false],
+        'external_reference' => ['string', 191, true],
+        'operation_id'       => ['uuid', 36, false],
+        'journal_sequence'   => ['bigint', null, false],
+    ];
+
+    /** @var array<string, array{0: non-empty-list<string>, 1: bool}> Each index the holds migration creates, by its name's suffix, with its columns and uniqueness. */
+    private const array HOLDS_INDEXES = [
+        '_review_index' => [['review_by'], false],
+        '_batch_index'  => [['import_batch_id'], false],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each lifecycle lock column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array LOCK_COLUMNS = [
+        'id'        => ['smallint', null, false],
+        'token'     => ['string', 64, true],
+        'locked_at' => ['datetime', 6, true],
+    ];
+
+    /** @var array<string, array{0: string, 1: ?int, 2: bool}> Each import batches column the package writes, in order, with its type family, length or precision, and nullability. */
+    private const array IMPORT_BATCHES_COLUMNS = [
+        'id'                  => ['uuid', 36, false],
+        'source_id'           => ['string', 64, false],
+        'source_region'       => ['string', 32, true],
+        'input_format'        => ['string', 32, false],
+        'importer_type'       => ['string', 191, false],
+        'importer_id'         => ['string', 191, false],
+        'reason'              => ['string', 64, false],
+        'external_reference'  => ['string', 191, true],
+        'file_sha256'         => ['string', 64, false],
+        'externally_verified' => ['boolean', null, false],
+        'hold_id'             => ['uuid', 36, true],
+        'status'              => ['string', 16, false],
+        'lines_read'          => ['integer', null, false],
+        'imported'            => ['integer', null, false],
+        'duplicates'          => ['integer', null, false],
+        'conflicts'           => ['integer', null, false],
+        'rejected'            => ['integer', null, false],
+        'conflict_ids'        => ['text', null, true],
+        'started_at'          => ['datetime', 6, false],
+        'updated_at'          => ['datetime', 6, false],
+        'finished_at'         => ['datetime', 6, true],
+    ];
+
     /** @var string How a column of an entries table the package does not write is described. */
     private const string UNKNOWN_ENTRIES_COLUMN = 'Column `%s` is not one the package writes, so no entry\'s HMAC covers it.';
 
@@ -168,6 +257,9 @@ final readonly class TableShape
 
     /** @var string How a column of an artifacts, outbox, deliveries or integrity state table the package does not write is described. */
     private const string UNKNOWN_DELIVERY_COLUMN = 'Column `%s` is not one the package writes.';
+
+    /** @var string How a column of a lifecycle journal table the package does not write is described. */
+    private const string UNKNOWN_JOURNAL_COLUMN = 'Column `%s` is not one the package writes, so no journal row\'s HMAC covers it.';
 
     /**
      * Constructor.
@@ -180,7 +272,7 @@ final readonly class TableShape
      */
     private function __construct(
 
-        /** What the table is called in a problem: `entries`, `artifacts`, `outbox`, `deliveries`, `checkpoints`, `checkpoint members` or `integrity state`. */
+        /** What the table is called in a problem: `entries`, `artifacts`, `outbox`, `deliveries`, `checkpoints`, `checkpoint members`, `integrity state`, `lifecycle journal`, `holds`, `lifecycle lock` or `import batches`. */
         public string $label,
 
         /** Each column the package writes, in order, with its type family, its length or precision, and its nullability. */
@@ -270,5 +362,51 @@ final readonly class TableShape
     public static function state(): self
     {
         return new self('integrity state', self::STATE_COLUMNS, [], ['name'], self::UNKNOWN_DELIVERY_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the lifecycle journal: keyed by the
+     * row's id, one row per sequence, and its rows found by seal, by hold and
+     * by kind.
+     *
+     * @return self
+     */
+    public static function journal(): self
+    {
+        return new self('lifecycle journal', self::JOURNAL_COLUMNS, self::JOURNAL_INDEXES, ['id'], self::UNKNOWN_JOURNAL_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the holds table: keyed by the
+     * hold's id, and its holds found by review date and by import batch.
+     *
+     * @return self
+     */
+    public static function holds(): self
+    {
+        return new self('holds', self::HOLDS_COLUMNS, self::HOLDS_INDEXES, ['hold_id'], self::UNKNOWN_DELIVERY_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the lifecycle lock table: keyed by
+     * its one row's id, and no other index.
+     *
+     * @return self
+     */
+    public static function lock(): self
+    {
+        return new self('lifecycle lock', self::LOCK_COLUMNS, [], ['id'], self::UNKNOWN_DELIVERY_COLUMN);
+    }
+
+    /**
+     * The shape the shipped migration gives the import batches table: keyed by
+     * the batch's id, and its batches found by status and by when each was last
+     * written.
+     *
+     * @return self
+     */
+    public static function importBatches(): self
+    {
+        return new self('import batches', self::IMPORT_BATCHES_COLUMNS, ['_status_index' => [['status', 'updated_at'], false]], ['id'], self::UNKNOWN_DELIVERY_COLUMN);
     }
 }

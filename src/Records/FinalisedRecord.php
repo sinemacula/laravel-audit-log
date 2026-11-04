@@ -23,7 +23,8 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  * the next destination. It is never recorded before the activity occurred, and
  * its id, and its import batch id when it has one, are lower-case UUIDs, the
  * one form every engine stores and returns, so a record signed on one engine
- * verifies on every other.
+ * verifies on every other; its source digest, when it has one, is 64 lower-case
+ * hexadecimal characters, which its column holds exactly.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,6 +90,7 @@ final readonly class FinalisedRecord
         self::checkTime($record, $recordedAt);
         self::checkIntegrity($integrityVersion, $keyId, $hmac);
         self::checkIds($record);
+        self::checkSourceDigest($record->sourceDigest);
     }
 
     /**
@@ -139,7 +141,7 @@ final readonly class FinalisedRecord
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @return array{id: string, record_version: int, event: string, event_version: int, category: string, outcome: string, reason: ?string, actor_type: ?string, actor_id: ?string, subject_type: ?string, subject_id: ?string, principal_type: ?string, principal_id: ?string, tenant_type: ?string, tenant_id: ?string, credential_id: ?string, guard: ?string, session_id: ?string, request_id: ?string, trace_id: ?string, correlation_id: ?string, origin: ?string, provenance: string, source_id: string, source_region: ?string, source_record_id: ?string, import_batch_id: ?string, ip: ?string, user_agent: ?string, context: array<array-key, mixed>|\stdClass|null, properties: array<array-key, mixed>|\stdClass|null, occurred_at: string, recorded_at: string, integrity_version: int, key_id: string, hmac: string}
+     * @return array{id: string, record_version: int, event: string, event_version: int, category: string, outcome: string, reason: ?string, actor_type: ?string, actor_id: ?string, subject_type: ?string, subject_id: ?string, principal_type: ?string, principal_id: ?string, tenant_type: ?string, tenant_id: ?string, credential_id: ?string, guard: ?string, session_id: ?string, request_id: ?string, trace_id: ?string, correlation_id: ?string, origin: ?string, provenance: string, source_id: string, source_region: ?string, source_record_id: ?string, import_batch_id: ?string, source_digest: ?string, ip: ?string, user_agent: ?string, context: array<array-key, mixed>|\stdClass|null, properties: array<array-key, mixed>|\stdClass|null, occurred_at: string, recorded_at: string, integrity_version: int, key_id: string, hmac: string}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -254,6 +256,24 @@ final readonly class FinalisedRecord
         }
 
         self::checkUuid('import_batch_id', $record->importBatchId);
+    }
+
+    /**
+     * Refuse a source digest, when there is one, that is not 64 lower-case
+     * hexadecimal characters.
+     *
+     * @param  ?string  $sourceDigest
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function checkSourceDigest(?string $sourceDigest): void
+    {
+        if ($sourceDigest === null || preg_match(self::HMAC_PATTERN, $sourceDigest) === 1) {
+            return;
+        }
+
+        throw new \InvalidArgumentException('A finalised record\'s `source_digest` must be 64 lower-case hexadecimal characters.');
     }
 
     /**

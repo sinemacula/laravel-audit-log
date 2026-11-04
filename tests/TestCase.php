@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -11,7 +12,9 @@ use Orchestra\Testbench\TestCase as OrchestraTestCase;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
@@ -51,6 +54,10 @@ abstract class TestCase extends OrchestraTestCase
         'audit-log.integrity.checkpoints_table'    => IntegrityTables::DEFAULT_CHECKPOINTS,
         'audit-log.integrity.members_table'        => IntegrityTables::DEFAULT_MEMBERS,
         'audit-log.integrity.state_table'          => IntegrityTables::DEFAULT_STATE,
+        'audit-log.lifecycle.journal_table'        => LifecycleTables::DEFAULT_JOURNAL,
+        'audit-log.lifecycle.holds_table'          => LifecycleTables::DEFAULT_HOLDS,
+        'audit-log.lifecycle.lock_table'           => LifecycleTables::DEFAULT_LOCK,
+        'audit-log.import.batches_table'           => LifecycleTables::DEFAULT_IMPORT_BATCHES,
     ];
 
     /** @var array<string, true> Worker databases this process has created. */
@@ -131,20 +138,23 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migrations so the entries, artifacts, outbox,
-     * deliveries, checkpoints, checkpoint members and integrity state tables
-     * exist for tests that use them, each on the connection its settings name
-     * when they run.
+     * Run the package's shipped migrations so the eleven tables, the entries,
+     * artifacts, outbox, deliveries, checkpoints, checkpoint members, integrity
+     * state, lifecycle journal, holds, lifecycle lock and import batches, exist
+     * for tests that use them, each on the connection its settings name when
+     * they run.
      *
      * A test may point the storage settings elsewhere once the tables exist;
      * `tearDown()` puts them back before the migrations are rolled back. On a
      * persistent database (MySQL, PostgreSQL) creating and dropping the tables
-     * costs more than most tests themselves, so while all seven are on the
+     * costs more than most tests themselves, so while all eleven are on the
      * worker's connection they are kept from one test to the next. Each test
      * starts by comparing their schema and migration records with what the
      * migrations left: when they match it deletes their rows, otherwise it
-     * migrates them afresh. When any table is on another connection, all seven
-     * are migrated for the test and dropped when it ends.
+     * migrates them afresh. The rows the migrations seed are the exception: the
+     * lifecycle lock's one row and the installation id are put back, as a fresh
+     * migration would leave them. When any table is on another connection, all
+     * eleven are migrated for the test and dropped when it ends.
      *
      * @return void
      */
@@ -170,9 +180,7 @@ abstract class TestCase extends OrchestraTestCase
         $key    = serialize([$names, $connection]);
 
         if ($kept && self::$keptTables['key'] === $key && self::$keptTables['schema'] === $this->schemaOf($names)) {
-            foreach ($names as $table) {
-                DB::connection(self::CONNECTION)->table($table)->delete();
-            }
+            $this->emptyKeptTables($names);
 
             return;
         }
@@ -258,7 +266,32 @@ abstract class TestCase extends OrchestraTestCase
             [$storage, IntegrityTables::checkpointsTable()],
             [$storage, IntegrityTables::membersTable()],
             [$storage, IntegrityTables::stateTable()],
+            [$storage, LifecycleTables::journalTable()],
+            [$storage, LifecycleTables::holdsTable()],
+            [$storage, LifecycleTables::lockTable()],
+            [$storage, LifecycleTables::importBatchesTable()],
         ];
+    }
+
+    /**
+     * Delete the rows of every kept table, then put back the rows the
+     * migrations seed: the lifecycle lock's one row, with no token and no time,
+     * and a new installation id, so each test starts with the rows a fresh
+     * migration leaves, even after a test that deleted or locked them.
+     *
+     * @param  list<string>  $tables
+     * @return void
+     */
+    private function emptyKeptTables(array $tables): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+
+        foreach ($tables as $table) {
+            $connection->table($table)->delete();
+        }
+
+        $connection->table(LifecycleTables::lockTable())->insert(['id' => 1, 'token' => null, 'locked_at' => null]);
+        $connection->table(IntegrityTables::stateTable())->insert(InstallationIdentity::row(CarbonImmutable::now()));
     }
 
     /**

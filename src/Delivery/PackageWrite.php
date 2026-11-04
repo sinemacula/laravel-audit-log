@@ -8,17 +8,17 @@ use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * What the package's own read path asks of a record it writes, beyond the
- * guarantees of a fail-closed, immediate record: a check of the record once it
- * is built and before it is delivered, which throws to refuse it, so nothing is
- * delivered that does not keep its evidence exactly; and a hand-over of the
- * finalised record once the store or the outbox has acknowledged it, so the
- * read discloses nothing until then, and holds the very envelope that was
- * written.
+ * What the package's own activity (its read path and its lifecycle) asks of a
+ * record it writes, beyond the guarantees of a fail-closed, immediate record: a
+ * check of the record once it is built and before it is delivered, which throws
+ * to refuse it, so nothing is delivered that does not keep its evidence
+ * exactly; and a hand-over of the finalised record once the store or the outbox
+ * has acknowledged it, so a read discloses nothing until then, and holds the
+ * very envelope that was written.
  *
  * Only a record under the reserved `audit_log.` prefix is written with one, and
  * such a record is written with nothing else. Both closures capture what the
- * read disclosed, so neither ever shows in a stack frame.
+ * activity disclosed, so neither ever shows in a stack frame.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -25,6 +25,9 @@ use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
+use SineMacula\Laravel\AuditLog\Integrity\PruneCoverage;
+use SineMacula\Laravel\AuditLog\Integrity\PruneCoverageResult;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealChainException;
@@ -163,6 +166,9 @@ final class IntegritySensitiveParametersTest extends TestCase
     /** @var string The id of a seal. */
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
+    /** @var string The id of a prune operation. */
+    private const string OPERATION_ID = '01932b4e-a000-7000-8000-000000000001';
+
     /** @var string An instant in the package's form. */
     private const string INSTANT = '2026-11-01T13:00:00.000000Z';
 
@@ -249,6 +255,9 @@ final class IntegritySensitiveParametersTest extends TestCase
         self::assertContains(self::NAMESPACE . 'Database\IntegrityProgress', self::scanned());
         self::assertContains(self::NAMESPACE . 'Integrity\Anchors\DiskAnchor', self::scanned());
         self::assertContains(Finding::class, self::scanned());
+        self::assertContains(PruneBitmap::class, self::scanned());
+        self::assertContains(PruneCoverage::class, self::scanned());
+        self::assertContains(PruneCoverageResult::class, self::scanned());
         self::assertCount(count(array_unique(self::scanned())), self::scanned());
     }
 
@@ -893,13 +902,13 @@ final class IntegritySensitiveParametersTest extends TestCase
     private static function signingOf(SealSigner $signer): array
     {
         $seal  = new SealEnvelope('app-eu-1', self::SEAL_ID, 1, null, null, 1, self::DIGEST, self::INSTANT, self::INSTANT, self::INSTANT, self::KEY_ID);
-        $prune = new PruneRecord('app-eu-1', self::SEAL_ID, self::DIGEST, 1, '01932b4e-a000-7000-8000-000000000001', self::INSTANT, self::KEY_ID, self::DIGEST);
+        $prune = new PruneRecord('app-eu-1', self::SEAL_ID, self::DIGEST, 1, 'AQ', 1, self::OPERATION_ID, self::INSTANT, self::KEY_ID, self::DIGEST);
 
         return [
             'signingKeyId'  => static fn (): string => $signer->signingKeyId(),
             'sign'          => static fn (): string => $signer->sign($seal),
             'verifies'      => static fn (): bool => $signer->verifies($seal, self::DIGEST),
-            'signPrune'     => static fn (): PruneRecord => $signer->signPrune('app-eu-1', self::SEAL_ID, self::DIGEST, 1, '01932b4e-a000-7000-8000-000000000001', self::INSTANT),
+            'signPrune'     => static fn (): PruneRecord => $signer->signPrune('app-eu-1', self::SEAL_ID, self::DIGEST, 1, 'AQ', 1, self::OPERATION_ID, self::INSTANT),
             'verifiesPrune' => static fn (): bool => $signer->verifiesPrune($prune),
         ];
     }

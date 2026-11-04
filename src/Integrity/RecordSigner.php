@@ -22,9 +22,13 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * the row is malformed, is refused with an exception, never reported as
  * tampered or as intact.
  *
- * The captured-content digest is SHA-256 over the canonical encoding of the
+ * The captured-content digest is SHA-256 over the canonical encoding of the 33
  * captured columns alone, leaving out when the record was recorded and how it
- * was signed, so the same record finalised twice has one digest.
+ * was signed, so the same record finalised twice has one digest. An imported
+ * record's source digest is one of those columns, so the row's signature covers
+ * it; two imports of one assertion are two records, with their own ids and
+ * batches and so their own captured digests, and a repeated import is found by
+ * its source digest, never by this one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,7 +43,7 @@ final readonly class RecordSigner
     /** @var list<int> The integrity versions this release verifies. */
     public const array SUPPORTED_VERSIONS = [1];
 
-    /** @var list<string> The captured record's columns, as `AuditRecord::toArray()` keys them, in table order. */
+    /** @var list<string> The captured record's 33 columns, as `AuditRecord::toArray()` keys them, in table order. */
     public const array CAPTURED_COLUMNS = [
         'id',
         'record_version',
@@ -68,6 +72,7 @@ final readonly class RecordSigner
         'source_region',
         'source_record_id',
         'import_batch_id',
+        'source_digest',
         'ip',
         'user_agent',
         'context',
@@ -75,7 +80,7 @@ final readonly class RecordSigner
         'occurred_at',
     ];
 
-    /** @var list<string> Every column but `hmac`, in table order: the signature covers each of them. */
+    /** @var list<string> Every column but `hmac`, 36 in table order: the signature covers each of them. */
     public const array SIGNED_COLUMNS = [...self::CAPTURED_COLUMNS, 'recorded_at', 'integrity_version', 'key_id'];
 
     /** @var string The column holding the signature. */

@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Console;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Filesystem\Factory;
@@ -20,6 +21,14 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
+use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
+use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
+use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
+use SineMacula\Laravel\AuditLog\Lifecycle\HoldKeeper;
+use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Database\VersionReportingPdo;
 use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
@@ -49,7 +58,7 @@ final class CheckCommandTest extends TestCase
         . ' and whole records in plaintext go to it and to everything it feeds.';
 
     /** @var list<string> What a run prints when nothing has a problem, the note on the default channel last. */
-    private const array EVERY_SUBJECT_OK = ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE];
+    private const array EVERY_SUBJECT_OK = ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE];
 
     /** @var list<string> Absolute paths to the shipped migration files of the tables the schema subject checks, in the order they run. */
     private const array MIGRATION_PATHS = [
@@ -78,6 +87,22 @@ final class CheckCommandTest extends TestCase
         'audit-log.integrity.checkpoints_table' => 'audit_custom_checkpoints',
         'audit-log.integrity.members_table'     => 'audit_custom_members',
         'audit-log.integrity.state_table'       => 'audit_custom_state',
+    ];
+
+    /** @var list<string> Absolute paths to the shipped lifecycle migration files, in the order they run. */
+    private const array LIFECYCLE_MIGRATION_PATHS = [
+        __DIR__ . '/../../../database/migrations/2026_11_02_000700_create_audit_log_lifecycle_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_000800_create_audit_log_holds_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_000900_create_audit_log_lifecycle_lock_table.php',
+        __DIR__ . '/../../../database/migrations/2026_11_02_001000_create_audit_log_import_batches_table.php',
+    ];
+
+    /** @var array<string, string> The lifecycle tables a test migrates under names of their own, by the setting that names each; PostgreSQL's index names would clash with the defaults'. */
+    private const array CUSTOM_LIFECYCLE_TABLES = [
+        'audit-log.lifecycle.journal_table' => 'audit_custom_journal',
+        'audit-log.lifecycle.holds_table'   => 'audit_custom_holds',
+        'audit-log.lifecycle.lock_table'    => 'audit_custom_lock',
+        'audit-log.import.batches_table'    => 'audit_custom_batches',
     ];
 
     /** @var string What a missing table is asked to be created by, after its name and connection. */
@@ -156,6 +181,19 @@ final class CheckCommandTest extends TestCase
         'integrity.anchor.disk'                     => 42,
         'integrity.anchor.path'                     => '../anchors',
         'integrity.anchor.batch'                    => 0,
+        'lifecycle.journal_table'                   => 'Journal',
+        'lifecycle.holds_table'                     => 'audit-holds',
+        'lifecycle.lock_table'                      => '1lock',
+        'import.batches_table'                      => 'Batches',
+        'retention.after_days'                      => 36501,
+        'retention.categories'                      => 'security',
+        'retention.preserve'                        => 'security',
+        'retention.batch'                           => 99,
+        'retention.max_seconds'                     => 59,
+        'retention.schedule'                        => 'nightly',
+        'import.chunk'                              => 99,
+        'import.max_skew_seconds'                   => 86401,
+        'import.max_line_bytes'                     => 1023,
     ];
 
     /** @var array<string, array<string, string>|string> An explicit ring whose settings all pass, so none of them reads `app.key`. */
@@ -264,6 +302,10 @@ final class CheckCommandTest extends TestCase
         // The default channel of a default install, whatever the environment
         // says, so the note on it is the same in every run
         app(ConfigRepository::class)->set('logging.default', 'stack');
+
+        // The policy the package binds by default, whether or not the provider
+        // has bound it yet
+        app()->bindIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
     }
 
     /**
@@ -279,12 +321,14 @@ final class CheckCommandTest extends TestCase
             Schema::connection('custom')->dropIfExists(self::CUSTOM_TABLE);
             Schema::connection('custom')->dropIfExists(self::CUSTOM_ARTIFACTS_TABLE);
 
-            foreach (self::CUSTOM_INTEGRITY_TABLES as $table) {
+            foreach ([...self::CUSTOM_INTEGRITY_TABLES, ...self::CUSTOM_LIFECYCLE_TABLES] as $table) {
                 Schema::connection('custom')->dropIfExists($table);
             }
         }
 
         Schema::connection(self::CONNECTION)->dropIfExists(self::LONGEST_ARTIFACTS_TABLE);
+
+        CarbonImmutable::setTestNow();
 
         foreach ($this->files as $file) {
 
@@ -315,7 +359,7 @@ final class CheckCommandTest extends TestCase
     /**
      * A table of another name on a connection of its own, with a table prefix
      * and an explicit key ring, passes once the migrations have run there, the
-     * integrity tables' included.
+     * integrity and lifecycle tables' included.
      *
      * @return void
      */
@@ -331,16 +375,19 @@ final class CheckCommandTest extends TestCase
         $config->set('audit-log.integrity.keys', ['k1' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         $config->set('audit-log.integrity.current', 'k1');
         $config->set(self::CUSTOM_INTEGRITY_TABLES);
+        $config->set(self::CUSTOM_LIFECYCLE_TABLES);
 
         $this->migrate();
 
         [, $before] = $this->check();
 
         $this->migrateIntegrityTables();
+        $this->migrateLifecycleTables();
 
         [$code, $output] = $this->check();
 
         self::assertContains('[integrity] The checkpoints table `audit_custom_checkpoints` does not exist on connection [custom]' . self::PUBLISH, $before);
+        self::assertContains('[lifecycle] The lifecycle journal table `audit_custom_journal` does not exist on connection [custom]' . self::PUBLISH, $before);
         self::assertTrue(Schema::connection('custom')->hasTable(self::CUSTOM_TABLE));
         self::assertTrue(Schema::connection('custom')->hasTable(self::CUSTOM_ARTIFACTS_TABLE));
         self::assertSame(0, $code);
@@ -596,13 +643,14 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
 
     /**
      * A storage connection that is not configured is reported once, by
-     * `connections`, and the schema is not checked on it.
+     * `connections`, and neither the schema nor the lifecycle is checked on it.
      *
      * @return void
      */
@@ -647,7 +695,8 @@ final class CheckCommandTest extends TestCase
 
     /**
      * A maintenance connection of its own that is configured with the storage
-     * connection's driver passes.
+     * connection's driver, and reaches the storage connection's database, so
+     * the installation id it reads is the same, passes.
      *
      * @return void
      */
@@ -658,6 +707,12 @@ final class CheckCommandTest extends TestCase
         $config->set('database.connections.maintenance', $config->array('database.connections.' . self::CONNECTION));
         $config->set('audit-log.storage.maintenance_connection', 'maintenance');
 
+        // On SQLite a second in-memory connection is another database, so it
+        // shares the worker's
+        if (DB::connection(self::CONNECTION)->getDriverName() === 'sqlite') {
+            DB::connection('maintenance')->setPdo(DB::connection(self::CONNECTION)->getPdo());
+        }
+
         [$code, $output] = $this->check();
 
         self::assertSame(0, $code);
@@ -667,7 +722,8 @@ final class CheckCommandTest extends TestCase
     /**
      * The engine's problems are listed with the tables': here a MySQL session
      * that is not strict, on a connection that answers as MySQL would and holds
-     * no table, so the artifacts and integrity tables are missing too.
+     * no table, so the artifacts, integrity and lifecycle tables are missing
+     * too.
      *
      * @return void
      */
@@ -700,6 +756,10 @@ final class CheckCommandTest extends TestCase
             '[integrity] The checkpoints table `audit_log_checkpoints` does not exist on connection [fake]' . self::PUBLISH,
             '[integrity] The checkpoint members table `audit_log_checkpoint_members` does not exist on connection [fake]' . self::PUBLISH,
             '[integrity] The integrity state table `audit_log_integrity_state` does not exist on connection [fake]' . self::PUBLISH,
+            '[lifecycle] The lifecycle journal table `audit_log_lifecycle` does not exist on connection [fake]' . self::PUBLISH,
+            '[lifecycle] The holds table `audit_log_holds` does not exist on connection [fake]' . self::PUBLISH,
+            '[lifecycle] The lifecycle lock table `audit_log_lifecycle_lock` does not exist on connection [fake]' . self::PUBLISH,
+            '[lifecycle] The import batches table `audit_log_import_batches` does not exist on connection [fake]' . self::PUBLISH,
         ], self::problemsIn($output));
     }
 
@@ -723,6 +783,7 @@ final class CheckCommandTest extends TestCase
                 . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -747,6 +808,7 @@ final class CheckCommandTest extends TestCase
                 . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -903,6 +965,7 @@ final class CheckCommandTest extends TestCase
             '[schema] The storage connection [broken] could not be opened (' . SQLiteDatabaseDoesNotExistException::class . ').',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
         self::assertStringNotContainsString($path, implode("\n", $output));
@@ -928,6 +991,7 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -970,6 +1034,7 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1168,6 +1233,7 @@ final class CheckCommandTest extends TestCase
                 . ' (`vendor:publish --tag=audit-log-migrations`, then `migrate`).',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1279,7 +1345,7 @@ final class CheckCommandTest extends TestCase
         [$code, $output] = $this->check();
 
         self::assertSame(1, $code);
-        self::assertSame([self::MISSING_APPLICATION_KEY, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE], $output);
+        self::assertSame([self::MISSING_APPLICATION_KEY, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE], $output);
     }
 
     /**
@@ -1434,6 +1500,7 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1457,6 +1524,7 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] The checkpoint members table `audit_absent_members` does not exist on connection [testing]' . self::PUBLISH,
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1481,7 +1549,7 @@ final class CheckCommandTest extends TestCase
 
         $config->set(['audit-log.integrity.anchor.driver' => 'disk', 'audit-log.integrity.anchor.disk' => 'anchors']);
 
-        self::assertSame([1, ['[config] OK', '[connections] OK', '[schema] OK', self::UNCONFIGURED_DISK, '[delivery] OK', self::SPILL_NOTE]], $this->check());
+        self::assertSame([1, ['[config] OK', '[connections] OK', '[schema] OK', self::UNCONFIGURED_DISK, '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE]], $this->check());
 
         $config->set('filesystems.disks.anchors', ['driver' => 'local', 'root' => sys_get_temp_dir() . '/audit-log-anchors']);
 
@@ -1526,6 +1594,7 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -1810,18 +1879,245 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The check writes nothing: the table's rows are as they were.
+     * The check writes nothing: the entries, the lifecycle tables, the lock's
+     * row and the integrity state, with the installation id the migrations
+     * seed, are as they were after two runs.
      *
      * @return void
      */
     public function testTheCheckWritesNothing(): void
     {
-        $before = DB::table('audit_log_entries')->count();
+        $tables = ['audit_log_entries', 'audit_log_lifecycle', 'audit_log_holds', 'audit_log_import_batches', 'audit_log_checkpoints'];
+        $counts = static fn (): array => array_map(static fn (string $table): int => DB::table($table)->count(), $tables);
+        $before = $counts();
+        $state  = DB::table('audit_log_integrity_state')->get()->all();
+
+        self::assertSame([InstallationIdentity::NAME], array_column($state, 'name'));
 
         $this->check();
+        $this->check();
 
-        self::assertSame(0, $before);
-        self::assertSame(0, DB::table('audit_log_entries')->count());
+        self::assertSame([0, 0, 0, 0, 0], $before);
+        self::assertSame($before, $counts());
+        self::assertEquals($state, DB::table('audit_log_integrity_state')->get()->all());
+        $rows = DB::table('audit_log_lifecycle_lock')->get()->all();
+        $lock = array_map(static fn (object $row): array => ['id' => (int) $row->id, 'token' => $row->token, 'locked_at' => $row->locked_at], $rows);
+
+        self::assertSame([['id' => 1, 'token' => null, 'locked_at' => null]], $lock);
+    }
+
+    /**
+     * A missing installation id fails the run under `[lifecycle]`, and the
+     * check leaves it missing rather than writing one.
+     *
+     * @return void
+     */
+    public function testAMissingInstallationIdFailsTheRunAndIsNotWritten(): void
+    {
+        DB::table('audit_log_integrity_state')->delete();
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame([
+            '[lifecycle] The storage connection reaches no installation id; the package\'s migrations seed it, and `audit-log:seal` writes it when it is missing.',
+        ], self::problemsIn($output));
+        self::assertSame(0, DB::table('audit_log_integrity_state')->count());
+    }
+
+    /**
+     * The lifecycle subject is listed after `delivery`, `[lifecycle] OK` on a
+     * good install, and a lifecycle problem fails the run under it: here the
+     * lock's one row is missing.
+     *
+     * @return void
+     */
+    public function testTheLifecycleSubjectIsListed(): void
+    {
+        [$code, $output] = $this->check();
+
+        self::assertSame(0, $code);
+        self::assertSame(['[delivery] OK', '[lifecycle] OK'], array_slice($output, 4, 2));
+
+        DB::table('audit_log_lifecycle_lock')->delete();
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame(['[lifecycle] The lifecycle lock row is missing; run the migrations, which seed it.'], self::problemsIn($output));
+        self::assertSame('[lifecycle] The lifecycle lock row is missing; run the migrations, which seed it.', $output[5]);
+    }
+
+    /**
+     * A malformed lifecycle table's name leaves the lifecycle subject out,
+     * since it reads the tables, while a malformed retention or import setting
+     * leaves it in.
+     *
+     * @return void
+     */
+    public function testAMalformedLifecycleTableLeavesTheSubjectOut(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.lifecycle.holds_table', 'audit-holds');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertNotContains('[lifecycle] OK', $output);
+        self::assertSame([], array_values(array_filter($output, static fn (string $line): bool => str_starts_with($line, '[lifecycle]'))));
+
+        $config->set('audit-log.lifecycle.holds_table', 'audit_log_holds');
+        $config->set('audit-log.import.chunk', 99);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertContains('[lifecycle] OK', $output);
+    }
+
+    /**
+     * Notes are no problems: a hold past its review date and an import batch
+     * still running that has not moved for over an hour are each a
+     * `[lifecycle] note:` line after the spill note, and the run still exits
+     * `0`.
+     *
+     * @return void
+     */
+    public function testNotesLeaveTheExitCodeAsItIs(): void
+    {
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 09:00:00', 'UTC'));
+
+        $hold = app(HoldKeeper::class)->place(
+            '01932b4e-9000-7000-8000-0000000000a1',
+            HoldScope::all(),
+            new Authority(Reference::of('App\Models\User', '7'), 'case.review'),
+            HoldBasis::LEGAL_CLAIM,
+            new CarbonImmutable('2026-11-03 00:00:00', 'UTC'),
+        );
+
+        DB::table('audit_log_import_batches')->insert(self::batchRow('01932b4e-b000-7000-8000-000000000001', '2026-11-02 09:00:00.000000'));
+
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-04 09:00:00', 'UTC'));
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(0, $code);
+        self::assertSame([
+            self::SPILL_NOTE,
+            "[lifecycle] note: 1 hold is past its review date: `{$hold->id}`; review each, and release it once nothing obliges keeping it.",
+            '[lifecycle] note: 1 import batch is running with nothing written for over an hour: `01932b4e-b000-7000-8000-000000000001`;'
+                . ' close an interrupted one with `audit-log:import --close=<batch>`.',
+        ], array_slice($output, -3));
+    }
+
+    /**
+     * A category kept for less than it must be preserved is refused before any
+     * prune runs: a `config` problem naming both settings, which fails the run.
+     *
+     * @return void
+     */
+    public function testARetentionShorterThanItsPreservationIsAProblem(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.retention.categories', ['security' => 30]);
+        $config->set('audit-log.retention.preserve', ['security' => 60]);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame(
+            [
+                '[config] `audit-log.retention.categories.security` is shorter than `audit-log.retention.preserve.security`;'
+                    . ' a category must be kept at least as long as it is preserved.',
+            ],
+            self::problemsIn($output),
+        );
+        self::assertContains('[lifecycle] OK', $output);
+    }
+
+    /**
+     * Every malformed lifecycle, retention and import setting is listed by the
+     * one run, by its full path and in the order the settings are read.
+     *
+     * @return void
+     */
+    public function testEveryMalformedLifecycleLeafIsReportedInOneRun(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        foreach (self::BAD_LEAVES as $leaf => $bad) {
+
+            if (!str_starts_with($leaf, 'lifecycle.') && !str_starts_with($leaf, 'retention.') && !str_starts_with($leaf, 'import.')) {
+                continue;
+            }
+
+            $config->set("audit-log.{$leaf}", $bad);
+        }
+
+        $table = ' must be a table name of 1 to 47 lower-case letters, digits and underscores that does not start with a digit.';
+        $map   = ' must be a map of categories to days, each from 0 to 36500, 0 meaning forever.';
+
+        self::assertSame([
+            '[config] `audit-log.lifecycle.journal_table`' . $table,
+            '[config] `audit-log.lifecycle.holds_table`' . $table,
+            '[config] `audit-log.lifecycle.lock_table`' . $table,
+            '[config] `audit-log.import.batches_table`' . $table,
+            '[config] `audit-log.retention.after_days` must be an integer from 0 to 36500.',
+            '[config] `audit-log.retention.categories`' . $map,
+            '[config] `audit-log.retention.preserve`' . $map,
+            '[config] `audit-log.retention.batch` must be an integer from 100 to 10000.',
+            '[config] `audit-log.retention.max_seconds` must be an integer from 60 to 86400.',
+            '[config] `audit-log.retention.schedule` must be a cron expression, or null or empty to schedule nothing.',
+            '[config] `audit-log.import.chunk` must be an integer from 100 to 5000.',
+            '[config] `audit-log.import.max_skew_seconds` must be an integer from 0 to 86400.',
+            '[config] `audit-log.import.max_line_bytes` must be an integer from 1024 to 16777216.',
+        ], self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * Rows of `[the setting, the bad value, the text in it]`: a lifecycle,
+     * retention or import setting in each shape it is refused in.
+     *
+     * @return iterable<string, array{0: string, 1: array<array-key, int|string>|string, 2: string}>
+     */
+    public static function provideLifecycleValuesThatMustNotBePrinted(): iterable
+    {
+        yield from [
+            'a journal table'             => ['audit-log.lifecycle.journal_table', self::SENTINEL, self::SENTINEL],
+            'a lock table that is a list' => ['audit-log.lifecycle.lock_table', [self::SENTINEL], self::SENTINEL],
+            'a batches table'             => ['audit-log.import.batches_table', self::SENTINEL, self::SENTINEL],
+            'a retention'                 => ['audit-log.retention.after_days', self::SENTINEL, self::SENTINEL],
+            'a category of no grammar'    => ['audit-log.retention.categories', [self::SENTINEL . '!' => 30], self::SENTINEL],
+            'a category\'s retention'     => ['audit-log.retention.categories', ['security' => self::SENTINEL], self::SENTINEL],
+            'a preservation'              => ['audit-log.retention.preserve', ['security' => self::SENTINEL], self::SENTINEL],
+            'a schedule'                  => ['audit-log.retention.schedule', self::SENTINEL, self::SENTINEL],
+            'a chunk'                     => ['audit-log.import.chunk', self::SENTINEL, self::SENTINEL],
+            'a line limit'                => ['audit-log.import.max_line_bytes', self::SENTINEL, self::SENTINEL],
+        ];
+    }
+
+    /**
+     * A bad lifecycle, retention or import setting fails the run and never
+     * appears in its output, which names the setting by its key.
+     *
+     * @param  string  $setting
+     * @param  array<array-key, int|string>|string  $value
+     * @param  string  $sentinel
+     * @return void
+     */
+    #[DataProvider('provideLifecycleValuesThatMustNotBePrinted')]
+    public function testThePrintedOutputHoldsNoValueOfALifecycleSetting(string $setting, array|string $value, string $sentinel): void
+    {
+        app(ConfigRepository::class)->set($setting, $value);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertCount(1, self::problemsIn($output));
+        self::assertStringContainsString("`{$setting}", implode("\n", $output));
+        self::assertStringNotContainsString($sentinel, implode("\n", $output));
     }
 
     /**
@@ -1843,6 +2139,7 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] OK',
             '[delivery] The channel [missing] that `audit-log.failure.log_channel` names is not configured in `logging.channels`.',
+            '[lifecycle] OK',
             '[spill] The channel [missing] is not the documented file format, so replaying what it holds is unverified,'
                 . ' and whole records in plaintext go to it and to everything it feeds.',
         ], $output);
@@ -1909,7 +2206,7 @@ final class CheckCommandTest extends TestCase
         $config->set('logging.channels.audit_spill', DocumentedSpillChannel::config(sys_get_temp_dir() . '/audit-log-spill-' . getmypid() . '.log'));
         $config->set('audit-log.failure.log_channel', 'audit_spill');
 
-        self::assertSame([0, ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[spill] OK']], $this->check());
+        self::assertSame([0, ['[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', '[spill] OK']], $this->check());
     }
 
     /**
@@ -1925,12 +2222,12 @@ final class CheckCommandTest extends TestCase
 
         $config->set('audit-log.delivery.mode', 'queue');
 
-        self::assertSame([1, [self::MALFORMED_DELIVERY_MODE, '[connections] OK', '[schema] OK', '[integrity] OK', self::SPILL_NOTE]], $this->check());
+        self::assertSame([1, [self::MALFORMED_DELIVERY_MODE, '[connections] OK', '[schema] OK', '[integrity] OK', '[lifecycle] OK', self::SPILL_NOTE]], $this->check());
 
         $config->set('audit-log.delivery.mode', 'sync');
         $config->set('audit-log.failure.log_channel', 42);
 
-        self::assertSame([1, [self::MALFORMED_LOG_CHANNEL, '[connections] OK', '[schema] OK', '[integrity] OK']], $this->check());
+        self::assertSame([1, [self::MALFORMED_LOG_CHANNEL, '[connections] OK', '[schema] OK', '[integrity] OK', '[lifecycle] OK']], $this->check());
     }
 
     /**
@@ -2035,6 +2332,7 @@ final class CheckCommandTest extends TestCase
             '[schema] OK',
             '[integrity] OK',
             '[delivery] OK',
+            '[lifecycle] OK',
             self::SPILL_NOTE,
         ], $output);
     }
@@ -2155,7 +2453,7 @@ final class CheckCommandTest extends TestCase
         [$code, $output] = $this->check();
 
         self::assertSame(1, $code);
-        self::assertSame([...$capture, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE], $output);
+        self::assertSame([...$capture, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE], $output);
 
         $config->set('audit-log.delivery.outbox.connection', 42);
 
@@ -2242,7 +2540,7 @@ final class CheckCommandTest extends TestCase
         [$code, $output] = $this->check();
 
         self::assertSame(1, $code);
-        self::assertSame([...$read, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', self::SPILL_NOTE], $output);
+        self::assertSame([...$read, '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', self::SPILL_NOTE], $output);
 
         $config->set('audit-log.capture.bulk.max_members', 0);
 
@@ -2474,6 +2772,63 @@ final class CheckCommandTest extends TestCase
 
             $migration->up(); // @phpstan-ignore method.notFound
         }
+    }
+
+    /**
+     * Run the shipped lifecycle migrations with the settings as the test has
+     * them.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S4833")
+     * @SuppressWarnings("php:S2003")
+     */
+    private function migrateLifecycleTables(): void
+    {
+        foreach (self::LIFECYCLE_MIGRATION_PATHS as $path) {
+
+            $migration = include $path;
+
+            if (!$migration instanceof Migration) {
+                self::fail('A lifecycle migration file did not return a Migration instance.');
+            }
+
+            $migration->up(); // @phpstan-ignore method.notFound
+        }
+    }
+
+    /**
+     * An import batch row, `running`, last written at the stored time given.
+     *
+     * @param  string  $id
+     * @param  string  $updatedAt
+     * @return array<string, bool|int|string|null>
+     */
+    private static function batchRow(string $id, string $updatedAt): array
+    {
+        return [
+            'id'                  => $id,
+            'source_id'           => 'legacy',
+            'source_region'       => null,
+            'input_format'        => 'audit-log-import/v1',
+            'importer_type'       => 'App\Models\User',
+            'importer_id'         => '7',
+            'reason'              => 'case.review',
+            'external_reference'  => null,
+            'file_sha256'         => str_repeat('a', 64),
+            'externally_verified' => false,
+            'hold_id'             => null,
+            'status'              => 'running',
+            'lines_read'          => 0,
+            'imported'            => 0,
+            'duplicates'          => 0,
+            'conflicts'           => 0,
+            'rejected'            => 0,
+            'conflict_ids'        => null,
+            'started_at'          => $updatedAt,
+            'updated_at'          => $updatedAt,
+            'finished_at'         => null,
+        ];
     }
 
     /**

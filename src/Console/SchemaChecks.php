@@ -10,9 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 /**
  * The schema checks of `audit-log:check`: one of the package's tables exists on
  * its connection with the shape the shipped migration gives it (see
- * `TableShape`): the entries table unless another shape is given, or the
- * outbox, the deliveries, the checkpoints, the checkpoint members or the
- * integrity state table.
+ * `TableShape`): the entries table unless another shape is given, or any other
+ * table a shipped migration creates.
  *
  * The table's prefixed name must fit every index name. Each column the package
  * writes must exist with its type family, its length or precision (which SQLite
@@ -44,6 +43,7 @@ final readonly class SchemaChecks
         'integer'  => ['mysql' => 'int', 'pgsql' => 'int4', 'sqlite' => 'integer'],
         'bigint'   => ['mysql' => 'bigint', 'pgsql' => 'int8', 'sqlite' => 'integer'],
         'text'     => ['mysql' => 'text', 'pgsql' => 'text', 'sqlite' => 'text'],
+        'boolean'  => ['mysql' => 'tinyint(1)', 'pgsql' => 'bool', 'sqlite' => 'tinyint'],
     ];
 
     /** @var string The collation every character column must use on MySQL: binary, and NO PAD. */

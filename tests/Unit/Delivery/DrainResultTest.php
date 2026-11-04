@@ -11,7 +11,8 @@ use SineMacula\Laravel\AuditLog\Delivery\DrainResult;
 
 /**
  * Unit tests for a drain's tally: it starts at zero, counts each outcome apart,
- * and has failures only once a row failed.
+ * a row completed as pruned among them, and has failures only once a row
+ * failed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,7 +31,7 @@ final class DrainResultTest extends TestCase
     {
         $result = new DrainResult;
 
-        self::assertSame([0, 0, 0, 0, 0], self::counts($result));
+        self::assertSame([0, 0, 0, 0, 0, 0], self::counts($result));
         self::assertFalse($result->hasFailures());
     }
 
@@ -45,6 +46,12 @@ final class DrainResultTest extends TestCase
         $result = new DrainResult;
 
         $result->addDelivered();
+        $result->addPruned();
+        $result->addPruned();
+        $result->addPruned();
+        $result->addPruned();
+        $result->addPruned();
+        $result->addPruned();
         $result->addRetried();
         $result->addRetried();
         $result->addFailed();
@@ -60,12 +67,13 @@ final class DrainResultTest extends TestCase
         $result->addMissed();
         $result->addMissed();
 
-        self::assertSame([1, 2, 3, 4, 5], self::counts($result));
+        self::assertSame([1, 6, 2, 3, 4, 5], self::counts($result));
     }
 
     /**
      * Rows of `[how the outcome is added, whether the tally then has
-     * failures]`: only a failed row makes a drain unsuccessful.
+     * failures]`: only a failed row makes a drain unsuccessful, and a pruned
+     * row is complete.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Delivery\DrainResult): void, 1: bool}>
      */
@@ -74,6 +82,9 @@ final class DrainResultTest extends TestCase
         yield from [
             'delivered' => [static function (DrainResult $result): void {
                 $result->addDelivered();
+            }, false],
+            'pruned' => [static function (DrainResult $result): void {
+                $result->addPruned();
             }, false],
             'retried' => [static function (DrainResult $result): void {
                 $result->addRetried();
@@ -109,13 +120,13 @@ final class DrainResultTest extends TestCase
 
     /**
      * The tally's counts, in the order the command prints them: delivered,
-     * retried, failed, stale and missed.
+     * pruned, retried, failed, stale and missed.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\DrainResult  $result
      * @return list<int>
      */
     private static function counts(DrainResult $result): array
     {
-        return [$result->delivered(), $result->retried(), $result->failed(), $result->stale(), $result->missed()];
+        return [$result->delivered(), $result->pruned(), $result->retried(), $result->failed(), $result->stale(), $result->missed()];
     }
 }

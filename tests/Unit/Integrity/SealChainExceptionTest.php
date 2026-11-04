@@ -11,8 +11,9 @@ use SineMacula\Laravel\AuditLog\Integrity\SealChainException;
 
 /**
  * Unit tests for the seal chain exception: the message for a last seal whose
- * digest disagrees and for one of another log, the seal and finding each names,
- * the class it specialises, and the absence of any exception it could carry.
+ * digest disagrees, for one of another log, and for a journal head that cannot
+ * be read, the seal and finding each names, the class it specialises, and the
+ * absence of any exception it could carry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,6 +50,54 @@ final class SealChainExceptionTest extends TestCase
             'The last seal belongs to another log id, so no seal is chained onto it; the log id must not change once a seal exists.',
             SealChainException::forLog(self::SEAL_ID)->getMessage(),
         );
+    }
+
+    /**
+     * A journal head that cannot be read is refused with the fixed message,
+     * which names no value of the row.
+     *
+     * @return void
+     */
+    public function testTheJournalMessageIsPinned(): void
+    {
+        self::assertSame(
+            'The lifecycle journal\'s last row has a malformed sequence or HMAC, so no seal commits to it; run audit-log:verify.',
+            SealChainException::forJournal()->getMessage(),
+        );
+    }
+
+    /**
+     * A journal behind the last seal's commitment is refused with the fixed
+     * message, naming the last seal, with the commitment finding, and carrying
+     * nothing else.
+     *
+     * @return void
+     */
+    public function testAJournalBehindTheCommitmentNamesTheSeal(): void
+    {
+        $behind = SealChainException::forJournalBehind('01932b4e-c000-7000-8000-000000000001');
+
+        self::assertSame('The lifecycle journal\'s head is behind the last seal\'s commitment to it, so no seal commits to it; run audit-log:verify.', $behind->getMessage());
+        self::assertSame('01932b4e-c000-7000-8000-000000000001', $behind->sealId);
+        self::assertSame(Finding::JOURNAL_COMMITMENT, $behind->finding);
+        self::assertNull($behind->getPrevious());
+        self::assertSame(0, $behind->getCode());
+    }
+
+    /**
+     * The journal's refusal names no seal, since it is of the journal's head,
+     * and gives the finding of a journal row that cannot be read.
+     *
+     * @return void
+     */
+    public function testTheJournalRefusalNamesNoSealAndIsMalformed(): void
+    {
+        $journal = SealChainException::forJournal();
+
+        self::assertNull($journal->sealId);
+        self::assertSame(Finding::JOURNAL_MALFORMED, $journal->finding);
+        self::assertNull($journal->getPrevious());
+        self::assertSame(0, $journal->getCode());
     }
 
     /**

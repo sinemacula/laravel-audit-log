@@ -10,6 +10,7 @@ use Illuminate\Contracts\Encryption\EncryptException;
 use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
@@ -60,7 +61,7 @@ final class RecordPipelineTest extends TestCase
     private const string BULK_CODE = 'invoice.bulk_approved';
 
     /** @var string Why a reserved code without a package write is refused. */
-    private const string RESERVED_CODE = 'A code under the reserved prefix is written only by the package\'s own read path.';
+    private const string RESERVED_CODE = 'A code under the reserved prefix is written only by the package\'s own activity.';
 
     /** @var string Why a package write that is not fail-closed and immediate, or is a capture, is refused. */
     private const string LOOSE_PACKAGE_WRITE = 'A package write is written immediately and fail-closed, and is never a capture.';
@@ -577,6 +578,90 @@ final class RecordPipelineTest extends TestCase
         }
 
         self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * Rows of `[case]`: each code of the lifecycle's own activity.
+     *
+     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity}>
+     */
+    public static function provideLifecycleActivities(): iterable
+    {
+        foreach ([PackageActivity::PRUNED, PackageActivity::HELD, PackageActivity::RELEASED, PackageActivity::IMPORTED] as $case) {
+            yield $case->value => [$case];
+        }
+    }
+
+    /**
+     * A lifecycle code without a package write is refused as a read's is,
+     * before anything is consumed: a fail-closed, immediate builder from the
+     * facade, and one written with or without a capture's signal, record
+     * nothing.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
+     * @return void
+     */
+    #[DataProvider('provideLifecycleActivities')]
+    public function testALifecycleCodeWithoutAPackageWriteIsRefused(PackageActivity $case): void
+    {
+        $facade = AuditLog::event(self::CODE)->forPackage($case)->immediately()->failClosed();
+
+        try {
+            $facade->record();
+
+            self::fail('Expected a lifecycle code from the facade to be refused.');
+        } catch (\LogicException $exception) {
+            self::assertSame(self::RESERVED_CODE, $exception->getMessage());
+        }
+
+        self::assertFalse($facade->isConsumed());
+
+        foreach ([null, $this->signal()] as $capture) {
+            $pending = (new PendingRecord)->forPackage($case)->failClosed();
+
+            try {
+                self::pipeline(TenantContributor::class)->write($pending, $capture);
+
+                self::fail('Expected a lifecycle code without a package write to be refused.');
+            } catch (\LogicException $exception) {
+                self::assertSame(self::RESERVED_CODE, $exception->getMessage());
+            }
+
+            self::assertFalse($pending->isConsumed());
+            self::assertNull($pending->snapshot()->tenant);
+        }
+
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * A lifecycle code with a package write is written under the package's own
+     * definition: the `audit` category, version 1, its evidence kept and
+     * everything it does not list dropped.
+     *
+     * @return void
+     */
+    public function testALifecycleCodeWithAPackageWriteIsWritten(): void
+    {
+        $acknowledged = 0;
+        $package      = new PackageWrite(
+            static function (): void {},
+            static function () use (&$acknowledged): void {
+                $acknowledged++;
+            },
+        );
+
+        $pending = (new PendingRecord)->forPackage(PackageActivity::PRUNED)->failClosed()->withProperties(['deleted' => 3, 'status' => 'complete', 'tenant_id' => 'dropped']);
+        $record  = self::pipeline()->write($pending, null, $package);
+
+        self::assertSame(1, $acknowledged);
+        self::assertSame('audit_log.pruned', $record->event);
+        self::assertSame('audit', $record->category);
+        self::assertSame(1, $record->eventVersion);
+        self::assertSame(3, $record->properties['deleted'] ?? null);
+        self::assertSame('complete', $record->properties['status'] ?? null);
+        self::assertArrayNotHasKey('tenant_id', $record->properties ?? []);
+        self::assertSame([$record], $this->fake->recorded());
     }
 
     /**

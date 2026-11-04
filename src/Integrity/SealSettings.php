@@ -4,9 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
-use Cron\CronExpression;
 use Illuminate\Contracts\Config\Repository;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
+use SineMacula\Laravel\AuditLog\Config\ScheduleSetting;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 
 /**
@@ -270,17 +270,6 @@ final readonly class SealSettings
      */
     private function schedule(string $setting): ?string
     {
-        $key        = self::PREFIX . $setting;
-        $expression = $this->config->get($key, self::SCHEDULES[$setting]);
-
-        if ($expression === null || $expression === '') {
-            return null;
-        }
-
-        if (!is_string($expression) || !CronExpression::isValidExpression($expression)) {
-            throw new \InvalidArgumentException(sprintf('`%s` must be a cron expression, or null or empty to schedule nothing.', $key));
-        }
-
-        return $expression;
+        return ScheduleSetting::read($this->config, self::PREFIX . $setting, self::SCHEDULES[$setting]);
     }
 }

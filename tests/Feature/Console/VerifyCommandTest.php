@@ -27,8 +27,10 @@ use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorConflictException;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorFactory;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
@@ -38,6 +40,7 @@ use Symfony\Component\Console\Output\BufferedOutput;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Concerns\SeedsArtifacts;
+use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -49,12 +52,13 @@ use Tests\TestCase;
  * Feature tests for `audit-log:verify`: it prints a pinned line for each seal
  * as it is verified, then each finding of the run and the summary, in text or
  * one JSON object a line; the coverage is always printed, and a ranged run says
- * it is not the whole log; it fails non-zero on a tampered, incomplete or
- * unverifiable log and, with `--strict` and an anchor, on anything the anchor
- * does not confirm, except a seal awaiting its first anchoring; it refuses a
- * malformed option or range before verifying anything and alarms nothing; and a
- * failure or a stopped run dispatches the event and reports the exception, none
- * of which holds a value of an entry.
+ * it is not the whole log; the journal's line follows the anchoring, its counts
+ * in the JSON summary; it fails non-zero on a tampered, incomplete or
+ * unverifiable log, a journal finding among them, and, with `--strict` and an
+ * anchor, on anything the anchor does not confirm, except a seal awaiting its
+ * first anchoring; it refuses a malformed option or range before verifying
+ * anything and alarms nothing; and a failure or a stopped run dispatches the
+ * event and reports the exception, none of which holds a value of an entry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,7 +68,7 @@ use Tests\TestCase;
 #[CoversClass(VerifyCommand::class)]
 final class VerifyCommandTest extends TestCase
 {
-    use SealsEntries, SearchesForSecrets, SeedsArtifacts;
+    use SealsEntries, SearchesForSecrets, SeedsArtifacts, WritesTheJournal;
 
     /** @var string When the log is sealed by the seal command. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -74,6 +78,9 @@ final class VerifyCommandTest extends TestCase
 
     /** @var string When an entry is recorded that is overdue for sealing by the time a run verifies. */
     private const string OVERDUE_AT = '2026-10-30 12:00:00';
+
+    /** @var string The id of a hold the journal places. */
+    private const string HOLD_ID = '01932b4e-d000-7000-8000-000000000001';
 
     /** @var string The id of the operation that prunes a seal. */
     private const string OPERATION_ID = '01932b4e-a000-7000-8000-000000000001';
@@ -85,6 +92,7 @@ final class VerifyCommandTest extends TestCase
     private const string VALID_SUMMARY = "Checked seals 1 to 2 of head 2; no anchor is configured.\n"
         . "Integrity: 2 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n"
         . "Anchoring: 0 anchored, 2 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
+        . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
         . "Unsealed: 0 pending, 0 overdue.\n"
         . "Verification passed.\n";
 
@@ -182,6 +190,7 @@ final class VerifyCommandTest extends TestCase
             . "Checked seals 1 to 2 of head 2; no anchor is configured.\n"
             . "Integrity: 1 valid, 0 pruned, 0 incomplete, 0 unverifiable, 1 tampered.\n"
             . "Anchoring: 0 anchored, 2 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
+            . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
             . "Unsealed: 0 pending, 1 overdue.\n"
             . "Verification failed.\n",
             $this->printed(),
@@ -230,10 +239,74 @@ final class VerifyCommandTest extends TestCase
             'awaiting_anchor' => 0,
             'pending'         => 0,
             'overdue'         => 1,
+            'journal'         => ['rows' => 0, 'head' => null, 'committed' => null],
             'first_finding'   => 'overdue_unsealed',
             'first_bad_id'    => $late,
             'passed'          => false,
         ], $lines[2]);
+    }
+
+    /**
+     * The journal's line follows the anchoring: the rows read, the sequence of
+     * the chain's head, and the sequence the latest seal commits to.
+     *
+     * @return void
+     */
+    public function testItPrintsTheJournalLine(): void
+    {
+        $this->journalHold(self::HOLD_ID);
+        $this->sealLog(1);
+        $this->journalRow(JournalKind::RELEASE, ['hold_id' => self::HOLD_ID], self::HOLD_ID);
+
+        self::assertSame(0, $this->verify());
+        self::assertStringContainsString(
+            "Anchoring: 0 anchored, 1 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
+            . "Journal: 2 rows to sequence 2; the latest seal commits to 1.\n"
+            . "Unsealed: 0 pending, 0 overdue.\n",
+            $this->printed(),
+        );
+    }
+
+    /**
+     * The JSON summary holds the journal's counts, and so does a ranged run's,
+     * since every run verifies the whole journal.
+     *
+     * @return void
+     */
+    public function testTheJsonSummaryHoldsTheJournal(): void
+    {
+        $this->sealLog(1);
+        $this->journalHold(self::HOLD_ID);
+        $this->sealLog(1);
+
+        foreach ([[], ['--from' => '1', '--to' => '1']] as $options) {
+            self::assertSame(0, $this->verify(['--json' => true, ...$options]));
+
+            $lines = $this->jsonLines();
+
+            self::assertSame(['rows' => 1, 'head' => 1, 'committed' => 1], $lines[array_key_last($lines)]['journal'] ?? null);
+        }
+    }
+
+    /**
+     * A journal finding is printed as a finding of the run, fails the run
+     * non-zero and alarms with it, a ranged run included.
+     *
+     * @return void
+     */
+    public function testAJournalFindingExitsNonZero(): void
+    {
+        $this->sealLog(1);
+
+        $release = $this->journalRow(JournalKind::RELEASE, ['hold_id' => self::HOLD_ID], self::HOLD_ID);
+
+        self::assertSame(1, $this->verify(['--from' => '1', '--to' => '1']));
+        self::assertStringContainsString(sprintf("finding journal_transition integrity=tampered count=1 first=%s\n", $release->id), $this->printed());
+        self::assertStringEndsWith("Verification failed.\n", $this->printed());
+        $alarm = $this->singleAlarm();
+
+        self::assertSame('journal_transition', $alarm->finding);
+        self::assertSame($release->id, $alarm->firstBadId);
     }
 
     /**
@@ -366,8 +439,8 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A segment whose entries a valid prune record accounts for is pruned, and
-     * the run passes.
+     * A segment whose entries a valid prune record of both its members accounts
+     * for is pruned, and the run passes.
      *
      * @return void
      */
@@ -381,9 +454,18 @@ final class VerifyCommandTest extends TestCase
         $ledger = new InMemoryPruneLedger;
 
         $digest = (string) $seal['seal_digest'];
-        $record = app(SealSigner::class)->signPrune((string) $seal['log_id'], (string) $seal['id'], $digest, 2, self::OPERATION_ID, '2027-11-01T00:00:00.000000Z');
+        $record = app(SealSigner::class)->signPrune(
+            (string) $seal['log_id'],
+            (string) $seal['id'],
+            $digest,
+            2,
+            PruneBitmap::encode([0, 1], 2),
+            2,
+            self::OPERATION_ID,
+            '2027-11-01T00:00:00.000000Z',
+        );
 
-        $ledger->record($record);
+        $ledger->add($record);
 
         app()->instance(PruneLedger::class, $ledger);
 
@@ -595,6 +677,7 @@ final class VerifyCommandTest extends TestCase
             . "Checked seals 1 to 2 of head 2; the anchor's head is 2.\n"
             . "Integrity: 2 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n"
             . "Anchoring: 2 anchored, 0 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
+            . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
             . "Unsealed: 0 pending, 0 overdue.\n"
             . "Verification passed.\n",
             $this->printed(),
@@ -656,6 +739,7 @@ final class VerifyCommandTest extends TestCase
             "Checked no seals: the log has none; no anchor is configured.\n"
             . "Integrity: 0 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n"
             . "Anchoring: 0 anchored, 0 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
+            . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
             . "Unsealed: 0 pending, 0 overdue.\n"
             . "Verification passed.\n",
             $this->printed(),
@@ -695,6 +779,7 @@ final class VerifyCommandTest extends TestCase
             . "Checked seals 2 to 2 of head 3; no anchor is configured.\n"
             . "Integrity: 1 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n"
             . "Anchoring: 0 anchored, 1 unanchored (0 awaiting their first anchoring), 0 unavailable, 0 contradicted.\n"
+            . "Journal: 0 rows to sequence none; the latest seal commits to none.\n"
             . self::RANGED . "\n"
             . "Verification passed.\n",
             $this->printed(),

@@ -12,9 +12,9 @@ use SineMacula\Laravel\AuditLog\Delivery\ReplayResult;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 
 /**
- * Unit tests for the tally of one replay: each outcome counted apart, the
- * bounded list of events and what an event may hold, how a drain's tally maps
- * across, and which outcomes make a replay unsuccessful.
+ * Unit tests for the tally of one replay: each outcome counted apart, a pruned
+ * record among them, the bounded list of events and what an event may hold, how
+ * a drain's tally maps across, and which outcomes make a replay unsuccessful.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,7 +36,7 @@ final class ReplayResultTest extends TestCase
     {
         $result = new ReplayResult;
 
-        self::assertSame([0, 0, 0, 0, []], self::tally($result));
+        self::assertSame([0, 0, 0, 0, 0, []], self::tally($result));
         self::assertSame([], $result->events());
         self::assertSame(0, $result->omittedEvents());
         self::assertFalse($result->hasSkippedOrFailed());
@@ -55,12 +55,15 @@ final class ReplayResultTest extends TestCase
         $result->addReplayed('line 1', self::ID);
         $result->addReplayed('line 2', self::ID);
         $result->addWouldReplay('line 3', self::ID);
+        $result->addPruned('line 8', self::ID);
+        $result->addPruned('line 9', self::ID);
+        $result->addPruned('line 10', self::ID);
         $result->addFailed('line 4', self::ID, \DomainException::class);
         $result->addSkipped('line 5', EnvelopeFailure::SIGNATURE_MISMATCH);
         $result->addSkipped('line 6', EnvelopeFailure::SIGNATURE_MISMATCH);
         $result->addSkipped('line 7', EnvelopeFailure::UNSIGNED);
 
-        self::assertSame([2, 1, 1, 0, ['signature_mismatch' => 2, 'unsigned' => 1]], self::tally($result));
+        self::assertSame([2, 1, 3, 1, 0, ['signature_mismatch' => 2, 'unsigned' => 1]], self::tally($result));
     }
 
     /**
@@ -75,6 +78,7 @@ final class ReplayResultTest extends TestCase
 
         $result->addReplayed('line 1', self::ID);
         $result->addWouldReplay('outbox', self::ID);
+        $result->addPruned('line 2', self::ID);
         $result->addFailed('line 3', self::ID, \DomainException::class);
         $result->addSkipped('line 4', EnvelopeFailure::UNSIGNED, self::ID);
         $result->addSkipped('line 5', EnvelopeFailure::TRUNCATED);
@@ -82,6 +86,7 @@ final class ReplayResultTest extends TestCase
         self::assertSame([
             'line 1: replayed ' . self::ID,
             'outbox: would_replay ' . self::ID,
+            'line 2: pruned ' . self::ID,
             'line 3: failed ' . self::ID . ' (DomainException)',
             'line 4: unsigned ' . self::ID,
             'line 5: truncated',
@@ -145,10 +150,11 @@ final class ReplayResultTest extends TestCase
     }
 
     /**
-     * A drain's rows delivered are replayed; those failed, or released for a
-     * later attempt because a destination failed again, were not delivered; and
-     * those another drain took over or claimed first are that drain's. It lists
-     * no event, since it does not say which row ended how.
+     * A drain's rows delivered are replayed; those whose record was pruned are
+     * pruned; those failed, or released for a later attempt because a
+     * destination failed again, were not delivered; and those another drain
+     * took over or claimed first are that drain's. It lists no event, since it
+     * does not say which row ended how.
      *
      * @return void
      */
@@ -159,6 +165,12 @@ final class ReplayResultTest extends TestCase
         $drain->addDelivered();
         $drain->addDelivered();
         $drain->addDelivered();
+        $drain->addPruned();
+        $drain->addPruned();
+        $drain->addPruned();
+        $drain->addPruned();
+        $drain->addPruned();
+        $drain->addPruned();
         $drain->addFailed();
         $drain->addRetried();
         $drain->addRetried();
@@ -174,16 +186,17 @@ final class ReplayResultTest extends TestCase
         $result->addFailed('line 2', self::ID, \DomainException::class);
         $result->addDrain($drain);
 
-        self::assertSame([4, 0, 4, 5, []], self::tally($result));
+        self::assertSame([4, 0, 6, 4, 5, []], self::tally($result));
         self::assertCount(2, $result->events());
 
         $result->addDrain($drain);
 
-        self::assertSame([7, 0, 7, 10, []], self::tally($result));
+        self::assertSame([7, 0, 12, 7, 10, []], self::tally($result));
     }
 
     /**
-     * Only a skipped line or a failed record makes a replay unsuccessful.
+     * Only a skipped line or a failed record makes a replay unsuccessful: a
+     * pruned record, counted on its own or by a drain, is complete.
      *
      * @return void
      */
@@ -194,9 +207,11 @@ final class ReplayResultTest extends TestCase
 
         $drained->addStale();
         $drained->addMissed();
+        $drained->addPruned();
 
         $counted->addReplayed('line 1', self::ID);
         $counted->addWouldReplay('line 2', self::ID);
+        $counted->addPruned('line 3', self::ID);
         $counted->addDrain($drained);
 
         $failed  = new ReplayResult;
@@ -211,13 +226,14 @@ final class ReplayResultTest extends TestCase
     }
 
     /**
-     * The tally's counts: replayed, would replay, failed, deferred and skipped.
+     * The tally's counts: replayed, would replay, pruned, failed, deferred and
+     * skipped.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\ReplayResult  $result
-     * @return array{0: int, 1: int, 2: int, 3: int, 4: array<string, int>}
+     * @return array{0: int, 1: int, 2: int, 3: int, 4: int, 5: array<string, int>}
      */
     private static function tally(ReplayResult $result): array
     {
-        return [$result->replayed(), $result->wouldReplay(), $result->failed(), $result->deferred(), $result->skipped()];
+        return [$result->replayed(), $result->wouldReplay(), $result->pruned(), $result->failed(), $result->deferred(), $result->skipped()];
     }
 }

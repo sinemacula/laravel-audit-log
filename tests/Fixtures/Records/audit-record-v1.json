@@ -26,6 +26,7 @@
     "source_region": "eu-west-2",
     "source_record_id": null,
     "import_batch_id": null,
+    "source_digest": null,
     "ip": "203.0.113.7",
     "user_agent": "Mozilla/5.0",
     "context": {

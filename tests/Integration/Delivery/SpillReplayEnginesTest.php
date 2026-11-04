@@ -69,6 +69,15 @@ final class SpillReplayEnginesTest extends TestCase
     /** @var string The import batch an imported record came in. */
     private const string IMPORT_BATCH_ID = '019a4b2e-7c10-7000-8000-00000000abcd';
 
+    /** @var array<string, ?string> The columns of an imported record in place of the captured record's. */
+    private const array IMPORTED = [
+        'provenance'       => 'imported',
+        'source_record_id' => 'legacy-0042',
+        'import_batch_id'  => self::IMPORT_BATCH_ID,
+        'source_digest'    => '9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c',
+        'origin'           => null,
+    ];
+
     /** @var string One secret of the integrity key ring. */
     private const string FIRST_SECRET = 'a-first-secret-of-32-bytes-long!';
 
@@ -76,7 +85,7 @@ final class SpillReplayEnginesTest extends TestCase
     private const string MEMORY_LIMIT = '1G';
 
     /** @var int The columns of a row, the signature included. */
-    private const int COLUMN_COUNT = 36;
+    private const int COLUMN_COUNT = 37;
 
     /** @var int The depth a stored row is decoded to, and an envelope with its own object. */
     private const int JSON_DEPTH = 513;
@@ -276,7 +285,7 @@ final class SpillReplayEnginesTest extends TestCase
             'a NUL in a JSON value'            => [['properties' => ['note' => "a\0b"]]],
             'the largest integers'             => [['properties' => ['max' => PHP_INT_MAX, 'min' => PHP_INT_MIN]]],
             'a trailing space in a column'     => [['user_agent' => 'agent   ', 'correlation_id' => 'app:ticket ']],
-            'an imported record'               => [['provenance' => 'imported', 'source_record_id' => 'legacy-0042', 'import_batch_id' => self::IMPORT_BATCH_ID, 'origin' => null]],
+            'an imported record'               => [self::IMPORTED],
             'no JSON at all'                   => [['properties' => null, 'context' => null]],
         ];
     }

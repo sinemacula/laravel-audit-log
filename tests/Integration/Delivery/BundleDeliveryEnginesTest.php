@@ -9,6 +9,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Database\Connection;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Log\LogManager;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -271,10 +272,11 @@ final class BundleDeliveryEnginesTest extends TestCase
 
     /**
      * Two replays of one spilled bundle race, each in a process and on a
-     * connection of its own: the second's artifact insert waits on the first's
-     * uncommitted artifact, or on SQLite on the file's one write lock, and,
-     * once both of the first's rows are committed, finds the bundle stored
-     * already, so both are replayed and one entry and one artifact are left.
+     * connection of its own: the first holds its rows uncommitted inside its
+     * lifecycle transaction, the second waits on the lifecycle lock that
+     * transaction holds, or on SQLite on the file's one write lock, and, once
+     * both of the first's rows are committed, finds the bundle stored already,
+     * so both are replayed and one entry and one artifact are left.
      *
      * @return void
      */
@@ -294,17 +296,25 @@ final class BundleDeliveryEnginesTest extends TestCase
             file_put_contents($this->childFile(self::OUTCOME), json_encode(['tally' => self::tally($result), 'waited' => microtime(true) - $started], JSON_THROW_ON_ERROR));
         });
 
-        $storage = DB::connection(StorageConnection::name());
+        $held = false;
 
-        $storage->beginTransaction();
+        DB::connection(StorageConnection::name())->listen(function (QueryExecuted $query) use (&$held): void {
+            if ($held || !str_starts_with(strtolower($query->sql), 'insert') || !str_contains($query->sql, EntrySettings::table())) {
+                return;
+            }
+
+            // Both rows are written and uncommitted: let the second replay
+            // start, and hold them a while before the transaction commits
+            $held = true;
+
+            $this->openGate(self::START);
+
+            usleep(self::HOLD_MICROSECONDS);
+        });
 
         $first = $this->replay($file);
 
-        $this->openGate(self::START);
-
-        usleep(self::HOLD_MICROSECONDS);
-
-        $storage->commit();
+        self::assertTrue($held);
 
         $this->assertKilled($this->waitForChild($child));
 

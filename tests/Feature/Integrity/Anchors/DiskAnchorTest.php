@@ -51,7 +51,7 @@ final class DiskAnchorTest extends TestCase
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
     /** @var string The golden first seal's digest. */
-    private const string DIGEST = '329162defc18f3f10f3a8a351a7faa0c0e5e1004d65ea3b432feb0b54d3282c6';
+    private const string DIGEST = '81472ef9f38d641924cf10f61fa9b5c57f5c7dfbd10c8b7d26bcc3259dde7069';
 
     /** @var string The marker of the golden first seal. */
     private const string MARKER = 'audit-log-anchors/app-eu-1/by-sequence/00000000000000000001';
@@ -453,8 +453,8 @@ final class DiskAnchorTest extends TestCase
      */
     public static function provideOtherReceipts(): iterable
     {
-        $path = 'audit-log-anchors/app-eu-1/00000000000000000001-329162defc18f3f10f3a8a351a7faa0c0e5e1004d65ea3b432feb0b54d3282c6.json';
-        $hash = '43a5f8ceb107717979f5c5179fe22278e529585c1d95e7d7f2e403f051e69a65';
+        $path = 'audit-log-anchors/app-eu-1/00000000000000000001-81472ef9f38d641924cf10f61fa9b5c57f5c7dfbd10c8b7d26bcc3259dde7069.json';
+        $hash = '92587ef56efe79888e255e02b8e86123728c1d223d9cf93157de524c7a5c7542';
 
         yield from [
             'another hash'         => [['path' => $path, 'sha256' => str_repeat('0', 64)]],

@@ -14,7 +14,8 @@ use Tests\Fixtures\Database\EntriesTableShape;
  * Unit tests for the shapes the schema checks compare the package's tables
  * against: the entries table's is what its migration gives, column by column
  * and index by index, the artifacts', the outbox's, the deliveries', the
- * checkpoints', the checkpoint members' and the integrity state's are what
+ * checkpoints', the checkpoint members', the integrity state's, the lifecycle
+ * journal's, the holds', the lifecycle lock's and the import batches' are what
  * theirs give, and each names its table and describes a column the package does
  * not write in its own words.
  *
@@ -145,9 +146,9 @@ final class TableShapeTest extends TestCase
 
     /**
      * The checkpoints shape is what its migration gives: the seal's id as the
-     * key, its place in the chain, its members' digest, its times, its
-     * signature, the four anchor columns, one seal per sequence and the index
-     * the anchorer reads the seals not yet anchored by.
+     * key, its place in the chain, its members' digest, its times, the journal
+     * head it commits to, its signature, the four anchor columns, one seal per
+     * sequence and the index the anchorer reads the seals not yet anchored by.
      *
      * @return void
      */
@@ -170,6 +171,8 @@ final class TableShapeTest extends TestCase
             'signer'             => ['string', 16, false],
             'key_id'             => ['string', 32, false],
             'algorithm_version'  => ['smallint', null, false],
+            'journal_sequence'   => ['bigint', null, true],
+            'journal_head'       => ['string', 64, true],
             'signature'          => ['string', 64, false],
             'anchor'             => ['string', 64, true],
             'anchor_receipt'     => ['json', null, true],
@@ -179,6 +182,7 @@ final class TableShapeTest extends TestCase
         self::assertSame([
             '_sequence_unique' => [['sequence'], true],
             '_anchored_index'  => [['anchored_at', 'sequence'], false],
+            '_journal_index'   => [['journal_sequence'], false],
         ], $shape->indexes);
         self::assertSame(['id'], $shape->primary);
     }
@@ -223,6 +227,170 @@ final class TableShapeTest extends TestCase
     }
 
     /**
+     * The entries shape holds the source digest, nullable, after the import
+     * batch and before the address, so a schema without it is reported.
+     *
+     * @return void
+     */
+    public function testTheEntriesShapeHoldsTheSourceDigest(): void
+    {
+        $columns = array_keys(TableShape::entries()->columns);
+        $at      = array_search('source_digest', $columns, true);
+
+        self::assertSame(['string', 64, true], TableShape::entries()->columns['source_digest']);
+        self::assertIsInt($at);
+        self::assertSame(['import_batch_id', 'source_digest', 'ip'], array_slice($columns, $at - 1, 3));
+        self::assertCount(37, $columns);
+    }
+
+    /**
+     * The lifecycle journal shape is what its migration gives: the row's id as
+     * the key, its place in the chain, its kind and operation, its authority,
+     * the seal and the hold it names, its payload and digest, its link and its
+     * signature, one row per sequence, and the lookups by seal, hold and kind.
+     *
+     * @return void
+     */
+    public function testTheJournalShapeIsWhatTheMigrationGives(): void
+    {
+        $shape = TableShape::journal();
+
+        self::assertSame([
+            'id'                 => ['uuid', 36, false],
+            'sequence'           => ['bigint', null, false],
+            'log_id'             => ['string', 64, false],
+            'kind'               => ['string', 32, false],
+            'operation_id'       => ['uuid', 36, false],
+            'occurred_at'        => ['datetime', 6, false],
+            'authority_type'     => ['string', 191, true],
+            'authority_id'       => ['string', 191, true],
+            'reason'             => ['string', 64, true],
+            'external_reference' => ['string', 191, true],
+            'seal_id'            => ['uuid', 36, true],
+            'hold_id'            => ['uuid', 36, true],
+            'payload'            => ['longtext', null, false],
+            'payload_digest'     => ['string', 64, false],
+            'previous_hmac'      => ['string', 64, true],
+            'key_id'             => ['string', 32, false],
+            'hmac'               => ['string', 64, false],
+        ], $shape->columns);
+        self::assertSame([
+            '_sequence_unique' => [['sequence'], true],
+            '_seal_index'      => [['seal_id'], false],
+            '_hold_index'      => [['hold_id'], false],
+            '_kind_index'      => [['kind', 'occurred_at'], false],
+        ], $shape->indexes);
+        self::assertSame(['id'], $shape->primary);
+    }
+
+    /**
+     * The holds shape is what its migration gives: the hold's id as the key,
+     * its scope and digest, its basis, batch and times, its authority, and the
+     * operation and journal row that placed it, found by review date and by
+     * import batch.
+     *
+     * @return void
+     */
+    public function testTheHoldsShapeIsWhatTheMigrationGives(): void
+    {
+        $shape = TableShape::holds();
+
+        self::assertSame([
+            'hold_id'            => ['uuid', 36, false],
+            'scope'              => ['longtext', null, false],
+            'scope_digest'       => ['string', 64, false],
+            'basis'              => ['string', 32, false],
+            'import_batch_id'    => ['uuid', 36, true],
+            'placed_at'          => ['datetime', 6, false],
+            'review_by'          => ['datetime', 6, true],
+            'authority_type'     => ['string', 191, false],
+            'authority_id'       => ['string', 191, false],
+            'reason'             => ['string', 64, false],
+            'external_reference' => ['string', 191, true],
+            'operation_id'       => ['uuid', 36, false],
+            'journal_sequence'   => ['bigint', null, false],
+        ], $shape->columns);
+        self::assertSame([
+            '_review_index' => [['review_by'], false],
+            '_batch_index'  => [['import_batch_id'], false],
+        ], $shape->indexes);
+        self::assertSame(['hold_id'], $shape->primary);
+    }
+
+    /**
+     * The lifecycle lock shape is what its migration gives: the one row's id as
+     * the key, the token and the time of the last lock, and no other index.
+     *
+     * @return void
+     */
+    public function testTheLockShapeIsWhatTheMigrationGives(): void
+    {
+        $shape = TableShape::lock();
+
+        self::assertSame([
+            'id'        => ['smallint', null, false],
+            'token'     => ['string', 64, true],
+            'locked_at' => ['datetime', 6, true],
+        ], $shape->columns);
+        self::assertSame([], $shape->indexes);
+        self::assertSame(['id'], $shape->primary);
+    }
+
+    /**
+     * The import batches shape is what its migration gives: the batch's id as
+     * the key, its source and format, its importer, its file, its hold, its
+     * status and counts, its conflicts and its times, found by status and by
+     * when each was last written.
+     *
+     * @return void
+     */
+    public function testTheImportBatchesShapeIsWhatTheMigrationGives(): void
+    {
+        $shape = TableShape::importBatches();
+
+        self::assertSame([
+            'id'                  => ['uuid', 36, false],
+            'source_id'           => ['string', 64, false],
+            'source_region'       => ['string', 32, true],
+            'input_format'        => ['string', 32, false],
+            'importer_type'       => ['string', 191, false],
+            'importer_id'         => ['string', 191, false],
+            'reason'              => ['string', 64, false],
+            'external_reference'  => ['string', 191, true],
+            'file_sha256'         => ['string', 64, false],
+            'externally_verified' => ['boolean', null, false],
+            'hold_id'             => ['uuid', 36, true],
+            'status'              => ['string', 16, false],
+            'lines_read'          => ['integer', null, false],
+            'imported'            => ['integer', null, false],
+            'duplicates'          => ['integer', null, false],
+            'conflicts'           => ['integer', null, false],
+            'rejected'            => ['integer', null, false],
+            'conflict_ids'        => ['text', null, true],
+            'started_at'          => ['datetime', 6, false],
+            'updated_at'          => ['datetime', 6, false],
+            'finished_at'         => ['datetime', 6, true],
+        ], $shape->columns);
+        self::assertSame(['_status_index' => [['status', 'updated_at'], false]], $shape->indexes);
+        self::assertSame(['id'], $shape->primary);
+    }
+
+    /**
+     * At the longest table name the setting accepts, every index a lifecycle
+     * shape names fits PostgreSQL's 63 characters.
+     *
+     * @return void
+     */
+    public function testEveryLifecycleIndexFitsAtTheLongestTableName(): void
+    {
+        foreach ([TableShape::journal(), TableShape::holds(), TableShape::lock(), TableShape::importBatches()] as $shape) {
+            foreach (array_keys($shape->indexes) as $suffix) {
+                self::assertLessThanOrEqual(63, 47 + strlen($suffix), $suffix);
+            }
+        }
+    }
+
+    /**
      * Rows of `[the shape, its label, how a column it does not hold is
      * described]`.
      *
@@ -238,14 +406,18 @@ final class TableShapeTest extends TestCase
             'the checkpoints'        => [TableShape::checkpoints(), 'checkpoints', 'Column `notes` is not one the package writes, so no seal covers it.'],
             'the checkpoint members' => [TableShape::members(), 'checkpoint members', 'Column `notes` is not one the package writes, so no seal covers it.'],
             'the integrity state'    => [TableShape::state(), 'integrity state', 'Column `notes` is not one the package writes.'],
+            'the lifecycle journal'  => [TableShape::journal(), 'lifecycle journal', 'Column `notes` is not one the package writes, so no journal row\'s HMAC covers it.'],
+            'the holds'              => [TableShape::holds(), 'holds', 'Column `notes` is not one the package writes.'],
+            'the lifecycle lock'     => [TableShape::lock(), 'lifecycle lock', 'Column `notes` is not one the package writes.'],
+            'the import batches'     => [TableShape::importBatches(), 'import batches', 'Column `notes` is not one the package writes.'],
         ];
     }
 
     /**
      * Each shape names its table, and describes a column the package does not
-     * write in its own words: an entry is covered by an HMAC, a seal and its
-     * members by the seal, and nothing else, an artifact's own columns
-     * included, by either.
+     * write in its own words: an entry and a journal row are covered by an
+     * HMAC, a seal and its members by the seal, and nothing else, an artifact's
+     * own columns included, by either.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
      * @param  string  $label

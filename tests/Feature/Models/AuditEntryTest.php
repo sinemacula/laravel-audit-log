@@ -16,6 +16,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Casts\UtcInstant;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
 use SineMacula\Laravel\AuditLog\Models\ImmutableEntryException;
+use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\TestCase;
 
 /**
@@ -113,6 +114,7 @@ final class AuditEntryTest extends TestCase
         'source_region'     => null,
         'source_record_id'  => null,
         'import_batch_id'   => null,
+        'source_digest'     => null,
         'ip'                => '203.0.113.7',
         'user_agent'        => 'Mozilla/5.0',
         'context'           => '{"flags":[1,2],"locale":"en-GB"}',
@@ -505,6 +507,26 @@ final class AuditEntryTest extends TestCase
         self::assertSame('invoice.approved', $entry->event);
         self::assertSame('captured', $entry->provenance);
         self::assertNull($entry->reason);
+        self::assertNull($entry->source_digest);
+    }
+
+    /**
+     * The model's docblock names every column of the entries table as a
+     * property, in table order, the source digest included, and no other, and
+     * says pruning never deletes through it.
+     *
+     * @return void
+     */
+    public function testItsDocblockDocumentsEveryColumn(): void
+    {
+        $docblock = (string) (new \ReflectionClass(AuditEntry::class))->getDocComment();
+
+        preg_match_all('/@property\s.*\$(\w+)$/m', $docblock, $matches);
+
+        self::assertSame(array_keys(RowCodec::COLUMNS), $matches[1]);
+        self::assertStringContainsString('@property ?string $source_digest', $docblock);
+        self::assertStringContainsString('never through the model', preg_replace('/\s+\*\s+/', ' ', $docblock) ?? '');
+        self::assertStringNotContainsString('reserved for pruning', $docblock);
     }
 
     /**

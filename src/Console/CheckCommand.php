@@ -10,6 +10,7 @@ use Illuminate\Database\DatabaseManager;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
@@ -59,19 +60,31 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * `IntegrityChecks`, skipped when the integrity key settings are malformed) and
  * `[delivery]` (the spill channel, the store when a failure is thrown, and in
  * outbox mode the outbox and deliveries tables; see `DeliveryChecks`, skipped
- * when the storage connection or a failure or delivery setting is malformed). A
- * malformed context, source, definition, redaction, capture, read or export
+ * when the storage connection or a failure or delivery setting is malformed)
+ * and `[lifecycle]` (the journal, holds, lifecycle lock and import batches
+ * tables' shapes, the lock's row, the bound retention policy's version, the
+ * installation's identity through both connections, the journal's
+ * verification and the holds projection's drift; see `LifecycleChecks`,
+ * skipped when the storage connection is malformed or not configured, or a
+ * lifecycle table's name or an integrity setting the journal is read with is
+ * malformed). The lifecycle, retention and import settings are read under
+ * `[config]` too, after the read and export settings. A malformed context,
+ * source, definition, redaction, capture, read, export, retention or import
  * setting, or artifacts table's name, skips nothing, since no later subject
  * reads it. After every subject, `[spill] OK` says the spill channel is the one
  * the documentation gives, or a `[spill]` warning says replaying what it holds
  * is unverified; that is a note, not a problem, and leaves the exit code as it
- * is, and it is left out while the channel setting is malformed. It does not
- * warn about a storage connection shared with the application, which every
- * default install would trip. The command writes nothing and prints no secret,
- * statement or binding: a malformed setting is named by its key and never its
- * value, only the name of a connection, guard, log channel or disk is printed,
- * and a connection that cannot be opened or read, or a store that cannot be
- * resolved, is named with the class of what was thrown, never its message.
+ * is, and it is left out while the channel setting is malformed. Each
+ * lifecycle note follows it as `[lifecycle] note: …`, a hold past its review
+ * date or an import that stopped moving, which leaves the exit code as it is
+ * too. It does not warn about a storage connection shared with the
+ * application, which every default install would trip. The command writes
+ * nothing, reading the installation id the migrations seed, and prints no
+ * secret, statement or binding: a malformed setting is named by its key and
+ * never its value, only the name of a connection, guard, log channel or disk
+ * and the id of a journal row, a hold or an import batch is printed, and a
+ * connection that cannot be opened or read, or a store or a policy that cannot
+ * be resolved, is named with the class of what was thrown, never its message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -85,23 +98,24 @@ final class CheckCommand extends Command
     protected $signature = 'audit-log:check';
 
     /** @var string The console command description. */
-    protected $description = 'Check the audit log settings, connections, schema, integrity keys, tables and anchor, and delivery';
+    protected $description = 'Check the audit log settings, connections, schema, integrity keys, tables and anchor, delivery, and lifecycle';
 
     /**
      * Run every check, then report each problem, or that a subject has none,
-     * and last the note on the spill channel.
+     * and last the notes on the spill channel and the lifecycle.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityChecks  $integrity
+     * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
      * @return int
      */
-    public function handle(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery, IntegrityChecks $integrity): int
+    public function handle(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery, IntegrityChecks $integrity, LifecycleChecks $lifecycle): int
     {
         $found = [];
 
-        foreach ($this->checks($config, $database, $delivery, $integrity) as $subject => $checks) {
+        foreach ($this->checks($config, $database, $delivery, $integrity, $lifecycle) as $subject => $checks) {
 
             $problems = [];
 
@@ -123,7 +137,7 @@ final class CheckCommand extends Command
             }
         }
 
-        $this->noteSpill($delivery);
+        $this->notes($delivery, $lifecycle);
 
         return array_merge(...array_values($found)) === [] ? self::SUCCESS : self::FAILURE;
     }
@@ -136,11 +150,12 @@ final class CheckCommand extends Command
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityChecks  $integrity
+     * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
      * @return array<string, list<\Closure(): list<string>>>
      */
-    private function checks(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery, IntegrityChecks $integrity): array
+    private function checks(ConfigRepository $config, DatabaseManager $database, DeliveryChecks $delivery, IntegrityChecks $integrity, LifecycleChecks $lifecycle): array
     {
-        [$storageCheck, $maintenanceCheck, $tableCheck, $integrityCheck, $deliveryCheck, $sealCheck] = self::settingChecks($config);
+        [$storageCheck, $maintenanceCheck, $tableCheck, $integrityCheck, $deliveryCheck, $sealCheck, $lifecycleCheck] = self::settingChecks($config);
 
         $checks  = ['config' => [$storageCheck, $maintenanceCheck, $tableCheck, ...self::integritySettingChecks($config), ...self::captureSettingChecks($config)]];
         $storage = !self::fails($storageCheck);
@@ -164,8 +179,12 @@ final class CheckCommand extends Command
             $checks['integrity'] = $sealing;
         }
 
-        if ($storage && !self::fails($deliveryCheck)) {
+        if (!self::fails($deliveryCheck)) {
             $checks['delivery'] = [$delivery->problems(...)];
+        }
+
+        if (!self::fails($lifecycleCheck)) {
+            $checks['lifecycle'] = [$lifecycle->problems(...)];
         }
 
         return $checks;
@@ -174,15 +193,19 @@ final class CheckCommand extends Command
     /**
      * The checks of the settings themselves, in order: the storage connection,
      * the maintenance connection, the entries table's name, the integrity key
-     * settings, the failure and delivery settings together, and the sealing and
-     * anchor settings and the integrity tables' names together.
+     * settings, the storage connection with the failure and delivery settings
+     * together, the sealing and anchor settings and the integrity tables' names
+     * together, and what the lifecycle subject reads: the lifecycle tables'
+     * names, the integrity key settings, the log id and the integrity tables'
+     * names the journal is verified and the installation id read with, and a
+     * storage connection configured in `database.connections`.
      *
      * @formatter:off
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
      * @param  \Illuminate\Config\Repository  $config
-     * @return array{0: \Closure(): list<string>, 1: \Closure(): list<string>, 2: \Closure(): list<string>, 3: \Closure(): list<string>, 4: \Closure(): list<string>, 5: \Closure(): list<string>}
+     * @return array{0: \Closure(): list<string>, 1: \Closure(): list<string>, 2: \Closure(): list<string>, 3: \Closure(): list<string>, 4: \Closure(): list<string>, 5: \Closure(): list<string>, 6: \Closure(): list<string>}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -212,6 +235,8 @@ final class CheckCommand extends Command
                 return [];
             },
             static function () use ($config): array {
+                StorageConnection::name();
+
                 (new FailureSettings($config))->validate();
                 (new DeliverySettings($config))->validate();
 
@@ -226,6 +251,17 @@ final class CheckCommand extends Command
                 IntegrityTables::stateTable();
 
                 return [];
+            },
+            static function () use ($config): array {
+                LifecycleTables::validate();
+
+                (new IntegritySettings($config))->validate();
+                (new SealSettings($config))->logId();
+
+                IntegrityTables::checkpointsTable();
+                IntegrityTables::stateTable();
+
+                return self::unconfigured($config, 'storage.connection', StorageConnection::resolvedName());
             },
         ];
     }
@@ -279,9 +315,11 @@ final class CheckCommand extends Command
      * guards the actor is read from, the redaction settings, the failure and
      * delivery settings, the delivery tables' names and the outbox connection,
      * then the capture settings, the artifacts table's name and the guards the
-     * automatic capture skips, then the read and export settings. Only the
+     * automatic capture skips, then the read and export settings, then the
+     * lifecycle tables' names and the retention and import settings. Only the
      * delivery subject depends on any of them: the failure and delivery
-     * settings, the delivery tables' names and the outbox connection.
+     * settings, the delivery tables' names and the outbox connection; the
+     * lifecycle subject's tables are read by a setting check of its own.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -315,6 +353,7 @@ final class CheckCommand extends Command
             ...array_map(self::reading(...), CaptureChecks::readers($config)),
             static fn (): array => CaptureChecks::guardProblems($config),
             ...array_map(self::reading(...), ReadChecks::readers($config)),
+            ...array_map(self::reading(...), LifecycleChecks::readers($config)),
         ];
     }
 
@@ -452,29 +491,28 @@ final class CheckCommand extends Command
 
     /**
      * Say whether the spill channel is the one the documentation gives, by
-     * `info()`, or that replaying what it holds is unverified, by `warn()`; say
-     * nothing while the channel setting is malformed, which `config` reports.
+     * `info()`, or that replaying what it holds is unverified, by `warn()`,
+     * saying nothing of it while the channel setting is malformed, which
+     * `config` reports; then give each lifecycle note by `warn()`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
+     * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
      * @return void
      */
-    private function noteSpill(DeliveryChecks $delivery): void
+    private function notes(DeliveryChecks $delivery, LifecycleChecks $lifecycle): void
     {
         try {
             $note = $delivery->spillNote();
+
+            $note === null ? $this->info('[spill] OK') : $this->warn("[spill] {$note}");
         } catch (\InvalidArgumentException) {
             // The malformed setting is listed under `config`, and names no
             // channel to describe
-            return;
         }
 
-        if ($note === null) {
-            $this->info('[spill] OK');
-
-            return;
+        foreach ($lifecycle->notes() as $lifecycleNote) {
+            $this->warn("[lifecycle] note: {$lifecycleNote}");
         }
-
-        $this->warn("[spill] {$note}");
     }
 
     /**

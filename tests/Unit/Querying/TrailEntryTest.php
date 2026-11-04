@@ -15,6 +15,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Enums\Provenance;
+use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -23,8 +24,9 @@ use Tests\Fixtures\Records\RecordFactory;
 /**
  * Unit tests for an entry as a viewer is shown it: its snake-case array, with
  * references as pairs, enums as values and times as instants; times in UTC to
- * the microsecond, whatever the default time zone; and an artifact shown by its
- * descriptor alone, never its id or its members.
+ * the microsecond, whatever the default time zone; an imported entry's source
+ * digest; and an artifact shown by its descriptor alone, never its id or its
+ * members.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,6 +44,9 @@ final class TrailEntryTest extends TestCase
 
     /** @var string A digest in lower-case hex. */
     private const string DIGEST = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+
+    /** @var string The keyed digest of an imported entry's source assertion, in lower-case hex. */
+    private const string SOURCE_DIGEST = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
 
     /** @var string The default time zone before a test changed it. */
     private string $timeZone = 'UTC';
@@ -106,6 +111,7 @@ final class TrailEntryTest extends TestCase
             'source_region'     => 'eu-west-2',
             'source_record_id'  => 'legacy-9',
             'import_batch_id'   => '01932b4e-8a40-7000-8000-0000000000ff',
+            'source_digest'     => self::SOURCE_DIGEST,
             'ip'                => '[ENCRYPTED]',
             'user_agent'        => 'Mozilla/5.0',
             'context'           => ['route' => 'invoices.approve'],
@@ -119,18 +125,20 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * An entry with no references, origin or manifest gives `null` for each.
+     * An entry with no references, origin, source digest or manifest gives
+     * `null` for each.
      *
      * @return void
      */
     public function testToArrayGivesNullForWhatIsAbsent(): void
     {
-        $array = self::entry(['actor' => null, 'subject' => null, 'tenant' => null, 'origin' => null, 'manifest' => null])->toArray();
+        $array = self::entry(['actor' => null, 'subject' => null, 'tenant' => null, 'origin' => null, 'sourceDigest' => null, 'manifest' => null])->toArray();
 
         self::assertNull($array['actor']);
         self::assertNull($array['subject']);
         self::assertNull($array['tenant']);
         self::assertNull($array['origin']);
+        self::assertNull($array['source_digest']);
         self::assertNull($array['manifest']);
     }
 
@@ -158,6 +166,28 @@ final class TrailEntryTest extends TestCase
         $zoned = self::entry(['occurredAt' => new CarbonImmutable('2026-11-02 01:00:00.000007', 'Pacific/Auckland')]);
 
         self::assertSame('2026-11-01T12:00:00.000007Z', $zoned->toArray()['occurred_at']);
+    }
+
+    /**
+     * A stored imported entry is projected with its source digest, and a stored
+     * captured entry with none.
+     *
+     * @return void
+     */
+    public function testTheSourceDigestIsProjectedFromTheStoredEntry(): void
+    {
+        $projector = new EntryProjector(new SealedFieldReader, new RecordingExceptionHandler);
+        $imported  = new FinalisedRecord(RecordFactory::imported(), RecordFactory::IMPORTED_AT, 1, 'k1', self::HMAC);
+        $entries   = $projector->project([
+            StoredEntry::fromRow((new RowCodec)->encode($imported), new RowCodec),
+            StoredEntry::fromRow((new RowCodec)->encode(RecordFactory::finalisedBundle(1)), new RowCodec),
+        ]);
+
+        self::assertSame(RecordFactory::source()->sourceDigest, $entries[0]->sourceDigest);
+        self::assertSame(RecordFactory::source()->sourceDigest, $entries[0]->toArray()['source_digest']);
+        self::assertSame(Provenance::IMPORTED, $entries[0]->provenance);
+        self::assertNull($entries[1]->sourceDigest);
+        self::assertNull($entries[1]->toArray()['source_digest']);
     }
 
     /**
@@ -237,6 +267,7 @@ final class TrailEntryTest extends TestCase
             'sourceRegion'     => 'eu-west-2',
             'sourceRecordId'   => 'legacy-9',
             'importBatchId'    => '01932b4e-8a40-7000-8000-0000000000ff',
+            'sourceDigest'     => self::SOURCE_DIGEST,
             'ip'               => '[ENCRYPTED]',
             'userAgent'        => 'Mozilla/5.0',
             'context'          => ['route' => 'invoices.approve'],

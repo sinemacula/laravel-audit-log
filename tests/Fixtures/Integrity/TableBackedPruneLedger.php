@@ -12,18 +12,20 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 
 /**
- * A prune ledger over a table of its own on the maintenance connection, as a
- * lifecycle journal keeps one: a prune deletes a segment's entries and writes
- * its record here in one transaction, so a test can kill it at each boundary,
- * or run it beside a verification, and see the record and the deletes commit
- * together or not at all.
+ * A prune ledger over a table of its own on the maintenance connection, as the
+ * lifecycle journal keeps one: a prune deletes some of a segment's entries and
+ * writes its record here in one transaction, so a test can kill it at each
+ * boundary, or run it beside a verification, and see the record and the deletes
+ * commit together or not at all.
  *
- * The table holds one record per seal, each field stored as the record gives
- * it, so a record reads back exactly as it was written on every engine. Every
- * query reads the writer, so a replica's lag never hides a committed prune. A
- * row is read back into a record, which refuses a malformed field, and nothing
- * more is checked here: verification checks every record it is given. The test
- * that creates the table drops it.
+ * The table holds every record of a seal, keyed by the seal and the record's
+ * sequence among the seal's, each field stored as the record gives it, so a
+ * record reads back exactly as it was written on every engine. Every query
+ * reads the writer, so a replica's lag never hides a committed prune. A row is
+ * read back through `PruneRecord::fromArray()`, which refuses a malformed field
+ * as a record that cannot be read, and nothing more is checked here:
+ * verification checks every record it is given. The test that creates the table
+ * drops it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,6 +36,9 @@ final readonly class TableBackedPruneLedger implements PruneLedger
 {
     /** @var string The table the records are kept in. */
     public const string TABLE = 'audit_test_prune_records';
+
+    /** @var list<string> The columns of a stored record, in the order of the record's constructor. */
+    private const array COLUMNS = ['log_id', 'seal_id', 'seal_digest', 'member_count', 'pruned', 'pruned_count', 'operation_id', 'pruned_at', 'key_id', 'signature'];
 
     /**
      * Constructor.
@@ -60,14 +65,18 @@ final readonly class TableBackedPruneLedger implements PruneLedger
 
         $schema->dropIfExists(self::TABLE);
         $schema->create(self::TABLE, static function (Blueprint $table): void {
-            $table->char('seal_id', 36)->primary();
+            $table->char('seal_id', 36);
+            $table->unsignedInteger('sequence');
             $table->string('log_id', 64);
             $table->char('seal_digest', 64);
             $table->unsignedInteger('member_count');
+            $table->text('pruned');
+            $table->unsignedInteger('pruned_count');
             $table->char('operation_id', 36);
             $table->char('pruned_at', 27);
             $table->string('key_id', 32);
             $table->char('signature', 64);
+            $table->primary(['seal_id', 'sequence']);
         });
     }
 
@@ -84,9 +93,8 @@ final readonly class TableBackedPruneLedger implements PruneLedger
     }
 
     /**
-     * Write the record as the prune record of the seal it names, joining a
-     * transaction open on the maintenance connection. A second record for one
-     * seal is refused by the table's key.
+     * Write the record as the next prune record of the seal it names, joining a
+     * transaction open on the maintenance connection.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\PruneRecord  $record
      * @return void
@@ -95,11 +103,16 @@ final readonly class TableBackedPruneLedger implements PruneLedger
      */
     public function record(PruneRecord $record): void
     {
+        $last = $this->connection()->table(self::TABLE)->useWritePdo()->where('seal_id', $record->sealId)->max('sequence');
+
         $this->connection()->table(self::TABLE)->insert([
             'seal_id'      => $record->sealId,
+            'sequence'     => (is_numeric($last) ? (int) $last : 0) + 1,
             'log_id'       => $record->logId,
             'seal_digest'  => $record->sealDigest,
             'member_count' => $record->memberCount,
+            'pruned'       => $record->pruned,
+            'pruned_count' => $record->prunedCount,
             'operation_id' => $record->operationId,
             'pruned_at'    => $record->prunedAt,
             'key_id'       => $record->keyId,
@@ -108,34 +121,21 @@ final readonly class TableBackedPruneLedger implements PruneLedger
     }
 
     /**
-     * The record written for the seal, read from the writer, or `null` when
-     * none was.
+     * Every record written for the seal, read from the writer, in the order
+     * written, or none.
      *
      * @param  string  $sealId
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\PruneRecord
+     * @return list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>
      *
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
      */
     #[\Override]
-    public function recordFor(string $sealId): ?PruneRecord
+    public function recordsFor(string $sealId): array
     {
-        $stored = $this->connection()->table(self::TABLE)->useWritePdo()->where('seal_id', $sealId)->first();
+        $stored = $this->connection()->table(self::TABLE)->useWritePdo()->where('seal_id', $sealId)->orderBy('sequence')->get(self::COLUMNS)->all();
 
-        if ($stored === null) {
-            return null;
-        }
-
-        return new PruneRecord(
-            self::text($stored, 'log_id'),
-            self::text($stored, 'seal_id'),
-            self::text($stored, 'seal_digest'),
-            self::count($stored, 'member_count'),
-            self::text($stored, 'operation_id'),
-            self::text($stored, 'pruned_at'),
-            self::text($stored, 'key_id'),
-            self::text($stored, 'signature'),
-        );
+        return array_values(array_map(static fn (object $columns): PruneRecord => PruneRecord::fromArray(['v' => PruneRecord::VERSION, ...self::fieldsOf($columns)]), $stored));
     }
 
     /**
@@ -151,47 +151,24 @@ final readonly class TableBackedPruneLedger implements PruneLedger
     }
 
     /**
-     * A text column of a stored record.
+     * The fields of a stored record, each integer column read from an integer
+     * or the canonical digits a driver may return it as.
      *
-     * @param  object  $stored
-     * @param  string  $column
-     * @return string
-     *
-     * @throws \UnexpectedValueException
+     * @param  object  $columns
+     * @return array<string, int|string|null>
      */
-    private static function text(object $stored, string $column): string
+    private static function fieldsOf(object $columns): array
     {
-        $value = get_object_vars($stored)[$column] ?? null;
+        $fields = [];
 
-        if (!is_string($value)) {
-            throw new \UnexpectedValueException(sprintf('A stored prune record\'s `%s` must be text.', $column));
+        foreach (self::COLUMNS as $column) {
+            $value   = get_object_vars($columns)[$column] ?? null;
+            $integer = in_array($column, ['member_count', 'pruned_count'], true);
+
+            $fields[$column] = $integer && is_string($value) && preg_match('/^(?:0|[1-9][0-9]*)$/', $value) === 1 ? (int) $value : $value;
         }
 
-        return $value;
-    }
-
-    /**
-     * An integer column of a stored record, which a driver may return as its
-     * canonical digits.
-     *
-     * @param  object  $stored
-     * @param  string  $column
-     * @return int
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function count(object $stored, string $column): int
-    {
-        $value = get_object_vars($stored)[$column] ?? null;
-
-        if (is_int($value)) {
-            return $value;
-        }
-
-        if (is_string($value) && preg_match('/^(?:0|[1-9][0-9]*)$/', $value) === 1) {
-            return (int) $value;
-        }
-
-        throw new \UnexpectedValueException(sprintf('A stored prune record\'s `%s` must be an integer.', $column));
+        /** @var array<string, int|string|null> */
+        return $fields;
     }
 }

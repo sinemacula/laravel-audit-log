@@ -209,7 +209,7 @@ final class HostileValuesTest extends TestCase
     #[DataProvider('providePhrases')]
     public function testAValueTheDriverQuotesLeavesTheHostUsable(string $phrase): void
     {
-        $imported = ['provenance' => 'imported', 'source_id' => 'legacy-app', 'source_record_id' => $phrase];
+        $imported = ['provenance' => 'imported', 'source_id' => 'legacy-app', 'source_record_id' => $phrase, 'source_digest' => hash('sha256', $phrase)];
         $first    = $this->finaliser()->finalise(RecordFactory::withFields($imported));
         $second   = $this->finaliser()->finalise(RecordFactory::withFields($imported));
         $store    = app(DatabaseAuditStore::class);

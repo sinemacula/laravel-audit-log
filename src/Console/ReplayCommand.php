@@ -19,7 +19,8 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * unsigned line, since signing editable bytes cannot establish where they came
  * from.
  *
- * It prints the count of each outcome, then each event, which holds line
+ * It prints the count of each outcome, a record retention had already pruned,
+ * which is never stored again, among them, then each event, which holds line
  * numbers, record ids and the classes of failures, and never a value, a payload
  * or a message of a failure. It exits non-zero when a line was skipped or a
  * record failed. A path it cannot read is refused by name; whatever else stops
@@ -103,10 +104,11 @@ final class ReplayCommand extends Command
     private function printResult(string $source, ReplayResult $result): void
     {
         $this->line(sprintf(
-            '%s: replayed %d, would replay %d, failed %d, deferred %d, skipped %d.',
+            '%s: replayed %d, would replay %d, pruned %d, failed %d, deferred %d, skipped %d.',
             $source,
             $result->replayed(),
             $result->wouldReplay(),
+            $result->pruned(),
             $result->failed(),
             $result->deferred(),
             array_sum($result->skipped()),

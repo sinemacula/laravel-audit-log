@@ -9,15 +9,16 @@ use Illuminate\Database\Query\Builder;
 
 /**
  * The integrity state table, on the storage connection's writer: the
- * operational progress of sealing, anchoring and verification, one named map of
- * scalars per row, for the health snapshot, for monitoring missed runs and for
- * resuming a sweep.
+ * operational progress of sealing, anchoring, verification and pruning, one
+ * named map of scalars per row, for the health snapshot, for monitoring missed
+ * runs and for resuming a sweep.
  *
  * Progress is never evidence: verification reads none of it, and any row may be
  * lost or rewritten without hiding a change to the log. Sealing and anchoring
  * read it only to start where they left off, and fall back to the log itself
- * when it is missing. A row that is missing, or whose value is not a JSON
- * object of scalars, reads as absent, and the next write replaces it. Only the
+ * when it is missing; pruning only writes it, since a run resumes from the
+ * lifecycle journal. A row that is missing, or whose value is not a JSON object
+ * of scalars, reads as absent, and the next write replaces it. Only the
  * package's own names are read or written, each row is written whole with the
  * time it was written, in UTC to the microsecond, and every statement reads and
  * writes the writer, so a replica's lag never reads as stale progress.
@@ -53,6 +54,9 @@ final readonly class IntegrityProgress
     /** @var string The last complete verification, whether it passed at the strictness it ran at, and that strictness: `{at, head, passed, strict}`. */
     public const string VERIFY_LAST_FULL = 'verify.last_full';
 
+    /** @var string The last prune run that ended: `{at, run_id, status, deleted, cursor}`. */
+    public const string RETENTION_LAST_RUN = 'retention.last_run';
+
     /** @var list<string> Every name the package reads or writes. */
     private const array NAMES = [
         self::SEAL_LAST_RUN,
@@ -63,6 +67,7 @@ final readonly class IntegrityProgress
         self::ANCHOR_LAST,
         self::ANCHOR_LAST_FAILURE,
         self::VERIFY_LAST_FULL,
+        self::RETENTION_LAST_RUN,
     ];
 
     /** @var string How a time is written: UTC to the microsecond, as every time the package stores. */

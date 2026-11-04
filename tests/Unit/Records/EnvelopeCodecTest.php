@@ -77,6 +77,18 @@ final class EnvelopeCodecTest extends TestCase
     /** @var string The import batch an imported record came in. */
     private const string IMPORT_BATCH_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0e';
 
+    /** @var string The digest of an imported record's source assertion. */
+    private const string SOURCE_DIGEST = 'b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c';
+
+    /** @var array<string, ?string> The columns of an imported record in place of the captured record's. */
+    private const array IMPORTED = [
+        'provenance'       => 'imported',
+        'source_record_id' => 'old-42',
+        'import_batch_id'  => self::IMPORT_BATCH_ID,
+        'source_digest'    => self::SOURCE_DIGEST,
+        'origin'           => null,
+    ];
+
     /** @var string The id of the bulk record's artifact. */
     private const string ARTIFACT_ID = '01932b4e-8a40-7000-8000-0000000000b1';
 
@@ -94,8 +106,8 @@ final class EnvelopeCodecTest extends TestCase
         'id', 'record_version', 'event', 'event_version', 'category', 'outcome', 'reason', 'actor_type', 'actor_id',
         'subject_type', 'subject_id', 'principal_type', 'principal_id', 'tenant_type', 'tenant_id', 'credential_id',
         'guard', 'session_id', 'request_id', 'trace_id', 'correlation_id', 'origin', 'provenance', 'source_id',
-        'source_region', 'source_record_id', 'import_batch_id', 'ip', 'user_agent', 'context', 'properties',
-        'occurred_at', 'recorded_at', 'integrity_version', 'key_id', 'hmac',
+        'source_region', 'source_record_id', 'import_batch_id', 'source_digest', 'ip', 'user_agent', 'context',
+        'properties', 'occurred_at', 'recorded_at', 'integrity_version', 'key_id', 'hmac',
     ];
 
     /**
@@ -124,7 +136,7 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A record is encoded as the canonical encoding of its 36 columns, keys
+     * A record is encoded as the canonical encoding of its 37 columns, keys
      * sorted, exactly as the signer encodes what it signs.
      *
      * @return void
@@ -196,7 +208,7 @@ final class EnvelopeCodecTest extends TestCase
             'a one-key map whose key is 0'         => [['properties' => (object) ['0' => 'a']]],
             'a map with sequential numeric keys'   => [['properties' => (object) ['0' => 'a', '1' => 'b'], 'context' => ['n' => (object) ['0' => (object) ['0' => 'x']]]]],
             'null context and properties'          => [['context' => null, 'properties' => null]],
-            'an imported record'                   => [['provenance' => 'imported', 'source_record_id' => 'old-42', 'import_batch_id' => self::IMPORT_BATCH_ID, 'origin' => null]],
+            'an imported record'                   => [self::IMPORTED],
             '4-byte Unicode'                       => [['properties' => ['emoji' => "\u{1F600} \u{1F469}\u{200D}\u{1F4BB}", "\u{1F511}" => 'key'], 'user_agent' => "\u{1F600}"]],
             'the largest integers'                 => [['properties' => ['safe' => 9007199254740991, 'max' => PHP_INT_MAX, 'min' => PHP_INT_MIN]]],
             'a decimal as a string'                => [['properties' => ['amount' => '1200.50', 'zero' => '0.0']]],
@@ -366,7 +378,7 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[column]`: each of the 36 columns.
+     * Rows of `[column]`: each of the 37 columns.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -412,6 +424,7 @@ final class EnvelopeCodecTest extends TestCase
             'a nullable column holding an integer'         => ['reason', 5],
             'a nullable column holding a boolean'          => ['guard', false],
             'a nullable column holding an object'          => ['actor_id', new \stdClass],
+            'the source digest holding an integer'         => ['source_digest', 64],
             'an integer column holding a digit string'     => ['event_version', '1'],
             'an integer column holding null'               => ['event_version', null],
             'an integer column holding a boolean'          => ['event_version', true],
@@ -725,6 +738,8 @@ final class EnvelopeCodecTest extends TestCase
             'an upper-case id'            => [['id' => strtoupper(self::ID)]],
             'an id that is no UUID'       => [['id' => 'inv-0042']],
             'an upper-case import batch'  => [['import_batch_id' => '0192F1C4-7B8E-7C3A-9D2E-5F6A7B8C9D0E']],
+            'an upper-case source digest' => [['source_digest' => strtoupper(self::SOURCE_DIGEST)]],
+            'a short source digest'       => [['source_digest' => substr(self::SOURCE_DIGEST, 1)]],
         ];
     }
 
@@ -796,6 +811,26 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
+     * A record built by the import, with no origin, encodes and decodes to the
+     * same bytes, its provenance, source fields and source digest kept.
+     *
+     * @return void
+     */
+    public function testAnImportedRecordRoundTripsByteForByte(): void
+    {
+        $codec     = self::codec();
+        $finalised = self::signer()->sign(RecordFactory::imported(origin: null), RecordFactory::IMPORTED_AT);
+        $envelope  = $codec->encode($finalised);
+        $decoded   = $codec->decode($envelope, $finalised->record->id);
+
+        self::assertSame($envelope, $codec->encode($decoded));
+        self::assertSame(CanonicalEncoder::encode($finalised->toArray()), CanonicalEncoder::encode($decoded->toArray()));
+        self::assertSame(['imported', null, RecordFactory::IMPORT_BATCH_ID, RecordFactory::source()->sourceDigest], [
+            $decoded->record->provenance, $decoded->record->origin, $decoded->record->importBatchId, $decoded->record->sourceDigest,
+        ]);
+    }
+
+    /**
      * The provenance and the import fields are kept as signed, and every other
      * field the captured record had.
      *
@@ -807,14 +842,15 @@ final class EnvelopeCodecTest extends TestCase
             'provenance'       => 'imported',
             'source_record_id' => 'legacy-0042',
             'import_batch_id'  => self::IMPORT_BATCH_ID,
+            'source_digest'    => self::SOURCE_DIGEST,
             'source_id'        => 'legacy-app',
             'source_region'    => null,
         ];
 
         $record = self::codec()->decode(self::envelope($imported))->record;
 
-        self::assertSame(['imported', 'legacy-0042', self::IMPORT_BATCH_ID, 'legacy-app', null], [
-            $record->provenance, $record->sourceRecordId, $record->importBatchId, $record->sourceId, $record->sourceRegion,
+        self::assertSame(['imported', 'legacy-0042', self::IMPORT_BATCH_ID, self::SOURCE_DIGEST, 'legacy-app', null], [
+            $record->provenance, $record->sourceRecordId, $record->importBatchId, $record->sourceDigest, $record->sourceId, $record->sourceRegion,
         ]);
 
         self::assertSame(CanonicalEncoder::encode(array_replace(RecordFactory::captured(id: self::ID)->toArray(), $imported)), CanonicalEncoder::encode($record->toArray()));

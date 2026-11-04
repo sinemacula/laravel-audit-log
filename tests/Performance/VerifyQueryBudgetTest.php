@@ -12,17 +12,22 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Integrity\Anchorer;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\DiskAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\CheckpointWriter;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Integrity\JournalVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
@@ -32,25 +37,31 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationRange;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\Verifier;
+use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
+use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Statement-budget and memory contract for verification: a run of an empty log
- * reads the head and the five whole-log counts and writes its completion; each
- * segment adds one read of its members and their entries, and each page of
- * seals one more; a segment's bundles add one read of their artifacts and one
- * of their members for each batch of them, and a segment without one adds
- * nothing; a ranged run reads its range, its boundary and the head, and writes
- * nothing; the null prune ledger and the null anchor cost no statement, and an
- * anchor that answers costs one read of the local seal at its head; every
- * report is let go as the run goes; and the peak memory of a run follows its
- * largest segment, never the number of segments.
+ * Statement-budget and memory contract for verification: every run, a ranged
+ * one included, reads the seals' journal commitments once and the journal a
+ * page at a time, one page for a journal shorter than one, whatever the seals;
+ * a run of an empty log reads the head and the five whole-log counts and writes
+ * its completion; each segment adds one read of its members and their entries,
+ * and each page of seals one more; a segment's bundles add one read of their
+ * artifacts and one of their members for each batch of them, and a segment
+ * without one adds nothing; a ranged run reads its range, its boundary and the
+ * head, and writes nothing; the null prune ledger and the null anchor cost no
+ * statement, the journal's ledger one indexed read of each seal's records, and
+ * the present members a valid record covers one read again for each 500 of
+ * them; an anchor that answers costs one read of the local seal at its head;
+ * every report is let go as the run goes; and the peak memory of a run follows
+ * its largest segment, never the number of segments.
  *
  * Memory is measured as the growth of the peak over what the process held
  * before the run, the peak reset first, always against another run in this
@@ -65,10 +76,13 @@ use Tests\Fixtures\Support\FrozenClock;
 #[CoversClass(SegmentVerifier::class)]
 final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 {
-    use SealsEntries, SeedsArtifacts;
+    use SealsEntries, SeedsArtifacts, WritesTheJournal;
 
-    /** @var int The reads a run of the whole log makes whatever it holds: the head, the seals outside the chain, the orphaned members, and the overdue, the far-ahead and the pending entries. */
-    private const int WHOLE_RUN_READS = 6;
+    /** @var int The reads every run makes of the lifecycle journal, a ranged one included, while the journal is shorter than a page: the seals' commitments and one page of rows. */
+    private const int JOURNAL_READS = 2;
+
+    /** @var int The reads a run of the whole log makes whatever it holds: the head, the seals outside the chain, the orphaned members, the overdue, the far-ahead and the pending entries, and the journal's. */
+    private const int WHOLE_RUN_READS = 6 + self::JOURNAL_READS;
 
     /** @var int How many entries a segment of the largest-segment measurement holds. */
     private const int SEGMENT_ENTRIES = 100;
@@ -106,6 +120,33 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 
         self::assertNull($summary->head);
         self::assertSame([], $this->streamed);
+    }
+
+    /**
+     * The journal costs every run one read of the seals' commitments and one
+     * read per page of rows, however many seals commit to it: a journal of
+     * fewer rows than a page is one read, and a page more is one more.
+     *
+     * @return void
+     */
+    public function testTheJournalIsTwoReadsWhateverTheSeals(): void
+    {
+        $this->storeSeals(3, 1);
+
+        for ($row = 0; $row < 5; $row++) {
+            $this->journalHold(sprintf('01932b4e-d000-7000-8000-%012d', $row + 1));
+        }
+
+        $this->storeSeals(2, 1);
+
+        $summary = $this->assertStatementBudget(self::WHOLE_RUN_READS + 5 + 1, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog());
+        $journal = array_filter($this->capturedStatements(), static fn (string $statement): bool => str_contains($statement, LifecycleTables::journalTable()));
+        $commits = array_filter($this->capturedStatements(), static fn (string $statement): bool => str_contains($statement, 'journal_sequence'));
+
+        self::assertSame([], $summary->findings);
+        self::assertSame(['rows' => 5, 'head' => 5, 'committed' => 5], $summary->journal?->toArray());
+        self::assertCount(1, $journal);
+        self::assertCount(1, $commits);
     }
 
     /**
@@ -153,15 +194,15 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     public static function provideRanges(): iterable
     {
         yield from [
-            'from the first seal' => [1, 3, 1 + 1 + 3],
-            'from the middle'     => [2, 4, 1 + 1 + 1 + 3],
+            'from the first seal' => [1, 3, 1 + 1 + 3 + self::JOURNAL_READS],
+            'from the middle'     => [2, 4, 1 + 1 + 1 + 3 + self::JOURNAL_READS],
         ];
     }
 
     /**
      * A ranged run reads the head, the seal before its first when there is one,
-     * one page and each segment of its range, and nothing else: no member of a
-     * seal outside it, no whole-log count, and no write.
+     * one page and each segment of its range, and the journal, and nothing
+     * else: no member of a seal outside it, no whole-log count, and no write.
      *
      * @param  int  $from
      * @param  int  $to
@@ -220,6 +261,60 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * Under the journal's ledger each seal asks for its records once, in one
+     * indexed statement, whether it was pruned or not, and a missing member it
+     * covers costs no read more: three seals, one of them pruned, cost three
+     * statements more than under the null ledger.
+     *
+     * @return void
+     */
+    public function testEachSealAsksTheLedgerOnce(): void
+    {
+        $this->storeSeals(3, 2);
+
+        $seal    = $this->seals()[1];
+        $members = $this->sortedMembersOf((string) $seal['id']);
+
+        DB::connection()->table(EntrySettings::table())->where('id', $members[1])->delete();
+
+        $this->journalPrune($seal, [1]);
+
+        $ledger  = new JournalPruneLedger(app(DatabaseManager::class));
+        $summary = $this->assertStatementBudget(self::WHOLE_RUN_READS + 3 + 1 + 3, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog(null, null, $ledger));
+        $asked   = array_values(preg_grep('/where kind = \? and seal_id = \?/', str_replace(['"', '`'], '', $this->capturedStatements())) ?: []);
+
+        self::assertCount(3, $asked);
+        self::assertSame([2, 1, 0], [$summary->integrity['valid'], $summary->integrity['pruned'], $summary->integrity['incomplete']]);
+    }
+
+    /**
+     * The present members a valid record covers are read again in one statement
+     * for each 500 of them, and none for a seal that has none: a seal of 501
+     * members all covered and present costs two reads more than its ledger
+     * read, the first of 500 ids and the second of one.
+     *
+     * @return void
+     */
+    public function testACoveredPresentMemberIsReadAgainInBatches(): void
+    {
+        $this->storeSeals(1, 501);
+
+        $seal = $this->seals()[0];
+
+        $this->journalPrune($seal, range(0, 500));
+
+        $ledger  = new JournalPruneLedger(app(DatabaseManager::class));
+        $summary = $this->assertStatementBudget(self::WHOLE_RUN_READS + 1 + 1 + 1 + 2, 1, 0, 0, fn (): VerificationSummary => $this->verifyLog(null, null, $ledger));
+
+        $rereads = preg_grep('/^select \S*id\S* from \S*' . preg_quote(EntrySettings::table(), '/') . '\S* where \S*id\S* in \(/', $this->capturedStatements()) ?: [];
+
+        self::assertSame([500, 1], array_values(array_map(static fn (string $statement): int => substr_count($statement, '?'), $rereads)));
+        self::assertSame(1, $summary->integrity['incomplete']);
+        self::assertSame(Finding::RESURRECTED, $this->streamed[0]->finding);
+        self::assertSame($this->sortedMembersOf((string) $seal['id'])[0], $this->streamed[0]->firstBadId);
+    }
+
+    /**
      * An anchor that holds every seal is asked for its head alone, and the
      * local seal at that head is read once to compare it: a run under it costs
      * one read more than one under no anchor does, whatever the number of
@@ -250,7 +345,7 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 
         $anchor = $this->anchorAll();
 
-        $this->assertStatementBudget(1 + 1 + 2 + 1, 0, 0, 0, fn (): VerificationSummary => $this->verifyLog(new VerificationRange(1, 2), $anchor));
+        $this->assertStatementBudget(1 + 1 + 2 + 1 + self::JOURNAL_READS, 0, 0, 0, fn (): VerificationSummary => $this->verifyLog(new VerificationRange(1, 2), $anchor));
     }
 
     /**
@@ -389,17 +484,19 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Run a verification of the range, the whole log by default, under the
-     * anchor given or none, keeping every report it streams.
+     * anchor given or none and the prune ledger given or the null one, keeping
+     * every report it streams.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\VerificationRange  $range
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
+     * @param  ?\SineMacula\Laravel\AuditLog\Contracts\PruneLedger  $prunes
      * @return \SineMacula\Laravel\AuditLog\Integrity\VerificationSummary
      */
-    private function verifyLog(?VerificationRange $range = null, ?CheckpointAnchor $anchor = null): VerificationSummary
+    private function verifyLog(?VerificationRange $range = null, ?CheckpointAnchor $anchor = null, ?PruneLedger $prunes = null): VerificationSummary
     {
         $this->streamed = [];
 
-        return $this->verifier($anchor)->verify($range ?? VerificationRange::whole(), function (SegmentReport $report): void {
+        return $this->verifier($anchor, $prunes)->verify($range ?? VerificationRange::whole(), function (SegmentReport $report): void {
             $this->streamed[] = $report;
         });
     }
@@ -430,20 +527,22 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * A verifier from the container's collaborators, under the anchor given or
-     * none, with nothing pruned.
+     * none, and the prune ledger given or the null one, with nothing pruned.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
+     * @param  ?\SineMacula\Laravel\AuditLog\Contracts\PruneLedger  $prunes
      * @return \SineMacula\Laravel\AuditLog\Integrity\Verifier
      */
-    private function verifier(?CheckpointAnchor $anchor = null): Verifier
+    private function verifier(?CheckpointAnchor $anchor = null, ?PruneLedger $prunes = null): Verifier
     {
         $anchor ??= new NullAnchor;
         $database = app(DatabaseManager::class);
         $settings = app(SealSettings::class);
         $manifest = app(ManifestVerifier::class);
-        $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, new NullPruneLedger, $anchor, $database, $manifest);
+        $prunes ??= new NullPruneLedger;
+        $segments = new SegmentVerifier(app(SealSigner::class), app(RecordSigner::class), app(RowCodec::class), $settings, $prunes, $anchor, $database, $manifest);
 
-        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), app(Clock::class), $database);
+        return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), app(Clock::class), $database, app(JournalVerifier::class));
     }
 
     /**
@@ -488,6 +587,49 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
         foreach (array_chunk($rows, self::INSERT_CHUNK) as $chunk) {
             DB::connection()->table(EntrySettings::table())->insert($chunk);
         }
+    }
+
+    /**
+     * Journal a prune run's start and one prune of the seal's members at the
+     * positions given, with its signed record, as the pruner writes them.
+     *
+     * @param  array<string, scalar|null>  $seal
+     * @param  list<int>  $positions
+     * @return void
+     */
+    private function journalPrune(array $seal, array $positions): void
+    {
+        $runId  = '01932b4e-b000-7000-8000-000000000001';
+        $count  = (int) $seal['member_count'];
+        $record = app(SealSigner::class)->signPrune(
+            (string) $seal['log_id'],
+            (string) $seal['id'],
+            (string) $seal['seal_digest'],
+            $count,
+            PruneBitmap::encode($positions, $count),
+            count($positions),
+            '01932b4e-a000-7000-8000-000000000001',
+            '2027-11-01T00:00:00.000000Z',
+        );
+
+        $this->journalRow(JournalKind::PRUNE_RUN, ['run_id' => $runId, 'phase' => 'start']);
+        $this->journalRow(JournalKind::PRUNE, ['record' => [...$record->toArray(), 'signature' => $record->signature], 'run_id' => $runId], sealId: $record->sealId);
+    }
+
+    /**
+     * The ids of the entries the seal holds, sorted bytewise, as the members
+     * are placed.
+     *
+     * @param  string  $sealId
+     * @return list<string>
+     */
+    private function sortedMembersOf(string $sealId): array
+    {
+        $members = $this->membersOf($sealId);
+
+        usort($members, strcmp(...));
+
+        return $members;
     }
 
     /**

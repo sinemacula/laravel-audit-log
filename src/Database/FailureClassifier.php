@@ -99,6 +99,20 @@ final class FailureClassifier
     }
 
     /**
+     * Throw the failed statement masked, as `masked()` gives it, so a caller
+     * that catches one rethrows it with no binding and no quoted value.
+     *
+     * @param  \Illuminate\Database\QueryException  $failure
+     * @return never
+     *
+     * @throws \Illuminate\Database\QueryException
+     */
+    public static function rethrowMasked(#[\SensitiveParameter] QueryException $failure): never
+    {
+        throw self::masked($failure);
+    }
+
+    /**
      * Whether the failure is a concurrency error, as Laravel recognises one: a
      * deadlock, a serialisation failure, a lock wait timeout or a locked
      * database. Laravel's own `DeadlockException` always is, whatever its code

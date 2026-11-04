@@ -2,9 +2,11 @@
 
 declare(strict_types = 1);
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
@@ -13,7 +15,10 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
  * Create the integrity state table: the operational progress of sealing,
  * anchoring and verification, one named value per row, for monitoring and for
  * resuming a sweep. It is never evidence: verification reads none of it, and
- * any row may be lost or rewritten without hiding a change to the log.
+ * any progress row may be lost or rewritten without hiding a change to the log.
+ * The migration also seeds the installation id (see `InstallationIdentity`), a
+ * new UUID version 7, with a plain insert that is never replaced, so
+ * `audit-log:check` only ever reads it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,6 +31,7 @@ return new class extends Migration {
      * @return void
      *
      * @throws \RuntimeException
+     * @throws \JsonException
      */
     public function up(): void
     {
@@ -54,6 +60,8 @@ return new class extends Migration {
             $blueprint->collation('utf8mb4_0900_bin');
             $blueprint->engine('InnoDB');
         });
+
+        $schema->getConnection()->table($table)->insert(InstallationIdentity::row(CarbonImmutable::now()));
     }
 
     /**

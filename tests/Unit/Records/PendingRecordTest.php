@@ -409,6 +409,26 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
+     * `identifiedAs()` gives the record the id given in place of a fresh one,
+     * and refuses one that is not a lower-case UUID.
+     *
+     * @return void
+     */
+    public function testIdentifiedAsGivesTheRecordItsId(): void
+    {
+        $pending = (new PendingRecord)->forPackage(PackageActivity::TRAIL_READ);
+
+        self::assertSame($pending, $pending->identifiedAs('01932b4e-9000-8000-8000-0000000000a1'));
+        self::assertSame('01932b4e-9000-8000-8000-0000000000a1', $pending->snapshot()->id);
+        self::assertNull((new PendingRecord)->snapshot()->id);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A pending record\'s id is a lower-case UUID.');
+
+        $pending->identifiedAs('01932B4E-9000-8000-8000-0000000000A1');
+    }
+
+    /**
      * A builder whose record has been built refuses `forPackage()` as it
      * refuses every other mutator.
      *
@@ -428,8 +448,8 @@ final class PendingRecordTest extends TestCase
 
     /**
      * Rows of `[call]`: one call of each public mutator, the seventeen fluent
-     * methods, the nine fillers, the manifest and the package's own code, each
-     * with a valid argument.
+     * methods, the nine fillers, the manifest, the package's own code and the
+     * id of the package's own record, each with a valid argument.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
      */
@@ -466,6 +486,9 @@ final class PendingRecordTest extends TestCase
             }],
             'forPackage' => [static function (PendingRecord $pending): void {
                 $pending->forPackage(PackageActivity::TRAIL_READ);
+            }],
+            'identifiedAs' => [static function (PendingRecord $pending): void {
+                $pending->identifiedAs('01932b4e-9000-8000-8000-0000000000a1');
             }],
         ];
     }
@@ -583,6 +606,9 @@ final class PendingRecordTest extends TestCase
             'forPackage' => [static function (PendingRecord $pending): void {
                 $pending->forPackage(PackageActivity::TRAIL_READ);
             }],
+            'identifiedAs' => [static function (PendingRecord $pending): void {
+                $pending->identifiedAs('not-an-id');
+            }],
         ];
     }
 
@@ -627,7 +653,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(28, $mutators);
+        self::assertCount(29, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }

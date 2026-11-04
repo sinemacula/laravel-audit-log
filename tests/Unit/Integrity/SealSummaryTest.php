@@ -31,7 +31,7 @@ final class SealSummaryTest extends TestCase
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
     /** @var string The golden first seal's digest. */
-    private const string DIGEST = '329162defc18f3f10f3a8a351a7faa0c0e5e1004d65ea3b432feb0b54d3282c6';
+    private const string DIGEST = '81472ef9f38d641924cf10f61fa9b5c57f5c7dfbd10c8b7d26bcc3259dde7069';
 
     /**
      * The summary keeps the log, the sequence, the seal id and the digest as
@@ -89,8 +89,8 @@ final class SealSummaryTest extends TestCase
     }
 
     /**
-     * Two summaries are the same only when every one of the four fields is;
-     * a change to any one makes them differ, each way round.
+     * Two summaries are the same only when every one of the four fields is; a
+     * change to any one makes them differ, each way round.
      *
      * @return void
      */

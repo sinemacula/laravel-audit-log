@@ -26,6 +26,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\ManifestVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
@@ -51,10 +52,12 @@ use Tests\TestCase;
  * change gives and which wins, the expected sequence, the chain over recomputed
  * digests, the members read in one statement and sorted rather than trusted,
  * the prune records that account for missing entries and the ones that do not,
- * the manifests of the bundles whose entries verified, checked together, and
- * anchoring as a separate answer: asked of the anchor, never of the receipt,
- * not asked once it has failed, contradicted by the anchor's head, and awaiting
- * its first anchoring within the grace.
+ * the ledger asked after the members are read and the covered members read
+ * again, so a member pruned meanwhile is pruned and one still there is
+ * resurrected, the manifests of the bundles whose entries verified, checked
+ * together, and anchoring as a separate answer: asked of the anchor, never of
+ * the receipt, not asked once it has failed, contradicted by the anchor's head,
+ * and awaiting its first anchoring within the grace.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -1009,8 +1012,7 @@ final class SegmentVerifierTest extends TestCase
 
         $this->entries()->whereIn('id', $ids)->delete();
 
-        $valid  = $this->pruneOf(1);
-        $forged = new PruneRecord($valid->logId, $valid->sealId, $valid->sealDigest, $valid->memberCount, $valid->operationId, $valid->prunedAt, $valid->keyId, self::OTHER_DIGEST);
+        $forged = self::changed($this->pruneOf(1), ['signature' => self::OTHER_DIGEST]);
         $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($forged)));
 
         self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
@@ -1058,7 +1060,17 @@ final class SegmentVerifierTest extends TestCase
         $logId  ??= app(SealSettings::class)->logId();
         $sealId ??= (string) $seal['id'];
         $digest ??= (string) $seal['seal_digest'];
-        $record = app(SealSigner::class)->signPrune($logId, $sealId, $digest, $count ?? 2, self::OPERATION_ID, self::PRUNED_AT);
+        $count  ??= 2;
+        $record = app(SealSigner::class)->signPrune(
+            $logId,
+            $sealId,
+            $digest,
+            $count,
+            PruneBitmap::encode(range(0, $count - 1), $count),
+            $count,
+            self::OPERATION_ID,
+            self::PRUNED_AT,
+        );
         $ledger = new class ($record, (string) $seal['id']) implements PruneLedger {
             /**
              * Constructor.
@@ -1079,12 +1091,12 @@ final class SegmentVerifierTest extends TestCase
              * The record, for the seal it is given for.
              *
              * @param  string  $sealId
-             * @return ?\SineMacula\Laravel\AuditLog\Integrity\PruneRecord
+             * @return list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>
              */
             #[\Override]
-            public function recordFor(string $sealId): ?PruneRecord
+            public function recordsFor(string $sealId): array
             {
-                return $sealId === $this->sealId ? $this->record : null;
+                return $sealId === $this->sealId ? [$this->record] : [];
             }
         };
 
@@ -1134,8 +1146,7 @@ final class SegmentVerifierTest extends TestCase
         $this->sealAll();
         $this->entries()->whereIn('id', $ids)->delete();
 
-        $valid  = $this->pruneOf(1);
-        $record = new PruneRecord($valid->logId, $valid->sealId, self::OTHER_DIGEST, $valid->memberCount, $valid->operationId, $valid->prunedAt, 'gone', $valid->signature);
+        $record = self::changed($this->pruneOf(1), ['seal_digest' => self::OTHER_DIGEST, 'key_id' => 'gone']);
         $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($record)));
 
         self::assertSame(Finding::PRUNE_RECORD, $report->finding);
@@ -1215,7 +1226,7 @@ final class SegmentVerifierTest extends TestCase
         $this->sealAll();
         $this->entries()->where('id', $ids[0])->delete();
 
-        $verifier = $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1)));
+        $verifier = $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1, [$ids[0]])));
 
         self::assertSame(IntegrityStatus::PRUNED, $this->report(1, verifier: $verifier)->integrity);
 
@@ -1229,19 +1240,269 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A prune record is asked for only when an entry is missing: an intact seal
-     * with a record is valid, never pruned.
+     * Members are placed bytewise, never in the order the engine returns them:
+     * rows returned in reverse still give the record's position of the member
+     * pruned, and a record set at the position the engine's order would give it
+     * covers another member, which is still there.
      *
      * @return void
      */
-    public function testAPruneRecordIsAskedForOnlyWhenAnEntryIsMissing(): void
+    public function testMembersAreOrderedBytewiseNotByTheEngine(): void
     {
-        $this->storeEntries(2);
+        $sorted = self::sorted($this->storeEntries(4));
+
+        $this->sealAll();
+        $this->entries()->where('id', $sorted[0])->delete();
+
+        $bytewise = $this->pruneOf(1, [$sorted[0]]);
+        $engine   = $this->pruneOf(1, [$sorted[3]]);
+
+        $reversed = $this->useReversingConnection();
+        $pruned   = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($bytewise)));
+
+        self::assertSame(IntegrityStatus::PRUNED, $pruned->integrity);
+        self::assertEqualsCanonicalizing($sorted, $reversed->getArrayCopy());
+        self::assertNotSame($sorted, $reversed->getArrayCopy());
+
+        $misplaced = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($engine)));
+
+        self::assertSame(IntegrityStatus::INCOMPLETE, $misplaced->integrity);
+        self::assertSame(Finding::MISSING_ENTRY, $misplaced->finding);
+        self::assertSame($sorted[0], $misplaced->firstBadId);
+    }
+
+    /**
+     * Every missing member is kept, not only the first: a record that covers
+     * the first two of three missing leaves the third `missing_entry`, and one
+     * that covers all three is pruned.
+     *
+     * @return void
+     */
+    public function testEveryMissingIdIsKept(): void
+    {
+        $sorted = self::sorted($this->storeEntries(5));
+
+        $this->sealAll();
+        $this->entries()->whereIn('id', [$sorted[0], $sorted[2], $sorted[4]])->delete();
+
+        $partial = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1, [$sorted[0], $sorted[2]]))));
+
+        self::assertSame(IntegrityStatus::INCOMPLETE, $partial->integrity);
+        self::assertSame(Finding::MISSING_ENTRY, $partial->finding);
+        self::assertSame($sorted[4], $partial->firstBadId);
+
+        $whole = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1, [$sorted[0], $sorted[2], $sorted[4]]))));
+
+        self::assertSame(IntegrityStatus::PRUNED, $whole->integrity);
+        self::assertSame(5, $whole->members);
+    }
+
+    /**
+     * A seal whose members were pruned by two prunes, as two categories kept
+     * for different times are, has two disjoint records that cover its missing
+     * members together: pruned, its present members verified.
+     *
+     * @return void
+     */
+    public function testTwoCategoriesPrunedInOneSealArePruned(): void
+    {
+        $sorted = self::sorted($this->storeEntries(4));
+
+        $this->sealAll();
+        $this->entries()->whereIn('id', [$sorted[0], $sorted[3], $sorted[1]])->delete();
+
+        $first  = $this->pruneOf(1, [$sorted[0], $sorted[3]]);
+        $second = $this->pruneOf(1, [$sorted[1]], '01932b4e-a000-7000-8000-000000000002');
+        $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($first, $second)));
+
+        self::assertSame(IntegrityStatus::PRUNED, $report->integrity);
+        self::assertNull($report->finding);
+        self::assertSame(4, $report->members);
+        self::assertSame(IntegrityStatus::INCOMPLETE, $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($first)))->integrity);
+    }
+
+    /**
+     * A member a valid record covers that is still there when read again, here
+     * pruned and then inserted again as it was, is `resurrected`, which is
+     * incomplete and never valid, at that member.
+     *
+     * @return void
+     */
+    public function testAMemberCoveredButPresentIsResurrected(): void
+    {
+        $sorted = self::sorted($this->storeEntries(3));
+
+        $this->sealAll();
+
+        $row = (array) $this->entries()->where('id', $sorted[1])->first();
+
+        $this->entries()->whereIn('id', [$sorted[0], $sorted[1]])->delete();
+        $this->entries()->insert($row);
+
+        $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1, [$sorted[0], $sorted[1]]))));
+
+        self::assertSame(IntegrityStatus::INCOMPLETE, $report->integrity);
+        self::assertSame(Finding::RESURRECTED, $report->finding);
+        self::assertSame($sorted[1], $report->firstBadId);
+    }
+
+    /**
+     * A member present when the members are read and gone when it is read again
+     * was pruned by a prune that committed between the two reads, so the record
+     * the ledger then gives accounts for it: the segment is pruned.
+     *
+     * @return void
+     */
+    public function testAMemberGoneBetweenTheReadsIsPruned(): void
+    {
+        $sorted = self::sorted($this->storeEntries(3));
+
+        $this->sealAll();
+
+        $record = $this->pruneOf(1, [$sorted[2]]);
+        $ledger = self::askedLedger(function () use ($sorted): void {
+            $this->entries()->where('id', $sorted[2])->delete();
+        }, [$record]);
+
+        $report = $this->report(1, verifier: $this->verifier(prunes: $ledger));
+
+        self::assertSame(IntegrityStatus::PRUNED, $report->integrity);
+        self::assertNull($report->finding);
+        self::assertSame(3, $report->members);
+    }
+
+    /**
+     * The ledger is asked even when no member is missing, so a seal whose every
+     * pruned member was inserted again is `resurrected`, at its first member,
+     * never valid.
+     *
+     * @return void
+     */
+    public function testAFullyResurrectedSealIsResurrected(): void
+    {
+        $sorted = self::sorted($this->storeEntries(2));
+
         $this->sealAll();
 
         $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1))));
 
-        self::assertSame(IntegrityStatus::VALID, $report->integrity);
+        self::assertSame(IntegrityStatus::INCOMPLETE, $report->integrity);
+        self::assertSame(Finding::RESURRECTED, $report->finding);
+        self::assertSame($sorted[0], $report->firstBadId);
+        self::assertSame(IntegrityStatus::VALID, $this->report(1)->integrity);
+    }
+
+    /**
+     * A ledger that cannot read a stored record of the seal is a forged record
+     * of it, tampering at the seal, whether or not a member is missing.
+     *
+     * @return void
+     */
+    public function testAnUnreadableLedgerRecordIsTampered(): void
+    {
+        $ids = $this->storeEntries(2);
+
+        $this->sealAll();
+
+        $ledger = self::askedLedger(static function (): void {}, null);
+        $intact = $this->report(1, verifier: $this->verifier(prunes: $ledger));
+
+        self::assertSame(IntegrityStatus::TAMPERED, $intact->integrity);
+        self::assertSame(Finding::PRUNE_RECORD, $intact->finding);
+        self::assertSame($this->seal(1)['id'], $intact->firstBadId);
+
+        $this->entries()->where('id', $ids[0])->delete();
+
+        self::assertSame(Finding::PRUNE_RECORD, $this->report(1, verifier: $this->verifier(prunes: $ledger))->finding);
+    }
+
+    /**
+     * The members and their entries are read first, the ledger is asked after,
+     * and the present members a valid record covers are read again after that,
+     * in one statement of their ids on the writer.
+     *
+     * @return void
+     */
+    public function testTheLedgerIsAskedAfterTheMembersAreRead(): void
+    {
+        $sorted = self::sorted($this->storeEntries(3));
+
+        $this->sealAll();
+
+        $seal = $this->seal(1);
+
+        /** @var \ArrayObject<int, string> $order */
+        $order  = new \ArrayObject;
+        $ledger = self::askedLedger(static function () use ($order): void {
+            $order->append('ledger');
+        }, [$this->pruneOf(1, [$sorted[0], $sorted[2]])]);
+
+        DB::connection(StorageConnection::name())->listen(static function (QueryExecuted $query) use ($order): void {
+            $order->append(strtolower($query->sql));
+        });
+
+        $report = $this->verifier(prunes: $ledger)->verify($seal, 1, null, self::context());
+        $steps  = $order->getArrayCopy();
+
+        self::assertSame(Finding::RESURRECTED, $report->finding);
+        self::assertCount(3, $steps);
+        self::assertStringContainsString('left join', $steps[0]);
+        self::assertSame('ledger', $steps[1]);
+        self::assertMatchesRegularExpression('/^select \S*id\S* from \S*' . preg_quote(EntrySettings::table(), '/') . '\S* where \S*id\S* in \(\?, \?\)$/', $steps[2]);
+    }
+
+    /**
+     * A worse finding still wins over pruning and over a resurrection: an entry
+     * edited beside a resurrected member is tampering, and two valid records
+     * that set one member are tampering though every missing member is covered.
+     *
+     * @return void
+     */
+    public function testAWorseFindingStillWins(): void
+    {
+        $sorted = self::sorted($this->storeEntries(3));
+
+        $this->sealAll();
+        $this->entries()->where('id', $sorted[2])->update(['event' => 'invoice.voided']);
+
+        $edited = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1, [$sorted[0]]))));
+
+        self::assertSame(IntegrityStatus::TAMPERED, $edited->integrity);
+        self::assertSame(Finding::ENTRY_HMAC, $edited->finding);
+
+        $this->entries()->where('id', $sorted[2])->delete();
+        $this->entries()->where('id', $sorted[0])->delete();
+
+        $overlap = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1, [$sorted[0], $sorted[2]]), $this->pruneOf(1, [$sorted[2]]))));
+
+        self::assertSame(IntegrityStatus::TAMPERED, $overlap->integrity);
+        self::assertSame(Finding::PRUNE_RECORD, $overlap->finding);
+        self::assertSame($this->seal(1)['id'], $overlap->firstBadId);
+    }
+
+    /**
+     * A record never excuses a seal whose membership is not the one sealed:
+     * with a member row removed, the segment is tampering at its count, never
+     * pruned, though the record covers its only missing entry.
+     *
+     * @return void
+     */
+    public function testARecordCoversNothingOfAnUnauthenticatedMembership(): void
+    {
+        $sorted = self::sorted($this->storeEntries(3));
+
+        $this->sealAll();
+
+        $record = $this->pruneOf(1, [$sorted[0]]);
+
+        $this->entries()->where('id', $sorted[0])->delete();
+        $this->members()->where('entry_id', $sorted[2])->delete();
+
+        $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($record)));
+
+        self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
+        self::assertSame(Finding::MEMBER_COUNT, $report->finding);
+        self::assertSame(2, $report->members);
     }
 
     /**
@@ -1788,7 +2049,7 @@ final class SegmentVerifierTest extends TestCase
         $this->entries()->where('id', $entryId)->delete();
         $this->artifactsTable()->where('entry_id', $entryId)->delete();
 
-        $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1))));
+        $report = $this->report(1, verifier: $this->verifier(prunes: $this->ledgerOf($this->pruneOf(1, [$entryId]))));
 
         self::assertSame(IntegrityStatus::PRUNED, $report->integrity);
         self::assertNull($report->finding);
@@ -1934,18 +2195,32 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The valid prune record of the stored seal at the sequence, signed under
-     * the ring's signing key.
+     * The valid prune record of the members given of the stored seal at the
+     * sequence, every member when none is given, their positions taken in
+     * member order, signed under the ring's signing key.
      *
      * @param  int  $sequence
+     * @param  ?list<string>  $pruned
+     * @param  string  $operationId
      * @return \SineMacula\Laravel\AuditLog\Integrity\PruneRecord
      */
-    private function pruneOf(int $sequence): PruneRecord
+    private function pruneOf(int $sequence, ?array $pruned = null, string $operationId = self::OPERATION_ID): PruneRecord
     {
-        $seal   = $this->seal($sequence);
-        $signer = app(SealSigner::class);
+        $seal      = $this->seal($sequence);
+        $members   = self::sorted($this->membersOf((string) $seal['id']));
+        $positions = array_keys(array_intersect($members, $pruned ?? $members));
+        $bitmap    = PruneBitmap::encode($positions, (int) $seal['member_count']);
 
-        return $signer->signPrune((string) $seal['log_id'], (string) $seal['id'], (string) $seal['seal_digest'], (int) $seal['member_count'], self::OPERATION_ID, self::PRUNED_AT);
+        return app(SealSigner::class)->signPrune(
+            (string) $seal['log_id'],
+            (string) $seal['id'],
+            (string) $seal['seal_digest'],
+            (int) $seal['member_count'],
+            $bitmap,
+            count($positions),
+            $operationId,
+            self::PRUNED_AT,
+        );
     }
 
     /**
@@ -1959,10 +2234,68 @@ final class SegmentVerifierTest extends TestCase
         $ledger = new InMemoryPruneLedger;
 
         foreach ($records as $record) {
-            $ledger->record($record);
+            $ledger->add($record);
         }
 
         return $ledger;
+    }
+
+    /**
+     * A prune ledger that runs the work given each time it is asked, then
+     * answers with the records given, or refuses a stored record it cannot read
+     * when it is given none.
+     *
+     * @param  \Closure(): void  $work
+     * @param  ?list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>  $records
+     * @return \SineMacula\Laravel\AuditLog\Contracts\PruneLedger
+     */
+    private static function askedLedger(\Closure $work, ?array $records): PruneLedger
+    {
+        return new class ($work, $records) implements PruneLedger {
+            /**
+             * Constructor.
+             *
+             * @param  \Closure(): void  $work
+             * @param  ?list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>  $records
+             */
+            public function __construct(
+
+                /** What runs each time the ledger is asked. */
+                private readonly \Closure $work,
+
+                /** The records of every seal, or `null` for a stored record that cannot be read. */
+                private readonly ?array $records,
+            ) {}
+
+            /**
+             * Run the work, then answer with the records, or refuse.
+             *
+             * @param  string  $sealId
+             * @return list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>
+             *
+             * @throws \UnexpectedValueException
+             */
+            #[\Override]
+            public function recordsFor(string $sealId): array
+            {
+                ($this->work)();
+
+                return $this->records ?? throw new \UnexpectedValueException('A stored prune record\'s `pruned` must be text.');
+            }
+        };
+    }
+
+    /**
+     * The record given with the fields given changed, its signature kept unless
+     * one is given.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\PruneRecord  $record
+     * @param  array<string, string>  $changes
+     * @return \SineMacula\Laravel\AuditLog\Integrity\PruneRecord
+     */
+    private static function changed(PruneRecord $record, array $changes): PruneRecord
+    {
+        return PruneRecord::fromArray([...$record->toArray(), 'signature' => $record->signature, ...$changes]);
     }
 
     /**

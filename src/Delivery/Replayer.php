@@ -5,7 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Delivery;
 
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Lifecycle\MaintenanceTransaction;
+use SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
@@ -24,6 +27,17 @@ use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
  * restore the key or leave it quarantined. A record the store refuses is
  * counted by its id and the class of the failure, never its message, and stops
  * no other line.
+ *
+ * A pruned record is never resurrected: a line that verifies is checked against
+ * the tombstones first, and a record retention has already pruned is counted
+ * pruned and never handed to the store, on a dry run too, and the line stays in
+ * the file. A failure reading the tombstones is counted as the line's failure.
+ * Outside a dry run the check and the store run in one lifecycle transaction,
+ * behind the lifecycle lock every prune takes first, so no prune can delete the
+ * record between its check and its insert and the insert never brings back an
+ * entry pruned a moment before; the installation is confirmed once, before the
+ * first line. The outbox replay drains, and the drain checks every row it reads
+ * the same way.
  *
  * A spilled bundle, a record with its attachment, is replayed whole: the store
  * keeps its entry and its artifact together, and a bundle it holds already is a
@@ -64,6 +78,7 @@ final readonly class Replayer
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Receipts  $receipts
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer  $drainer
      * @param  \SineMacula\Laravel\AuditLog\Delivery\RecordedNotifier  $notifier
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones  $tombstones
      */
     public function __construct(
 
@@ -87,6 +102,9 @@ final readonly class Replayer
 
         /** The notifier that dispatches `AuditRecorded` for a replayed record. */
         private RecordedNotifier $notifier,
+
+        /** The tombstones that say whether retention has already pruned a record. */
+        private PruneTombstones $tombstones,
     ) {}
 
     /**
@@ -97,11 +115,17 @@ final readonly class Replayer
      * @param  bool  $dryRun
      * @return \SineMacula\Laravel\AuditLog\Delivery\ReplayResult
      *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \SineMacula\Laravel\AuditLog\Database\InstallationMismatchException
      * @throws \InvalidArgumentException
      */
     public function spill(string $path, bool $dryRun): ReplayResult
     {
         $result = new ReplayResult;
+
+        if (!$dryRun) {
+            $this->container->make(MaintenanceTransaction::class)->confirm();
+        }
 
         foreach ($this->reader->lines($path) as $line) {
             $this->replayLine($line, $dryRun, $result);
@@ -143,8 +167,8 @@ final readonly class Replayer
     }
 
     /**
-     * Count the line the reader or the codec refused; otherwise count the
-     * record it holds on a dry run, and replay it on any other.
+     * Count the line the reader or the codec refused, and otherwise replay the
+     * record it holds.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\SpillLine  $line
      * @param  bool  $dryRun
@@ -169,19 +193,72 @@ final readonly class Replayer
             return;
         }
 
-        if ($dryRun) {
-            $result->addWouldReplay($where, $record->record->id);
+        $this->replayRecord($record, $where, $dryRun, $result);
+    }
+
+    /**
+     * Count the record retention has already pruned; otherwise count it on a
+     * dry run, and give it to the store on any other, the check made again
+     * behind the lifecycle lock.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @param  string  $where
+     * @param  bool  $dryRun
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\ReplayResult  $result
+     * @return void
+     */
+    private function replayRecord(#[\SensitiveParameter] FinalisedRecord $record, string $where, bool $dryRun, ReplayResult $result): void
+    {
+        if (!$dryRun) {
+            $this->store($record, $where, $result);
 
             return;
         }
 
-        $this->store($record, $where, $result);
+        if ($this->stopsAtTheTombstones($record, $where, $result)) {
+            return;
+        }
+
+        $result->addWouldReplay($where, $record->record->id);
     }
 
     /**
-     * Give the record to the store inside the write guard and dispatch
-     * `AuditRecorded`; a failure, a bundle refused by a store that keeps no
-     * attachments included, is counted by the record's id and its class alone.
+     * Whether the record goes no further than the tombstones: retention has
+     * already pruned it, and it is counted pruned, or the tombstones could not
+     * be read, and it is counted failed by its id and the class of the failure
+     * alone.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @param  string  $where
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\ReplayResult  $result
+     * @return bool
+     */
+    private function stopsAtTheTombstones(#[\SensitiveParameter] FinalisedRecord $record, string $where, ReplayResult $result): bool
+    {
+        $id = $record->record->id;
+
+        try {
+            $pruned = $this->tombstones->isPruned($id);
+        } catch (\Throwable $exception) {
+            $result->addFailed($where, $id, get_debug_type($exception));
+
+            return true;
+        }
+
+        if ($pruned) {
+            $result->addPruned($where, $id);
+        }
+
+        return $pruned;
+    }
+
+    /**
+     * In one lifecycle transaction, behind the lock, check the record against
+     * the tombstones and, unless retention has pruned it, give it to the store
+     * inside the write guard; then count it pruned, or dispatch `AuditRecorded`
+     * and count it replayed. A failure, of the tombstones' read or of the
+     * store, a bundle refused by a store that keeps no attachments included, is
+     * counted by the record's id and its class alone.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  string  $where
@@ -190,24 +267,55 @@ final readonly class Replayer
      */
     private function store(#[\SensitiveParameter] FinalisedRecord $record, string $where, ReplayResult $result): void
     {
-        $container = $this->container;
+        $container  = $this->container;
+        $tombstones = $this->tombstones;
+        $id         = $record->record->id;
+
+        $unlessPruned = static function () use ($container, $tombstones, $record): bool {
+            if ($tombstones->isPruned($record->record->id)) {
+                return false;
+            }
+
+            $container->make(WriteGuard::class)->during(static fn () => self::storeIn($container, $record));
+
+            return true;
+        };
 
         try {
-            $container->make(WriteGuard::class)->during(static function () use ($container, $record): void {
-                if ($record->record->attachment !== null) {
-                    (new StoreCapabilities($container))->assertAcceptsAttachments();
-                }
-
-                $container->make(AuditStore::class)->store($record);
-            });
+            $stored = $container->make(MaintenanceTransaction::class)->run(Str::uuid7()->toString(), $unlessPruned);
         } catch (\Throwable $exception) {
-            $result->addFailed($where, $record->record->id, get_debug_type($exception));
+            $result->addFailed($where, $id, get_debug_type($exception));
 
             return;
         }
 
-        $this->notifier->notify($record->record->id, $record->record->event, $record->record->category);
+        if (!$stored) {
+            $result->addPruned($where, $id);
 
-        $result->addReplayed($where, $record->record->id);
+            return;
+        }
+
+        $this->notifier->notify($id, $record->record->event, $record->record->category);
+
+        $result->addReplayed($where, $id);
+    }
+
+    /**
+     * Give the record to the bound store, once a bundle's store is known to
+     * keep attachments.
+     *
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    private static function storeIn(Container $container, #[\SensitiveParameter] FinalisedRecord $record): void
+    {
+        if ($record->record->attachment !== null) {
+            (new StoreCapabilities($container))->assertAcceptsAttachments();
+        }
+
+        $container->make(AuditStore::class)->store($record);
     }
 }

@@ -76,6 +76,7 @@ final class AuditEntryReadTest extends TestCase
         'source_region'     => 'eu-west-1',
         'source_record_id'  => 'legacy-77',
         'import_batch_id'   => '0192f5a0-7c1e-7000-8000-0000000000ff',
+        'source_digest'     => 'b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c',
         'ip'                => '2001:db8::1',
         'user_agent'        => 'Navigateur Été/1.0',
         'context'           => '{"7":"numeric key","flags":[1,2],"nested":{"a":null}}',

@@ -24,6 +24,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
+use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
@@ -43,10 +44,12 @@ use Tests\TestCase;
  * another process, on whichever engine the suite runs against: a seal committed
  * once the run has read the head is never read; a prune that deletes a
  * segment's entries and writes its signed record in one transaction is seen
- * whole or not at all, so the segment is `valid` or `pruned` and never
- * `incomplete`; anchoring meanwhile never fails a run; and a strict run beside
- * a seal run that has sealed and not yet anchored passes, its new seal awaiting
- * its first anchoring.
+ * whole or not at all, and one that commits after the members are read is found
+ * by the ledger and the reread that follow, so the segment is `valid` or
+ * `pruned` and never `incomplete`, neither `missing_entry` nor `resurrected`;
+ * anchoring meanwhile never fails a run; and a strict run beside a seal run
+ * that has sealed and not yet anchored passes, its new seal awaiting its first
+ * anchoring.
  *
  * Each run streams its reports and keeps none; these tests keep them to
  * compare. SQLite runs in WAL mode, as the operations guidance advises, so a
@@ -184,7 +187,7 @@ final class VerifyConcurrencyTest extends TestCase
     {
         yield from [
             'committed before the segment is read'             => [false, IntegrityStatus::PRUNED],
-            'committed after its members and entries are read' => [true, IntegrityStatus::VALID],
+            'committed after its members and entries are read' => [true, IntegrityStatus::PRUNED],
         ];
     }
 
@@ -192,8 +195,10 @@ final class VerifyConcurrencyTest extends TestCase
      * A prune in another process deletes a segment's entries and writes its
      * signed record in one transaction, committing while the run is held at the
      * segment: committed before its members and entries are read, the segment
-     * is `pruned`; after, it is `valid`, read from before the prune. It is
-     * never `incomplete`, and every other segment stays `valid`.
+     * is `pruned`; committed after, its members were read present, the ledger
+     * asked after them gives the record, and the members it covers, read again,
+     * are gone, so it is `pruned` too. It is never `incomplete`, and every
+     * other segment stays `valid`.
      *
      * @param  bool  $afterTheRead
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus  $expected
@@ -487,9 +492,9 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * In another process's prune: delete the seal's entries and write its
-     * signed prune record in one transaction on the maintenance connection,
-     * running the hold, when given, between the two.
+     * In another process's prune: delete every entry of the seal and write the
+     * signed prune record of all of them in one transaction on the maintenance
+     * connection, running the hold, when given, between the two.
      *
      * @param  array<string, scalar|null>  $seal
      * @param  \Tests\Fixtures\Integrity\TableBackedPruneLedger  $ledger
@@ -501,7 +506,17 @@ final class VerifyConcurrencyTest extends TestCase
         $id      = (string) $seal['id'];
         $members = $this->membersOf($id);
         $digest  = (string) $seal['seal_digest'];
-        $record  = app(SealSigner::class)->signPrune((string) $seal['log_id'], $id, $digest, (int) $seal['member_count'], self::OPERATION_ID, self::PRUNED_AT);
+        $count   = (int) $seal['member_count'];
+        $record  = app(SealSigner::class)->signPrune(
+            (string) $seal['log_id'],
+            $id,
+            $digest,
+            $count,
+            PruneBitmap::encode(range(0, $count - 1), $count),
+            $count,
+            self::OPERATION_ID,
+            self::PRUNED_AT,
+        );
 
         DB::connection(StorageConnection::forMaintenance())->transaction(static function ($connection) use ($members, $record, $ledger, $hold): void {
             $connection->table(EntrySettings::table())->whereIn('id', $members)->delete();

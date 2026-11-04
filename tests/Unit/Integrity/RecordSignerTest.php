@@ -16,6 +16,7 @@ use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
+use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use Tests\Fixtures\Records\RecordFactory;
@@ -25,8 +26,9 @@ use Tests\Fixtures\Records\RecordFactory;
  * version 1, pinned byte for byte by the golden entry; verification that fails
  * for a tampered column and only then answers `false`, refusing an unknown key,
  * an unsupported version, a missing column, a malformed HMAC and a value with
- * no canonical form; and the captured-content digest that leaves out the
- * finalisation columns.
+ * no canonical form; the source digest of an imported record, signed and
+ * captured; and the captured-content digest that leaves out the finalisation
+ * columns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,6 +46,9 @@ final class RecordSignerTest extends TestCase
 
     /** @var string The id a captured record is pinned to. */
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
+
+    /** @var string The batch of a second import of the factory's assertion. */
+    private const string OTHER_BATCH_ID = '0192f1c4-7b8e-7c3a-9d2e-5f6a7b8c9d0f';
 
     /** @var string When the record is finalised: after the activity occurred. */
     private const string RECORDED_AT = '2026-11-01T12:00:01.654321Z';
@@ -80,8 +85,8 @@ final class RecordSignerTest extends TestCase
         'id', 'record_version', 'event', 'event_version', 'category', 'outcome', 'reason', 'actor_type', 'actor_id',
         'subject_type', 'subject_id', 'principal_type', 'principal_id', 'tenant_type', 'tenant_id', 'credential_id',
         'guard', 'session_id', 'request_id', 'trace_id', 'correlation_id', 'origin', 'provenance', 'source_id',
-        'source_region', 'source_record_id', 'import_batch_id', 'ip', 'user_agent', 'context', 'properties',
-        'occurred_at', 'recorded_at', 'integrity_version', 'key_id', 'hmac',
+        'source_region', 'source_record_id', 'import_batch_id', 'source_digest', 'ip', 'user_agent', 'context',
+        'properties', 'occurred_at', 'recorded_at', 'integrity_version', 'key_id', 'hmac',
     ];
 
     /**
@@ -168,7 +173,7 @@ final class RecordSignerTest extends TestCase
 
     /**
      * The signed envelope is the finalised record's envelope without its HMAC:
-     * the 35 signed columns, the finalisation columns included, and nothing
+     * the 36 signed columns, the finalisation columns included, and nothing
      * else.
      *
      * @return void
@@ -713,7 +718,7 @@ final class RecordSignerTest extends TestCase
      */
     public static function provideEveryCapturedColumn(): iterable
     {
-        foreach (array_slice(self::COLUMNS, 0, 32) as $column) {
+        foreach (array_slice(self::COLUMNS, 0, 33) as $column) {
             yield $column => [$column];
         }
     }
@@ -758,6 +763,38 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
+     * An imported record's source digest is signed and captured: its row
+     * verifies as signed, a digest edited, emptied or set where there was none
+     * fails verification and changes the captured digest, and two imports of
+     * one assertion, with their own ids and batches, have one source digest and
+     * two captured digests.
+     *
+     * @return void
+     */
+    public function testTheSourceDigestIsSigned(): void
+    {
+        $signer   = self::signer();
+        $imported = self::stored($signer->sign(RecordFactory::imported(), self::RECORDED_AT));
+        $captured = self::stored($signer->sign(self::record(), self::RECORDED_AT));
+        $source   = RecordFactory::source();
+        $again    = RecordFactory::imported(new ImportedSource($source->sourceId, $source->sourceRegion, $source->sourceRecordId, self::OTHER_BATCH_ID, $source->sourceDigest));
+        $repeat   = self::stored($signer->sign($again, self::RECORDED_AT));
+
+        self::assertContains('source_digest', RecordSigner::CAPTURED_COLUMNS);
+        self::assertTrue($signer->verifies($imported));
+        self::assertSame(RecordFactory::source()->sourceDigest, $imported['source_digest']);
+
+        foreach ([str_repeat('0', 64), null] as $value) {
+            self::assertFalse($signer->verifies(['source_digest' => $value] + $imported));
+            self::assertNotSame($signer->capturedDigest($imported), $signer->capturedDigest(['source_digest' => $value] + $imported));
+        }
+
+        self::assertFalse($signer->verifies(['source_digest' => str_repeat('0', 64)] + $captured));
+        self::assertSame($imported['source_digest'], $repeat['source_digest']);
+        self::assertNotSame($signer->capturedDigest($imported), $signer->capturedDigest($repeat));
+    }
+
+    /**
      * The signed columns are the envelope without `hmac`, and the captured
      * columns are the captured record's, both in table order (S1).
      *
@@ -768,8 +805,8 @@ final class RecordSignerTest extends TestCase
         $finalised = self::signer()->sign(self::record(), self::RECORDED_AT);
 
         self::assertSame(self::COLUMNS, array_keys($finalised->toArray()));
-        self::assertSame(array_slice(self::COLUMNS, 0, 35), RecordSigner::SIGNED_COLUMNS);
-        self::assertSame(array_slice(self::COLUMNS, 0, 32), RecordSigner::CAPTURED_COLUMNS);
+        self::assertSame(array_slice(self::COLUMNS, 0, 36), RecordSigner::SIGNED_COLUMNS);
+        self::assertSame(array_slice(self::COLUMNS, 0, 33), RecordSigner::CAPTURED_COLUMNS);
         self::assertSame(array_keys(self::record()->toArray()), RecordSigner::CAPTURED_COLUMNS);
     }
 
@@ -841,6 +878,7 @@ final class RecordSignerTest extends TestCase
             'source_region'    => null,
             'source_record_id' => 'r1',
             'import_batch_id'  => '01932b4e-8a40-7000-8000-0000000000bb',
+            'source_digest'    => str_repeat('5d', 32),
             'ip'               => '203.0.113.8',
             'user_agent'       => null,
             'context'          => json_decode('{"method":"GET","route":"invoices.approve"}'),

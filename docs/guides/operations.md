@@ -1,13 +1,15 @@
 # Operations
 
-Sealing, anchoring and verification run as commands, on Laravel's scheduler, beside the application. This guide covers
-what to schedule, what to watch, where to anchor, which keys to keep, and what sealing costs. How each step works, and
-what each status and finding means, is in [the integrity note](../design/integrity.md); what none of it promises is in
-[the threat model](../design/threat-model.md).
+Sealing, anchoring, verification and pruning run as commands, on Laravel's scheduler, beside the application, and
+holds, imports and reconciliation run as commands an operator starts. This guide covers what to schedule, what to
+watch, where to anchor, which keys to keep, and what sealing costs. How each step works, and what each status and
+finding means, is in [the integrity note](../design/integrity.md) and [the lifecycle note](../design/lifecycle.md);
+retention, holds and imports are in [the retention guide](retention.md) and [the import guide](import.md); what none of
+it promises is in [the threat model](../design/threat-model.md).
 
 ## Schedule
 
-The package registers three runs on Laravel's scheduler, so the scheduler itself must run: `php artisan schedule:run`
+The package registers four runs on Laravel's scheduler, so the scheduler itself must run: `php artisan schedule:run`
 every minute from cron, or `php artisan schedule:work`. `php artisan schedule:list` shows the runs the package
 registered.
 
@@ -16,13 +18,20 @@ registered.
 | `audit-log:seal`                          | `integrity.seal.schedule`       | `*/5 * * * *` | Seals the entries recorded since the last seal, then anchors   |
 | `audit-log:seal --sweep`                  | `integrity.seal.sweep_schedule` | `15 3 * * *`  | Seals whatever the recent passes missed, from a saved cursor   |
 | `audit-log:verify --strict --sweep-first` | `integrity.verify.schedule`     | `45 3 * * *`  | Sweeps, then verifies the whole log and its anchoring, records |
+| `audit-log:prune`                         | `retention.schedule`            | `30 3 * * *`  | Deletes the sealed entries retention no longer keeps, journals |
 
-- Each run is started with `runInBackground()`, so a long sweep or verification never holds up the application's own
-  tasks due in the same minute, and `schedule:work` keeps ticking while one runs.
+- The prune is registered only when it can delete something: when a category is kept for less than forever by
+  `retention.after_days` or `retention.categories`, or when a `RetentionPolicy` of your own is bound. With the default
+  settings everything is kept forever and `schedule:list` shows three runs. A bound policy that cannot be resolved is
+  reported and the prune still registered, so the run refuses it and records that.
+- Each run is started with `runInBackground()`, so a long sweep, verification or prune never holds up the application's
+  own tasks due in the same minute, and `schedule:work` keeps ticking while one runs.
 - Each run is registered with `withoutOverlapping()`, so a run still going when the next is due is not started twice.
-  Its lock lapses well inside the run's period, after 15 minutes for sealing and 23 hours for the sweep and the
-  verification, so a run killed before it released its lock (a deploy, a restart, the memory limit) skips at most the
-  runs due within that time, never the next day's. `php artisan schedule:clear-cache` clears a lock a killed run left.
+  Its lock lapses well inside the run's period, after 15 minutes for sealing and 23 hours for the sweep, the
+  verification and the prune, so a run killed before it released its lock (a deploy, a restart, the memory limit)
+  skips at most the runs due within that time, never the next day's. `php artisan schedule:clear-cache` clears a lock a
+  killed run left. A second prune started beside a first is still safe: each chunk takes the lifecycle lock, and two
+  prunes never cover one member twice.
 - Each run is registered with `onOneServer()` only when the cache store the scheduler takes its locks in is `redis`,
   `memcached`, `database` or `dynamodb`, the stores every server shares. That store is the one `Schedule::useCache()`
   was given, which Laravel sets from `cache.schedule_store` or the `SCHEDULE_CACHE_DRIVER` environment variable, and the
@@ -41,6 +50,7 @@ registered.
   Schedule::command('audit-log:seal')->everyFiveMinutes()->withoutOverlapping(15)->runInBackground()->onOneServer();
   Schedule::command('audit-log:seal --sweep')->dailyAt('03:15')->withoutOverlapping(1380)->runInBackground()->onOneServer();
   Schedule::command('audit-log:verify --strict --sweep-first')->dailyAt('03:45')->withoutOverlapping(1380)->runInBackground()->onOneServer();
+  Schedule::command('audit-log:prune')->dailyAt('03:30')->withoutOverlapping(1380)->runInBackground()->onOneServer();
   ```
 
 - A schedule that is no cron expression registers nothing for its run and is reported; it never throws, so the
@@ -57,6 +67,30 @@ The commands can be run by hand too:
   range it refuses. A ranged run checks every seal of its range, a seal missing at either end of it included, and says
   that it does not establish the integrity of the whole log, so schedule the complete one.
 
+The lifecycle commands are run by hand, but for the prune, which the scheduler runs. Each prints no value of an entry,
+a statement or a binding, names a failure by its class, and exits 0 when it is done, 1 when it is refused or fails at
+run time, and 2 for an argument or option it refuses, before anything runs. Each trusts the shell, as `audit-log:seal`
+and `audit-log:verify` do: `--by-type` and `--by-id` assert the operator and prove nothing, `--reason` is a reason code
+and `--reference` the ticket or case, so keep the maintenance connection's credentials to those who may run them.
+
+| Command                    | Options                                                                                                                                                                       | What it does                                                                                      |
+|----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `audit-log:prune`          | `--dry-run`, `--max-seconds`, `--json`                                                                                                                                        | Prunes what retention no longer keeps; exits 1 when the run fails or skips a seal it cannot trust |
+| `audit-log:hold`           | `--all`, `--tenant`, `--tenantless`, `--about`, `--category`, `--from`, `--to`, `--import-batch`, `--basis`, `--review-by`, `--by-type`, `--by-id`, `--reason`, `--reference` | Places a hold and prints its id                                                                   |
+| `audit-log:release <hold>` | `--by-type`, `--by-id`, `--reason`, `--reference`                                                                                                                             | Releases a hold; exits 1 for a hold that is not active                                            |
+| `audit-log:holds`          | `--rebuild`, `--json`                                                                                                                                                         | Lists the active holds from the verified journal, or rebuilds their projection                    |
+| `audit-log:import [file]`  | `--source`, `--region`, `--from-export`, `--dry-run`, `--hold`, `--hold-basis`, `--close`, `--by-type`, `--by-id`, `--reason`, `--reference`, `--json`                        | Imports a file of another system's records as a batch, or closes a batch left running             |
+| `audit-log:reconcile`      | `--since`, `--json`                                                                                                                                                           | Writes the lifecycle records the journal says are missing, looking back `--since` days            |
+
+- `audit-log:prune --dry-run` takes no lock and writes nothing, and `--max-seconds`, from 60 to 86400, overrides
+  `retention.max_seconds`. A run that stops on its time budget ends `partial` and the next resumes after it.
+- `audit-log:replay` replays a spill file behind the lifecycle lock, so it uses the maintenance connection a prune
+  uses and waits for a prune in progress.
+- `audit-log:reconcile` is never scheduled: run it by hand, one at a time, after a lifecycle command warned that its
+  record could not be written. `--since` is 1 to 3650 days, 7 by default.
+- `audit-log:import --close=<batch>` brings a batch a dead import left `running` to its end, `interrupted` unless its
+  finish was journalled; `audit-log:check` notes such a batch once it has not been written for an hour.
+
 ## Monitor
 
 A failure raises an alarm; a run that does not happen raises none.
@@ -72,6 +106,11 @@ A failure raises an alarm; a run that does not happen raises none.
 - Nothing alarms on a run that does not happen: a missed scheduled run raises nothing, since a stopped scheduler, a
   server that is down or a cron line that was lost dispatches no event and reports nothing. So read the progress the
   package records, and alert when it goes stale.
+- A lifecycle operation whose activity record cannot be written stays committed: its result says `recorded: false`,
+  its command warns, and the failure is reported as a `LifecycleRecordFailedException` naming its class. Run
+  `audit-log:reconcile` then, which writes the missing records from the journal.
+- A prune refused on a broken journal ends `failed` with `journal_broken`, and `audit-log:verify` reports the journal's
+  finding and fails. Every run of `audit-log:verify` verifies the whole lifecycle journal and prints its line.
 
 The progress is in `integrity.state_table` (`audit_log_integrity_state` by default), one row per name, with the time it
 was written in `updated_at`. It is operational, never evidence: a monitor may read it, and nothing it says changes what
@@ -81,22 +120,27 @@ verification finds.
 SELECT name, value, updated_at FROM audit_log_integrity_state ORDER BY name;
 ```
 
-| Name                  | Written                                    | Value                                  | Stale means                                                         |
-|-----------------------|--------------------------------------------|----------------------------------------|---------------------------------------------------------------------|
-| `seal.last_run`       | When a seal run ends without a failure     | `at`, `seals`, `entries`, `sweep`      | Older than a few seal intervals: the scheduler or sealing stopped   |
-| `seal.last`           | After each seal commits                    | `sequence`, `id`, `sealed_at`          | Old while entries are being recorded: nothing is being sealed       |
-| `seal.recent`         | After a recent pass's seal moves it on     | `last_recorded_at`                     | Old while entries are being recorded: the recent pass stopped       |
-| `sweep.cursor`        | After each window of an unfinished sweep   | `recorded_at`, `id`, `from_its_time`   | Present for days: the sweep keeps stopping before its end           |
-| `sweep.completed`     | When a sweep reaches the end of the table  | `at`                                   | Older than a day and a sweep's length: the sweep is overdue         |
-| `anchor.last`         | After a pass that anchored a seal          | `sequence`, `anchor`, `anchored_at`    | Behind `seal.last`: anchoring lags sealing                          |
-| `anchor.last_failure` | When anchoring fails                       | `sequence`, `class`, `at`              | Newer than `anchor.last`: the anchor is down                        |
-| `verify.last_full`    | When a complete verification ends          | `at`, `head`, `passed`, `strict`       | Older than a day, or `passed` false: the verification did not pass  |
+| Name                  | Written                                        | Value                                         | Stale means                                                        |
+|-----------------------|------------------------------------------------|-----------------------------------------------|--------------------------------------------------------------------|
+| `seal.last_run`       | When a seal run ends without a failure         | `at`, `seals`, `entries`, `sweep`             | Older than a few seal intervals: the scheduler or sealing stopped  |
+| `seal.last`           | After each seal commits                        | `sequence`, `id`, `sealed_at`                 | Old while entries are being recorded: nothing is being sealed      |
+| `seal.recent`         | After a recent pass's seal moves it on         | `last_recorded_at`                            | Old while entries are being recorded: the recent pass stopped      |
+| `sweep.cursor`        | After each window of an unfinished sweep       | `recorded_at`, `id`, `from_its_time`          | Present for days: the sweep keeps stopping before its end          |
+| `sweep.completed`     | When a sweep reaches the end of the table      | `at`                                          | Older than a day and a sweep's length: the sweep is overdue        |
+| `anchor.last`         | After a pass that anchored a seal              | `sequence`, `anchor`, `anchored_at`           | Behind `seal.last`: anchoring lags sealing                         |
+| `anchor.last_failure` | When anchoring fails                           | `sequence`, `class`, `at`                     | Newer than `anchor.last`: the anchor is down                       |
+| `verify.last_full`    | When a complete verification ends              | `at`, `head`, `passed`, `strict`              | Older than a day, or `passed` false: the verification did not pass |
+| `retention.last_run`  | When a prune run ends, unless it was a dry run | `at`, `run_id`, `status`, `deleted`, `cursor` | Older than a day: the scheduled prune has not finished a run since |
 
 - `verify.last_full` records whether the run passed at the strictness it ran at, and that strictness in `strict`: the
   scheduled run is strict, so a run that failed only on its anchoring records `passed` false with `strict` true. A
   monitor should alert on a stale row and on `passed` false alike.
 - `seal.recent` is where the recent pass reads from, less the lookback: the latest entry time a recent pass sealed,
   which only a recent pass moves forward, so a sweep's seal of old rows never pulls the recent pass back to them.
+- `retention.last_run` is written by every prune that is not a dry run, a failed one included, with its `status`:
+  `complete`, `partial` or `failed`. A stale row means the scheduled prune has not finished a run since; a `partial`
+  one is normal while holds or undelivered records keep entries, and a run that stopped on its time budget is resumed
+  by the next. A prune never reads this row: where it resumes is read from the lifecycle journal.
 
 - **Anchor lag** is the distance between `seal.last` and `anchor.last` by sequence. Each seal run anchors up to
   `integrity.anchor.batch` seals after it seals, so a lag that grows run after run means the anchor is failing or slower
@@ -112,8 +156,12 @@ SELECT name, value, updated_at FROM audit_log_integrity_state ORDER BY name;
 - **An entry recorded far ahead of the clock**, more than the lookback beyond the verification's own clock, is never
   taken by a seal while it stays ahead, so verification reports it `future_unsealed` and the log `incomplete` rather
   than counting it pending. A clock that runs that far ahead on a recording server shows up here first.
-- Run `php artisan audit-log:check` in the deploy pipeline: it reports a malformed integrity setting, a missing or
-  misshapen integrity table and an anchor disk that is not configured, and writes nothing.
+- Run `php artisan audit-log:check` in the deploy pipeline: it reports a malformed integrity, retention or import
+  setting, a retention shorter than its preservation, a missing or misshapen integrity or lifecycle table, a missing
+  lock row, a missing installation id, a maintenance connection that reaches another installation, a lifecycle journal
+  that does not verify, holds projection drift and an anchor disk that is not configured. It notes, without failing, a
+  hold whose review date has passed and an import batch left `running` for an hour. It writes nothing: the migrations
+  seed the installation id, and a check only reads it.
 
 ## Anchor outside the application
 
@@ -177,11 +225,13 @@ AUDIT_LOG_INTEGRITY_ANCHOR_PATH=audit-log-anchors
 The integrity key ring signs every entry, and each seal is signed under a key derived from the ring key it names, so the
 ring decides for how long the log can be verified.
 
-| Key                    | Protects                                                                 | Keep it                                              |
-|------------------------|--------------------------------------------------------------------------|------------------------------------------------------|
-| Encryption keys        | The outbox and bulk manifests (`app.key`) and encrypted fields (owners') | Until no row needs decrypting; destroying one erases |
-| Row-HMAC keys          | Each entry's `hmac`, under its `key_id`                                  | As long as the entries they signed                   |
-| Seal-verification keys | Each seal's `signature`, under its `key_id`                              | As long as the seals, which pruning keeps            |
+| Key                    | Protects                                                                       | Keep it                                              |
+|------------------------|--------------------------------------------------------------------------------|------------------------------------------------------|
+| Encryption keys        | The outbox and bulk manifests (`app.key`) and encrypted fields (owners')       | Until no row needs decrypting; destroying one erases |
+| Row-HMAC keys          | Each entry's `hmac`, and an imported row's `source_digest`, under its `key_id` | As long as the entries they signed                   |
+| Seal-verification keys | Each seal's `signature`, under its `key_id`                                    | As long as the seals, which pruning keeps            |
+| Journal keys           | Each lifecycle journal row's `hmac`, under its `key_id`                        | As long as the journal, which nothing prunes         |
+| `app.key` for exports  | An export artifact's members, which `audit-log:export --verify` reads          | As long as an export's verification is promised      |
 
 - These are separate lifetimes, though one ring key may serve as both a row-HMAC and a seal-verification key: an
   encryption key may be retired or destroyed on its own schedule, while a ring key is kept for as long as a seal names
@@ -189,6 +239,12 @@ ring decides for how long the log can be verified.
 - A retired `app.key` must stay in `app.previous_keys` for as long as the artifacts sealed under it are kept, or their
   manifests can no longer be read and `audit-log:verify` reports them `manifest_unreadable`, though their entries still
   verify.
+- Export artifacts need `app.key` kept, or listed in `app.previous_keys`, for as long as their verification is
+  promised. An `audit_log.trail_exported` entry and its artifact are never pruned, so the database keeps them, but the
+  artifact's members are encrypted under `app.key`, and a key dropped from both leaves the export unverifiable.
+- The journal's key and an import's source-digest key are derived from the ring key a row names, each under its own
+  info string, so keeping that ring key keeps them. A source digest under a key the ring no longer holds cannot be
+  compared, and a re-import of its line is then counted a conflict, never a duplicate.
 - Use a managed ring (`integrity.keys` and `integrity.current`) before going live. A key derived from `app.key` ties the
   log to it: after a rotation the old key has to stay in `app.previous_keys` for as long as the log, and dropping it
   leaves every row and seal it signed unverifiable.
@@ -206,8 +262,12 @@ triggers for each engine, as SQL that its tests run as written.
 - The application's user inserts and selects entries, artifacts, seals and members, may update only a seal's four
   anchor columns, and needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the integrity state table; it is granted no
   DDL.
-- The maintenance user is the only one that may delete an entry or its artifact, and nothing else, since pruning
-  deletes an entry's artifact with it and keeps every seal and member.
+- The maintenance user, `storage.maintenance_connection`'s, is the only one that may delete an entry, its artifact or
+  its receipts, since pruning deletes them together and keeps every seal and member. It also inserts the lifecycle
+  journal and never updates or deletes a row of it, inserts and deletes the holds projection, and updates the lock row;
+  the application's user only reads the journal and the holds.
+- The maintenance credentials can still delete rows outside the package, and the journal and the seals make that
+  detectable, not impossible: keep them to whoever may prune, hold and release.
 - Run `audit-log:verify` as a user that can read the tables and write the integrity state table.
 - The triggers guard against the application's users. The tables' owner can drop them, so keep the owner's credentials
   out of the application.

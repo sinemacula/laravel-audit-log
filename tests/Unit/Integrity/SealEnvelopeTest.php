@@ -13,10 +13,12 @@ use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 /**
  * Unit tests for the seal envelope: the golden members digest, canonical seal
  * and digest reproduced byte for byte, the second golden seal chained onto the
- * first, members sorted bytewise whatever their order, a digest that every
- * field changes, each malformed field and member refused with its message, the
- * genesis rule left to verification, and a stored seal read in every form an
- * engine returns, refused naming the column and never quoting its value.
+ * first and committing to the golden journal's first row, members sorted
+ * bytewise whatever their order, a digest that every one of the sixteen fields
+ * changes, each malformed field and member refused with its message, the
+ * genesis rule and the journal's pairing left to verification, and a stored
+ * seal read in every form an engine returns, its journal columns optional,
+ * refused naming the column and never quoting its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,6 +33,9 @@ final class SealEnvelopeTest extends TestCase
 
     /** @var string A digest that is not the golden seal's. */
     private const string OTHER_DIGEST = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+    /** @var string The golden journal vectors. */
+    private const string JOURNAL_GOLDEN = __DIR__ . '/../../Fixtures/Integrity/journal-v1.json';
 
     /** @var string A signature, for a stored row. */
     private const string SIGNATURE = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
@@ -79,8 +84,9 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * The golden first seal has the golden fourteen fields, encodes to the
-     * golden canonical string, and has the golden digest.
+     * The golden first seal has the golden sixteen fields, encodes to the
+     * golden canonical string, and has the golden digest; it was made before
+     * the journal had a row, so it commits to none.
      *
      * @return void
      *
@@ -91,10 +97,33 @@ final class SealEnvelopeTest extends TestCase
         $seal = self::goldenSeal('seal_1');
 
         self::assertSame(self::goldenFields('seal_1'), $seal->toArray());
-        self::assertCount(14, $seal->toArray());
+        self::assertCount(16, $seal->toArray());
         self::assertSame(self::goldenString('seal_1_canonical'), CanonicalEncoder::encode($seal->toArray()));
         self::assertSame(self::goldenString('seal_1_digest'), $seal->digest());
         self::assertSame(self::goldenString('members_digest'), $seal->membersDigest);
+        self::assertNull($seal->journalSequence);
+        self::assertNull($seal->journalHead);
+    }
+
+    /**
+     * The golden second seal commits to the golden journal's first row, its
+     * sequence and its HMAC, and encodes to the golden canonical string.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheSecondGoldenSealCommitsToTheJournalsFirstRow(): void
+    {
+        $seal    = self::goldenSeal('seal_2');
+        $journal = json_decode((string) file_get_contents(self::JOURNAL_GOLDEN), true, 512, JSON_THROW_ON_ERROR);
+        $rows    = is_array($journal) ? $journal['rows'] ?? null : null;
+        $row     = is_array($rows) && is_array($rows[0] ?? null) ? $rows[0] : self::fail('The golden journal has no first row.');
+
+        self::assertSame(1, $seal->journalSequence);
+        self::assertSame($row['hmac'] ?? null, $seal->journalHead);
+        self::assertSame(self::goldenString('seal_2_canonical'), CanonicalEncoder::encode($seal->toArray()));
+        self::assertSame(hash('sha256', self::goldenString('seal_2_canonical')), $seal->digest());
     }
 
     /**
@@ -142,7 +171,7 @@ final class SealEnvelopeTest extends TestCase
 
     /**
      * Rows of `[field, changed value, whether an envelope can hold it]`: each
-     * of the fourteen fields. The version, the signer and the algorithm version
+     * of the sixteen fields. The version, the signer and the algorithm version
      * have one value this release builds, so a change to them is shown on the
      * encoded fields.
      *
@@ -165,11 +194,13 @@ final class SealEnvelopeTest extends TestCase
             'signer'            => ['signer', 'ed25519', false],
             'key_id'            => ['key_id', 'k2025', true],
             'algorithm_version' => ['algorithm_version', 2, false],
+            'journal_sequence'  => ['journal_sequence', 1, true],
+            'journal_head'      => ['journal_head', self::OTHER_DIGEST, true],
         ];
     }
 
     /**
-     * Changing any one of the fourteen fields changes the seal digest, so none
+     * Changing any one of the sixteen fields changes the seal digest, so none
      * can be altered unnoticed.
      *
      * @param  string  $field
@@ -310,6 +341,11 @@ final class SealEnvelopeTest extends TestCase
             'an algorithm version of 0'       => ['algorithm_version', 0, $version],
             'another signer'                  => ['signer', 'ed25519', 'A seal\'s `signer` must be `hmac`.'],
             'an upper-case signer'            => ['signer', 'HMAC', 'A seal\'s `signer` must be `hmac`.'],
+            'a journal sequence of 0'         => ['journal_sequence', 0, 'A seal\'s `journal_sequence` must be null or at least 1.'],
+            'a negative journal sequence'     => ['journal_sequence', -1, 'A seal\'s `journal_sequence` must be null or at least 1.'],
+            'a short journal head'            => ['journal_head', str_repeat('a', 63), 'A seal\'s `journal_head` must be null or 64 lower-case hexadecimal characters.'],
+            'an upper-case journal head'      => ['journal_head', str_repeat('A', 64), 'A seal\'s `journal_head` must be null or 64 lower-case hexadecimal characters.'],
+            'an empty journal head'           => ['journal_head', '', 'A seal\'s `journal_head` must be null or 64 lower-case hexadecimal characters.'],
         ];
     }
 
@@ -348,6 +384,54 @@ final class SealEnvelopeTest extends TestCase
         self::assertSame(50000, $seal->memberCount);
         self::assertSame(PHP_INT_MAX, $seal->sequence);
         self::assertSame(1, self::envelope(['member_count' => 1])->memberCount);
+        self::assertSame(1, self::envelope(['journal_sequence' => 1, 'journal_head' => self::OTHER_DIGEST])->journalSequence);
+        self::assertSame(PHP_INT_MAX, self::envelope(['journal_sequence' => PHP_INT_MAX, 'journal_head' => self::OTHER_DIGEST])->journalSequence);
+    }
+
+    /**
+     * The pairing of the journal's two fields is not enforced when a seal is
+     * built or loaded: a sequence with no head, or a head with no sequence, is
+     * evidence for the journal's verification to report.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testDoesNotEnforceTheJournalsPairing(): void
+    {
+        $sequence = self::envelope(['journal_sequence' => 4]);
+        $head     = self::envelope(['journal_head' => self::OTHER_DIGEST]);
+
+        self::assertSame(4, $sequence->journalSequence);
+        self::assertNull($sequence->journalHead);
+        self::assertNull($head->journalSequence);
+        self::assertSame(self::OTHER_DIGEST, $head->journalHead);
+        self::assertSame($sequence->toArray(), SealEnvelope::fromRow($sequence->toRow(self::OTHER_DIGEST, self::SIGNATURE))->toArray());
+        self::assertSame($head->toArray(), SealEnvelope::fromRow($head->toRow(self::OTHER_DIGEST, self::SIGNATURE))->toArray());
+    }
+
+    /**
+     * A stored row with no journal columns reads as a seal that commits to
+     * none, and a journal sequence is read from its decimal string.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testTheJournalColumnsAreOptionalWhenLoading(): void
+    {
+        $row = self::storedRow();
+
+        unset($row['journal_sequence'], $row['journal_head']);
+
+        $seal      = SealEnvelope::fromRow($row);
+        $committed = SealEnvelope::fromRow(self::storedRow(['journal_sequence' => '7', 'journal_head' => self::OTHER_DIGEST]));
+
+        self::assertNull($seal->journalSequence);
+        self::assertNull($seal->journalHead);
+        self::assertSame(self::goldenString('seal_1_digest'), $seal->digest());
+        self::assertSame(7, $committed->journalSequence);
+        self::assertSame(self::OTHER_DIGEST, $committed->journalHead);
     }
 
     /**
@@ -539,6 +623,10 @@ final class SealEnvelopeTest extends TestCase
             'a key id outside the grammar'     => ['key_id', 's3cr3t key'],
             'an algorithm version unsupported' => ['algorithm_version', 2],
             'an algorithm version as text'     => ['algorithm_version', 'one'],
+            'a journal sequence as text'       => ['journal_sequence', 's3cr3t'],
+            'a journal sequence of 0'          => ['journal_sequence', 0],
+            'a journal head that is upper'     => ['journal_head', 'S3CR3T' . str_repeat('A', 58)],
+            'a journal head that is no string' => ['journal_head', 42],
         ];
     }
 
@@ -569,9 +657,9 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * The insert row holds the thirteen envelope columns, the digest and the
-     * signature in table order, every time in the form the database stores, and
-     * no anchor column.
+     * The insert row holds the thirteen envelope columns, the journal's two,
+     * the digest and the signature in table order, every time in the form the
+     * database stores, and no anchor column.
      *
      * @return void
      *
@@ -596,8 +684,15 @@ final class SealEnvelopeTest extends TestCase
             'signer'            => 'hmac',
             'key_id'            => 'k2026',
             'algorithm_version' => 1,
+            'journal_sequence'  => null,
+            'journal_head'      => null,
             'signature'         => self::goldenString('seal_1_signature'),
         ], $seal->toRow(self::goldenString('seal_1_digest'), self::goldenString('seal_1_signature')));
+
+        $second = self::goldenSeal('seal_2')->toRow(self::goldenString('seal_2_digest'), self::goldenString('seal_2_signature'));
+
+        self::assertSame(1, $second['journal_sequence']);
+        self::assertSame(self::goldenFields('seal_2')['journal_head'], $second['journal_head']);
     }
 
     /**
@@ -723,6 +818,8 @@ final class SealEnvelopeTest extends TestCase
             self::text($fields['key_id']),
             self::integer($fields['algorithm_version']),
             self::text($fields['signer']),
+            $fields['journal_sequence'] === null ? null : self::integer($fields['journal_sequence']),
+            $fields['journal_head']     === null ? null : self::text($fields['journal_head']),
         );
     }
 
@@ -749,7 +846,7 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * The golden seal's fourteen fields, in the envelope's order.
+     * The golden seal's sixteen fields, in the envelope's order.
      *
      * @param  'seal_1'|'seal_2'  $seal
      * @return array<string, int|string|null>

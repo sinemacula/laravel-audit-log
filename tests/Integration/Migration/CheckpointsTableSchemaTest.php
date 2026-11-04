@@ -50,6 +50,7 @@ final class CheckpointsTableSchemaTest extends TestCase
         'seal_digest'        => 64,
         'signer'             => 16,
         'key_id'             => 32,
+        'journal_head'       => 64,
         'signature'          => 64,
         'anchor'             => 64,
         'anchor_error_class' => 191,
@@ -95,8 +96,9 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the nineteen columns of a seal; only the link to the
-     * previous seal and the four anchor columns may be missing.
+     * The table holds the twenty-one columns of a seal; only the link to the
+     * previous seal, the journal head it commits to and the four anchor columns
+     * may be missing.
      *
      * @return void
      */
@@ -114,6 +116,8 @@ final class CheckpointsTableSchemaTest extends TestCase
             'anchored_at'        => true,
             'first_recorded_at'  => false,
             'id'                 => false,
+            'journal_head'       => true,
+            'journal_sequence'   => true,
             'key_id'             => false,
             'last_recorded_at'   => false,
             'log_id'             => false,
@@ -131,8 +135,9 @@ final class CheckpointsTableSchemaTest extends TestCase
 
     /**
      * The columns are in the order of the seal: its identity and place in the
-     * chain, what it holds, when, how it is signed, and last the anchor
-     * columns, the only ones written after the row.
+     * chain, what it holds, when, how it is signed, the journal head it commits
+     * to, its signature, and last the anchor columns, the only ones written
+     * after the row.
      *
      * @return void
      */
@@ -142,7 +147,7 @@ final class CheckpointsTableSchemaTest extends TestCase
             'id', 'sequence', 'log_id', 'previous_id', 'previous_digest',
             'member_count', 'members_digest', 'seal_digest',
             'first_recorded_at', 'last_recorded_at', 'sealed_at',
-            'signer', 'key_id', 'algorithm_version', 'signature',
+            'signer', 'key_id', 'algorithm_version', 'journal_sequence', 'journal_head', 'signature',
             'anchor', 'anchor_receipt', 'anchored_at', 'anchor_error_class',
         ], array_column(Schema::getColumns(self::TABLE), 'name'));
     }
@@ -188,12 +193,13 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * Beside the primary key and the unique sequence, the only index is the one
-     * the anchorer reads by: whether the seal is anchored, then its sequence.
+     * Beside the primary key and the unique sequence, the only indexes are the
+     * one the anchorer reads by, whether the seal is anchored, then its
+     * sequence, and the one the highest journal commitment is read by.
      *
      * @return void
      */
-    public function testIndexesWhatTheAnchorerReads(): void
+    public function testIndexesWhatTheAnchorerAndTheJournalCheckRead(): void
     {
         $secondary = array_values(array_filter(Schema::getIndexes(self::TABLE), static fn (array $index): bool => !$index['primary']));
 
@@ -203,6 +209,7 @@ final class CheckpointsTableSchemaTest extends TestCase
 
         self::assertSame([
             [self::TABLE . '_anchored_index', ['anchored_at', 'sequence'], false],
+            [self::TABLE . '_journal_index', ['journal_sequence'], false],
             [self::TABLE . '_sequence_unique', ['sequence'], true],
         ], $indexes);
     }
@@ -223,7 +230,7 @@ final class CheckpointsTableSchemaTest extends TestCase
         $indexes = array_filter(Schema::getIndexes(self::TABLE), static fn (array $index): bool => !$sqlite || !$index['primary']);
         $lengths = array_map(strlen(...), array_column($indexes, 'name'));
 
-        self::assertCount($sqlite ? 2 : 3, $lengths);
+        self::assertCount($sqlite ? 3 : 4, $lengths);
         self::assertSame(63, max($lengths));
     }
 
@@ -254,9 +261,10 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The sequence is a big integer, so a log never runs out of sequences, and
-     * a sequence beyond what a 32-bit integer holds is kept as written; the
-     * algorithm version is a small integer.
+     * The sequence and the journal sequence a seal commits to are big integers,
+     * so neither log runs out of sequences, and a sequence beyond what a 32-bit
+     * integer holds is kept as written; the algorithm version is a small
+     * integer.
      *
      * @return void
      */
@@ -277,9 +285,12 @@ final class CheckpointsTableSchemaTest extends TestCase
             default => 'integer',
         }, $types['algorithm_version']);
 
-        DB::table(self::TABLE)->insert(self::row(1, ['sequence' => 2 ** 40]));
+        self::assertSame($types['sequence'], $types['journal_sequence']);
+
+        DB::table(self::TABLE)->insert(self::row(1, ['sequence' => 2 ** 40, 'journal_sequence' => 2 ** 41]));
 
         self::assertSame(2 ** 40, DB::table(self::TABLE)->value('sequence'));
+        self::assertSame(2 ** 41, DB::table(self::TABLE)->value('journal_sequence'));
     }
 
     /**
@@ -351,6 +362,26 @@ final class CheckpointsTableSchemaTest extends TestCase
         self::assertSame('disk:0123456789abcdef', $row->anchor);
         self::assertSame(['path' => 'audit-log-anchors/app/1.json', 'sha256' => str_repeat('a', 64)], json_decode((string) $row->anchor_receipt, true));
         self::assertNull($row->anchor_error_class);
+    }
+
+    /**
+     * A seal of an empty journal commits to no head, so both journal columns
+     * are null, and a seal of a journal with rows keeps the head's sequence and
+     * HMAC as written.
+     *
+     * @return void
+     */
+    public function testTheJournalHeadIsNullForAnEmptyJournalAndKeptOtherwise(): void
+    {
+        DB::table(self::TABLE)->insert(self::row(1));
+        DB::table(self::TABLE)->insert(self::row(2, ['journal_sequence' => 7, 'journal_head' => str_repeat('f', 64)]));
+
+        $rows = DB::table(self::TABLE)->orderBy('sequence')->get(['journal_sequence', 'journal_head'])->all();
+
+        self::assertNull($rows[0]->journal_sequence);
+        self::assertNull($rows[0]->journal_head);
+        self::assertSame(7, $rows[1]->journal_sequence);
+        self::assertSame(str_repeat('f', 64), $rows[1]->journal_head);
     }
 
     /**

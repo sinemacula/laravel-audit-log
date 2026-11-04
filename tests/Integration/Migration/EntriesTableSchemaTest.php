@@ -77,7 +77,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the 36 columns of the stored envelope; only what a record
+     * The table holds the 37 columns of the stored envelope; only what a record
      * may lack is nullable, and every column the HMAC needs to name the event,
      * its outcome, its source, its times and its signature is not.
      *
@@ -117,6 +117,7 @@ final class EntriesTableSchemaTest extends TestCase
             'recorded_at'       => false,
             'request_id'        => true,
             'session_id'        => true,
+            'source_digest'     => true,
             'source_id'         => false,
             'source_record_id'  => true,
             'source_region'     => true,
@@ -141,7 +142,7 @@ final class EntriesTableSchemaTest extends TestCase
             'id', 'record_version', 'event', 'event_version', 'category', 'outcome', 'reason',
             'actor_type', 'actor_id', 'subject_type', 'subject_id', 'principal_type', 'principal_id', 'tenant_type', 'tenant_id',
             'credential_id', 'guard', 'session_id', 'request_id', 'trace_id', 'correlation_id',
-            'origin', 'provenance', 'source_id', 'source_region', 'source_record_id', 'import_batch_id',
+            'origin', 'provenance', 'source_id', 'source_region', 'source_record_id', 'import_batch_id', 'source_digest',
             'ip', 'user_agent', 'context', 'properties', 'occurred_at',
             'recorded_at', 'integrity_version', 'key_id', 'hmac',
         ], array_column(Schema::getColumns(self::TABLE), 'name'));
@@ -414,6 +415,26 @@ final class EntriesTableSchemaTest extends TestCase
         $this->expectException(UniqueConstraintViolationException::class);
 
         DB::table(self::TABLE)->insert(self::row(2, ['source_id' => 'app', 'source_record_id' => 'r1']));
+    }
+
+    /**
+     * The source digest of an imported record is kept as written, a hex digest
+     * of 64 characters, and a captured record has none; two records of one
+     * source may share a digest, since a repeat is found through the source's
+     * unique index, not this column.
+     *
+     * @return void
+     */
+    public function testTheSourceDigestIsKeptAndNotUnique(): void
+    {
+        $digest = str_repeat('d', 64);
+
+        DB::table(self::TABLE)->insert(self::row(1));
+        DB::table(self::TABLE)->insert(self::row(2, ['provenance' => 'imported', 'source_id' => 'upstream', 'source_record_id' => 'r1', 'source_digest' => $digest]));
+        DB::table(self::TABLE)->insert(self::row(3, ['provenance' => 'imported', 'source_id' => 'upstream', 'source_record_id' => 'r2', 'source_digest' => $digest]));
+
+        self::assertSame([null, $digest, $digest], DB::table(self::TABLE)->orderBy('id')->pluck('source_digest')->all());
+        self::assertSame([], array_values(array_filter(Schema::getIndexes(self::TABLE), static fn (array $index): bool => in_array('source_digest', $index['columns'], true))));
     }
 
     /**

@@ -30,6 +30,7 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Privacy\FieldEncryptionFailedException;
 use SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser;
@@ -72,9 +73,10 @@ use Tests\Unit\Stubs\StubDocument;
  * Feature tests for the recorder: what each of its calls does, and the capture
  * pipeline a recorded activity runs: the definition, the timing's checks, the
  * contributors in order, minimising what they leave, the clock and source, and
- * delivery, and the trail it gives as the way into the read path. Its
- * collaborators come from the current container on every capture, and it holds
- * nothing but registration data.
+ * delivery, the trail it gives as the way into the read path, and the lifecycle
+ * it gives as the way into holds, prunes and imports. Its collaborators come
+ * from the current container on every capture, and it holds nothing but
+ * registration data.
  *
  * Definitions and contributors are registered on a recorder of a test's own,
  * since the application's has frozen by the time a test runs.
@@ -1785,6 +1787,25 @@ final class RecorderTest extends TestCase
         $this->app?->bind(AuditTrail::class, static fn (): AuditTrail => $first);
 
         self::assertSame($first, $recorder->trail());
+    }
+
+    /**
+     * `lifecycle()` resolves a new way into the lifecycle from the current
+     * container on each call, so one bound there is the one it gives, and two
+     * calls never share one.
+     *
+     * @return void
+     */
+    public function testLifecycleResolvesAFreshOneEachTime(): void
+    {
+        $recorder = app(Recorder::class);
+        $first    = $recorder->lifecycle();
+
+        self::assertNotSame($first, $recorder->lifecycle());
+
+        $this->app?->bind(AuditLifecycle::class, static fn (): AuditLifecycle => $first);
+
+        self::assertSame($first, $recorder->lifecycle());
     }
 
     /**

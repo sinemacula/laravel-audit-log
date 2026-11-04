@@ -393,6 +393,11 @@ $verification->isVerified();  // true only when nothing was found
 $verification->findings;      // each finding, once, in the order the chain checks them
 ```
 
+`audit_log.trail_exported` entries are protected from retention, so `--verify` keeps working while the database and
+`app.key` live: `audit-log:prune` never deletes an export's entry or its `export` artifact, whatever the category
+`audit` is kept for. The artifact's members are encrypted under `app.key`, so keep a rotated key in
+`app.previous_keys` for as long as an export's verification is promised.
+
 The verifying viewer's scope must reach the export entry: the category `audit`, and the exporter's single tenant, or
 the entries of no tenant when the export's scope did not see exactly one. An entry outside the scope, and any entry at
 all for a viewer the policy denies, is `entry_missing`, exactly as an entry that was never stored. The trail's filters
