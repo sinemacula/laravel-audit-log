@@ -1,8 +1,8 @@
 # Design Notes
 
 These notes document the package's record, definition, redaction, storage, integrity, lifecycle, privacy, delivery,
-reading, context and testing contracts that are easy to miss if you only read the quick-start material or skim the
-test suite. Task-oriented guides are in `docs/guides`.
+reading, context, composition and testing contracts that are easy to miss if you only read the quick-start material or
+skim the test suite. Task-oriented guides are in `docs/guides`.
 
 Each note is intentionally short and follows the same structure:
 
@@ -61,6 +61,9 @@ The current note set is:
   exposure no timer bounds, and that installing the package is not compliance; what a PHP access policy cannot stop:
   direct SQL, a replica dump or a backup, direct reads of the model, and timing; and what erasure does not promise:
   the two guarantees for keys, a wrapping key derived from `app.key`, recall, and restores.
+- `provider-composition.md`: the contracts an application or a composing package binds, their defaults and
+  lifetimes, how a default gives way to an earlier or a later binding, what is registered from `boot()` rather than
+  bound, the order the provider registers and boots, and what a custom binding turns off or refuses.
 - `testing-helpers.md`: the fake store and its assertions, what runs with it and what it does not model, a failing fake
   under each mode, and how Laravel's test helpers change what a record holds.
 

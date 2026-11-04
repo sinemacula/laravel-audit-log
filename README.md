@@ -187,7 +187,8 @@ Run `php artisan audit-log:check` in a deploy pipeline: it reports every malform
 problem and unusable key at once, exits non-zero on any, and writes nothing. It also says whether the spill channel is
 the one a replay can read, and fails on one that would fail together with the store. After a database restore it fails
 too, on keys an erasure destroyed and on a database behind its anchor, until `audit-log:erase --reapply` has re-applied
-the erasures since.
+the erasures since. In production it also fails on the testing fake bound as the store or a stack's destination, and
+notes, without failing, a seal, sweep or verification schedule turned off.
 
 ## Usage
 
@@ -483,14 +484,19 @@ Keys, erasure, restores and what each store holds are in [the privacy guide](doc
 
 | Guide                                                 | Covers                                                                                                             |
 |-------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| [Installation](#installation)                         | Requiring the package                                                                                              |
+| [Configuration](#configuration)                       | Publishing the config and migrations, every setting, what the package schedules and `audit-log:check`              |
+| [Recording](#usage)                                   | Recording, timing, failures, the outbox, definitions, contributors, identifiers and the fake                       |
 | [Automatic capture](docs/guides/automatic-capture.md) | Laravel's authentication events, excluded guards, Gate denials, model changes, bulk operations, gaps and failures  |
 | [Extending](docs/guides/extending.md)                 | Extension points, mapping another package's events, one row per sign-in, correlation ids and contributors          |
 | [Reading](docs/guides/reading.md)                     | Access policies, filters, cursors, audited reads, describing entries, exports and their verification               |
 | [Events](docs/guides/events.md)                       | The events the package dispatches, and alerting on a failed write, a failed capture or an integrity failure        |
+| [Storage](docs/design/storage.md)                     | The tables, their columns and indexes, the storage and maintenance connections, and grants and triggers as SQL     |
 | [Retention](docs/guides/retention.md)                 | Retention by category, a policy of your own, preservation, holds, prune runs and verification after a prune        |
 | [Import](docs/guides/import.md)                       | The import format, importing an export, duplicates and conflicts, batches, holds and dry runs                      |
 | [Operations](docs/guides/operations.md)               | Scheduling sealing, verification and pruning, monitoring, anchoring, keys, grants and what sealing costs           |
 | [Privacy](docs/guides/privacy.md)                     | Encryption by default, owners' keys and wrapping, erasure and its two outcomes, restores and what each store holds |
+| [Testing](docs/design/testing-helpers.md)             | The fake store, its assertions, what runs with it and how Laravel's test helpers change a record                   |
 
 The contracts behind them, for maintainers and reviewers, are in [docs/design](docs/design/README.md).
 

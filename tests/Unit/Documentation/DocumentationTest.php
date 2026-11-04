@@ -77,39 +77,41 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
  * envelope failure, integrity status, anchoring status, finding, anchor driver,
  * journal kind, hold basis, prune status, import status, import format, import
  * rejection, key state, marker transition, erasure refusal, erasure status and
- * rewrap status, every configuration key and every method of the recorder is
- * documented; every package event has a row in the events table and in the
+ * rewrap status, every configuration key by its full path, which a planted
+ * undocumented leaf fails, and every method of the recorder and of the facade
+ * is documented; every package event has a row in the events table and in the
  * events guide; every `AuditLog::` call shown exists or is planned; every
  * design note, the redaction note, the threat model, the delivery note and the
- * integrity, lifecycle and privacy notes among them, exists, has the standard
- * sections and is listed in the index, which ends with the standard sentence;
- * the notes state what they must, and the threat model opens with the limits of
- * key matching and states each limit of integrity and of erasure; the redaction
- * note lists every entry of the matcher and every IP mode, and never calls key
- * matching fail-closed; the integrity note has a row for every status and
- * finding; every redaction, failure, delivery and integrity setting's
- * environment variable is in the README; the operations guide has its sections,
- * names every integrity command, option and progress name, and claims nothing
- * beyond its measurements; the outcomes table has exactly its rows, and no
- * document says a failed record is not true; the documented spill channel is
- * the one the tests use, and the spill and the outbox are called personal data;
- * every test a note cites and every file it anchors exists, and no document
- * cites a file kept out of the repository, a milestone or another package of
- * the suite, or describes a transition from a release that does not exist; the
- * vocabulary reserves every prefix and every shipped code sits under one; and
- * every example is valid and neutral, naming no other package of the suite. The
- * automatic-capture guide has its sections, names every package code and states
- * every gap in capture, the extending guide has its sections and documents the
- * correlation id format, which the builder holds to, every capture setting's
- * environment variable is in the README, and the segments a watched model may
- * not use are the vocabulary's prefixes. The reading guide has its sections,
- * makes each of its statements, names every value of the read path, every
- * export option and both read settings' environment variables, and shows no
- * call that does not exist; the threat model states the limits of a PHP access
- * policy; the reading note names the seams it leaves, and no longer the
- * decrypting reader or owner discovery, which ship; each package code's row in
- * the vocabulary keeps what its definition retains; and no document says the
- * immediate path is outside the caller's transaction.
+ * integrity, lifecycle, privacy and provider composition notes among them,
+ * exists, has the standard sections and is listed in the index, which ends with
+ * the standard sentence; the notes state what they must, and the threat model
+ * opens with the limits of key matching and states each limit of integrity and
+ * of erasure; the redaction note lists every entry of the matcher and every IP
+ * mode, and never calls key matching fail-closed; the integrity note has a row
+ * for every status and finding; every redaction, failure, delivery and
+ * integrity setting's environment variable is in the README; the operations
+ * guide has its sections, names every integrity command, option and progress
+ * name, and claims nothing beyond its measurements; the outcomes table has
+ * exactly its rows, and no document says a failed record is not true; the
+ * documented spill channel is the one the tests use, and the spill and the
+ * outbox are called personal data; every test a note cites and every file it
+ * anchors exists, and no document cites a file kept out of the repository, a
+ * milestone or another package of the suite, or describes a transition from a
+ * release that does not exist; the vocabulary reserves every prefix and every
+ * shipped code sits under one; and every example is valid and neutral, naming
+ * no other package of the suite. The automatic-capture guide has its sections,
+ * names every package code and states every gap in capture, the extending guide
+ * has its sections and documents the correlation id format, which the builder
+ * holds to, every capture setting's environment variable is in the README, and
+ * the segments a watched model may not use are the vocabulary's prefixes. The
+ * reading guide has its sections, makes each of its statements, names every
+ * value of the read path, every export option and both read settings'
+ * environment variables, and shows no call that does not exist; the threat
+ * model states the limits of a PHP access policy; the reading note names the
+ * seams it leaves, and no longer the decrypting reader or owner discovery,
+ * which ship; each package code's row in the vocabulary keeps what its
+ * definition retains; and no document says the immediate path is outside the
+ * caller's transaction.
  *
  * It catches an omission or a rename, not wrong prose: what the documentation
  * says about each of them is held to the code by review.
@@ -178,6 +180,7 @@ final class DocumentationTest extends TestCase
         'reading.md',
         'lifecycle.md',
         'privacy.md',
+        'provider-composition.md',
     ];
 
     /** @var string The sentence the threat model opens with. */
@@ -212,6 +215,9 @@ final class DocumentationTest extends TestCase
 
     /** @var string The delivery note. */
     private const string DELIVERY_NOTE = '/docs/design/delivery.md';
+
+    /** @var string The provider composition note. */
+    private const string COMPOSITION_NOTE = '/docs/design/provider-composition.md';
 
     /** @var string The event model. */
     private const string EVENT_MODEL = '/docs/design/event-model.md';
@@ -564,7 +570,34 @@ final class DocumentationTest extends TestCase
     #[DataProvider('provideConfigurationKeys')]
     public function testEveryConfigurationKeyIsDocumented(string $key): void
     {
-        self::assertTrue(str_contains(self::documentation(), '`' . $key . '`'), sprintf('The documentation does not name the configuration key `%s`.', $key));
+        self::assertSame([], self::undocumentedKeys([$key], self::documentation()), sprintf('The documentation does not name the configuration key `%s`.', $key));
+    }
+
+    /**
+     * A leaf planted in the shipped configuration, under a section the
+     * documentation already covers and in a new section of its own, is a leaf
+     * the provider yields and the check finds undocumented, while every leaf
+     * the documentation names, by its full path only, passes: a leaf named by
+     * its last segment, or inside a longer path, is not documented.
+     *
+     * @return void
+     */
+    public function testAPlantedUndocumentedLeafFailsTheCheck(): void
+    {
+        $config = require self::root() . '/config/audit-log.php';
+
+        self::assertIsArray($config);
+        self::assertIsArray($config['monitor']);
+
+        $config['monitor']['planted_minutes'] = 5;
+        $config['planted']                    = ['section' => ['leaf' => null]];
+
+        $keys = self::leafKeys($config);
+
+        self::assertContains('monitor.planted_minutes', $keys);
+        self::assertContains('planted.section.leaf', $keys);
+        self::assertSame(['monitor.planted_minutes', 'planted.section.leaf'], self::undocumentedKeys($keys, self::documentation()));
+        self::assertSame(['monitor.planted_minutes'], self::undocumentedKeys(['monitor.planted_minutes'], 'The `planted_minutes` and `monitor.planted_minutes.extra` settings.'));
     }
 
     /**
@@ -968,6 +1001,31 @@ final class DocumentationTest extends TestCase
     }
 
     /**
+     * Rows of `[method]`: every public method the facade declares of its own,
+     * beyond the recorder's.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideFacadeMethods(): iterable
+    {
+        foreach (self::callsDeclaredOn(AuditLog::class) as $method) {
+            yield $method => [$method];
+        }
+    }
+
+    /**
+     * Every method the facade declares of its own is shown being called on it.
+     *
+     * @param  string  $method
+     * @return void
+     */
+    #[DataProvider('provideFacadeMethods')]
+    public function testEveryFacadeMethodIsDocumented(string $method): void
+    {
+        self::assertContains($method, self::auditLogCallsIn(self::documentation()), sprintf('The documentation does not show AuditLog::%s().', $method));
+    }
+
+    /**
      * Every `AuditLog::name(` the documentation shows is a method the recorder
      * or the facade declares, or a call that is planned.
      *
@@ -1247,6 +1305,9 @@ final class DocumentationTest extends TestCase
             'a mapper never recurses'             => [self::EXTENDING_GUIDE, 'so a mapper never runs inside itself'],
             'an attachment kept atomically'       => [self::EXTENDING_GUIDE, 'only when it keeps the attachment and its entry atomically'],
             'no detection'                        => [self::EXTENDING_GUIDE, 'The package never looks for another package'],
+            'a binding beats a default'           => [self::COMPOSITION_NOTE, 'the other binding always wins'],
+            'registration is frozen'              => [self::COMPOSITION_NOTE, 'each is refused with a `\LogicException` once the application has booted'],
+            'booting cannot fail on a setting'    => [self::COMPOSITION_NOTE, 'a malformed setting is reported by `audit-log:check`, never by a failed boot'],
         ];
 
         yield from self::integrityStatements();
@@ -2567,6 +2628,19 @@ final class DocumentationTest extends TestCase
         }
 
         return $keys;
+    }
+
+    /**
+     * The keys the text does not name by their full path, in code type, in the
+     * order given.
+     *
+     * @param  list<string>  $keys
+     * @param  string  $text
+     * @return list<string>
+     */
+    private static function undocumentedKeys(array $keys, string $text): array
+    {
+        return array_values(array_filter($keys, static fn (string $key): bool => !str_contains($text, '`' . $key . '`')));
     }
 
     /**
