@@ -241,13 +241,15 @@ written and what the store may do to a row are fixed here; a change to any of th
   application that records many entries in one transaction.
 - The artifacts migration creates the artifacts table on the storage connection under `entries.artifacts_table`.
 - The integrity migrations create the checkpoints, the members and the integrity state tables on the storage connection.
-  Run as the tables' owner once the users exist, the documented grants give a writer what recording, sealing, anchoring,
-  the sweep and verification need, and the documented triggers leave every one of them working.
+  Run as the tables' owner once the users exist, the documented grants, the key block included, give a writer what
+  recording, sealing, anchoring, the sweep and verification need, and the documented triggers leave every one of them
+  working.
 - The lifecycle migrations create the journal, the holds, the lock, with its one row, and the import batches on the
   storage connection.
 - The key migrations create the subject keys, the owner erasures and the key uses on the storage connection, with no
   row. Run after the blocks above, the documented key grants give the writer what creating a key and recording its key
-  uses need, and the maintenance user what erasure, reinstatement and rewrapping need.
+  uses need, the maintenance user what erasure, reinstatement and rewrapping need, and the writer and the verifier what
+  verification reads of the key store.
 
 ## Failure / Edge Cases
 
@@ -290,7 +292,9 @@ credentials can, and the maintenance credentials can delete what pruning deletes
 makes an unauthorised destruction detectable, never impossible. Both are the SQL below, which the integration tests run
 as written, each block found by the marker line before it. Replace `app_db`, `audit_writer`, `audit_maintenance` and
 `audit_verifier` with your database and users. Create the users first, run each block as the tables' owner, and rename
-a table in the SQL when its setting renames it.
+a table in the SQL when its setting renames it. Run both of your engine's grant blocks, the key block after the other:
+the key tables are always migrated, and while the package's key store is in use verification reads them, so a writer
+or a verifier granted the first block alone cannot verify.
 
 The role matrix is what the blocks grant, per table and user; "outbox mode" marks the grants the writer needs only
 when delivery runs through the outbox, which the blocks leave out. The last three rows are granted by each engine's key
@@ -340,11 +344,12 @@ block, which runs after the others:
 - There is no DDL for the application user: no documented user holds `DROP`, `TRUNCATE`, `TRIGGER` or `ALTER`, or
   creates anything. On PostgreSQL before 15, also revoke `CREATE` on the `public` schema from `PUBLIC`.
 - Verification needs `SELECT` on the entries, the artifacts, the checkpoints, the members, the journal and the holds,
-  and the user that runs `audit-log:verify` also needs `SELECT`, `INSERT` and `UPDATE` on the integrity state table,
-  where a full run records that it completed. The verifier, an optional third user for scheduled verification, holds
-  exactly those; the writer may verify instead, as it holds them too. The verifier role never needs delete-capable
-  credentials to read prune evidence, which is read on the storage connection. On PostgreSQL every user also needs
-  `CONNECT` on the database and `USAGE` on the schema, which grant no table privilege.
+  and, while the package's key store is in use, on the subject keys, the owner erasures and the key uses, which the key
+  block grants; and the user that runs `audit-log:verify` also needs `SELECT`, `INSERT` and `UPDATE` on the integrity
+  state table, where a full run records that it completed. The verifier, an optional third user for scheduled
+  verification, holds exactly those; the writer may verify instead, as it holds them too. The verifier role never needs
+  delete-capable credentials to read prune evidence, which is read on the storage connection. On PostgreSQL every user
+  also needs `CONNECT` on the database and `USAGE` on the schema, which grant no table privilege.
 - The triggers refuse every change except a maintenance delete of an entry, an artifact or a hold, an update of a
   seal's anchor columns, of a batch's status, counts, conflict ids and times, and of the lock's token and time. Each
   table gets `<table>_no_update` and `<table>_no_delete`: an entry or an artifact is never updated and only the
