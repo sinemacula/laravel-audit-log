@@ -34,7 +34,7 @@ test_patterns = [
 ]
 
 [runtimes.enabled]
-php = "8.3"
+php = "8.5"
 
 [smells]
 mode = "comment"
@@ -76,34 +76,19 @@ package_filters = ["slevomat", "dealerdirect", "sinemacula"]
 [plugins.definitions.php-codesniffer.drivers.lint]
 success_codes = [0, 1, 2, 3]
 
-# Held at the version the shared standard requires, with the Symfony packages
-# held on the 7.4 line: from 3.90 the fixer also accepts Symfony 8, which needs
-# PHP 8.4.1 and carries syntax an older runner cannot parse, and the sandbox
-# install ignores platform requirements. Those pins are only honoured through
-# extra_packages, which is silently ignored whenever package_file is set, so
-# this plugin declares its packages here rather than reading composer.json.
+# Held at the version the shared standard requires. The standards package comes
+# from extra_packages, which is silently ignored whenever package_file is set,
+# so this plugin declares its packages here rather than reading composer.json.
 [[plugin]]
 name = "php-cs-fixer"
 version = "3.95.27"
-extra_packages = [
-    "sinemacula/coding-standards@1.28.0",
-    "symfony/console@^7.4",
-    "symfony/event-dispatcher@^7.4",
-    "symfony/filesystem@^7.4",
-    "symfony/finder@^7.4",
-    "symfony/options-resolver@^7.4",
-    "symfony/process@^7.4",
-    "symfony/stopwatch@^7.4",
-    "symfony/string@^7.4",
-]
+extra_packages = ["sinemacula/coding-standards@1.28.0"]
 
 # phpstan runs from a dedicated sandbox file that lists the analysis stack and
 # every dependency the analysed code references, so a package the code starts
 # to use is added there as well as to composer.json. With no package_filters,
 # qlty installs the whole file into the tool sandbox and phpstan resolves the
-# framework from there, with no project install or prepare step. The sandbox
-# install ignores platform requirements, so Symfony is held below 8.0: Symfony 8
-# needs PHP 8.4 and carries syntax the PHP 8.3 runner cannot parse.
+# framework from there, with no project install or prepare step.
 [[plugin]]
 name = "phpstan"
 version = "2.1.46"
