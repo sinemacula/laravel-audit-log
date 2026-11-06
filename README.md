@@ -21,8 +21,6 @@ Captures Laravel's own authentication events on its own, and gives the applicati
 an invoice approved, a user suspended, a setting changed. Stands alone: it names no other package, and exposes a mapping
 seam that suite packages and applications register their own events through.
 
-> **Status:** in development. The API and schema below describe the planned 1.0 and may change before it is tagged.
-
 ## Core Concept
 
 | Concept       | What it is                                                                                                      |
