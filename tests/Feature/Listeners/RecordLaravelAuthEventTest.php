@@ -744,7 +744,7 @@ final class RecordLaravelAuthEventTest extends TestCase
         $handled    = array_map(static fn (\ReflectionType $member): string => $member instanceof \ReflectionNamedType ? $member->getName() : '', $type->getTypes());
         $registered = array_keys(array_filter(
             Event::getRawListeners(),
-            static fn (array $listeners): bool => in_array(RecordLaravelAuthEvent::class, $listeners, true),
+            static fn (mixed $listeners): bool => is_array($listeners) && in_array(RecordLaravelAuthEvent::class, $listeners, true),
         ));
 
         sort($handled);
@@ -833,7 +833,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     /**
      * The events recorded that name no guard.
      *
-     * @return list<object>
+     * @return list<\Illuminate\Auth\Events\Lockout|\Illuminate\Auth\Events\PasswordReset|\Illuminate\Auth\Events\PasswordResetLinkSent|\Illuminate\Auth\Events\Registered|\Illuminate\Auth\Events\Verified>
      */
     private static function guardlessEvents(): array
     {
@@ -849,7 +849,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     /**
      * The events recorded that name a guard.
      *
-     * @return list<object>
+     * @return list<\Illuminate\Auth\Events\CurrentDeviceLogout|\Illuminate\Auth\Events\Failed|\Illuminate\Auth\Events\Login|\Illuminate\Auth\Events\Logout|\Illuminate\Auth\Events\OtherDeviceLogout>
      */
     private static function guardedEvents(): array
     {

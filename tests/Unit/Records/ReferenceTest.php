@@ -244,7 +244,7 @@ final class ReferenceTest extends TestCase
 
         if ($mode === 'enforced') {
             Relation::requireMorphMap();
-            Relation::morphMap(['other' => \stdClass::class]);
+            Relation::morphMap(['other' => StubSealedUser::class]);
         }
 
         $reference = Reference::to($model);

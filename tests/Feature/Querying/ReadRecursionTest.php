@@ -129,7 +129,7 @@ final class ReadRecursionTest extends TestCase
         $listeners = [new ReadingListener($this->viewer()), new ReadingListener($this->viewer())];
 
         foreach ($listeners as $listener) {
-            Event::listen(AuditRecorded::class, $listener);
+            Event::listen(AuditRecorded::class, $listener(...));
         }
 
         $this->captureQueries();
@@ -164,7 +164,7 @@ final class ReadRecursionTest extends TestCase
 
         $listener = new ReadingListener($this->viewer());
 
-        Event::listen(AuditRecorded::class, $listener);
+        Event::listen(AuditRecorded::class, $listener(...));
 
         self::assertCount(2, $this->trail()->cursorPaginate()->entries);
         self::assertSame([], $listener->heard());
@@ -206,7 +206,7 @@ final class ReadRecursionTest extends TestCase
 
         $listener = new ReadingListener($this->viewer());
 
-        Event::listen(AuditRecorded::class, $listener);
+        Event::listen(AuditRecorded::class, $listener(...));
 
         $result = app(Replayer::class)->spill($this->spillFileOf($this->spillLines()), false);
 
@@ -321,7 +321,7 @@ final class ReadRecursionTest extends TestCase
 
         $listener = new ReadingListener($this->viewer(), EventDefinition::DEFAULT_CATEGORY);
 
-        Event::listen(AuditRecorded::class, $listener);
+        Event::listen(AuditRecorded::class, $listener(...));
 
         AuditLog::record(self::CODE);
 

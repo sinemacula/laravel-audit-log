@@ -46,10 +46,16 @@ final class CapturingLogManager extends LogManager
      * @param  mixed  $name
      * @param  ?array<array-key, mixed>  $config
      * @return \Psr\Log\LoggerInterface
+     *
+     * @throws \InvalidArgumentException
      */
     #[\Override]
     protected function get(mixed $name, ?array $config = null)
     {
+        if ($name !== null && !is_string($name)) {
+            throw new \InvalidArgumentException('A log channel is named by a string.');
+        }
+
         $logger = parent::get($name, $config);
         $inner  = $logger instanceof Logger ? $logger->getLogger() : $logger;
 

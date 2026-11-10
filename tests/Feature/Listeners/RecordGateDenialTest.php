@@ -5,9 +5,14 @@ declare(strict_types = 1);
 namespace Tests\Feature\Listeners;
 
 use Illuminate\Auth\Access\Events\GateEvaluated;
+use Illuminate\Auth\Access\Gate as AccessGate;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Container\Container;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Contracts\Events\Dispatcher as DispatcherContract;
+use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
@@ -177,11 +182,13 @@ final class RecordGateDenialTest extends TestCase
      *
      * @param  array<int, int>|int|string  $result
      * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
      */
     #[DataProvider('provideFalsyResults')]
     public function testAnyOtherFalsyResultIsADenial(array|int|string $result): void
     {
-        self::listener()->handle(new GateEvaluated(null, self::ABILITY, $result, []));
+        self::listener()->handle(self::evaluation($result));
 
         self::assertSame('denied', $this->onlyRecord()->outcome);
     }
@@ -190,11 +197,13 @@ final class RecordGateDenialTest extends TestCase
      * A denied response is a denial.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
      */
     public function testADeniedResponseIsADenial(): void
     {
-        self::listener()->handle(self::denial(Response::deny()));
-        self::listener()->handle(self::denial(Response::denyAsNotFound()));
+        self::listener()->handle(self::evaluation(Response::deny()));
+        self::listener()->handle(self::evaluation(Response::denyAsNotFound()));
 
         self::assertSame(['denied', 'denied'], array_map(static fn (AuditRecord $record): string => $record->outcome, $this->fake->recorded()));
     }
@@ -203,12 +212,14 @@ final class RecordGateDenialTest extends TestCase
      * An allowed response, and any truthy result, record nothing.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
      */
     public function testAnAllowedResponseRecordsNothing(): void
     {
-        self::listener()->handle(self::denial(Response::allow('Fine.', 'allowed_code')));
-        self::listener()->handle(self::denial('yes'));
-        self::listener()->handle(self::denial(new \stdClass));
+        self::listener()->handle(self::evaluation(Response::allow('Fine.', 'allowed_code')));
+        self::listener()->handle(self::evaluation('yes'));
+        self::listener()->handle(self::evaluation(new \stdClass));
 
         self::assertSame(0, $this->fake->count());
         $this->assertNothingFailed();
@@ -322,17 +333,19 @@ final class RecordGateDenialTest extends TestCase
      * code, one that merely looks like a code included, gives no reason.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
      */
     public function testAReasonCodeIsKeptOnlyWhenAllowlisted(): void
     {
-        self::listener()->handle(self::denial(Response::deny('No.', 'insufficient_role')));
+        self::listener()->handle(self::evaluation(Response::deny('No.', 'insufficient_role')));
 
         self::config()->set('audit-log.capture.gate.reason_codes', ['insufficient_role', '403']);
 
         $codes = ['insufficient_role', 403, '403', 'tok_live_abc123', 404, 'Insufficient_Role', 4.03, ['insufficient_role'], null];
 
         foreach ($codes as $code) {
-            self::listener()->handle(self::denial(Response::deny('No.', $code)));
+            self::listener()->handle(self::evaluation(Response::deny('No.', $code)));
         }
 
         self::assertSame(
@@ -363,6 +376,8 @@ final class RecordGateDenialTest extends TestCase
      * since it is free text.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
      */
     public function testTheResponseMessageIsNeverRead(): void
     {
@@ -403,7 +418,7 @@ final class RecordGateDenialTest extends TestCase
             }
         };
 
-        self::listener()->handle(self::denial($response));
+        self::listener()->handle(self::evaluation($response));
 
         $record = $this->onlyRecord();
 
@@ -537,13 +552,15 @@ final class RecordGateDenialTest extends TestCase
      * nothing.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
      */
     public function testAnAllowedCheckReadsNoSetting(): void
     {
         self::config()->set('audit-log.capture.gate', ['enabled' => 'yes', 'only_abilities' => [], 'except_abilities' => 'x', 'reason_codes' => 'x']);
 
         self::listener()->handle(self::denial(true));
-        self::listener()->handle(self::denial(new \stdClass));
+        self::listener()->handle(self::evaluation(new \stdClass));
 
         self::assertSame(0, $this->fake->count());
         $this->assertNothingFailed();
@@ -662,15 +679,47 @@ final class RecordGateDenialTest extends TestCase
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @param  mixed  $result
+     * @param  ?bool  $result
      * @param  ?\Tests\Unit\Stubs\StubAuthUser  $user
      * @param  array<array-key, mixed>  $arguments
      * @param  string  $ability
      * @return \Illuminate\Auth\Access\Events\GateEvaluated
      */
-    private static function denial(mixed $result, ?StubAuthUser $user = null, array $arguments = [], string $ability = self::ABILITY): GateEvaluated
+    private static function denial(?bool $result, ?StubAuthUser $user = null, array $arguments = [], string $ability = self::ABILITY): GateEvaluated
     {
         return new GateEvaluated($user, $ability, $result, $arguments);
+    }
+
+    /**
+     * The evaluation a Gate of its own dispatches for a guest when the
+     * ability's callback gives the result, which the Gate passes on as it is.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $result
+     * @return \Illuminate\Auth\Access\Events\GateEvaluated
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
+     */
+    private static function evaluation(mixed $result): GateEvaluated
+    {
+        $container = new Container;
+        $events    = new Dispatcher($container);
+        $evaluated = null;
+
+        $container->instance(DispatcherContract::class, $events);
+
+        $events->listen(GateEvaluated::class, static function (GateEvaluated $event) use (&$evaluated): void {
+            $evaluated = $event;
+        });
+
+        (new AccessGate($container, static fn (): null => null))
+            ->define(self::ABILITY, static fn (?Authenticatable $user = null): mixed => $result)
+            ->raw(self::ABILITY);
+
+        self::assertInstanceOf(GateEvaluated::class, $evaluated);
+
+        return $evaluated;
     }
 
     /**

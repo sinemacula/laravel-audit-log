@@ -120,6 +120,7 @@ use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\TestCase;
+use Tests\Unit\Stubs\StubAuthUser;
 
 /**
  * Feature tests for the package AuditLogServiceProvider: the configuration it
@@ -242,7 +243,7 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         $this->forgetPublishing();
 
-        $running = new \ReflectionProperty($this->app, 'isRunningInConsole');
+        $running = new \ReflectionProperty(Application::class, 'isRunningInConsole');
         $running->setValue($this->app, false);
 
         $this->provider()->boot();
@@ -896,7 +897,7 @@ final class AuditLogServiceProviderTest extends TestCase
     public function testListenersRegisterOnce(string $event, string $listener): void
     {
         self::assertSame([$listener], array_values(array_filter(
-            Event::getRawListeners()[$event] ?? [],
+            self::listenersFor(Event::getRawListeners(), $event),
             static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
         )));
     }
@@ -952,7 +953,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $listener = $root->make(RecordLaravelAuthEvent::class);
         $sandbox  = clone $root;
         $captured = new CapturedEvents;
-        $event    = new Registered(new \stdClass);
+        $event    = new Registered(new StubAuthUser);
 
         $sandbox->instance(CaptureCoordinator::class, new CaptureCoordinator($sandbox));
         $sandbox->instance(CapturedEvents::class, $captured);
@@ -981,7 +982,7 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         foreach ([Attempting::class, Validated::class, Authenticated::class] as $event) {
             self::assertSame([], array_values(array_filter(
-                Event::getRawListeners()[$event] ?? [],
+                self::listenersFor(Event::getRawListeners(), $event),
                 static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
             )), "{$event} has a listener of the package's.");
         }
@@ -993,7 +994,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $wildcards = (new \ReflectionProperty(Dispatcher::class, 'wildcards'))->getValue($dispatcher);
 
         self::assertIsArray($wildcards);
-        self::assertNotContains(CaptureMappedEvent::class, $wildcards['*'] ?? []);
+        self::assertNotContains(CaptureMappedEvent::class, self::listenersFor($wildcards, '*'));
     }
 
     /**
@@ -1005,7 +1006,7 @@ final class AuditLogServiceProviderTest extends TestCase
     public function testTheCommitProbeListensOnce(): void
     {
         self::assertSame([[CommitQueue::class, 'probe']], array_values(array_filter(
-            Event::getRawListeners()[TransactionCommitting::class] ?? [],
+            self::listenersFor(Event::getRawListeners(), TransactionCommitting::class),
             static fn (mixed $registered): bool => is_array($registered) && is_string($registered[0] ?? null) && str_starts_with($registered[0], 'SineMacula\\'),
         )));
     }
@@ -1050,9 +1051,12 @@ final class AuditLogServiceProviderTest extends TestCase
             $paths = [...$paths, ...$hinted];
         }
 
-        $source = (string) realpath(__DIR__ . '/../../src');
+        $source = realpath(__DIR__ . '/../../src');
 
-        self::assertCount(0, Route::getRoutes());
+        self::assertIsString($source);
+        self::assertNotSame('', $source);
+
+        self::assertCount(0, Route::getRoutes()->getRoutes());
         self::assertArrayNotHasKey('audit-log', $finder->getHints());
 
         foreach ($paths as $path) {

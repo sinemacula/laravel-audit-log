@@ -242,6 +242,25 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
+     * The listeners a dispatcher's raw listener map holds for the event, once
+     * they are asserted to be a list of them rather than a single listener.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $listeners
+     * @param  string  $event
+     * @return array<array-key, mixed>
+     */
+    protected static function listenersFor(array $listeners, string $event): array
+    {
+        $registered = $listeners[$event] ?? [];
+
+        static::assertIsArray($registered);
+
+        return $registered;
+    }
+
+    /**
      * Return the storage settings as they are, a name or `null` each, and one
      * that is not set as the value it then has; a setting that is neither is
      * left as the test sets it, since the shipped migrations cannot run with
@@ -448,7 +467,7 @@ abstract class TestCase extends OrchestraTestCase
         /** @var \Illuminate\Database\Migrations\DatabaseMigrationRepository $repository */
         $repository = $this->app?->make('migration.repository');
 
-        $repository->setSource(null);
+        $repository->setSource(DB::getDefaultConnection());
 
         if (!$repository->repositoryExists()) {
             return;

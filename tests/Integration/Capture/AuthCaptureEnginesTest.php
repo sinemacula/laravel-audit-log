@@ -175,9 +175,13 @@ final class AuthCaptureEnginesTest extends TestCase
         Route::get('/api/me', static function (): string {
             $user = Auth::guard('api')->user();
 
+            if (!$user instanceof SigningInUser) {
+                return 'missing';
+            }
+
             Event::dispatch(new Authenticated('api', $user));
 
-            return $user instanceof SigningInUser ? 'found' : 'missing';
+            return 'found';
         });
 
         self::assertTrue(Event::hasWildcardListeners(Authenticated::class));

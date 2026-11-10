@@ -609,7 +609,7 @@ final class RegistrationRequestsTest extends TestCase
 
         self::assertInstanceOf(Dispatcher::class, $dispatcher);
 
-        return count(array_keys($dispatcher->getRawListeners()[$event] ?? [], $listener, true));
+        return count(array_keys(self::listenersFor($dispatcher->getRawListeners(), $event), $listener, true));
     }
 
     /**

@@ -140,7 +140,7 @@ final class ModelWatcherTest extends TestCase
         $this->watcher->watch(WatchedInvoice::class, 'invoice', ['amount' => FieldHandling::REDACT, 'number']);
 
         foreach (self::EVENTS as $event) {
-            self::assertCount(1, $this->events->getRawListeners()['eloquent.' . $event . ': ' . WatchedInvoice::class], $event);
+            self::assertCount(1, self::listenersFor($this->events->getRawListeners(), 'eloquent.' . $event . ': ' . WatchedInvoice::class), $event);
         }
 
         self::assertSame(['number', 'amount'], array_keys($this->watcher->watchFor(WatchedInvoice::class)->fields ?? []));
@@ -163,7 +163,7 @@ final class ModelWatcherTest extends TestCase
         }
 
         self::assertSame(self::FIELDS['amount'], $this->watcher->watchFor(WatchedInvoice::class)?->handlingOf('amount'));
-        self::assertCount(1, $this->events->getRawListeners()['eloquent.created: ' . WatchedInvoice::class]);
+        self::assertCount(1, self::listenersFor($this->events->getRawListeners(), 'eloquent.created: ' . WatchedInvoice::class));
     }
 
     /**
