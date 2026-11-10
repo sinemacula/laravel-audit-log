@@ -355,7 +355,7 @@ final class LifecycleEnginesTest extends TestCase
      */
     private function batchIds(string $batchId): array
     {
-        return self::sorted(array_map(strval(...), $this->storage()->table(EntrySettings::table())->where('import_batch_id', $batchId)->pluck('id')->all()));
+        return self::sorted(self::strings($this->storage()->table(EntrySettings::table())->where('import_batch_id', $batchId)->pluck('id')->all()));
     }
 
     /**
@@ -366,7 +366,7 @@ final class LifecycleEnginesTest extends TestCase
      */
     private function present(array $ids): array
     {
-        return self::sorted(array_map(strval(...), $this->storage()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all()));
+        return self::sorted(self::strings($this->storage()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all()));
     }
 
     /**

@@ -475,7 +475,7 @@ final class PruneChunkTest extends TestCase
      */
     private function present(array $ids): array
     {
-        $present = array_map(strval(...), $this->maintenance()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all());
+        $present = self::strings($this->maintenance()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all());
 
         sort($present);
 

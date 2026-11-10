@@ -728,7 +728,7 @@ final class LifecycleProofsTest extends TestCase
      */
     private function present(array $ids): array
     {
-        return $this->sorted(array_map(strval(...), $this->storage()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all()));
+        return $this->sorted(self::strings($this->storage()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all()));
     }
 
     /**

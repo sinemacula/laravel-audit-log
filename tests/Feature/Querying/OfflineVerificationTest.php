@@ -63,6 +63,7 @@ final class OfflineVerificationTest extends TestCase
             $entry = json_decode($line, true, 513, JSON_THROW_ON_ERROR);
 
             self::assertIsArray($entry);
+            self::assertIsString($entry['id']);
 
             $ids[]       = $entry['id'];
             $positions[] = [$entry['recorded_at'], $entry['id']];

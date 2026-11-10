@@ -216,6 +216,23 @@ trait ReadsTheTrail
     }
 
     /**
+     * The id of a record `readRecords()` gave.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $record
+     * @return string
+     */
+    protected static function idOf(array $record): string
+    {
+        $id = $record['id'] ?? null;
+
+        self::assertIsString($id);
+
+        return $id;
+    }
+
+    /**
      * The properties of a record `readRecords()` gave, with their maps as
      * arrays.
      *

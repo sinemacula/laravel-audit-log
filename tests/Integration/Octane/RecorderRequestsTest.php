@@ -159,7 +159,7 @@ final class RecorderRequestsTest extends TestCase
     protected function tearDown(): void
     {
         TrustProxies::flushState();
-        Request::setTrustedProxies([], -1);
+        Request::setTrustedProxies([], 0);
 
         $connection = DB::connection(self::CONNECTION);
 

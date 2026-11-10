@@ -368,7 +368,7 @@ final class PruneEnginesTest extends TestCase
      */
     private function present(array $ids): array
     {
-        $present = array_map(strval(...), $this->storage()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all());
+        $present = self::strings($this->storage()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all());
 
         sort($present);
 

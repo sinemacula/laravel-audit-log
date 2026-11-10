@@ -115,7 +115,7 @@ final class WorkerContextTest extends TestCase
         Schema::dropIfExists(self::USERS_TABLE);
 
         TrustProxies::flushState();
-        Request::setTrustedProxies([], -1);
+        Request::setTrustedProxies([], 0);
 
         parent::tearDown();
     }

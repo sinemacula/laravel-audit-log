@@ -212,7 +212,7 @@ final class AuditLogServiceProviderTest extends TestCase
 
         $config->set('audit-log', ['storage' => ['connection' => 'audit']]);
 
-        (new AuditLogServiceProvider($this->app))->register();
+        $this->provider()->register();
 
         self::assertSame('audit', $config->get('audit-log.storage.connection'));
     }
@@ -245,7 +245,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $running = new \ReflectionProperty($this->app, 'isRunningInConsole');
         $running->setValue($this->app, false);
 
-        (new AuditLogServiceProvider($this->app))->boot();
+        $this->provider()->boot();
 
         self::assertSame([], ServiceProvider::pathsToPublish(AuditLogServiceProvider::class));
     }
@@ -590,7 +590,7 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         $this->app?->bind(FieldEncrypter::class, NoFieldEncrypter::class);
 
-        (new AuditLogServiceProvider($this->app))->register();
+        $this->provider()->register();
 
         self::assertInstanceOf(NoFieldEncrypter::class, app(FieldEncrypter::class));
     }
@@ -775,7 +775,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $this->app?->instance(AuditAccessPolicy::class, $policy);
         $this->app?->instance(FieldReader::class, $reader);
 
-        (new AuditLogServiceProvider($this->app))->register();
+        $this->provider()->register();
 
         self::assertSame($policy, app(AuditAccessPolicy::class));
         self::assertSame($reader, app(FieldReader::class));
@@ -1025,7 +1025,7 @@ final class AuditLogServiceProviderTest extends TestCase
         self::assertSame(EnterHttpFrame::class, $middleware[0] ?? null);
         self::assertCount(1, array_keys($middleware, EnterHttpFrame::class, true));
 
-        $this->app?->register(new AuditLogServiceProvider($this->app), true);
+        $this->app?->register($this->provider(), true);
 
         self::assertCount(1, array_keys($kernel->getGlobalMiddleware(), EnterHttpFrame::class, true));
     }
@@ -1100,7 +1100,7 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         self::assertFalse($this->app?->resolved('translator'));
 
-        (new AuditLogServiceProvider($this->app))->boot();
+        $this->provider()->boot();
 
         self::assertFalse($this->app->resolved('translator'));
         self::assertSame('Signed in', __('audit-log::codes.authentication.signed_in'));
@@ -1183,7 +1183,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $this->expectException(\LogicException::class);
         $this->expectExceptionMessage('The event code `authentication.signed_in` is already defined differently; a code has one definition.');
 
-        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke(new AuditLogServiceProvider($this->app));
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke($this->provider());
     }
 
     /**
@@ -1199,7 +1199,7 @@ final class AuditLogServiceProviderTest extends TestCase
 
         self::assertTrue($catalogue->isFrozen());
 
-        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke(new AuditLogServiceProvider($this->app));
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke($this->provider());
 
         self::assertSame($catalogue, app(EventCatalogue::class));
         self::assertTrue($catalogue->isRegistered(EventCode::of(CapturedActivity::SIGNED_IN)));
@@ -1449,6 +1449,20 @@ final class AuditLogServiceProviderTest extends TestCase
     private static function commandOf(ScheduledEvent $event): ?string
     {
         return preg_match('/\'artisan\' (audit-log:.+)\z/', (string) $event->command, $matches) === 1 ? $matches[1] : null;
+    }
+
+    /**
+     * A fresh instance of the package's provider on the test's application.
+     *
+     * @return \SineMacula\Laravel\AuditLog\AuditLogServiceProvider
+     */
+    private function provider(): AuditLogServiceProvider
+    {
+        $app = $this->app;
+
+        self::assertNotNull($app);
+
+        return new AuditLogServiceProvider($app);
     }
 
     /**

@@ -1037,7 +1037,9 @@ final class IntegritySensitiveParametersTest extends TestCase
      * What the work throws. The work holds the secret it is given, so its own
      * frame marks it.
      *
-     * @param  \Closure(): (bool|object|string|null)  $work
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $work
      * @return \Throwable
      */
     private static function thrownBy(#[\SensitiveParameter] \Closure $work): \Throwable

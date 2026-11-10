@@ -84,7 +84,7 @@ final class RequestIdentityTest extends TestCase
     #[\Override]
     protected function tearDown(): void
     {
-        Request::setTrustedProxies([], -1);
+        Request::setTrustedProxies([], 0);
         Str::createUuidsNormally();
 
         parent::tearDown();
@@ -358,7 +358,7 @@ final class RequestIdentityTest extends TestCase
      */
     public function testTheHeaderIsIgnoredWithNoProxyConfigured(): void
     {
-        Request::setTrustedProxies([], -1);
+        Request::setTrustedProxies([], 0);
 
         $this->trust(self::TRUST_REQUEST_ID);
         $this->enterRequest(['HTTP_X_REQUEST_ID' => self::INBOUND_ID]);
@@ -870,7 +870,7 @@ final class RequestIdentityTest extends TestCase
         self::assertSame(self::TRACE_ID, Context::scope(static fn (): ?string => $identity->traceId()));
         self::assertNull(Context::getHidden(CarriedContext::TRACE_ID));
 
-        Request::setTrustedProxies([], -1);
+        Request::setTrustedProxies([], 0);
 
         self::assertSame(self::TRACE_ID, $identity->traceId());
         self::assertSame(self::TRACE_ID, Context::getHidden(CarriedContext::TRACE_ID));

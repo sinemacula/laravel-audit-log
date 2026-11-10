@@ -491,7 +491,7 @@ final class AppendOnlyTriggersTest extends TestCase
 
         self::assertNull($root->table(LifecycleTables::lockTable())->value('token'));
 
-        $root->unprepared($this->pruneOf(sprintf('DELETE FROM %s WHERE id = \'%s\';', EntrySettings::table(), $entries[0])));
+        self::runScript($root, $this->pruneOf(sprintf('DELETE FROM %s WHERE id = \'%s\';', EntrySettings::table(), $entries[0])));
 
         self::assertSame(['manual'], $root->table(LifecycleTables::lockTable())->where('id', 1)->pluck('token')->all());
         self::assertNotNull($root->table(LifecycleTables::lockTable())->value('locked_at'));
@@ -520,7 +520,7 @@ final class AppendOnlyTriggersTest extends TestCase
         $pruned    = $this->storeArtifact(1, $entries[0]);
         $kept      = $this->storeArtifact(2, $entries[1]);
 
-        $root->unprepared($this->pruneOf(sprintf(
+        self::runScript($root, $this->pruneOf(sprintf(
             'DELETE FROM %s WHERE entry_id = \'%s\'; DELETE FROM %s WHERE id = \'%s\';',
             $artifacts,
             $entries[0],
@@ -550,7 +550,7 @@ final class AppendOnlyTriggersTest extends TestCase
         $root    = $this->root();
         $prune   = $this->pruneOf(sprintf('DELETE FROM %s WHERE id = \'%s\'; INSERT INTO audit_log_missing VALUES (1);', EntrySettings::table(), $entries[0]));
 
-        self::refusalOf(static fn () => $root->unprepared($prune), 'The failing prune');
+        self::refusalOf(static fn () => self::runScript($root, $prune), 'The failing prune');
 
         $root->unprepared('ROLLBACK');
 

@@ -6,7 +6,6 @@ namespace Tests\Concerns;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
-use Illuminate\Database\QueryException;
 
 /**
  * Runs the SQL the storage note documents exactly as it is written there: each
@@ -193,14 +192,28 @@ trait RunsDocumentedSql
         $sql = self::documentedSqlFor($marker, $names);
 
         if ($connection->getDriverName() !== 'mysql') {
-            $connection->unprepared($sql);
+            self::runScript($connection, $sql);
 
             return;
         }
 
         foreach (self::statementsOf($sql) as $statement) {
-            $connection->unprepared($statement);
+            self::runScript($connection, $statement);
         }
+    }
+
+    /**
+     * Run the SQL on the connection's PDO, unprepared, as `unprepared()` does,
+     * which takes only literal SQL: this SQL is read from the notes or made
+     * from the names they give.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $sql
+     * @return void
+     */
+    protected static function runScript(Connection $connection, string $sql): void
+    {
+        $connection->getPdo()->exec($sql);
     }
 
     /**
@@ -251,11 +264,11 @@ trait RunsDocumentedSql
             $sql = self::documentedSql($marker);
 
             foreach (self::documentedTriggers($sql) as $trigger => $table) {
-                $connection->unprepared(sprintf($driver === 'pgsql' ? 'DROP TRIGGER IF EXISTS %s ON %s' : 'DROP TRIGGER IF EXISTS %s', $trigger, $table));
+                self::runScript($connection, sprintf($driver === 'pgsql' ? 'DROP TRIGGER IF EXISTS %s ON %s' : 'DROP TRIGGER IF EXISTS %s', $trigger, $table));
             }
 
             foreach (self::documentedFunctions($sql) as $function) {
-                $connection->unprepared(sprintf('DROP FUNCTION IF EXISTS %s() CASCADE', $function));
+                self::runScript($connection, sprintf('DROP FUNCTION IF EXISTS %s() CASCADE', $function));
             }
         }
     }
@@ -438,7 +451,9 @@ trait RunsDocumentedSql
      * `SUPER` while binary logging is on (1419), never another error under the
      * same SQLSTATE, such as a syntax error.
      *
-     * @param  \Closure(): void  $statement
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $statement
      * @param  string  $driver
      * @param  string  $what
      * @return void
@@ -461,7 +476,9 @@ trait RunsDocumentedSql
      * Run the statement and assert a documented trigger refuses it, naming the
      * table and the statement.
      *
-     * @param  \Closure(): void  $statement
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $statement
      * @param  string  $table
      * @param  'DELETE'|'TRUNCATE'|'UPDATE'  $operation
      * @return void
@@ -474,18 +491,21 @@ trait RunsDocumentedSql
     }
 
     /**
-     * The query exception the statement fails with, failing the test when it
+     * The database exception the statement fails with, a query exception or,
+     * for a script run on the PDO, the PDO's own, failing the test when it
      * succeeds.
      *
-     * @param  \Closure(): void  $statement
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $statement
      * @param  string  $what
-     * @return \Illuminate\Database\QueryException
+     * @return \PDOException
      */
-    private static function refusalOf(\Closure $statement, string $what): QueryException
+    private static function refusalOf(\Closure $statement, string $what): \PDOException
     {
         try {
             $statement();
-        } catch (QueryException $refusal) {
+        } catch (\PDOException $refusal) {
             return $refusal;
         }
 

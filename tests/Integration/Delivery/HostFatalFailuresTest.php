@@ -1256,7 +1256,7 @@ final class HostFatalFailuresTest extends TestCase
 
         $session = self::numberFrom($connection, $pgsql ? 'select pg_backend_pid() as value' : 'select connection_id() as value');
 
-        $reader->unprepared($pgsql ? "select pg_terminate_backend({$session})" : "KILL {$session}");
+        $reader->statement($pgsql ? "select pg_terminate_backend({$session})" : "KILL {$session}");
 
         $alive = $pgsql
             ? "select count(*) as value from pg_stat_activity where pid = {$session}"

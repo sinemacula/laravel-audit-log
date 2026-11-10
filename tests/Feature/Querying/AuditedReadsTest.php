@@ -130,7 +130,7 @@ final class AuditedReadsTest extends TestCase
         self::assertCount(1, $records);
         self::assertSame(['audit_log.trail_read', 'denied', 'no_scope'], [$records[0]['event'], $records[0]['outcome'], $records[0]['reason']]);
         self::assertSame(0, self::propertiesOf($records[0])['returned']);
-        self::assertSame([], $this->disclosureOf($records[0]['id'])['members']);
+        self::assertSame([], $this->disclosureOf(self::idOf($records[0]))['members']);
     }
 
     /**
@@ -153,7 +153,7 @@ final class AuditedReadsTest extends TestCase
 
         self::assertSame([$first], self::idsOf($page));
         self::assertCount(2, $records);
-        self::assertSame([$first, $page->entries[0]->hmac], $this->disclosureOf($records[1]['id'])['members'][0]);
+        self::assertSame([$first, $page->entries[0]->hmac], $this->disclosureOf(self::idOf($records[1]))['members'][0]);
 
         self::assertSame(2, $reads->count());
         self::assertSame(['audit_log.trail_read', 'audit_log.trail_read', 'audit_log.trail_counted'], array_column($this->readRecords(), 'event'));
@@ -291,8 +291,8 @@ final class AuditedReadsTest extends TestCase
 
         self::assertSame(self::termsOf($filters, AccessScope::all())->queryFingerprint, $fingerprint);
         self::assertNotSame(self::propertiesOf($without)['query_fingerprint'], $fingerprint);
-        self::assertSame(['App\Models\User', 'owner_9917'], $this->disclosureOf($record['id'])['filters']['holding_data_of']);
-        self::assertNull($this->disclosureOf($without['id'])['filters']['holding_data_of']);
+        self::assertSame(['App\Models\User', 'owner_9917'], $this->disclosureOf(self::idOf($record))['filters']['holding_data_of']);
+        self::assertNull($this->disclosureOf(self::idOf($without))['filters']['holding_data_of']);
     }
 
     /**
@@ -309,7 +309,7 @@ final class AuditedReadsTest extends TestCase
         $ids  = $this->seedEntries(3);
         $page = $this->trail()->cursorPaginate(2);
 
-        $disclosure = $this->disclosureOf($this->readRecords('audit_log.trail_read')[0]['id']);
+        $disclosure = $this->disclosureOf(self::idOf($this->readRecords('audit_log.trail_read')[0]));
 
         self::assertSame(array_map(static fn (TrailEntry $entry): array => [$entry->id, $entry->hmac], $page->entries), $disclosure['members']);
         self::assertSame([$ids[2], $ids[1]], array_column($disclosure['members'], 0));
@@ -339,7 +339,7 @@ final class AuditedReadsTest extends TestCase
         self::assertCount(1, $this->readRecords());
         self::assertSamePropertyKeys(self::COUNT_EVIDENCE, $properties);
         self::assertSame(['count', 3, 'success'], [$properties['purpose'], $properties['returned'], $properties['outcome']]);
-        self::assertSame([], $this->disclosureOf($record['id'])['members']);
+        self::assertSame([], $this->disclosureOf(self::idOf($record))['members']);
     }
 
     /**

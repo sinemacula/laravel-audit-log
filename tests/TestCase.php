@@ -227,6 +227,21 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
+     * The values read back, in order, once each is asserted to be a string.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $values
+     * @return list<string>
+     */
+    protected static function strings(array $values): array
+    {
+        static::assertContainsOnlyString($values);
+
+        return array_values($values);
+    }
+
+    /**
      * Return the storage settings as they are, a name or `null` each, and one
      * that is not set as the value it then has; a setting that is neither is
      * left as the test sets it, since the shipped migrations cannot run with

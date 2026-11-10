@@ -463,8 +463,10 @@ final class IntegritySettingsTest extends TestCase
     /**
      * Assert the call fails closed with exactly the message.
      *
+     * @template TResult
+     *
      * @param  string  $message
-     * @param  \Closure(): void  $call
+     * @param  \Closure(): TResult  $call
      * @return void
      */
     private static function assertRefused(string $message, \Closure $call): void

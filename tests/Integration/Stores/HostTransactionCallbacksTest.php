@@ -235,6 +235,8 @@ final class HostTransactionCallbacksTest extends TestCase
 
         $dispatcher = $connection->getEventDispatcher();
 
+        self::assertNotNull($dispatcher);
+
         $connection->unsetEventDispatcher();
         $connection->beginTransaction();
         $connection->setEventDispatcher($dispatcher);

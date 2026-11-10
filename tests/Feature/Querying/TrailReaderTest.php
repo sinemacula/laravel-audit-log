@@ -345,7 +345,7 @@ final class TrailReaderTest extends TestCase
         $record = $this->readRecords('audit_log.trail_read')[0];
 
         self::assertSame(['success', null, 0], [$record['outcome'], $record['reason'], self::propertiesOf($record)['returned']]);
-        self::assertSame([], $this->disclosureOf($record['id'])['members']);
+        self::assertSame([], $this->disclosureOf(self::idOf($record))['members']);
     }
 
     /**
@@ -491,7 +491,7 @@ final class TrailReaderTest extends TestCase
         $record = $this->readRecords('audit_log.trail_read')[0];
 
         self::assertSame(['failure', 'format_failed', 0], [$record['outcome'], $record['reason'], self::propertiesOf($record)['returned']]);
-        self::assertSame([], $this->disclosureOf($record['id'])['members']);
+        self::assertSame([], $this->disclosureOf(self::idOf($record))['members']);
     }
 
     /**
@@ -519,7 +519,7 @@ final class TrailReaderTest extends TestCase
             $properties = self::propertiesOf($record);
 
             self::assertSame(['denied', 'cursor_rejected', 'cursor', 0], [$record['outcome'], $record['reason'], $properties['page'], $properties['returned']]);
-            self::assertNull($this->disclosureOf($record['id'])['page']);
+            self::assertNull($this->disclosureOf(self::idOf($record))['page']);
         }
     }
 
@@ -703,7 +703,7 @@ final class TrailReaderTest extends TestCase
             self::assertStringNotContainsString($id, (string) json_encode(self::propertiesOf($record)));
         }
 
-        self::assertSame([StoredTime::format($first->entries[1]->occurredAt), $ids[1]], $this->disclosureOf($record['id'])['page']);
+        self::assertSame([StoredTime::format($first->entries[1]->occurredAt), $ids[1]], $this->disclosureOf(self::idOf($record))['page']);
     }
 
     /**
@@ -811,8 +811,8 @@ final class TrailReaderTest extends TestCase
         self::assertSame([$ids[2], $ids[1]], self::idsOf($page));
         self::assertTrue($page->hasMore());
         self::assertSame(2, self::propertiesOf($record)['returned']);
-        self::assertSame($shown, $this->disclosureOf($record['id'])['members']);
-        self::assertNotContains($ids[0], array_column($this->disclosureOf($record['id'])['members'], 0));
+        self::assertSame($shown, $this->disclosureOf(self::idOf($record))['members']);
+        self::assertNotContains($ids[0], array_column($this->disclosureOf(self::idOf($record))['members'], 0));
     }
 
     /**
@@ -835,7 +835,7 @@ final class TrailReaderTest extends TestCase
         self::assertStringContainsString('count(*)', $reads[0]);
 
         $record     = $this->readRecords('audit_log.trail_counted')[0];
-        $disclosure = $this->disclosureOf($record['id']);
+        $disclosure = $this->disclosureOf(self::idOf($record));
 
         self::assertSame(['success', 3], [$record['outcome'], self::propertiesOf($record)['returned']]);
         self::assertSame([], $disclosure['members']);
@@ -920,8 +920,8 @@ final class TrailReaderTest extends TestCase
         $filters = TrailFilters::none()->withCategories(['finance'])->withHoldingDataOf($owner)->normalised();
 
         self::assertSame(['App\Models\User', '42'], $filters['holding_data_of']);
-        self::assertSame($filters, $this->disclosureOf($this->readRecords('audit_log.trail_read')[0]['id'])['filters']);
-        self::assertSame($filters, $this->disclosureOf($this->readRecords('audit_log.trail_counted')[0]['id'])['filters']);
+        self::assertSame($filters, $this->disclosureOf(self::idOf($this->readRecords('audit_log.trail_read')[0]))['filters']);
+        self::assertSame($filters, $this->disclosureOf(self::idOf($this->readRecords('audit_log.trail_counted')[0]))['filters']);
     }
 
     /**

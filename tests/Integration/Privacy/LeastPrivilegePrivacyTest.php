@@ -324,7 +324,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
             ->pluck('state')
             ->all();
 
-        return array_values(array_map(strval(...), $states));
+        return self::strings($states);
     }
 
     /**

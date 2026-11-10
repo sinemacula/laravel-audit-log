@@ -280,8 +280,10 @@ final class KeySettingsTest extends TestCase
     /**
      * Assert the call fails closed with exactly the message.
      *
+     * @template TResult
+     *
      * @param  string  $message
-     * @param  \Closure(): (array<int|string, string>|int|string|null)  $call
+     * @param  \Closure(): TResult  $call
      * @return void
      */
     private static function assertRefused(string $message, \Closure $call): void
