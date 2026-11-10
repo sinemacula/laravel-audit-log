@@ -546,7 +546,11 @@ final readonly class EnvelopeCodec
     {
         ['recorded_at' => $recordedAt, 'integrity_version' => $integrityVersion, 'key_id' => $keyId, 'hmac' => $hmac, 'context' => $context, 'properties' => $properties] = $fields;
 
-        if (!is_string($recordedAt) || !is_int($integrityVersion) || !is_string($keyId) || !is_string($hmac) || !self::isJsonColumn($context) || !self::isJsonColumn($properties)) {
+        if (!is_string($recordedAt) || !is_int($integrityVersion) || !is_string($keyId) || !is_string($hmac)) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
+
+        if (!self::isJsonColumn($context) || !self::isJsonColumn($properties)) {
             throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
         }
 
