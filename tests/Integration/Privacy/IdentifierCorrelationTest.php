@@ -81,7 +81,9 @@ final class IdentifierCorrelationTest extends TestCase
             $hashes[]        = self::hashIn($stored);
         }
 
-        self::assertSame([self::FAILED => 5, self::LOCKED_OUT => 1], $byEvent);
+        ksort($byEvent);
+
+        self::assertSame([self::LOCKED_OUT => 1, self::FAILED => 5], $byEvent);
         self::assertCount(6, $hashes);
         self::assertSame([app(IdentifierHasher::class)->identifier(self::IDENTIFIER)], array_values(array_unique($hashes)));
     }

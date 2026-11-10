@@ -14,7 +14,7 @@
         "phpstan/phpstan-phpunit": "^2.0",
         "phpstan/phpstan-strict-rules": "^2.0",
         "phpunit/phpunit": "^12.5",
-        "sinemacula/coding-standards-laravel": "^1.6.3",
+        "sinemacula/coding-standards-laravel": "^1.7.1",
         "slevomat/coding-standard": "^8.28"
     },
     "config": {
