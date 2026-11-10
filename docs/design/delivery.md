@@ -349,7 +349,7 @@ A record with an artifact carries a `Records\Attachment`, the artifact descripto
 - A replay asks the bound store first, and a bundle it would lose is counted failed and stays in the file. A bundle
   stored already is a no-op.
 - In sync mode a store that keeps no attachments refuses the bundle inside the attempt, with a `\LogicException` that
-  follows the record's rule, so the spill keeps the whole bundle. `bulk()` refuses up front, so that is reached only
+  follows the record's rule, so the spill keeps the whole bundle. `covering()` refuses up front, so that is reached only
   when the binding changed in between.
 - `DatabaseAuditStore` writes the artifact and the entry in one transaction, a savepoint inside a host's, and compares
   a duplicate by the artifact's `id`, `entry_id`, `kind`, `member_count` and `digest`, never its ciphertext; the

@@ -345,17 +345,20 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * The manifest given to a builder is marked sensitive: it holds the members
-     * of the bulk operation.
+     * The manifest given to a builder, and the subjects it is built from, are
+     * marked sensitive: they hold the members of the bulk operation.
      *
      * @return void
      */
     public function testTheManifestIsSensitive(): void
     {
-        $given = (new \ReflectionMethod(PendingRecord::class, 'withManifest'))->getParameters()[0];
+        $given    = (new \ReflectionMethod(PendingRecord::class, 'withManifest'))->getParameters()[0];
+        $subjects = (new \ReflectionMethod(PendingRecord::class, 'covering'))->getParameters()[0];
 
         self::assertSame('manifest', $given->getName());
         self::assertCount(1, $given->getAttributes(\SensitiveParameter::class));
+        self::assertSame('subjects', $subjects->getName());
+        self::assertCount(1, $subjects->getAttributes(\SensitiveParameter::class));
     }
 
     /**
@@ -448,8 +451,9 @@ final class PendingRecordTest extends TestCase
 
     /**
      * Rows of `[call]`: one call of each public mutator, the seventeen fluent
-     * methods, the nine fillers, the manifest, the package's own code and the
-     * id of the package's own record, each with a valid argument.
+     * methods, the nine fillers, the manifest given either way, the package's
+     * own code and the id of the package's own record, each with a valid
+     * argument.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
      */
@@ -483,6 +487,9 @@ final class PendingRecordTest extends TestCase
             }],
             'withManifest' => [static function (PendingRecord $pending): void {
                 $pending->withManifest(self::manifest());
+            }],
+            'covering' => [static function (PendingRecord $pending): void {
+                $pending->covering([Reference::of('invoice', '1')]);
             }],
             'forPackage' => [static function (PendingRecord $pending): void {
                 $pending->forPackage(PackageActivity::TRAIL_READ);
@@ -603,6 +610,9 @@ final class PendingRecordTest extends TestCase
             'withManifest' => [static function (PendingRecord $pending): void {
                 $pending->withManifest(self::manifest());
             }],
+            'covering' => [static function (PendingRecord $pending): void {
+                $pending->covering([]);
+            }],
             'forPackage' => [static function (PendingRecord $pending): void {
                 $pending->forPackage(PackageActivity::TRAIL_READ);
             }],
@@ -653,7 +663,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(29, $mutators);
+        self::assertCount(30, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }

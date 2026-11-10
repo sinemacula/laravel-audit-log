@@ -8,21 +8,18 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
-use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
 use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
-use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
-use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
@@ -278,35 +275,6 @@ final readonly class Recorder
     public function watch(string $model, string $as, array $fields): void
     {
         Container::getInstance()->make(ModelWatcher::class)->watch($model, $as, $fields);
-    }
-
-    /**
-     * A builder for a bulk operation on the subjects, which writes nothing
-     * until its `record()` and is written after commit by default, like any
-     * explicit record. It carries the manifest of the subjects, each once,
-     * which is sealed when it is recorded; a manifest over its configured
-     * bounds is refused, never truncated, and so is any bulk operation while
-     * the bound store keeps no attachment.
-     *
-     * @param  \BackedEnum|string  $code
-     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
-     * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
-     *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
-     * @throws \InvalidArgumentException
-     * @throws \JsonException
-     * @throws \LogicException
-     */
-    public function bulk(\BackedEnum|string $code, #[\SensitiveParameter] iterable $subjects): PendingRecord
-    {
-        $container = Container::getInstance();
-
-        $container->make(StoreCapabilities::class)->assertAcceptsAttachments();
-
-        $settings = $container->make(CaptureSettings::class);
-        $manifest = Manifest::of($subjects, $settings->bulkMaxMembers(), $settings->bulkMaxBytes());
-
-        return $this->event($code)->withManifest($manifest);
     }
 
     /**

@@ -4,6 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Records;
 
+use Illuminate\Container\Container;
+use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
+use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Concerns\ChoosesDelivery;
 use SineMacula\Laravel\AuditLog\Records\Concerns\DescribesTheActivity;
@@ -35,8 +38,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  *
  * A bulk builder carries its manifest, what the operation affected, which its
  * record seals as an attachment and describes in `properties._audit.manifest`.
- * Only `AuditLog::bulk()` and the package's own read records give a builder
- * one.
+ * `covering()` gives a builder one, from the application or a mapper; the
+ * package's own read records carry theirs too.
  *
  * Only the package's own read path names one of its codes, with `forPackage()`.
  * A builder the facade made is refused when it is recorded with a code under
@@ -148,6 +151,35 @@ final class PendingRecord
         $this->id = self::checkedId($id);
 
         return $this;
+    }
+
+    /**
+     * Make the record a bulk operation's: carry the manifest of the subjects it
+     * covers, each a model or a reference, kept once whatever the order or
+     * repetition they come in. A manifest over the configured bounds is
+     * refused, never truncated, and so is any manifest while the bound store
+     * keeps no attachment. The application covers a builder from
+     * `AuditLog::event()`, and a mapper the builder it was handed.
+     *
+     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @return self
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     */
+    public function covering(#[\SensitiveParameter] iterable $subjects): self
+    {
+        $this->assertUsable();
+
+        $container = Container::getInstance();
+
+        $container->make(StoreCapabilities::class)->assertAcceptsAttachments();
+
+        $settings = $container->make(CaptureSettings::class);
+
+        return $this->withManifest(Manifest::of($subjects, $settings->bulkMaxMembers(), $settings->bulkMaxBytes()));
     }
 
     /**

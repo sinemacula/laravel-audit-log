@@ -23,6 +23,10 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * table. Anything it throws is recorded as a failed read and propagates to the
  * caller unchanged.
  *
+ * The policy is told who is reading and why, never how the viewer signed in or
+ * how recently: a requirement on the authentication itself, such as a fresh
+ * multi-factor check, belongs on the route or action that reads the trail.
+ *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
