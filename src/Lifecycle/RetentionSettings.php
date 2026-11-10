@@ -119,7 +119,7 @@ final readonly class RetentionSettings
     /**
      * The most entries one chunk of a prune deletes, from 100 to 10000.
      *
-     * @return int
+     * @return positive-int
      *
      * @throws \InvalidArgumentException
      */
@@ -206,7 +206,7 @@ final readonly class RetentionSettings
      * The numeric setting under the key, within its range.
      *
      * @param  key-of<self::NUMBERS>  $setting
-     * @return int
+     * @return ($setting is 'after_days' ? int : positive-int)
      *
      * @throws \InvalidArgumentException
      */
