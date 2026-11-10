@@ -345,6 +345,52 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
+     * A builder made without a source of manifests cannot cover subjects, and
+     * reads none of them.
+     *
+     * @return void
+     */
+    public function testABuilderWithoutASourceOfManifestsCoversNothing(): void
+    {
+        $reads    = new \ArrayObject;
+        $subjects = (static function () use ($reads): \Generator {
+            $reads->append(true);
+
+            yield Reference::of('invoice', '1');
+        })();
+
+        try {
+            (new PendingRecord)->event('invoice.voided')->covering($subjects);
+
+            self::fail('Expected the builder to refuse.');
+        } catch (\LogicException $exception) {
+            self::assertSame('This builder has no source of manifests, so it cannot cover subjects.', $exception->getMessage());
+        }
+
+        self::assertCount(0, $reads);
+    }
+
+    /**
+     * A builder given a source of manifests carries what it builds of the
+     * subjects.
+     *
+     * @return void
+     */
+    public function testABuilderCarriesTheManifestItsSourceBuilds(): void
+    {
+        $manifest = self::manifest();
+        $subjects = [Reference::of('invoice', '1')];
+        $pending  = new PendingRecord(manifests: static function (iterable $given) use ($manifest, $subjects): Manifest {
+            self::assertSame($subjects, $given);
+
+            return $manifest;
+        });
+
+        self::assertSame($pending, $pending->event('invoice.voided')->covering($subjects));
+        self::assertSame($manifest, $pending->snapshot()->manifest);
+    }
+
+    /**
      * The manifest given to a builder, and the subjects it is built from, are
      * marked sensitive: they hold the members of the bulk operation.
      *

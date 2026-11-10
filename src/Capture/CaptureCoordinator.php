@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 use SineMacula\Laravel\AuditLog\RecordPipeline;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 
@@ -253,7 +254,7 @@ final readonly class CaptureCoordinator
     private function described(#[\SensitiveParameter] object $event, #[\SensitiveParameter] \Closure $describe, bool $once, bool $mayDefer): ?PendingRecord
     {
         $events   = $this->container->make(CapturedEvents::class);
-        $pending  = new PendingRecord;
+        $pending  = new PendingRecord(manifests: $this->manifestOf(...));
         $returned = $events->whileDescribing($event, static fn (): ?PendingRecord => $describe($pending));
 
         if ($returned === null) {
@@ -263,6 +264,22 @@ final readonly class CaptureCoordinator
         self::checkReturned($returned, $pending, $mayDefer);
 
         return !$once || $events->claims($event) ? $pending : null;
+    }
+
+    /**
+     * The manifest a mapper's builder covers, from the capture's container.
+     *
+     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @return \SineMacula\Laravel\AuditLog\Records\Manifest
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     */
+    private function manifestOf(#[\SensitiveParameter] iterable $subjects): Manifest
+    {
+        return $this->container->make(BulkManifests::class)->of($subjects);
     }
 
     /**

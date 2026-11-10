@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\AuditLog;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\AuditLog\Capture\BulkManifests;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
@@ -20,6 +21,7 @@ use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
+use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
@@ -146,7 +148,7 @@ final readonly class Recorder
      */
     public function event(\BackedEnum|string $code): PendingRecord
     {
-        return (new PendingRecord($this->write(...)))->event($code);
+        return (new PendingRecord($this->write(...), self::manifestOf(...)))->event($code);
     }
 
     /**
@@ -304,6 +306,23 @@ final readonly class Recorder
     public function lifecycle(): AuditLifecycle
     {
         return Container::getInstance()->make(AuditLifecycle::class);
+    }
+
+    /**
+     * The manifest a builder covers, resolved from the current container on
+     * each call so the bound store and the bounds are those of the moment.
+     *
+     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @return \SineMacula\Laravel\AuditLog\Records\Manifest
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \LogicException
+     */
+    private static function manifestOf(#[\SensitiveParameter] iterable $subjects): Manifest
+    {
+        return Container::getInstance()->make(BulkManifests::class)->of($subjects);
     }
 
     /**

@@ -4,9 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Records;
 
-use Illuminate\Container\Container;
-use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
-use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Concerns\ChoosesDelivery;
 use SineMacula\Laravel\AuditLog\Records\Concerns\DescribesTheActivity;
@@ -79,6 +76,7 @@ final class PendingRecord
      * Constructor.
      *
      * @param  ?\Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): \SineMacula\Laravel\AuditLog\Records\AuditRecord  $recorder
+     * @param  ?\Closure(iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>): \SineMacula\Laravel\AuditLog\Records\Manifest  $manifests
      *
      * @internal
      */
@@ -86,6 +84,9 @@ final class PendingRecord
 
         /** The recorder `record()` hands the builder to. */
         private readonly ?\Closure $recorder = null,
+
+        /** What builds `covering()`'s manifest, bounded, for the bound store. */
+        private readonly ?\Closure $manifests = null,
     ) {}
 
     /**
@@ -159,27 +160,22 @@ final class PendingRecord
      * repetition they come in. A manifest over the configured bounds is
      * refused, never truncated, and so is any manifest while the bound store
      * keeps no attachment. The application covers a builder from
-     * `AuditLog::event()`, and a mapper the builder it was handed.
+     * `AuditLog::event()`, and a mapper the builder it was handed; a builder
+     * made without a source of manifests cannot cover anything.
      *
      * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @return self
      *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
-     * @throws \JsonException
      * @throws \LogicException
      */
     public function covering(#[\SensitiveParameter] iterable $subjects): self
     {
         $this->assertUsable();
 
-        $container = Container::getInstance();
+        $manifests = $this->manifests ?? throw new \LogicException('This builder has no source of manifests, so it cannot cover subjects.');
 
-        $container->make(StoreCapabilities::class)->assertAcceptsAttachments();
-
-        $settings = $container->make(CaptureSettings::class);
-
-        return $this->withManifest(Manifest::of($subjects, $settings->bulkMaxMembers(), $settings->bulkMaxBytes()));
+        return $this->withManifest($manifests($subjects));
     }
 
     /**
