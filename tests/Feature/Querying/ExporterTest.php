@@ -736,7 +736,7 @@ final class ExporterTest extends TestCase
         $properties = self::propertiesOf($record);
 
         self::assertSame(['failure', 'format_failed', 0, null], [$record['outcome'], $record['reason'], $properties['returned'], $properties['file_sha256']]);
-        self::assertSame([], $this->disclosureOf($record['id'])['members']);
+        self::assertSame([], $this->disclosureOf(self::idOf($record))['members']);
         self::assertSame([], $this->temporaries());
         self::assertFileDoesNotExist($this->target());
     }

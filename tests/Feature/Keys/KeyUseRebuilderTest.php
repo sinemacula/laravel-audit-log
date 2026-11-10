@@ -159,8 +159,8 @@ final class KeyUseRebuilderTest extends TestCase
         $result = $this->rebuilder()->rebuild();
 
         self::assertCount(2, $pages);
-        self::assertStringNotContainsString('>', $pages[0]);
-        self::assertStringContainsString('>', $pages[1]);
+        self::assertStringNotContainsString('>', $pages->getArrayCopy()[0]);
+        self::assertStringContainsString('>', $pages->getArrayCopy()[1]);
         self::assertSame(['entries' => 1001, 'verified' => 1001, 'skipped' => 0, 'added' => 0, 'dry_run' => false], $result->toArray());
     }
 

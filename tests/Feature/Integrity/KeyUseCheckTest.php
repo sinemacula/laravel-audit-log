@@ -90,8 +90,8 @@ final class KeyUseCheckTest extends TestCase
 
         self::assertSame([$last], $missing);
         self::assertCount(2, $statements);
-        self::assertStringContainsString(KeyTables::keyUsesTable(), $statements[0]);
-        self::assertMatchesRegularExpression('/\bentry_id\W* in \(/', $statements[0]);
+        self::assertStringContainsString(KeyTables::keyUsesTable(), $statements->getArrayCopy()[0]);
+        self::assertMatchesRegularExpression('/\bentry_id\W* in \(/', $statements->getArrayCopy()[0]);
     }
 
     /**

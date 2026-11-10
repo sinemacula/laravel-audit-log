@@ -1017,7 +1017,7 @@ final class OutboxDrainerTest extends TestCase
         $result = $this->drain();
 
         self::assertSame([0, 0, 0, 1, 0], self::tally($result));
-        self::assertSame([0, 1, 0, 0, 0], self::tally($nested[0]));
+        self::assertSame([0, 1, 0, 0, 0], self::tally($nested->getArrayCopy()[0]));
         self::assertSame(2, $this->outboxRow($id)['attempts'] ?? null);
         self::assertSame('2026-11-01T12:07:01.000000Z', $this->outboxRow($id)['available_at'] ?? null);
     }
@@ -1044,7 +1044,7 @@ final class OutboxDrainerTest extends TestCase
         $result = $this->drain();
 
         self::assertSame([0, 0, 0, 1, 0], self::tally($result));
-        self::assertSame([0, 0, 1, 0, 0], self::tally($nested[0]));
+        self::assertSame([0, 0, 1, 0, 0], self::tally($nested->getArrayCopy()[0]));
         self::assertSame('abandoned', $this->outboxRow($id)['last_error_class'] ?? null);
         self::assertSame('abandoned', self::onlyReport($handler)->exceptionClass);
         Event::assertNotDispatched(AuditWriteFailed::class);

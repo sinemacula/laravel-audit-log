@@ -1828,9 +1828,9 @@ final class SegmentVerifierTest extends TestCase
 
         self::assertSame(IntegrityStatus::VALID, $report->integrity);
         self::assertCount(1, $statements);
-        self::assertStringContainsString('left join', $statements[0]);
-        self::assertStringContainsString(IntegrityTables::membersTable(), $statements[0]);
-        self::assertStringContainsString(EntrySettings::table(), $statements[0]);
+        self::assertStringContainsString('left join', $statements->getArrayCopy()[0]);
+        self::assertStringContainsString(IntegrityTables::membersTable(), $statements->getArrayCopy()[0]);
+        self::assertStringContainsString(EntrySettings::table(), $statements->getArrayCopy()[0]);
     }
 
     /**
@@ -2180,7 +2180,7 @@ final class SegmentVerifierTest extends TestCase
 
         self::assertSame(IntegrityStatus::VALID, $this->verifier()->verify($sealed, 2, $previous, self::context())->integrity);
         self::assertCount(2, $statements);
-        self::assertStringContainsString(KeyTables::keyUsesTable(), $statements[1]);
+        self::assertStringContainsString(KeyTables::keyUsesTable(), $statements->getArrayCopy()[1]);
     }
 
     /**

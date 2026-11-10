@@ -212,7 +212,7 @@ final class TestingManagerTimingTest extends TestCase
     {
         $connection = $this->storageConnection();
 
-        self::assertSame(LaravelManager::class, get_class($this->app?->make('db.transactions')));
+        self::assertSame(LaravelManager::class, get_debug_type($this->app?->make('db.transactions')));
 
         $connection->beginTransaction();
 

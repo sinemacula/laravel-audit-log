@@ -52,6 +52,8 @@ final class AttachmentTest extends TestCase
         $manifest   = self::manifest();
         $attachment = Attachment::sealed($manifest, RecordFactory::encrypter());
 
+        self::assertNotNull($attachment->members);
+
         self::assertSame($manifest->canonical, RecordFactory::encrypter()->decryptString($attachment->members));
         self::assertSame($manifest->id, $attachment->id);
         self::assertSame('bulk', $attachment->kind);
@@ -164,6 +166,8 @@ final class AttachmentTest extends TestCase
         $second   = Attachment::sealed($manifest, RecordFactory::encrypter());
 
         self::assertNotSame($manifest->canonical, $first->members);
+        self::assertNotNull($first->members);
+
         self::assertStringNotContainsString('Invoice', $first->members);
         self::assertStringNotContainsString('Invoice', base64_decode($first->members, true) ?: '');
         self::assertNotSame($first->members, $second->members);

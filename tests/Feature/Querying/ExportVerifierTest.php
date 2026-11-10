@@ -218,7 +218,7 @@ final class ExportVerifierTest extends TestCase
             'findings'          => [],
             'outcome'           => 'success',
         ], array_diff_key(self::propertiesOf($record), ['_audit' => true]));
-        self::assertSame([[$result->entryId, $stored['hmac']]], $this->disclosureOf($record['id'])['members']);
+        self::assertSame([[$result->entryId, $stored['hmac']]], $this->disclosureOf(self::idOf($record))['members']);
     }
 
     /**

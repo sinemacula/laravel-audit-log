@@ -362,6 +362,8 @@ final class FailureSpillTest extends TestCase
         self::assertEquals($record->record->attachment, $decoded->record->attachment);
         self::assertNotNull($decoded->record->attachment);
 
+        self::assertNotNull($decoded->record->attachment->members);
+
         $members = app(StringEncrypter::class)->decryptString($decoded->record->attachment->members);
 
         self::assertSame(['count' => 3, 'digest' => $decoded->record->attachment->digest], Manifest::readCanonical($members));

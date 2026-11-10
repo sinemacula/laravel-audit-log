@@ -117,7 +117,7 @@ final class ManifestVerifierTest extends TestCase
 
         self::assertSame([[Finding::MANIFEST_MISSING, $kept]], $this->verifier()->findings($descriptors));
         self::assertCount(2, $statements);
-        self::assertStringContainsString(EntrySettings::table(), $statements[1]);
+        self::assertStringContainsString(EntrySettings::table(), $statements->getArrayCopy()[1]);
     }
 
     /**
@@ -531,7 +531,7 @@ final class ManifestVerifierTest extends TestCase
 
         self::assertSame([[$finding, $entryId]], $this->findingsOf([$entryId]));
         self::assertCount(1, $statements);
-        self::assertStringContainsString('length(', $statements[0]);
+        self::assertStringContainsString('length(', $statements->getArrayCopy()[0]);
     }
 
     /**

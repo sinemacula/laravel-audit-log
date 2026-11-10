@@ -1309,6 +1309,8 @@ final class AuditRecordTest extends TestCase
 
         self::assertNotNull($record->attachment);
         self::assertSame(self::KEYS, array_keys($envelope));
+        self::assertNotNull($record->attachment->members);
+
         self::assertStringNotContainsString($record->attachment->members, json_encode($envelope, JSON_THROW_ON_ERROR));
         self::assertSame($record->attachment->id, $envelope['properties']['_audit']['manifest']['artifact_id'] ?? null);
     }

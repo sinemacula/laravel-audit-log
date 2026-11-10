@@ -290,7 +290,7 @@ final class ExportProofsTest extends TestCase
             'findings'          => ['entry_missing'],
             'outcome'           => 'denied',
         ], array_diff_key(self::propertiesOf($records[0]), ['_audit' => true]));
-        self::assertSame([], $this->disclosureOf($records[0]['id'])['members']);
+        self::assertSame([], $this->disclosureOf(self::idOf($records[0]))['members']);
     }
 
     /**
