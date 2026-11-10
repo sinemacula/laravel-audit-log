@@ -375,7 +375,7 @@ final readonly class EventDefinition
      * The definition with a rule of the handling for each of the paths.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling  $handling
-     * @param  list<string>  $paths
+     * @param  array<string>  $paths
      * @return self
      *
      * @throws \InvalidArgumentException

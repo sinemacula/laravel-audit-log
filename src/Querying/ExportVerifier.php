@@ -146,18 +146,22 @@ final readonly class ExportVerifier
         $policy = $this->container->make(AuditAccessPolicy::class);
         $name   = get_debug_type($policy);
 
-        /** @param list<\SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding> $findings */
         $record = function (
             ?AccessScope $scope,
             Outcome $outcome,
             ?string $reason,
             #[\SensitiveParameter] ?StoredEntry $entry = null,
-            array $findings = [],
+            ExportFinding ...$findings,
         ) use (
             $viewer,
             $name,
         ): void {
-            $values   = array_map(static fn (ExportFinding $finding): string => $finding->value, $findings);
+            $values = [];
+
+            foreach ($findings as $finding) {
+                $values[] = $finding->value;
+            }
+
             $terms    = ReadTerms::of($this->container->make(KeyRing::class)->signingKey(), TrailFilters::none(), $scope);
             $evidence = AccessEvidence::forVerification($terms, $name, $entry === null ? null : [$entry->id(), $entry->hmac()], $values, $outcome);
 
@@ -169,7 +173,7 @@ final readonly class ExportVerifier
 
         [$findings, $entry, $lines, $entryId] = $this->chain($denied ? null : $scope, $path, static fn () => $record($scope, Outcome::FAILURE, self::QUERY_FAILED));
 
-        $record($scope, $denied ? Outcome::DENIED : Outcome::SUCCESS, $denied ? self::NO_SCOPE : null, $entry, $findings);
+        $record($scope, $denied ? Outcome::DENIED : Outcome::SUCCESS, $denied ? self::NO_SCOPE : null, $entry, ...$findings);
 
         return new ExportVerification($entryId, $lines, $findings);
     }

@@ -168,7 +168,7 @@ final readonly class CheckpointWriter
      * retry and so no savepoint: read the last seal, select the rows, and seal
      * the candidates among them, if any can be sealed.
      *
-     * @param  \Closure(\Illuminate\Database\Connection): array{0: list<\stdClass>, 1: list<\stdClass>}  $select
+     * @param  \Closure(\Illuminate\Database\Connection): array{0: array<int, \stdClass>, 1: array<int, \stdClass>}  $select
      * @param  int  $limit
      * @return \SineMacula\Laravel\AuditLog\Integrity\SealBatch
      *
@@ -181,16 +181,17 @@ final readonly class CheckpointWriter
         return $connection->transaction(function (Connection $connection) use ($select, $limit): SealBatch {
             $head                = $this->head($connection);
             [$rows, $candidates] = $select($connection);
-            [$members, $times]   = self::sealable($candidates);
-            $skipped             = count($candidates) - count($members);
+            $sealable            = self::sealable($candidates);
+            $skipped             = count($candidates) - count($sealable);
             $last                = $rows === [] ? null : self::positionOf($rows[array_key_last($rows)]);
 
-            if ($members === []) {
+            if ($sealable === []) {
                 return new SealBatch(null, null, count($rows), $skipped, $last, $limit);
             }
 
-            $seal   = $this->envelope($head, $members, $times, self::journalHeadAfter($head[0] ?? null, $connection));
-            $digest = $seal->digest();
+            $members = array_column($sealable, 0);
+            $seal    = $this->envelope($head, $members, array_column($sealable, 1), self::journalHeadAfter($head[0] ?? null, $connection));
+            $digest  = $seal->digest();
 
             $this->insert($connection, $seal, $digest, $members);
 
@@ -393,18 +394,17 @@ final readonly class CheckpointWriter
     }
 
     /**
-     * The members the candidates make, each an entry id and its HMAC, and their
-     * times in the package's form, leaving out each candidate whose id is not a
+     * The member each candidate makes, an entry id and its HMAC, with its time
+     * in the package's form, leaving out each candidate whose id is not a
      * lower-case UUID, whose HMAC is not 64 lower-case hex, or whose time
      * cannot be read.
      *
-     * @param  list<\stdClass>  $rows
-     * @return array{0: list<array{0: string, 1: string}>, 1: list<string>}
+     * @param  array<int, \stdClass>  $rows
+     * @return list<array{0: array{0: string, 1: string}, 1: string}>
      */
     private static function sealable(#[\SensitiveParameter] array $rows): array
     {
-        $members = [];
-        $times   = [];
+        $sealable = [];
 
         foreach ($rows as $candidate) {
 
@@ -416,11 +416,10 @@ final readonly class CheckpointWriter
                 continue;
             }
 
-            $members[] = [$id, $hmac];
-            $times[]   = $time;
+            $sealable[] = [[$id, $hmac], $time];
         }
 
-        return [$members, $times];
+        return $sealable;
     }
 
     /**
