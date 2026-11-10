@@ -238,7 +238,7 @@ final class KeyUseRebuilderTest extends TestCase
     /**
      * The key uses sorted by key, then entry.
      *
-     * @param  list<array{0: string, 1: string}>  $uses
+     * @param  array<array{0: string, 1: string}>  $uses
      * @return list<array{0: string, 1: string}>
      */
     private static function sorted(array $uses): array

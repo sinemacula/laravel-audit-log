@@ -486,7 +486,10 @@ final class CaptureMinimisationTest extends TestCase
         self::assertSame(1, $note['v']);
         self::assertIsString($note['k']);
         self::assertMatchesRegularExpression('/\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/', $note['k']);
-        self::assertSame(['note'], array_keys($record->properties['_audit'] ?? []));
+        $audit = $record->properties['_audit'] ?? null;
+
+        self::assertIsArray($audit);
+        self::assertSame(['note'], array_keys($audit));
         self::assertEqualsCanonicalizing($record->properties, $this->storedProperties($record->id));
         self::assertStringNotContainsString('Erasable.', (string) json_encode($this->storedRow($record->id)));
     }

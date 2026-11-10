@@ -1124,7 +1124,7 @@ final class HostFatalFailuresTest extends TestCase
      * waited for its own `deadlock_timeout`, this process's is too long to find
      * it first. Only the first attempt contends; a retry takes its own id.
      *
-     * @param  int  $hostAttempts
+     * @param  positive-int  $hostAttempts
      * @return void
      */
     private function raceIntoADeadlock(int $hostAttempts): void
@@ -1165,7 +1165,7 @@ final class HostFatalFailuresTest extends TestCase
      * In the child: run the host's transaction, with the attempts given, and
      * leave in the shared file how many it made and what it got.
      *
-     * @param  int  $hostAttempts
+     * @param  positive-int  $hostAttempts
      * @return void
      */
     private function contendAsTheHost(int $hostAttempts): void

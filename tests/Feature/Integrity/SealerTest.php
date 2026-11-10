@@ -389,7 +389,7 @@ final class SealerTest extends TestCase
         self::assertNotContains($ids[99], $selects->getArrayCopy()[0]);
         self::assertContains($ids[99], $selects->getArrayCopy()[1]);
         self::assertContains($ids[199], $selects->getArrayCopy()[2]);
-        self::assertLessThan(0, strcmp(self::positionIn($selects[1]), self::positionIn($selects[2])));
+        self::assertLessThan(0, strcmp(self::positionIn($selects->getArrayCopy()[1]), self::positionIn($selects->getArrayCopy()[2])));
     }
 
     /**

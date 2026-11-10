@@ -390,8 +390,8 @@ final class ImportProofsTest extends TestCase
         $rows   = $this->entries('audit_log.');
 
         self::assertSame(['complete', 2, 0], [$result['status'], $result['imported'], $result['rejected']]);
-        self::assertSame($this->sorted($exported), $this->sorted(array_column($rows, 'source_record_id')));
-        self::assertSame([], array_values(array_intersect($exported, array_column($rows, 'id'))));
+        self::assertSame($this->sorted($exported), $this->sorted(self::strings(array_column($rows, 'source_record_id'))));
+        self::assertSame([], array_values(array_intersect($exported, self::strings(array_column($rows, 'id')))));
         self::assertSame(['imported', 'imported'], array_column($rows, 'provenance'));
         self::assertSame([self::EXPORTER, self::EXPORTER], array_column($rows, 'source_id'));
         self::assertSame([$result['batch_id'], $result['batch_id']], array_column($rows, 'import_batch_id'));

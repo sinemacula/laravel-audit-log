@@ -880,8 +880,12 @@ final class NoSecretAnywhereTest extends TestCase
         $record = AuditLog::event(self::CODE)->withNote(self::SECRET, Reference::of('user', '1'))->record();
         $row    = $this->storageConnection()->table(EntrySettings::table())->where('id', $record->id)->first();
 
-        self::assertSame(['v', 'k', 'c'], array_keys($record->properties['_audit']['note'] ?? []));
-        self::assertArrayNotHasKey('omitted', $record->properties['_audit'] ?? []);
+        $audit = $record->properties['_audit'] ?? null;
+
+        self::assertIsArray($audit);
+        self::assertIsArray($audit['note'] ?? null);
+        self::assertSame(['v', 'k', 'c'], array_keys($audit['note']));
+        self::assertArrayNotHasKey('omitted', $audit);
         self::assertHoldsNoSecret($record, 'the returned record');
         self::assertHoldsNoSecret($row, 'the stored row');
     }

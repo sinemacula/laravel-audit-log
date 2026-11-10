@@ -194,9 +194,9 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
      */
     public function testAThousandLevelsOfNesting(): void
     {
-        $nested = 'leaf';
+        $nested = ['next' => 'leaf'];
 
-        for ($level = 0; $level < 1000; $level++) {
+        for ($level = 1; $level < 1000; $level++) {
             $nested = ['next' => $nested];
         }
 

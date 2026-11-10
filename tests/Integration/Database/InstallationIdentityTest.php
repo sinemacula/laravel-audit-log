@@ -235,7 +235,7 @@ final class InstallationIdentityTest extends TestCase
      */
     public function testConfirmRefusesConnectionsReachingDifferentDatabases(): void
     {
-        $this->otherDatabase(json_encode(['id' => self::OTHER_ID]));
+        $this->otherDatabase(json_encode(['id' => self::OTHER_ID], JSON_THROW_ON_ERROR));
 
         app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
 
@@ -260,7 +260,7 @@ final class InstallationIdentityTest extends TestCase
      */
     public function testTheRefusalNamesNoValue(): void
     {
-        foreach ([null, json_encode(['id' => self::OTHER_ID])] as $value) {
+        foreach ([null, json_encode(['id' => self::OTHER_ID], JSON_THROW_ON_ERROR)] as $value) {
 
             $this->otherDatabase($value);
 
@@ -358,7 +358,7 @@ final class InstallationIdentityTest extends TestCase
             'The storage and maintenance connections reach different installations.',
         ];
 
-        foreach ([null, json_encode(['id' => self::OTHER_ID])] as $index => $value) {
+        foreach ([null, json_encode(['id' => self::OTHER_ID], JSON_THROW_ON_ERROR)] as $index => $value) {
 
             $this->otherDatabase($value);
 

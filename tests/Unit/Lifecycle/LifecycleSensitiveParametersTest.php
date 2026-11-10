@@ -229,19 +229,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
             }
             PHP;
 
-        if (!class_exists(self::FIXTURE, false)) {
-            $file = (string) tempnam(sys_get_temp_dir(), 'scan');
-
-            file_put_contents($file, $source);
-
-            require $file;
-
-            unlink($file);
-        }
-
-        $fixture = self::FIXTURE;
-
-        self::assertTrue(class_exists($fixture));
+        $fixture = self::declared(self::FIXTURE, $source);
 
         $flagged = array_map(static fn (\ReflectionParameter $parameter): string => $parameter->getName(), self::payloadParametersOf($fixture, false));
 
@@ -385,6 +373,32 @@ final class LifecycleSensitiveParametersTest extends TestCase
 
         self::assertSame('held', $unmarked('held')->getTrace()[0]['args'][0] ?? null);
         self::assertInstanceOf(\SensitiveParameterValue::class, $marked('held')->getTrace()[0]['args'][0] ?? null);
+    }
+
+    /**
+     * The class of the name, declared from the source unless it already is.
+     *
+     * @param  string  $class
+     * @param  string  $source
+     * @return class-string
+     */
+    private static function declared(string $class, string $source): string
+    {
+        if (!class_exists($class, false)) {
+            $file = (string) tempnam(sys_get_temp_dir(), 'scan');
+
+            file_put_contents($file, $source);
+
+            require $file;
+
+            unlink($file);
+        }
+
+        if (!class_exists($class)) {
+            self::fail("The source does not declare {$class}.");
+        }
+
+        return $class;
     }
 
     /**

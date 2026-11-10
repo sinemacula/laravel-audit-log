@@ -1070,10 +1070,8 @@ final class PackageBoundaryTest extends TestCase
     /**
      * The static properties the class itself declares, named with it.
      *
-     * @param  string  $class
+     * @param  class-string  $class
      * @return list<string>
-     *
-     * @throws \ReflectionException
      */
     private static function staticPropertiesOf(string $class): array
     {

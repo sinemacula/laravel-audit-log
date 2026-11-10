@@ -473,7 +473,7 @@ final class JournalChainTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @param  list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind, 1: ?string, 2?: array<string, array<string, string>|int|string>, 3?: ?string}>  $specs
+     * @param  list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind, 1: ?string, 2?: array<string, array<string, int|string>|int|string>, 3?: ?string}>  $specs
      * @param  int  $refused
      * @return void
      *
@@ -681,7 +681,7 @@ final class JournalChainTest extends TestCase
      * The rows of each kind, hold id, payload and seal id given, signed and
      * linked from sequence 1.
      *
-     * @param  list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind, 1: ?string, 2?: array<string, array<string, string>|int|string>, 3?: ?string}>  $specs
+     * @param  list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind, 1: ?string, 2?: array<string, array<string, int|string>|int|string>, 3?: ?string}>  $specs
      * @return list<\SineMacula\Laravel\AuditLog\Integrity\JournalRow>
      */
     private static function linked(array $specs): array
@@ -705,7 +705,7 @@ final class JournalChainTest extends TestCase
      * @param  int  $sequence
      * @param  ?string  $previous
      * @param  ?string  $holdId
-     * @param  array<string, array<string, string>|int|string>  $payload
+     * @param  array<string, array<string, int|string>|int|string>  $payload
      * @param  ?string  $sealId
      * @param  string  $logId
      * @return \SineMacula\Laravel\AuditLog\Integrity\JournalRow

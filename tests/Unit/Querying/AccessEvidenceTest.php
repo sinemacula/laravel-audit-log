@@ -517,7 +517,7 @@ final class AccessEvidenceTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return iterable<string, array{0: \Closure(array<string, array<array-key, string>|scalar|null>, array{artifact_id: string, kind: string, digest: string, count: int}): ?array<string, array<array-key, array<array-key, scalar>|scalar|null>|scalar|null>}>
+     * @return iterable<string, array{0: \Closure(array<string, array<array-key, int|string>|scalar|null>, array{artifact_id: string, kind: string, digest: string, count: int}): ?array<string, array<array-key, array<array-key, scalar>|scalar|null>|scalar|null>}>
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -548,7 +548,7 @@ final class AccessEvidenceTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @param  \Closure(array<string, array<array-key, string>|scalar|null>, array{artifact_id: string, kind: string, digest: string, count: int}): ?array<string, array<array-key, array<array-key, scalar>|scalar|null>|scalar|null>  $kept
+     * @param  \Closure(array<string, array<array-key, int|string>|scalar|null>, array{artifact_id: string, kind: string, digest: string, count: int}): ?array<string, array<array-key, array<array-key, scalar>|scalar|null>|scalar|null>  $kept
      * @return void
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong

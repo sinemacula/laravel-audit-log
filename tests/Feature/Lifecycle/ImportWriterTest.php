@@ -167,10 +167,10 @@ final class ImportWriterTest extends TestCase
         self::assertSame(['begin', 'claim', 'classify', 'insert', 'key uses', 'counts', 'commit'], $log->getArrayCopy());
         self::assertSame(3, $tally->imported());
 
-        $entries = $this->connection()->table(EntrySettings::table())->orderBy('source_record_id')->pluck('id')->all();
+        $entries = self::strings($this->connection()->table(EntrySettings::table())->orderBy('source_record_id')->pluck('id')->all());
         $keys    = array_map(fn (Reference $actor): string => $this->makeSubjectKey($actor, null, 'finance')[0]->id, [$first, $second, $first]);
 
-        self::assertSame(self::sortedUses(array_map(null, $keys, $entries)), $this->keyUses());
+        self::assertSame(self::sortedUses(array_map(static fn (string $key, string $entry): array => [$key, $entry], $keys, $entries)), $this->keyUses());
     }
 
     /**

@@ -217,10 +217,10 @@ final class RecordFinaliserTest extends TestCase
     /**
      * A clock stopped at the instant, in whatever time zone the instant has.
      *
-     * @param  \Carbon\CarbonImmutable|false  $instant
+     * @param  ?\Carbon\CarbonImmutable  $instant
      * @return \SineMacula\Laravel\AuditLog\Contracts\Clock
      */
-    private static function clock(CarbonImmutable|false $instant): Clock
+    private static function clock(?CarbonImmutable $instant): Clock
     {
         self::assertInstanceOf(CarbonImmutable::class, $instant);
 

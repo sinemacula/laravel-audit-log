@@ -69,6 +69,7 @@ final class OfflineVerificationTest extends TestCase
             $positions[] = [$entry['recorded_at'], $entry['id']];
         }
 
+        self::assertIsInt($manifest['lines']);
         self::assertCount($manifest['lines'], $ids);
         self::assertSame($manifest['membership_sha256'], hash('sha256', implode('', array_map(static fn (string $id): string => $id . "\n", $ids))));
         self::assertSame($manifest['first'], $positions[0]);

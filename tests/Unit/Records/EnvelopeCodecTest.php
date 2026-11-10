@@ -1504,6 +1504,8 @@ final class EnvelopeCodecTest extends TestCase
             self::assertSame(self::ID, $exception->id, $what);
         }
 
+        self::assertIsArray($inputs['never finalised']['record']);
+
         foreach (['recorded_at', 'integrity_version', 'key_id', 'hmac'] as $column) {
             self::assertArrayNotHasKey($column, $inputs['never finalised']['record'], "An unsigned bundle's record holds `{$column}`.");
         }

@@ -307,6 +307,7 @@ final class BundleAtomicityTest extends TestCase
 
         self::assertSame(1, $this->entryCount());
         self::assertSame(1, $this->artifactCount());
+        self::assertIsString($stored['id']);
         self::assertSame($stored, $this->storedArtifact($stored['id']));
     }
 

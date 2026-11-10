@@ -67,7 +67,13 @@ final class LifecycleMigrationsConnectionTest extends TestCase
             self::assertFalse(Schema::connection(self::OUTBOX)->hasTable($table), $table);
         }
 
-        self::assertSame([1], DB::connection(self::STORAGE)->table('audit_log_lifecycle_lock')->pluck('id')->map(static fn (int|string $id): int => (int) $id)->all());
+        $ids = array_map(static function (mixed $id): int {
+            self::assertIsNumeric($id);
+
+            return (int) $id;
+        }, DB::connection(self::STORAGE)->table('audit_log_lifecycle_lock')->pluck('id')->all());
+
+        self::assertSame([1], $ids);
     }
 
     /**

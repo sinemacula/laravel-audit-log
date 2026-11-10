@@ -445,7 +445,7 @@ final class SealCrashBoundariesTest extends TestCase
         $seals   = $this->seals();
         $count   = count($seals);
 
-        self::assertSame(self::sorted($entries), $this->memberIds(), 'An entry is not a member of exactly one seal.');
+        self::assertSame(self::sorted(self::strings($entries)), $this->memberIds(), 'An entry is not a member of exactly one seal.');
         self::assertSame(range(1, $count), array_map(static fn (array $seal): int => (int) $seal['sequence'], $seals));
 
         CarbonImmutable::setTestNow(self::VERIFIED_AT);

@@ -1345,7 +1345,7 @@ final class AuditLifecycleTest extends TestCase
      */
     private static function endings(array $records): array
     {
-        $endings = array_map(static fn (array $record): string => sprintf('%s:%s', $record['outcome'], $record['reason'] ?? ''), $records);
+        $endings = array_map(static fn (array $record): string => implode(':', self::strings([$record['outcome'], $record['reason'] ?? ''])), $records);
 
         sort($endings);
 

@@ -1005,7 +1005,17 @@ final class RecordSignerTest extends TestCase
             self::fail('The golden v1 record is not an envelope.');
         }
 
-        return RecordFactory::withFields($envelope);
+        $fields = [];
+
+        foreach ($envelope as $name => $value) {
+            if (!is_string($name)) {
+                self::fail('The golden v1 record has a field with no name.');
+            }
+
+            $fields[$name] = $value;
+        }
+
+        return RecordFactory::withFields($fields);
     }
 
     /**

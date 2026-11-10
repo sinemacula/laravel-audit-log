@@ -323,6 +323,7 @@ final class FailureSpillTest extends TestCase
         self::assertTrue($decoded['unsigned']);
         self::assertSame(CanonicalEncoder::encode($attachment->envelopeFor($record->id)), CanonicalEncoder::encode($decoded['attachment']));
         self::assertSame(CanonicalEncoder::encode($record->toArray()), CanonicalEncoder::encode($decoded['record']));
+        self::assertIsArray($decoded['record']);
 
         foreach (['recorded_at', 'integrity_version', 'key_id', 'hmac'] as $column) {
             self::assertArrayNotHasKey($column, $decoded['record'], "An unsigned bundle's record holds `{$column}`.");
@@ -577,7 +578,11 @@ final class FailureSpillTest extends TestCase
 
         self::assertStringNotContainsString('%', $line);
         self::assertStringContainsString('"share":"100\u0025"', $line);
-        $kept = array_intersect_key($this->decoded($line)['properties'], ['share' => 0, '%key%' => 0, 'note' => 0]);
+        $properties = $this->decoded($line)['properties'];
+
+        self::assertIsArray($properties);
+
+        $kept = array_intersect_key($properties, ['share' => 0, '%key%' => 0, 'note' => 0]);
 
         self::assertSame(['%key%' => '%%s', 'note' => '\u0025 is a percent', 'share' => '100%'], $kept);
     }

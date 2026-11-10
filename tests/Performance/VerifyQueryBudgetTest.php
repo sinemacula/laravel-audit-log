@@ -676,7 +676,11 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
         }
 
         // An entry with no envelope has no key use, as the store writes none
-        $uses = array_map(static fn (array $row): array => ['key_id' => self::KEY_ID, 'entry_id' => $row['id']], $envelopes ? $rows : []);
+        $uses = array_map(static function (array $row): array {
+            self::assertIsString($row['id']);
+
+            return ['key_id' => self::KEY_ID, 'entry_id' => $row['id']];
+        }, $envelopes ? $rows : []);
 
         KeyUses::insert(DB::connection(), $uses);
     }

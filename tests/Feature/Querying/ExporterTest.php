@@ -901,7 +901,11 @@ final class ExporterTest extends TestCase
 
         self::assertSame([$id], $this->exportedIds());
         self::assertIsArray($line);
-        self::assertSame(['artifact_id', 'count', 'digest', 'kind'], array_keys($line['properties']['_audit']['manifest'] ?? []));
+
+        $manifest = $line['properties']['_audit']['manifest'] ?? null;
+
+        self::assertIsArray($manifest);
+        self::assertSame(['artifact_id', 'count', 'digest', 'kind'], array_keys($manifest));
         self::assertStringNotContainsString(RecordFactory::MEMBER_TYPE, $this->lines()[0]);
     }
 

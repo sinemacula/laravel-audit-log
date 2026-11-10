@@ -414,7 +414,7 @@ final class ExportProofsTest extends TestCase
     /**
      * Write the lines to the target, each with its line feed.
      *
-     * @param  list<string>  $lines
+     * @param  array<int, string>  $lines
      * @return void
      */
     private function writeLines(array $lines): void

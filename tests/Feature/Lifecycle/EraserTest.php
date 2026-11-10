@@ -871,14 +871,19 @@ final class EraserTest extends TestCase
         $locks  = new \ArrayObject;
         $marker = KeyTables::ownerErasuresTable();
 
-        DB::connection(StorageConnection::forMaintenance())->beforeExecuting(static function (string $query) use ($lost, $marker): void {
+        $maintenance = DB::connection(StorageConnection::forMaintenance());
+        $name        = $maintenance->getName();
+
+        self::assertNotNull($name);
+
+        $maintenance->beforeExecuting(static function (string $query) use ($lost, $marker, $name): void {
             if ($lost->count() >= 2 || !str_starts_with($query, 'select') || !str_contains($query, $marker)) {
                 return;
             }
 
             $lost->append(true);
 
-            throw new QueryException(StorageConnection::forMaintenance(), $query, [], new \PDOException(self::DEADLOCK));
+            throw new QueryException($name, $query, [], new \PDOException(self::DEADLOCK));
         });
 
         DB::listen(static function (QueryExecuted $query) use ($locks): void {

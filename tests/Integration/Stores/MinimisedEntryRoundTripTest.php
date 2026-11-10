@@ -708,6 +708,8 @@ final class MinimisedEntryRoundTripTest extends TestCase
     {
         $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
 
+        self::assertIsArray($decoded);
+
         if ($value === null) {
             Arr::forget($decoded, $path);
         } else {

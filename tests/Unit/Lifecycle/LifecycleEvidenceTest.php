@@ -172,7 +172,7 @@ final class LifecycleEvidenceTest extends TestCase
     /**
      * A record keeping the properties, or none.
      *
-     * @param  ?array<string, array<string, int|string>|int|string|null>  $properties
+     * @param  ?array<string, array<string, int|string>|float|int|string|null>  $properties
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      */
     private static function record(#[\SensitiveParameter] ?array $properties): AuditRecord
