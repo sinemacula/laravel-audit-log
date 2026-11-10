@@ -97,7 +97,7 @@ final readonly class Manifest
      * The manifest of the subjects, each a model, which becomes its reference,
      * or a reference, kept once whatever the order or repetition they come in.
      *
-     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @param  int  $maxMembers
      * @param  int  $maxBytes
      * @return self

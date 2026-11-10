@@ -33,9 +33,7 @@ final readonly class CoveringMapper implements EventMapper
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $record
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
      *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
-     * @throws \JsonException
      * @throws \LogicException
      */
     #[\Override]

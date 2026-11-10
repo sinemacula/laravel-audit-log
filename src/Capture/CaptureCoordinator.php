@@ -269,7 +269,7 @@ final readonly class CaptureCoordinator
     /**
      * The manifest a mapper's builder covers, from the capture's container.
      *
-     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @return \SineMacula\Laravel\AuditLog\Records\Manifest
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException

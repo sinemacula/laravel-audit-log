@@ -37,7 +37,7 @@ final readonly class BulkManifests
     /**
      * The manifest of the subjects, each a model or a reference, kept once.
      *
-     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @return \SineMacula\Laravel\AuditLog\Records\Manifest
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException

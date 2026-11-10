@@ -312,7 +312,7 @@ final readonly class Recorder
      * The manifest a builder covers, resolved from the current container on
      * each call so the bound store and the bounds are those of the moment.
      *
-     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @return \SineMacula\Laravel\AuditLog\Records\Manifest
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException

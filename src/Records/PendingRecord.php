@@ -163,7 +163,7 @@ final class PendingRecord
      * `AuditLog::event()`, and a mapper the builder it was handed; a builder
      * made without a source of manifests cannot cover anything.
      *
-     * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @return self
      *
      * @throws \InvalidArgumentException
