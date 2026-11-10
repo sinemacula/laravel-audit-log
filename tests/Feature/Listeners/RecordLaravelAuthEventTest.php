@@ -678,6 +678,28 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
+     * A guard that is not a string, which only an event a host builds against
+     * Laravel's declared types can carry, is no guard: the event is recorded
+     * with none, is skipped only when every guard is, and a sign-in under it is
+     * never read as the default guard's restore.
+     *
+     * @return void
+     */
+    public function testAGuardThatIsNotAStringIsNoGuard(): void
+    {
+        self::rememberOn('web');
+        self::config()->set('audit-log.capture.laravel.except_guards', ['web']);
+
+        self::listener()->handle((new \ReflectionClass(Logout::class))->newInstance(42, self::user(7)));
+        self::listener()->handle((new \ReflectionClass(Login::class))->newInstance(null, self::user(7), false));
+
+        [$logout, $login] = $this->fake->recorded();
+
+        self::assertSame([null, null], [$logout->guard, $login->guard]);
+        self::assertSame(CapturedActivity::SIGNED_IN->value, $login->event);
+    }
+
+    /**
      * A user no reference can be made of, a model with no key or a user whose
      * identifier is neither a string nor an integer, is no one: the event is
      * still recorded, with no actor and no subject.
