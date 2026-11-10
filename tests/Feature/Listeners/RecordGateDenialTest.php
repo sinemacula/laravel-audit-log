@@ -34,6 +34,7 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
+use Tests\Unit\Stubs\Enums\StubNumberedAbility;
 use Tests\Unit\Stubs\StubAuthUser;
 use Tests\Unit\Stubs\StubDocument;
 
@@ -612,15 +613,17 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * An ability that is not a string cannot be selected, so its denial is a
-     * contained failure.
+     * An ability that is not a string, such as the value of an integer-backed
+     * enum the Gate checks, cannot be selected, so its denial is a contained
+     * failure and the Gate's check returns its result.
      *
      * @return void
      */
     public function testAnAbilityThatIsNotAStringIsContained(): void
     {
-        self::listener()->handle(new GateEvaluated(null, 42, false, []));
+        Gate::define(StubNumberedAbility::PUBLISH, static fn (StubAuthUser $user): bool => false);
 
+        self::assertFalse(Gate::forUser(self::user(7))->allows(StubNumberedAbility::PUBLISH));
         self::assertSame(0, $this->fake->count());
         self::assertSame([[GateEvaluated::class, RecordGateDenial::class, \TypeError::class]], array_map(
             static fn (AuditCaptureFailed $failure): array => [$failure->eventClass, $failure->mapperClass, $failure->exceptionClass],
