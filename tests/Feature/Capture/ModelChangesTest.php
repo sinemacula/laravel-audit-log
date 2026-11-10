@@ -224,7 +224,7 @@ final class ModelChangesTest extends TestCase
 
     /**
      * Each change no model event announces writes nothing, though the tables
-     * change: a gap of model capture, which `bulk()` or an explicit record
+     * change: a gap of model capture, which `covering()` or an explicit record
      * covers.
      *
      * @formatter:off

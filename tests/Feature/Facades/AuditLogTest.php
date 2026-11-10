@@ -221,7 +221,7 @@ final class AuditLogTest extends TestCase
     {
         $fake = AuditLog::fake();
 
-        $record = AuditLog::bulk('invoice.voided', [Reference::of('invoice', '2'), Reference::of('invoice', '1'), Reference::of('invoice', '2')])->record();
+        $record = AuditLog::event('invoice.voided')->covering([Reference::of('invoice', '2'), Reference::of('invoice', '1'), Reference::of('invoice', '2')])->record();
 
         $stored     = $fake->recorded()[0] ?? null;
         $attachment = $stored?->attachment;

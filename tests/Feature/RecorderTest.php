@@ -1577,15 +1577,15 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `bulk()` gives a builder of the code, still to be recorded, carrying the
-     * manifest of its subjects, each once in canonical order; recording it
-     * seals the manifest as the record's attachment.
+     * `covering()` gives the builder the manifest of its subjects, each once in
+     * canonical order, still to be recorded; recording it seals the manifest as
+     * the record's attachment.
      *
      * @return void
      */
-    public function testBulkGivesABuilderCarryingTheManifest(): void
+    public function testCoveringGivesABuilderCarryingTheManifest(): void
     {
-        $pending = AuditLog::bulk('invoice.voided', self::goldenSubjects());
+        $pending = AuditLog::event('invoice.voided')->covering(self::goldenSubjects());
 
         $manifest = $pending->snapshot()->manifest;
 
@@ -1609,11 +1609,11 @@ final class RecorderTest extends TestCase
      *
      * @return void
      */
-    public function testBulkTakesModels(): void
+    public function testCoveringTakesModels(): void
     {
         $document = (new StubDocument)->forceFill(['id' => 'document-1']);
 
-        $manifest = AuditLog::bulk('document.archived', [$document, Reference::to($document)])->snapshot()->manifest;
+        $manifest = AuditLog::event('document.archived')->covering([$document, Reference::to($document)])->snapshot()->manifest;
 
         self::assertNotNull($manifest);
         self::assertSame(1, $manifest->count);
@@ -1626,7 +1626,7 @@ final class RecorderTest extends TestCase
      *
      * @return void
      */
-    public function testBulkIsRefusedByAStoreKeepingNoAttachments(): void
+    public function testCoveringIsRefusedByAStoreKeepingNoAttachments(): void
     {
         $reads    = new \ArrayObject;
         $subjects = (static function () use ($reads): \Generator {
@@ -1638,7 +1638,7 @@ final class RecorderTest extends TestCase
         app()->instance(AuditStore::class, new PlainStore);
 
         try {
-            AuditLog::recorder()->bulk('invoice.voided', $subjects);
+            AuditLog::recorder()->event('invoice.voided')->covering($subjects);
 
             self::fail('Expected the bulk operation to be refused.');
         } catch (\LogicException $exception) {
@@ -1657,14 +1657,14 @@ final class RecorderTest extends TestCase
      *
      * @return void
      */
-    public function testBulkReadsItsLimitsOnEachCall(): void
+    public function testCoveringReadsItsLimitsOnEachCall(): void
     {
         $subjects = [Reference::of('invoice', '1'), Reference::of('invoice', '2')];
 
         self::config()->set('audit-log.capture.bulk.max_members', 1);
 
         try {
-            AuditLog::recorder()->bulk('invoice.voided', $subjects);
+            AuditLog::recorder()->event('invoice.voided')->covering($subjects);
 
             self::fail('Expected the bulk operation to be refused.');
         } catch (\InvalidArgumentException $exception) {
@@ -1673,12 +1673,12 @@ final class RecorderTest extends TestCase
 
         self::config()->set('audit-log.capture.bulk.max_members', 2);
 
-        self::assertSame(2, AuditLog::bulk('invoice.voided', $subjects)->snapshot()->manifest?->count);
+        self::assertSame(2, AuditLog::event('invoice.voided')->covering($subjects)->snapshot()->manifest?->count);
 
         self::config()->set('audit-log.capture.bulk.max_bytes', 'many');
 
         try {
-            AuditLog::recorder()->bulk('invoice.voided', $subjects);
+            AuditLog::recorder()->event('invoice.voided')->covering($subjects);
 
             self::fail('Expected the malformed setting to be refused.');
         } catch (\InvalidArgumentException $exception) {
@@ -1691,12 +1691,12 @@ final class RecorderTest extends TestCase
      *
      * @return void
      */
-    public function testBulkRefusesNoSubjects(): void
+    public function testCoveringRefusesNoSubjects(): void
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('A bulk operation names at least one subject.');
 
-        AuditLog::bulk('invoice.voided', []);
+        AuditLog::event('invoice.voided')->covering([]);
     }
 
     /**
@@ -1704,11 +1704,11 @@ final class RecorderTest extends TestCase
      *
      * @return void
      */
-    public function testBulkRefusesAnInvalidCode(): void
+    public function testCoveringRefusesAnInvalidCode(): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        AuditLog::bulk('Invoice Voided', [Reference::of('invoice', '1')]);
+        AuditLog::event('Invoice Voided')->covering([Reference::of('invoice', '1')]);
     }
 
     /**
@@ -1717,10 +1717,10 @@ final class RecorderTest extends TestCase
      *
      * @return void
      */
-    public function testBulkIsWrittenAfterCommitByDefault(): void
+    public function testCoveringIsWrittenAfterCommitByDefault(): void
     {
         DB::connection(self::CONNECTION)->transaction(function (): void {
-            AuditLog::bulk('invoice.voided', self::goldenSubjects())->record();
+            AuditLog::event('invoice.voided')->covering(self::goldenSubjects())->record();
 
             self::assertSame(0, $this->fake->count());
         });
@@ -1752,8 +1752,8 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The properties, a captured event and a bulk operation's subjects hold the
-     * raw payload, so each is marked sensitive where the recorder takes it.
+     * The properties and a captured event hold the raw payload, so each is
+     * marked sensitive where the recorder takes it.
      *
      * @return void
      */
@@ -1763,7 +1763,6 @@ final class RecorderTest extends TestCase
             new \ReflectionParameter([Recorder::class, 'record'], 'properties'),
             new \ReflectionParameter([Recorder::class, 'write'], 'pending'),
             new \ReflectionParameter([Recorder::class, 'capture'], 'event'),
-            new \ReflectionParameter([Recorder::class, 'bulk'], 'subjects'),
         ];
 
         foreach ($parameters as $parameter) {

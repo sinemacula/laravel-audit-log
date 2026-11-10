@@ -100,7 +100,7 @@ each contract must keep to is in its docblock and in the extending guide's table
 - A store that does not implement `Contracts\DurableAuditStore` counts as neither durable nor joining a transaction, so
   in `sync` mode a `failClosed()` or `transactional()` record is refused while it is bound. In `outbox` mode the outbox
   gives both guarantees, so the store's capabilities are not checked. A store that does not implement
-  `Contracts\AcceptsAttachments`, or answers `false`, makes `AuditLog::bulk()` a programming error, and in `sync` mode
+  `Contracts\AcceptsAttachments`, or answers `false`, makes `covering()` a programming error, and in `sync` mode
   every read of the trail is refused, since each read records a disclosure.
 - A `Contracts\FieldEncrypter` other than `Privacy\SubjectKeyEncrypter` or `Privacy\NoFieldEncrypter`, a subclass or
   a decorator of either included, makes an erasure refuse with `unsupported_encrypter` and `holdingDataOf()` throw a

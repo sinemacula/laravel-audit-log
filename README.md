@@ -320,7 +320,7 @@ Record one bulk operation with the manifest of every subject it affected, sealed
 commit like any record. The bound store must keep attachments, as the database store does:
 
 ```php
-AuditLog::bulk('invoice.voided', $invoices)->record();
+AuditLog::event('invoice.voided')->covering($invoices)->record();
 ```
 
 What is captured, and the gaps where nothing can be, is in

@@ -98,7 +98,7 @@ final class BulkOperationTest extends TestCase
     {
         $tags = Tag::query()->orderBy('id')->get();
 
-        $record = AuditLog::bulk(self::CODE, [...$tags->all(), ...$tags->take(10)->all()])->record();
+        $record = AuditLog::event(self::CODE)->covering([...$tags->all(), ...$tags->take(10)->all()])->record();
 
         self::assertSame(1, self::entries()->count());
         self::assertSame(1, self::artifacts()->count());
@@ -125,7 +125,7 @@ final class BulkOperationTest extends TestCase
      */
     public function testTheDescriptorIsSigned(): void
     {
-        AuditLog::bulk(self::CODE, Tag::query()->get())->record();
+        AuditLog::event(self::CODE)->covering(Tag::query()->get())->record();
 
         $row    = (new RowCodec)->decode((array) self::entries()->first());
         $signer = app(RecordSigner::class);
@@ -165,7 +165,7 @@ final class BulkOperationTest extends TestCase
         })();
 
         try {
-            AuditLog::bulk(self::CODE, $subjects)->record();
+            AuditLog::event(self::CODE)->covering($subjects)->record();
 
             self::fail('Expected the bulk operation to be refused.');
         } catch (\LogicException $exception) {
@@ -200,7 +200,7 @@ final class BulkOperationTest extends TestCase
         $this->assertRefused($long, 'A bulk operation\'s manifest must encode to at most 65536 bytes, the `audit-log.capture.bulk.max_bytes` setting.');
         $this->assertNothingWritten();
 
-        AuditLog::bulk(self::CODE, Tag::query()->get())->record();
+        AuditLog::event(self::CODE)->covering(Tag::query()->get())->record();
 
         self::assertSame(1, self::artifacts()->where('member_count', self::SUBJECTS)->count());
     }
@@ -220,7 +220,7 @@ final class BulkOperationTest extends TestCase
         app()->instance(Clock::class, FrozenClock::at(self::RECORDED_AT));
 
         AuditLog::record('tag.renamed');
-        AuditLog::bulk(self::CODE, Tag::query()->get())->record();
+        AuditLog::event(self::CODE)->covering(Tag::query()->get())->record();
 
         $this->sealAt(self::SEALED_AT);
         $this->sealAll();
@@ -244,7 +244,7 @@ final class BulkOperationTest extends TestCase
     private function assertRefused(iterable $subjects, string $message): void
     {
         try {
-            AuditLog::bulk(self::CODE, $subjects)->record();
+            AuditLog::event(self::CODE)->covering($subjects)->record();
 
             self::fail('Expected the manifest to be refused.');
         } catch (\InvalidArgumentException $exception) {

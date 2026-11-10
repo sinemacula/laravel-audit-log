@@ -7,6 +7,7 @@ namespace Tests\Feature\Capture;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Application;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -16,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Capture\CaptureFailedException;
 use SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity;
 use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
@@ -33,6 +35,7 @@ use Tests\Fixtures\Capture\Events\RenewedPortalSession;
 use Tests\Fixtures\Capture\Events\SignedInToPortal;
 use Tests\Fixtures\Capture\Mappers\CodelessMapper;
 use Tests\Fixtures\Capture\Mappers\ConsumingMapper;
+use Tests\Fixtures\Capture\Mappers\CoveringMapper;
 use Tests\Fixtures\Capture\Mappers\FacadeRecordingMapper;
 use Tests\Fixtures\Capture\Mappers\FailClosedMapper;
 use Tests\Fixtures\Capture\Mappers\InvalidCodeMapper;
@@ -412,6 +415,27 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
+     * A mapper covers the subjects of a bulk operation: the capture writes one
+     * entry, whose descriptor counts each subject once, and one artifact beside
+     * it.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('mapThePortalEventsToCovering')]
+    public function testAMapperCoversTheSubjectsOfABulkOperation(): void
+    {
+        Event::dispatch(new SignedInToPortal);
+
+        $entry    = AuditEntry::query()->sole();
+        $artifact = (array) DB::connection(self::CONNECTION)->table(EntrySettings::artifactsTable())->sole();
+
+        self::assertSame(CoveringMapper::CODE, $entry->event);
+        self::assertSame([$entry->id, 'bulk', count(CoveringMapper::USERS)], [$artifact['entry_id'], $artifact['kind'], (int) $artifact['member_count']]);
+        self::assertSame(count(CoveringMapper::USERS), $entry->properties['_audit']['manifest']['count'] ?? null);
+        self::assertSame([], $this->failures);
+    }
+
+    /**
      * Map the portal interface to the portal mapper while the application
      * boots.
      *
@@ -495,6 +519,20 @@ final class MappedEventsTest extends TestCase
         self::mapWhileBooting($app, static function (): void {
             AuditLog::map(PortalEvent::class, PortalMapper::class);
             AuditLog::map(SignedInToPortal::class, PortalMapper::class);
+        });
+    }
+
+    /**
+     * Map the portal interface to the covering mapper while the application
+     * boots.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function mapThePortalEventsToCovering(Application $app): void
+    {
+        self::mapWhileBooting($app, static function (): void {
+            AuditLog::map(PortalEvent::class, CoveringMapper::class);
         });
     }
 
