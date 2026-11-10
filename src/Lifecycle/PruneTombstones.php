@@ -179,7 +179,7 @@ final readonly class PruneTombstones
 
             $seal    = SealEnvelope::fromRow((array) $stored);
             $members = $connection->table(IntegrityTables::membersTable())->useWritePdo()->where('checkpoint_id', $sealId)->get(['entry_id', 'hmac'])->all();
-            $pairs   = array_map(static fn (object $member): array => [(string) $member->entry_id, (string) $member->hmac], $members);
+            $pairs   = array_values(array_map(static fn (object $member): array => [(string) $member->entry_id, (string) $member->hmac], $members));
             $ids     = array_column($pairs, 0);
 
             usort($ids, strcmp(...));

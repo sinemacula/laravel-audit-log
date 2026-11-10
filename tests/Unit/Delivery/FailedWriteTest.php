@@ -69,17 +69,13 @@ final class FailedWriteTest extends TestCase
      */
     public function testNamesEveryConnectionATransactionWasOpenOn(): void
     {
-        $record  = RecordFactory::captured();
-        $failure = new \RuntimeException('Failed.');
-        $failed  = static fn (?string $name, bool $open, array $all): FailedWrite => new FailedWrite($record, null, $failure, FailedOperation::STORE, 's', $name, $open, $all);
-
-        self::assertSame(['host'], $failed('audit', false, ['host'])->openConnections());
-        self::assertSame(['host', 'audit'], $failed('audit', true, ['host'])->openConnections());
-        self::assertSame(['host', 'other', 'audit'], $failed('audit', true, ['host', 'other'])->openConnections());
-        self::assertSame(['audit'], $failed('audit', true, [])->openConnections());
-        self::assertSame(['audit'], $failed('audit', true, ['audit'])->openConnections());
-        self::assertSame(['host'], $failed(null, true, ['host'])->openConnections());
-        self::assertSame([], $failed('audit', false, [])->openConnections());
+        self::assertSame(['host'], self::failedOn('audit', false, ['host'])->openConnections());
+        self::assertSame(['host', 'audit'], self::failedOn('audit', true, ['host'])->openConnections());
+        self::assertSame(['host', 'other', 'audit'], self::failedOn('audit', true, ['host', 'other'])->openConnections());
+        self::assertSame(['audit'], self::failedOn('audit', true, [])->openConnections());
+        self::assertSame(['audit'], self::failedOn('audit', true, ['audit'])->openConnections());
+        self::assertSame(['host'], self::failedOn(null, true, ['host'])->openConnections());
+        self::assertSame([], self::failedOn('audit', false, [])->openConnections());
     }
 
     /**
@@ -107,5 +103,19 @@ final class FailedWriteTest extends TestCase
             'hostOpen'         => false,
             'openTransactions' => false,
         ], $sensitive);
+    }
+
+    /**
+     * A failed store of a captured record on the connection named, with a
+     * transaction open there or not, and open on the connections given.
+     *
+     * @param  ?string  $name
+     * @param  bool  $open
+     * @param  list<string>  $all
+     * @return \SineMacula\Laravel\AuditLog\Delivery\FailedWrite
+     */
+    private static function failedOn(?string $name, bool $open, array $all): FailedWrite
+    {
+        return new FailedWrite(RecordFactory::captured(), null, new \RuntimeException('Failed.'), FailedOperation::STORE, 's', $name, $open, $all);
     }
 }

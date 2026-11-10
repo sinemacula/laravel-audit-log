@@ -736,7 +736,7 @@ final class ExporterTest extends TestCase
         $properties = self::propertiesOf($record);
 
         self::assertSame(['failure', 'format_failed', 0, null], [$record['outcome'], $record['reason'], $properties['returned'], $properties['file_sha256']]);
-        self::assertSame([], $this->disclosureOf($record['id'])['members']);
+        self::assertSame([], $this->disclosureOf(self::idOf($record))['members']);
         self::assertSame([], $this->temporaries());
         self::assertFileDoesNotExist($this->target());
     }
@@ -901,7 +901,11 @@ final class ExporterTest extends TestCase
 
         self::assertSame([$id], $this->exportedIds());
         self::assertIsArray($line);
-        self::assertSame(['artifact_id', 'count', 'digest', 'kind'], array_keys($line['properties']['_audit']['manifest'] ?? []));
+
+        $manifest = $line['properties']['_audit']['manifest'] ?? null;
+
+        self::assertIsArray($manifest);
+        self::assertSame(['artifact_id', 'count', 'digest', 'kind'], array_keys($manifest));
         self::assertStringNotContainsString(RecordFactory::MEMBER_TYPE, $this->lines()[0]);
     }
 

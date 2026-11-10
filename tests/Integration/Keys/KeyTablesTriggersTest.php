@@ -122,11 +122,11 @@ final class KeyTablesTriggersTest extends TestCase
         $sql    = self::documentedSql('keys-triggers:' . $driver);
 
         foreach (self::documentedTriggers($sql) as $trigger => $table) {
-            $root->unprepared(sprintf($driver === 'pgsql' ? 'DROP TRIGGER IF EXISTS %s ON %s' : 'DROP TRIGGER IF EXISTS %s', $trigger, $table));
+            self::runScript($root, sprintf($driver === 'pgsql' ? 'DROP TRIGGER IF EXISTS %s ON %s' : 'DROP TRIGGER IF EXISTS %s', $trigger, $table));
         }
 
         foreach (self::documentedFunctions($sql) as $function) {
-            $root->unprepared(sprintf('DROP FUNCTION IF EXISTS %s() CASCADE', $function));
+            self::runScript($root, sprintf('DROP FUNCTION IF EXISTS %s() CASCADE', $function));
         }
 
         foreach ($this->names === [] ? [] : [self::WRITER, self::MAINTENANCE, self::VERIFIER] as $placeholder) {

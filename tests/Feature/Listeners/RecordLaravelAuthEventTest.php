@@ -17,6 +17,7 @@ use Illuminate\Auth\Events\PasswordResetLinkSent;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Validated;
 use Illuminate\Auth\Events\Verified;
+use Illuminate\Auth\GenericUser;
 use Illuminate\Auth\RequestGuard;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Config\Repository as ConfigRepository;
@@ -439,21 +440,26 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A sign-out with no user has explicitly no actor and no subject, even
-     * while a guard holds a user, and still names its guard.
+     * A sign-out from a session guard no one is signed in to, on this device or
+     * every device, has explicitly no actor and no subject, even while another
+     * guard holds a user, and still names its guard.
      *
      * @return void
      */
     public function testASignOutWithNoUserHasNoActor(): void
     {
+        $guard = Auth::guard('admin');
+
+        self::assertInstanceOf(SessionGuard::class, $guard);
+
         Auth::guard('web')->setUser(self::user(99));
 
-        self::listener()->handle(new Logout('web', null));
-        self::listener()->handle(new OtherDeviceLogout('web', null));
+        $guard->logout();
+        $guard->logoutCurrentDevice();
 
         foreach ($this->fake->recorded() as $record) {
             self::assertSame([null, null, null, null], self::actorAndSubject($record));
-            self::assertSame('web', $record->guard);
+            self::assertSame('admin', $record->guard);
         }
 
         self::assertSame(2, $this->fake->count());
@@ -672,8 +678,9 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A guard that is not a string is no guard: the event is recorded with
-     * none, is skipped only when every guard is, and a sign-in under it is
+     * A guard that is not a string, which only an event a host builds against
+     * Laravel's declared types can carry, is no guard: the event is recorded
+     * with none, is skipped only when every guard is, and a sign-in under it is
      * never read as the default guard's restore.
      *
      * @return void
@@ -683,8 +690,8 @@ final class RecordLaravelAuthEventTest extends TestCase
         self::rememberOn('web');
         self::config()->set('audit-log.capture.laravel.except_guards', ['web']);
 
-        self::listener()->handle(new Logout(42, self::user(7)));
-        self::listener()->handle(new Login(null, self::user(7), false));
+        self::listener()->handle((new \ReflectionClass(Logout::class))->newInstance(42, self::user(7)));
+        self::listener()->handle((new \ReflectionClass(Login::class))->newInstance(null, self::user(7), false));
 
         [$logout, $login] = $this->fake->recorded();
 
@@ -693,15 +700,16 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A user no reference can be made of, such as one with no key, is no one:
-     * the event is still recorded, with no actor and no subject.
+     * A user no reference can be made of, a model with no key or a user whose
+     * identifier is neither a string nor an integer, is no one: the event is
+     * still recorded, with no actor and no subject.
      *
      * @return void
      */
     public function testAUserThatCannotBeReferencedIsNoOne(): void
     {
         self::listener()->handle(new Login('web', new StubAuthUser, false));
-        self::listener()->handle(new Registered(new \stdClass));
+        self::listener()->handle(new Registered(new GenericUser(['id' => 4.2])));
 
         self::assertSame(2, $this->fake->count());
 
@@ -744,7 +752,7 @@ final class RecordLaravelAuthEventTest extends TestCase
         $handled    = array_map(static fn (\ReflectionType $member): string => $member instanceof \ReflectionNamedType ? $member->getName() : '', $type->getTypes());
         $registered = array_keys(array_filter(
             Event::getRawListeners(),
-            static fn (array $listeners): bool => in_array(RecordLaravelAuthEvent::class, $listeners, true),
+            static fn (mixed $listeners): bool => is_array($listeners) && in_array(RecordLaravelAuthEvent::class, $listeners, true),
         ));
 
         sort($handled);
@@ -833,7 +841,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     /**
      * The events recorded that name no guard.
      *
-     * @return list<object>
+     * @return list<\Illuminate\Auth\Events\Lockout|\Illuminate\Auth\Events\PasswordReset|\Illuminate\Auth\Events\PasswordResetLinkSent|\Illuminate\Auth\Events\Registered|\Illuminate\Auth\Events\Verified>
      */
     private static function guardlessEvents(): array
     {
@@ -849,7 +857,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     /**
      * The events recorded that name a guard.
      *
-     * @return list<object>
+     * @return list<\Illuminate\Auth\Events\CurrentDeviceLogout|\Illuminate\Auth\Events\Failed|\Illuminate\Auth\Events\Login|\Illuminate\Auth\Events\Logout|\Illuminate\Auth\Events\OtherDeviceLogout>
      */
     private static function guardedEvents(): array
     {

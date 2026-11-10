@@ -120,6 +120,7 @@ use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\TestCase;
+use Tests\Unit\Stubs\StubAuthUser;
 
 /**
  * Feature tests for the package AuditLogServiceProvider: the configuration it
@@ -212,7 +213,7 @@ final class AuditLogServiceProviderTest extends TestCase
 
         $config->set('audit-log', ['storage' => ['connection' => 'audit']]);
 
-        (new AuditLogServiceProvider($this->app))->register();
+        $this->provider()->register();
 
         self::assertSame('audit', $config->get('audit-log.storage.connection'));
     }
@@ -242,10 +243,10 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         $this->forgetPublishing();
 
-        $running = new \ReflectionProperty($this->app, 'isRunningInConsole');
+        $running = new \ReflectionProperty(Application::class, 'isRunningInConsole');
         $running->setValue($this->app, false);
 
-        (new AuditLogServiceProvider($this->app))->boot();
+        $this->provider()->boot();
 
         self::assertSame([], ServiceProvider::pathsToPublish(AuditLogServiceProvider::class));
     }
@@ -590,7 +591,7 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         $this->app?->bind(FieldEncrypter::class, NoFieldEncrypter::class);
 
-        (new AuditLogServiceProvider($this->app))->register();
+        $this->provider()->register();
 
         self::assertInstanceOf(NoFieldEncrypter::class, app(FieldEncrypter::class));
     }
@@ -775,7 +776,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $this->app?->instance(AuditAccessPolicy::class, $policy);
         $this->app?->instance(FieldReader::class, $reader);
 
-        (new AuditLogServiceProvider($this->app))->register();
+        $this->provider()->register();
 
         self::assertSame($policy, app(AuditAccessPolicy::class));
         self::assertSame($reader, app(FieldReader::class));
@@ -896,7 +897,7 @@ final class AuditLogServiceProviderTest extends TestCase
     public function testListenersRegisterOnce(string $event, string $listener): void
     {
         self::assertSame([$listener], array_values(array_filter(
-            Event::getRawListeners()[$event] ?? [],
+            self::listenersFor(Event::getRawListeners(), $event),
             static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
         )));
     }
@@ -952,7 +953,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $listener = $root->make(RecordLaravelAuthEvent::class);
         $sandbox  = clone $root;
         $captured = new CapturedEvents;
-        $event    = new Registered(new \stdClass);
+        $event    = new Registered(new StubAuthUser);
 
         $sandbox->instance(CaptureCoordinator::class, new CaptureCoordinator($sandbox));
         $sandbox->instance(CapturedEvents::class, $captured);
@@ -981,7 +982,7 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         foreach ([Attempting::class, Validated::class, Authenticated::class] as $event) {
             self::assertSame([], array_values(array_filter(
-                Event::getRawListeners()[$event] ?? [],
+                self::listenersFor(Event::getRawListeners(), $event),
                 static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
             )), "{$event} has a listener of the package's.");
         }
@@ -993,7 +994,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $wildcards = (new \ReflectionProperty(Dispatcher::class, 'wildcards'))->getValue($dispatcher);
 
         self::assertIsArray($wildcards);
-        self::assertNotContains(CaptureMappedEvent::class, $wildcards['*'] ?? []);
+        self::assertNotContains(CaptureMappedEvent::class, self::listenersFor($wildcards, '*'));
     }
 
     /**
@@ -1005,7 +1006,7 @@ final class AuditLogServiceProviderTest extends TestCase
     public function testTheCommitProbeListensOnce(): void
     {
         self::assertSame([[CommitQueue::class, 'probe']], array_values(array_filter(
-            Event::getRawListeners()[TransactionCommitting::class] ?? [],
+            self::listenersFor(Event::getRawListeners(), TransactionCommitting::class),
             static fn (mixed $registered): bool => is_array($registered) && is_string($registered[0] ?? null) && str_starts_with($registered[0], 'SineMacula\\'),
         )));
     }
@@ -1025,7 +1026,7 @@ final class AuditLogServiceProviderTest extends TestCase
         self::assertSame(EnterHttpFrame::class, $middleware[0] ?? null);
         self::assertCount(1, array_keys($middleware, EnterHttpFrame::class, true));
 
-        $this->app?->register(new AuditLogServiceProvider($this->app), true);
+        $this->app?->register($this->provider(), true);
 
         self::assertCount(1, array_keys($kernel->getGlobalMiddleware(), EnterHttpFrame::class, true));
     }
@@ -1050,9 +1051,12 @@ final class AuditLogServiceProviderTest extends TestCase
             $paths = [...$paths, ...$hinted];
         }
 
-        $source = (string) realpath(__DIR__ . '/../../src');
+        $source = realpath(__DIR__ . '/../../src');
 
-        self::assertCount(0, Route::getRoutes());
+        self::assertIsString($source);
+        self::assertNotSame('', $source);
+
+        self::assertCount(0, Route::getRoutes()->getRoutes());
         self::assertArrayNotHasKey('audit-log', $finder->getHints());
 
         foreach ($paths as $path) {
@@ -1100,7 +1104,7 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         self::assertFalse($this->app?->resolved('translator'));
 
-        (new AuditLogServiceProvider($this->app))->boot();
+        $this->provider()->boot();
 
         self::assertFalse($this->app->resolved('translator'));
         self::assertSame('Signed in', __('audit-log::codes.authentication.signed_in'));
@@ -1183,7 +1187,7 @@ final class AuditLogServiceProviderTest extends TestCase
         $this->expectException(\LogicException::class);
         $this->expectExceptionMessage('The event code `authentication.signed_in` is already defined differently; a code has one definition.');
 
-        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke(new AuditLogServiceProvider($this->app));
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke($this->provider());
     }
 
     /**
@@ -1199,7 +1203,7 @@ final class AuditLogServiceProviderTest extends TestCase
 
         self::assertTrue($catalogue->isFrozen());
 
-        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke(new AuditLogServiceProvider($this->app));
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerCapture'))->invoke($this->provider());
 
         self::assertSame($catalogue, app(EventCatalogue::class));
         self::assertTrue($catalogue->isRegistered(EventCode::of(CapturedActivity::SIGNED_IN)));
@@ -1449,6 +1453,20 @@ final class AuditLogServiceProviderTest extends TestCase
     private static function commandOf(ScheduledEvent $event): ?string
     {
         return preg_match('/\'artisan\' (audit-log:.+)\z/', (string) $event->command, $matches) === 1 ? $matches[1] : null;
+    }
+
+    /**
+     * A fresh instance of the package's provider on the test's application.
+     *
+     * @return \SineMacula\Laravel\AuditLog\AuditLogServiceProvider
+     */
+    private function provider(): AuditLogServiceProvider
+    {
+        $app = $this->app;
+
+        self::assertNotNull($app);
+
+        return new AuditLogServiceProvider($app);
     }
 
     /**

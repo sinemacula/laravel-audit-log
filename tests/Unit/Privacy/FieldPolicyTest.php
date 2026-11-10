@@ -1251,7 +1251,8 @@ final class FieldPolicyTest extends TestCase
         $kept = $this->apply(['items' => [0 => 'a', 'discard' => 'x', 1 => 'b']], $definition, actor: self::actor(), encrypter: $encrypter);
 
         self::assertSame([['properties', 'items', 0], ['properties', 'items', 1]], $encrypter->paths());
-        self::assertTrue(array_is_list($kept['items'] ?? null));
+        self::assertIsArray($kept['items'] ?? null);
+        self::assertTrue(array_is_list($kept['items']));
     }
 
     /**

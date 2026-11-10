@@ -322,7 +322,7 @@ final readonly class ScopeCompiler
         }
 
         if ($filters->eventPrefix !== null) {
-            $query->whereRaw($query->getGrammar()->wrap('event') . ' like ? escape \'' . self::LIKE_ESCAPE . '\'', [self::likePattern($filters->eventPrefix)]);
+            $query->whereRaw('event like ? escape \'' . self::LIKE_ESCAPE . '\'', [self::likePattern($filters->eventPrefix)]);
         }
 
         if ($filters->categories !== []) {

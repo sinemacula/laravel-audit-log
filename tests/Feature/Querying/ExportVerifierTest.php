@@ -218,7 +218,7 @@ final class ExportVerifierTest extends TestCase
             'findings'          => [],
             'outcome'           => 'success',
         ], array_diff_key(self::propertiesOf($record), ['_audit' => true]));
-        self::assertSame([[$result->entryId, $stored['hmac']]], $this->disclosureOf($record['id'])['members']);
+        self::assertSame([[$result->entryId, $stored['hmac']]], $this->disclosureOf(self::idOf($record))['members']);
     }
 
     /**
@@ -340,7 +340,7 @@ final class ExportVerifierTest extends TestCase
                 [ExportFinding::ARTIFACT_MISSING],
             ],
             'swapped artifacts' => [
-                static fn (self $test) => $test->swapArtifacts($test->entryId(), $test->otherExport()['entry']['id']),
+                static fn (self $test) => $test->swapArtifacts($test->entryId(), $test->otherEntryId()),
                 [ExportFinding::ARTIFACT_SWAPPED],
             ],
             'a kind changed in the column' => [
@@ -774,6 +774,20 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
+     * The id of the second export's bundled entry.
+     *
+     * @return string
+     */
+    private function otherEntryId(): string
+    {
+        $id = $this->otherExport()['entry']['id'] ?? null;
+
+        self::assertIsString($id);
+
+        return $id;
+    }
+
+    /**
      * The manifest the target's bundle carries.
      *
      * @return string
@@ -848,7 +862,7 @@ final class ExportVerifierTest extends TestCase
     /**
      * Write the lines to the target, each with its line feed.
      *
-     * @param  list<string>  $lines
+     * @param  array<int, string>  $lines
      * @return void
      */
     private function writeLines(array $lines): void

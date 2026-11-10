@@ -361,7 +361,7 @@ final readonly class JournalReplay
      * `null` for an empty page.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalChain  $chain
-     * @param  list<\stdClass>  $page
+     * @param  array<int, \stdClass>  $page
      * @param  array<int, string>  $runs
      * @param  array<int, array<string, scalar|null>>  $pending
      * @return ?int

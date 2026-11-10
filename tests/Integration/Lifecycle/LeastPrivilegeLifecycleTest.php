@@ -201,13 +201,13 @@ final class LeastPrivilegeLifecycleTest extends TestCase
         self::assertSame([$kept], $this->present([$held, $pruned, $kept]));
         self::assertSame(0, AuditLog::lifecycle()->rebuildHolds());
 
-        $kinds = array_unique(array_map(strval(...), $this->root()->table(LifecycleTables::journalTable())->orderBy('sequence')->pluck('kind')->all()));
+        $kinds = array_unique(self::strings($this->root()->table(LifecycleTables::journalTable())->orderBy('sequence')->pluck('kind')->all()));
 
         foreach ([JournalKind::HOLD, JournalKind::POLICY, JournalKind::PRUNE_RUN, JournalKind::PRUNE, JournalKind::RELEASE] as $kind) {
             self::assertContains($kind->value, $kinds);
         }
 
-        $codes = array_map(strval(...), $this->root()->table(EntrySettings::table())->where('event', 'like', 'audit_log.%')->pluck('event')->all());
+        $codes = self::strings($this->root()->table(EntrySettings::table())->where('event', 'like', 'audit_log.%')->pluck('event')->all());
 
         self::assertSame(['audit_log.held', 'audit_log.pruned', 'audit_log.pruned', 'audit_log.released'], self::sorted($codes));
         self::assertSame([0, ['pruned']], $this->verify());
@@ -230,13 +230,13 @@ final class LeastPrivilegeLifecycleTest extends TestCase
         self::assertSame('complete', $this->root()->table(LifecycleTables::importBatchesTable())->where('id', $result->batchId)->value('status'));
         self::assertSame(
             [JournalKind::IMPORT_STARTED->value, JournalKind::HOLD->value, JournalKind::IMPORT_FINISHED->value],
-            array_map(strval(...), $this->root()->table(LifecycleTables::journalTable())->orderBy('sequence')->pluck('kind')->all()),
+            self::strings($this->root()->table(LifecycleTables::journalTable())->orderBy('sequence')->pluck('kind')->all()),
         );
 
         $this->seal();
 
-        $imported = array_map(strval(...), $this->root()->table(EntrySettings::table())->where('import_batch_id', $result->batchId)->pluck('id')->all());
-        $members  = array_map(strval(...), $this->root()->table(IntegrityTables::membersTable())->whereIn('entry_id', $imported)->pluck('entry_id')->all());
+        $imported = self::strings($this->root()->table(EntrySettings::table())->where('import_batch_id', $result->batchId)->pluck('id')->all());
+        $members  = self::strings($this->root()->table(IntegrityTables::membersTable())->whereIn('entry_id', $imported)->pluck('entry_id')->all());
 
         self::assertCount(2, $imported);
         self::assertSame(self::sorted($imported), self::sorted($members));
@@ -324,7 +324,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
         self::assertNotNull($refusal, 'A hold on the writer\'s credentials was placed.');
 
         self::assertSame(1, $this->root()->table(LifecycleTables::journalTable())->count());
-        self::assertSame([$hold->hold->id], array_map(strval(...), $this->root()->table(LifecycleTables::holdsTable())->pluck('hold_id')->all()));
+        self::assertSame([$hold->hold->id], self::strings($this->root()->table(LifecycleTables::holdsTable())->pluck('hold_id')->all()));
     }
 
     /**
@@ -440,7 +440,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
         self::assertSame([$held], $this->present([$held, $other]));
         self::assertSame([$hold->hold->id], array_map(static fn (Hold $active): string => $active->id, AuditLog::lifecycle()->holds()));
         self::assertSame(1, AuditLog::lifecycle()->rebuildHolds());
-        self::assertSame([$hold->hold->id], array_map(strval(...), $this->root()->table($holds)->pluck('hold_id')->all()));
+        self::assertSame([$hold->hold->id], self::strings($this->root()->table($holds)->pluck('hold_id')->all()));
     }
 
     /**
@@ -568,7 +568,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
      */
     private function present(array $ids): array
     {
-        return self::sorted(array_map(strval(...), $this->root()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all()));
+        return self::sorted(self::strings($this->root()->table(EntrySettings::table())->whereIn('id', $ids)->pluck('id')->all()));
     }
 
     /**

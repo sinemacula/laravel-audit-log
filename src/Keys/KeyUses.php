@@ -85,7 +85,7 @@ final class KeyUses
      * Most rows one statement inserts on the connection's engine.
      *
      * @param  \Illuminate\Database\Connection  $connection
-     * @return int
+     * @return positive-int
      */
     public static function rowsPerStatement(Connection $connection): int
     {

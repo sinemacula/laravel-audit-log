@@ -406,8 +406,23 @@ final readonly class EnvelopeCodec
             'nullable' => $value === null || is_string($value),
             'integer'  => is_int($value),
             'instant'  => is_string($value) && StoredTime::isInstant($value),
-            'json'     => $value === null || $value instanceof \stdClass || (is_array($value) && array_is_list($value)),
+            'json'     => self::isJsonColumn($value),
         };
+    }
+
+    /**
+     * Whether the value is a JSON column's object, list or `null`.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $value
+     * @return bool
+     *
+     * @phpstan-assert-if-true \stdClass|list<mixed>|null $value
+     */
+    private static function isJsonColumn(#[\SensitiveParameter] mixed $value): bool
+    {
+        return $value === null || $value instanceof \stdClass || (is_array($value) && array_is_list($value));
     }
 
     /**
@@ -483,6 +498,10 @@ final readonly class EnvelopeCodec
     {
         $assoc = json_decode($json, true, self::DEPTH);
 
+        if (!is_array($assoc)) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
+
         return self::finalised(static fn (): AuditRecord => AuditRecord::fromEnvelope($assoc), $fields, $id);
     }
 
@@ -526,6 +545,14 @@ final readonly class EnvelopeCodec
     private static function finalised(#[\SensitiveParameter] \Closure $record, #[\SensitiveParameter] array $fields, ?string $id): FinalisedRecord
     {
         ['recorded_at' => $recordedAt, 'integrity_version' => $integrityVersion, 'key_id' => $keyId, 'hmac' => $hmac, 'context' => $context, 'properties' => $properties] = $fields;
+
+        if (!is_string($recordedAt) || !is_int($integrityVersion) || !is_string($keyId) || !is_string($hmac)) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
+
+        if (!self::isJsonColumn($context) || !self::isJsonColumn($properties)) {
+            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
+        }
 
         try {
             return FinalisedRecord::decoded($record(), $recordedAt, $integrityVersion, $keyId, $hmac, $context, $properties);

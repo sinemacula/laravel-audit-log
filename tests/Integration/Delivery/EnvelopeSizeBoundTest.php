@@ -379,6 +379,8 @@ final class EnvelopeSizeBoundTest extends TestCase
 
         $over = $this->finalisedRecord(self::paddedBundle($base, $length + 1));
 
+        self::assertNotNull($base->attachment->members);
+
         self::assertLessThan(EnvelopeCodec::MAX_BYTES - strlen($base->attachment->members), strlen(CanonicalEncoder::encode($over->toArray())));
 
         try {

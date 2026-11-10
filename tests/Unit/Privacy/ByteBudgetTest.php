@@ -459,7 +459,7 @@ final class ByteBudgetTest extends TestCase
 
         $result = ByteBudget::properties(['big' => self::costing('big', 6000)], $over, null, self::definition(), self::MINIMUM, new OmissionLog);
 
-        self::assertArrayNotHasKey('note', $result['_audit'] ?? []);
+        self::assertArrayNotHasKey('note', self::auditOf($result));
     }
 
     /**
@@ -682,7 +682,7 @@ final class ByteBudgetTest extends TestCase
         self::assertSame(self::HASH, $result['_audit']['identifier_hash'] ?? null);
         self::assertSame(self::LARGEST_MANIFEST, $result['_audit']['manifest'] ?? null);
         self::assertSame(PHP_INT_MAX, $result['_audit']['omitted']['count'] ?? null);
-        self::assertCount(32, $result['_audit']['omitted']['paths'] ?? []);
+        self::assertCount(32, self::omittedPathsOf($result));
         self::assertLessThanOrEqual(self::MINIMUM, strlen(self::encoded($result)));
     }
 
@@ -706,10 +706,10 @@ final class ByteBudgetTest extends TestCase
 
         $result = ByteBudget::properties($values, ['v' => 1, 'k' => 'key', 'c' => str_repeat('"', 4096)], self::HASH, $definition, self::MINIMUM, $log, self::LARGEST_MANIFEST);
 
-        self::assertArrayNotHasKey('note', $result['_audit'] ?? []);
+        self::assertArrayNotHasKey('note', self::auditOf($result));
         self::assertSame(self::HASH, $result['_audit']['identifier_hash'] ?? null);
         self::assertSame(self::LARGEST_MANIFEST, $result['_audit']['manifest'] ?? null);
-        self::assertCount(32, $result['_audit']['omitted']['paths'] ?? []);
+        self::assertCount(32, self::omittedPathsOf($result));
         self::assertLessThanOrEqual(self::MINIMUM, strlen(self::encoded($result)));
     }
 
@@ -739,7 +739,7 @@ final class ByteBudgetTest extends TestCase
         self::assertArrayHasKey('keep', $result ?? []);
         self::assertSame($note, $result['_audit']['note'] ?? null);
         self::assertSame(self::LARGEST_MANIFEST, $result['_audit']['manifest'] ?? null);
-        self::assertCount(32, $result['_audit']['omitted']['paths'] ?? []);
+        self::assertCount(32, self::omittedPathsOf($result));
         self::assertLessThanOrEqual(self::MINIMUM, strlen(self::encoded($result)));
         self::assertGreaterThan(self::MINIMUM - ByteBudget::METADATA_RESERVE_BYTES, strlen(self::encoded($result)));
     }
@@ -1180,6 +1180,44 @@ final class ByteBudgetTest extends TestCase
     private static function costing(string $key, int $cost): string
     {
         return str_repeat('x', $cost - strlen($key) - 6);
+    }
+
+    /**
+     * The package's reserved properties of the result, or none.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  ?array<array-key, mixed>  $result
+     * @return array<array-key, mixed>
+     */
+    private static function auditOf(?array $result): array
+    {
+        $audit = $result['_audit'] ?? [];
+
+        self::assertIsArray($audit);
+
+        return $audit;
+    }
+
+    /**
+     * The paths the result records as omitted, or none.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  ?array<array-key, mixed>  $result
+     * @return array<array-key, mixed>
+     */
+    private static function omittedPathsOf(?array $result): array
+    {
+        $omitted = self::auditOf($result)['omitted'] ?? [];
+
+        self::assertIsArray($omitted);
+
+        $paths = $omitted['paths'] ?? [];
+
+        self::assertIsArray($paths);
+
+        return $paths;
     }
 
     /**

@@ -254,7 +254,26 @@ final readonly class VerificationSummary
      */
     private function with(?JournalSummary $journal, ?KeyStoreSummary $keys): self
     {
-        return new self(...[...get_object_vars($this), 'journal' => $journal, 'keys' => $keys]);
+        return new self(
+            $this->from,
+            $this->to,
+            $this->head,
+            $this->remoteHead,
+            $this->remote,
+            $this->complete,
+            $this->anchorConfigured,
+            $this->discovers,
+            $this->integrity,
+            $this->anchoring,
+            $this->awaiting,
+            $this->findings,
+            $this->pending,
+            $this->overdue,
+            $this->firstFinding,
+            $this->firstBadId,
+            $journal,
+            $keys,
+        );
     }
 
     /**

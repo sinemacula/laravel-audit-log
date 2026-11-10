@@ -4,13 +4,15 @@ declare(strict_types = 1);
 
 namespace Tests\Fixtures\Capture\Models;
 
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\User;
 
 /**
  * A user who signs in through a guard for real: kept in a table of its own with
  * an email address, a password hashed when it is set and a remember token, so a
  * session guard's `attempt()` finds and checks the user, a remember-me cookie
- * restores them, and a token guard finds them by their token.
+ * restores them, a token guard finds them by their token, and a `Verified`
+ * event can carry them.
  *
  * The table is created and dropped by the tests that use it, and is never one
  * of the package's.
@@ -25,7 +27,7 @@ use Illuminate\Foundation\Auth\User;
  * @property string $password
  * @property ?string $remember_token
  */
-final class SigningInUser extends User
+final class SigningInUser extends User implements MustVerifyEmail
 {
     /** @var string The table the users are kept in. */
     public const string TABLE = 'signing_in_users';

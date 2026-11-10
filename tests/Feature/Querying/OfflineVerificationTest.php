@@ -63,11 +63,13 @@ final class OfflineVerificationTest extends TestCase
             $entry = json_decode($line, true, 513, JSON_THROW_ON_ERROR);
 
             self::assertIsArray($entry);
+            self::assertIsString($entry['id']);
 
             $ids[]       = $entry['id'];
             $positions[] = [$entry['recorded_at'], $entry['id']];
         }
 
+        self::assertIsInt($manifest['lines']);
         self::assertCount($manifest['lines'], $ids);
         self::assertSame($manifest['membership_sha256'], hash('sha256', implode('', array_map(static fn (string $id): string => $id . "\n", $ids))));
         self::assertSame($manifest['first'], $positions[0]);

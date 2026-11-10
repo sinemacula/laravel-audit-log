@@ -159,6 +159,8 @@ final class BootQueryBudgetTest extends TestCase
         $recorder->map(PortalSignedIn::class, PortalMapper::class);
         $recorder->watch(PlainLine::class, as: 'line', fields: ['description']);
 
+        self::assertNotNull($this->app);
+
         (new AuditLogServiceProvider($this->app))->boot();
 
         foreach ([CaptureCoordinator::class, CapturedEvents::class, CaptureSettings::class, RecordPipeline::class] as $abstract) {

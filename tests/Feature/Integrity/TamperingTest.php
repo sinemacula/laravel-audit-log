@@ -1532,7 +1532,7 @@ final class TamperingTest extends TestCase
      * @param  ?string  $finding
      * @param  ?string  $first
      * @param  string  $anchoring
-     * @return string
+     * @return non-empty-string
      */
     private static function line(
         int $sequence,

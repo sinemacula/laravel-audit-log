@@ -162,9 +162,9 @@ final class KeyUsesPathsTest extends TestCase
 
         self::assertSame(3, $result->imported);
 
-        $entries = $this->keyConnection()->table(EntrySettings::table())->orderBy('source_record_id')->pluck('id')->all();
-        $keys    = [$this->keyOf($first)->id, $this->keyOf($second)->id, $this->keyOf($first)->id];
-        $uses    = array_map(null, $keys, $entries);
+        $entries = self::strings($this->keyConnection()->table(EntrySettings::table())->orderBy('source_record_id')->pluck('id')->all());
+        $keys    = self::strings([$this->keyOf($first)->id, $this->keyOf($second)->id, $this->keyOf($first)->id]);
+        $uses    = array_map(static fn (string $key, string $entry): array => [$key, $entry], $keys, $entries);
 
         usort($uses, static fn (array $left, array $right): int => strcmp($left[0], $right[0]) ?: strcmp($left[1], $right[1]));
 

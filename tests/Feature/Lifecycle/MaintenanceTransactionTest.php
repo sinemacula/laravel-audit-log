@@ -671,19 +671,19 @@ final class MaintenanceTransactionTest extends TestCase
     {
         $this->raiseOnCommit(self::failure(self::BUSY));
 
-        $calls  = 0;
-        $result = $this->maintenance()->run(self::OPERATION, static function (Connection $connection) use (&$calls): string {
-            $calls++;
+        $calls  = new \ArrayObject;
+        $result = $this->maintenance()->run(self::OPERATION, static function (Connection $connection) use ($calls): string {
+            $calls->append(true);
 
-            self::writeMarker($connection, "test.attempt.{$calls}");
+            self::writeMarker($connection, "test.attempt.{$calls->count()}");
 
-            return "attempt {$calls}";
+            return "attempt {$calls->count()}";
         });
 
         $connection = DB::connection(self::CONNECTION);
 
         self::assertSame('attempt 2', $result);
-        self::assertSame(2, $calls);
+        self::assertCount(2, $calls);
         self::assertSame(['test.attempt.2'], self::markers($connection)->pluck('name')->all());
         self::assertSame(0, $connection->transactionLevel());
         self::assertFalse($connection->getPdo()->inTransaction());

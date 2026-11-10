@@ -68,7 +68,7 @@ final readonly class SqliteDeleteTriggers
         $dropped = array_values(array_filter($names, static fn (string $name): bool => in_array($name, $present, true)));
 
         foreach ($dropped as $name) {
-            $connection->unprepared(sprintf('DROP TRIGGER %s', $name));
+            $connection->statement(sprintf('DROP TRIGGER %s', $name));
         }
 
         return $dropped;
@@ -89,7 +89,7 @@ final readonly class SqliteDeleteTriggers
         }
 
         foreach ($names as $name) {
-            $connection->unprepared(self::statementFor(substr($name, 0, -strlen(self::SUFFIX))));
+            $connection->statement(self::statementFor(substr($name, 0, -strlen(self::SUFFIX))));
         }
     }
 

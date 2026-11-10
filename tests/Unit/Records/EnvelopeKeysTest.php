@@ -250,22 +250,14 @@ final class EnvelopeKeysTest extends TestCase
 
     /**
      * Whether the read path builds an encrypted field from the value, asked of
-     * the factory it builds every field with, at a path in whichever form the
-     * factory takes.
+     * the factory it builds every field with.
      *
      * @param  array<array-key, bool|float|int|string|null>  $candidate
      * @return bool
      */
     private static function readsAsAnEnvelope(array $candidate): bool
     {
-        $parameter = (new \ReflectionMethod(EncryptedField::class, 'fromEnvelope'))->getParameters()[1] ?? null;
-        $type      = $parameter?->getType();
-        $path      = $type instanceof \ReflectionNamedType && $type->getName() === 'array' ? ['properties', 'field'] : 'properties.field';
-        $factory   = [EncryptedField::class, 'fromEnvelope'];
-
-        self::assertIsCallable($factory);
-
-        return $factory(self::FIRST, $path, $candidate) !== null;
+        return EncryptedField::fromEnvelope(self::FIRST, ['properties', 'field'], $candidate) !== null;
     }
 
     /**

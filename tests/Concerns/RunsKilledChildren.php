@@ -92,7 +92,9 @@ trait RunsKilledChildren
      * Run the work in a child process, wait for it to die, and return the
      * signal that ended it.
      *
-     * @param  \Closure(): void  $work
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $work
      * @param  ?string  $killBefore
      * @param  ?string  $killAfter
      * @return int
@@ -109,7 +111,9 @@ trait RunsKilledChildren
      * Every connection is closed first, so the child shares no socket or file
      * lock with this process, which reconnects when it next needs to.
      *
-     * @param  \Closure(): void  $work
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $work
      * @param  ?string  $killBefore
      * @param  ?string  $killAfter
      * @return int
@@ -303,7 +307,9 @@ trait RunsKilledChildren
      * points, run the work, and die by `SIGKILL` however it went. What the work
      * threw is left for the parent to fail on.
      *
-     * @param  \Closure(): void  $work
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $work
      * @param  ?string  $killBefore
      * @param  ?string  $killAfter
      * @return never

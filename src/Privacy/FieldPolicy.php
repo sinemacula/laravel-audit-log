@@ -108,7 +108,7 @@ final class FieldPolicy
     ): array {
         $owners = self::owners($values, $definition, $actor, $subject);
 
-        $handle = static function (
+        return self::walk($values, [], [], $definition, static function (
             #[\SensitiveParameter]
             mixed $value,
             #[\SensitiveParameter]
@@ -132,9 +132,7 @@ final class FieldPolicy
             }
 
             return $kept;
-        };
-
-        return self::walk($values, [], [], $definition, $handle);
+        });
     }
 
     /**

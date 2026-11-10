@@ -128,6 +128,7 @@ final class TypedPlaintextTest extends TestCase
         $prefix = json_decode($cut, false, 2, JSON_THROW_ON_ERROR);
 
         self::assertIsString($prefix);
+        self::assertNotSame('', $prefix);
 
         $longer = mb_substr($value, 0, mb_strlen($prefix) + 1);
 

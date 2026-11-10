@@ -119,7 +119,7 @@ final class ScopeCompilerEnginesTest extends TestCase
         self::insertRow($lower, ['occurred_at' => '2026-11-01 12:00:00.123456']);
         self::insertRow($older, ['occurred_at' => '2026-11-01 12:00:00.123455']);
 
-        $page = static fn (Builder $query): array => array_values(array_map(strval(...), $query->orderByDesc('occurred_at')->orderByDesc('id')->pluck('id')->all()));
+        $page = static fn (Builder $query): array => self::strings($query->orderByDesc('occurred_at')->orderByDesc('id')->pluck('id')->all());
 
         self::assertSame([$higher, $lower, $older], $page(self::entries()));
 
@@ -179,7 +179,7 @@ final class ScopeCompilerEnginesTest extends TestCase
     {
         $ids = (new ScopeCompiler)->apply(self::entries(), $scope, $filters)->orderBy('id')->pluck('id')->all();
 
-        return array_values(array_map(strval(...), $ids));
+        return self::strings($ids);
     }
 
     /**

@@ -320,7 +320,7 @@ final class LifecycleTriggersTest extends TestCase
 
         self::assertRefusedByATrigger(static fn () => $lock->clone()->delete(), LifecycleTables::lockTable(), 'DELETE');
         self::assertRefusedByATrigger(static fn () => $lock->clone()->where('id', 1)->update(['id' => 2]), LifecycleTables::lockTable(), 'UPDATE');
-        self::assertSame([1], array_map(intval(...), $lock->clone()->pluck('id')->all()));
+        self::assertEquals([1], $lock->clone()->pluck('id')->all());
     }
 
     /**

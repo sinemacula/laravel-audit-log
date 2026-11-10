@@ -321,6 +321,8 @@ final class RecordPipelineTest extends TestCase
         self::assertInstanceOf(AuditRecord::class, $stored);
         self::assertInstanceOf(Attachment::class, $attachment);
         self::assertNotSame($manifest->canonical, $attachment->members);
+        self::assertNotNull($attachment->members);
+
         self::assertSame($manifest->canonical, RecordFactory::encrypter()->decryptString($attachment->members));
         self::assertSame(
             ['artifact_id' => $manifest->id, 'kind' => 'bulk', 'digest' => $manifest->digest, 'count' => $manifest->count],

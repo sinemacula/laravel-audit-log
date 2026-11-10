@@ -186,7 +186,7 @@ final class AuditImporterTest extends TestCase
         self::assertSame('2026-11-02T09:02:00.000000Z', $future['occurred_at']);
         self::assertSame('2026-11-02T09:02:00.000000Z', $future['recorded_at']);
 
-        $digest = app(SourceDigest::class)->of(self::assertionOf(json_decode(self::line('rec-0'), true)), app(SourceDigest::class)->signingKeyId());
+        $digest = app(SourceDigest::class)->of(self::assertionOf(self::fields('rec-0')), app(SourceDigest::class)->signingKeyId());
 
         self::assertSame($digest, $first['source_digest']);
         self::assertTrue(app(RecordSigner::class)->verifies($first));
@@ -241,7 +241,14 @@ final class AuditImporterTest extends TestCase
         $result = $this->importer()->import(ImportSource::fromFile($this->file([self::line('rec-1')]), self::SOURCE), self::authority());
 
         self::assertFalse((bool) $this->batch((string) $result->batchId)['externally_verified']);
-        self::assertFalse(json_decode($this->journalRows()[0]['payload'] ?? '{}', true)['externally_verified'] ?? true);
+        $payload = $this->journalRows()[0]['payload'] ?? '{}';
+
+        self::assertIsString($payload);
+
+        $decoded = json_decode($payload, true);
+
+        self::assertIsArray($decoded);
+        self::assertFalse($decoded['externally_verified'] ?? true);
     }
 
     /**
@@ -839,8 +846,11 @@ final class AuditImporterTest extends TestCase
             if (str_starts_with(strtolower($sql), 'insert') && str_contains($sql, EntrySettings::table())) {
                 $driver            = new \PDOException('SQLSTATE[22001]: String data, right truncated: 1406 Data too long, value \'secret-amount-4711\'');
                 $driver->errorInfo = ['22001', 1406, 'Data too long'];
+                $name              = $connection->getName();
 
-                throw new QueryException($connection->getName(), $sql, $bindings, $driver);
+                self::assertNotNull($name);
+
+                throw new QueryException($name, $sql, $bindings, $driver);
             }
         });
 
@@ -1245,12 +1255,23 @@ final class AuditImporterTest extends TestCase
      * given over its own.
      *
      * @param  string  $recordId
-     * @param  array<string, string|null>  $fields
+     * @param  array<string, array<string, string>|string|null>  $fields
      * @return string
      */
     private static function line(string $recordId, array $fields = []): string
     {
-        return (string) json_encode([
+        return (string) json_encode([...self::fields($recordId), ...$fields]);
+    }
+
+    /**
+     * The fields of a line of the import format, of the record id given.
+     *
+     * @param  string  $recordId
+     * @return array<string, array<string, string>|string>
+     */
+    private static function fields(string $recordId): array
+    {
+        return [
             'format'           => 'audit-log-import/v1',
             'source_record_id' => $recordId,
             'occurred_at'      => '2026-10-01T09:00:00.000001Z',
@@ -1261,20 +1282,19 @@ final class AuditImporterTest extends TestCase
             'category'         => 'finance',
             'properties'       => ['amount' => '1200.00'],
             'origin'           => 'http',
-            ...$fields,
-        ]);
+        ];
     }
 
     /**
-     * The source assertion of a decoded line of the import format, as an import
-     * line gives it.
+     * The source assertion of the fields of a line of the import format, as an
+     * import line gives it.
      *
      * @param  array<string, array<string, string>|string>  $line
      * @return array<string, array<int|string, string>|int|string|null>
      */
     private static function assertionOf(array $line): array
     {
-        $pair = static fn (?array $reference): ?array => $reference === null ? null : [$reference['type'], $reference['id']];
+        $pair = static fn (array|string|null $reference): ?array => is_array($reference) ? [$reference['type'], $reference['id']] : null;
 
         return [
             'v'              => 1,

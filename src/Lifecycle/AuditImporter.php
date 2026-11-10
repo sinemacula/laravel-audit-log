@@ -482,7 +482,9 @@ final readonly class AuditImporter
             [$start, $finish] = $this->batchJournal->of($connection, $batchId, $since);
 
             if ($start === null || $finish !== null) {
-                return [self::journalled($finishedToo, $finish[1]['status'] ?? null, $start === null), $start?->operationId, false];
+                $finished = $finish[1]['status'] ?? null;
+
+                return [self::journalled($finishedToo, is_string($finished) ? $finished : null, $start === null), $start?->operationId, false];
             }
 
             $this->journal->append($connection, $head, JournalKind::IMPORT_FINISHED, $start->operationId, $authority, $payload);
@@ -498,8 +500,10 @@ final readonly class AuditImporter
      * named by its class alone, so nothing of a line, a statement or a binding
      * reaches a reporter.
      *
+     * @template TResult
+     *
      * @param  string  $what
-     * @param  \Closure(): void  $step
+     * @param  \Closure(): TResult  $step
      * @return bool
      */
     private function succeeds(string $what, #[\SensitiveParameter] \Closure $step): bool
@@ -619,13 +623,13 @@ final readonly class AuditImporter
      * final batch journals only the finish it lacks.
      *
      * @param  bool  $finishedToo
-     * @param  bool|float|int|string|null  $status
+     * @param  ?string  $status
      * @param  bool  $neverStarted
      * @return ?\SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus
      *
      * @throws \InvalidArgumentException
      */
-    private static function journalled(bool $finishedToo, bool|float|int|string|null $status, bool $neverStarted): ?ImportStatus
+    private static function journalled(bool $finishedToo, ?string $status, bool $neverStarted): ?ImportStatus
     {
         if (!$finishedToo) {
             throw new \InvalidArgumentException(self::NOT_CLOSABLE);
@@ -635,7 +639,7 @@ final readonly class AuditImporter
             return null;
         }
 
-        return ImportStatus::tryFrom(is_string($status) ? $status : '') ?? ImportStatus::INTERRUPTED;
+        return ImportStatus::tryFrom($status ?? '') ?? ImportStatus::INTERRUPTED;
     }
 
     /**

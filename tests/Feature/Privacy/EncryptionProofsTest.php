@@ -325,7 +325,9 @@ final class EncryptionProofsTest extends TestCase
      * The typed plaintext the envelope holds, opened under the key row's data
      * key at the entry and path, in the configured log.
      *
-     * @param  array<array-key, int|string>  $envelope
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $envelope
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $key
      * @param  string  $entryId
      * @param  non-empty-list<int|string>  $path
@@ -335,7 +337,10 @@ final class EncryptionProofsTest extends TestCase
     {
         $dataKey = $this->keyWrapper()->unwrap((string) $key->wrappedKey, (string) $key->wrapKeyId, $key->wrapContext());
 
-        return FieldCipher::open($dataKey, $key->id, (int) ($envelope['v'] ?? 0), (string) ($envelope['c'] ?? ''), $entryId, $path, app(SealSettings::class)->logId());
+        self::assertIsInt($envelope['v'] ?? null);
+        self::assertIsString($envelope['c'] ?? null);
+
+        return FieldCipher::open($dataKey, $key->id, $envelope['v'], $envelope['c'], $entryId, $path, app(SealSettings::class)->logId());
     }
 
     /**

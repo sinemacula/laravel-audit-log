@@ -240,7 +240,7 @@ final class SealerTest extends TestCase
         self::assertSame(self::sorted([$edge, $later]), $this->membersOf((string) $this->seals()[1]['id']));
         self::assertSame(0, $this->countMembers($older));
         self::assertCount(1, $selects);
-        self::assertContains('2026-11-01 12:20:00.000000', $selects[0]);
+        self::assertContains('2026-11-01 12:20:00.000000', $selects->getArrayCopy()[0]);
     }
 
     /**
@@ -268,7 +268,7 @@ final class SealerTest extends TestCase
         $selects = $this->recordCandidateSelects();
 
         self::assertSame(1, $this->sealer()->seal()->seals());
-        self::assertContains('2026-11-01 12:20:00.000000', $selects[0]);
+        self::assertContains('2026-11-01 12:20:00.000000', $selects->getArrayCopy()[0]);
         self::assertSame([$late], $this->membersOf((string) $this->seals()[2]['id']));
         self::assertSame(['last_recorded_at' => '2026-11-01T12:30:00.000000Z'], app(IntegrityProgress::class)->get(IntegrityProgress::SEAL_RECENT));
 
@@ -278,7 +278,7 @@ final class SealerTest extends TestCase
         $fallback = $this->recordCandidateSelects();
         $this->sealer()->seal();
 
-        self::assertContains('2026-11-01 12:15:00.000000', $fallback[0]);
+        self::assertContains('2026-11-01 12:15:00.000000', $fallback->getArrayCopy()[0]);
     }
 
     /**
@@ -334,7 +334,7 @@ final class SealerTest extends TestCase
 
         $this->sealer()->seal();
 
-        self::assertContains('2026-11-01 12:20:00.000000', $selects[0]);
+        self::assertContains('2026-11-01 12:20:00.000000', $selects->getArrayCopy()[0]);
         self::assertSame(0, $this->countMembers($older));
 
         DB::connection(StorageConnection::name())->table(IntegrityTables::checkpointsTable())->update(['sequence' => 0, 'last_recorded_at' => '2099-01-01 00:00:00.000000']);
@@ -386,10 +386,10 @@ final class SealerTest extends TestCase
         self::assertSame(self::sorted(array_slice($ids, 100, 100)), $this->membersOf((string) $seals[1]['id']));
         self::assertSame(self::sorted(array_slice($ids, 200)), $this->membersOf((string) $seals[2]['id']));
         self::assertCount(3, $selects);
-        self::assertNotContains($ids[99], $selects[0]);
-        self::assertContains($ids[99], $selects[1]);
-        self::assertContains($ids[199], $selects[2]);
-        self::assertLessThan(0, strcmp(self::positionIn($selects[1]), self::positionIn($selects[2])));
+        self::assertNotContains($ids[99], $selects->getArrayCopy()[0]);
+        self::assertContains($ids[99], $selects->getArrayCopy()[1]);
+        self::assertContains($ids[199], $selects->getArrayCopy()[2]);
+        self::assertLessThan(0, strcmp(self::positionIn($selects->getArrayCopy()[1]), self::positionIn($selects->getArrayCopy()[2])));
     }
 
     /**

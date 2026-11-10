@@ -155,6 +155,10 @@ final class EntriesMigrationCollisionTest extends TestCase
      */
     private function runMigrationUp(Migration $migration): void
     {
-        \call_user_func([$migration, 'up']);
+        if (!method_exists($migration, 'up')) {
+            self::fail('The migration has no `up()` method.');
+        }
+
+        $migration->up();
     }
 }

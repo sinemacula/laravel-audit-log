@@ -103,27 +103,27 @@ final class SubjectKeyRowTest extends TestCase
     }
 
     /**
-     * Rows of `[draft argument, value, the field named]`: each draft argument
+     * Rows of `[draft argument, the field named]`: each draft argument
      * malformed in turn.
      *
-     * @return iterable<string, array{0: string, 1: int|string, 2: string}>
+     * @return iterable<string, array{0: array{id?: string, category?: string, generation?: int, wrapped?: string, wrapKeyId?: string, createdAt?: string}, 1: string}>
      */
     public static function provideMalformedDrafts(): iterable
     {
         yield from [
-            'an upper-case id'          => ['id', '01932B4E-E000-7000-8000-000000000001', 'id'],
-            'a category in capitals'    => ['category', 'Security', 'category'],
-            'a category with a space'   => ['category', 'secu rity', 'category'],
-            'generation zero'           => ['generation', 0, 'generation'],
-            'a generation past the int' => ['generation', 2147483648, 'generation'],
-            'an empty wrapped key'      => ['wrapped', '', 'wrapped_key'],
-            'a wrapped key with a NUL'  => ['wrapped', "a\0b", 'wrapped_key'],
-            'a wrapped key too long'    => ['wrapped', str_repeat('a', 65536), 'wrapped_key'],
-            'an empty wrapping key id'  => ['wrapKeyId', '', 'wrap_key_id'],
-            'a wrapping key id space'   => ['wrapKeyId', 'w 2026', 'wrap_key_id'],
-            'a wrapping key id too big' => ['wrapKeyId', str_repeat('w', 192), 'wrap_key_id'],
-            'a time without its zone'   => ['createdAt', '2026-11-02T09:30:00.000000', 'created_at'],
-            'a stored time'             => ['createdAt', '2026-11-02 09:30:00.000000', 'created_at'],
+            'an upper-case id'          => [['id' => '01932B4E-E000-7000-8000-000000000001'], 'id'],
+            'a category in capitals'    => [['category' => 'Security'], 'category'],
+            'a category with a space'   => [['category' => 'secu rity'], 'category'],
+            'generation zero'           => [['generation' => 0], 'generation'],
+            'a generation past the int' => [['generation' => 2147483648], 'generation'],
+            'an empty wrapped key'      => [['wrapped' => ''], 'wrapped_key'],
+            'a wrapped key with a NUL'  => [['wrapped' => "a\0b"], 'wrapped_key'],
+            'a wrapped key too long'    => [['wrapped' => str_repeat('a', 65536)], 'wrapped_key'],
+            'an empty wrapping key id'  => [['wrapKeyId' => ''], 'wrap_key_id'],
+            'a wrapping key id space'   => [['wrapKeyId' => 'w 2026'], 'wrap_key_id'],
+            'a wrapping key id too big' => [['wrapKeyId' => str_repeat('w', 192)], 'wrap_key_id'],
+            'a time without its zone'   => [['createdAt' => '2026-11-02T09:30:00.000000'], 'created_at'],
+            'a stored time'             => [['createdAt' => '2026-11-02 09:30:00.000000'], 'created_at'],
         ];
     }
 
@@ -131,21 +131,22 @@ final class SubjectKeyRowTest extends TestCase
      * Each malformed draft argument is refused naming its field, never its
      * value.
      *
-     * @param  string  $argument
-     * @param  int|string  $value
+     * @param  array{id?: string, category?: string, generation?: int, wrapped?: string, wrapKeyId?: string, createdAt?: string}  $argument
      * @param  string  $field
      * @return void
      */
     #[DataProvider('provideMalformedDrafts')]
-    public function testRefusesEachMalformedDraft(string $argument, int|string $value, string $field): void
+    public function testRefusesEachMalformedDraft(array $argument, string $field): void
     {
+        $value = implode('', $argument);
+
         try {
-            self::draft(...[$argument => $value]);
+            self::draft(...$argument);
 
             self::fail('Expected the draft to be refused.');
         } catch (\InvalidArgumentException $exception) {
             self::assertStringStartsWith("A subject key row's `{$field}`", $exception->getMessage());
-            self::assertStringNotContainsString((string) $value === '' ? "\0" : (string) $value, $exception->getMessage());
+            self::assertStringNotContainsString($value === '' ? "\0" : $value, $exception->getMessage());
         }
     }
 

@@ -6,6 +6,7 @@ namespace Tests\Unit\Stores;
 
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Foundation\Application as ApplicationContract;
 use Illuminate\Database\ConnectionResolver;
 use Illuminate\Database\DeadlockException;
 use Illuminate\Database\QueryException;
@@ -765,13 +766,14 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The log store, with a log manager that is never asked for a channel.
+     * The log store, with a log manager of a stub application, which it never
+     * asks for a channel.
      *
      * @return \SineMacula\Laravel\AuditLog\Contracts\AuditStore
      */
     private static function log(): AuditStore
     {
-        return new LogAuditStore(new LogManager(new Container), new NdjsonFormatter);
+        return new LogAuditStore(new LogManager(self::createStub(ApplicationContract::class)), new NdjsonFormatter);
     }
 
     /**

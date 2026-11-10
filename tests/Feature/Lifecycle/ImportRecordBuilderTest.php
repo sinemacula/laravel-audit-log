@@ -113,7 +113,9 @@ final class ImportRecordBuilderTest extends TestCase
 
         self::assertSame(['crm-eu', 'eu-west-2', 'rec-0042', self::BATCH, str_repeat('d', 64)], $source);
         self::assertSame([null, null, null, null, null, null], $ambient);
-        self::assertStringStartsWith(substr(str_replace('-', '', Str::uuid7(new CarbonImmutable(self::IMPORTED_AT, 'UTC'))->toString()), 0, 12), str_replace('-', '', $record->id));
+        $time = substr(str_replace('-', '', Str::uuid7(new CarbonImmutable(self::IMPORTED_AT, 'UTC'))->toString()), 0, 12);
+
+        self::assertSame($time, substr(str_replace('-', '', $record->id), 0, 12));
     }
 
     /**

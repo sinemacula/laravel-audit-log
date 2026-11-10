@@ -55,7 +55,7 @@ final class IntegerSetting
      * @param  mixed  $value
      * @param  int  $least
      * @param  int  $most
-     * @return int
+     * @return ($least is positive-int ? positive-int : int)
      *
      * @throws \InvalidArgumentException
      */

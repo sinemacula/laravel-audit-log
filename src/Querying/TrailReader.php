@@ -186,8 +186,8 @@ final readonly class TrailReader
             ?AccessScope $scope,
             Outcome $outcome,
             ?string $reason = null,
-            array $returned = [],
             ?FieldDisclosure $fields = null,
+            #[\SensitiveParameter] StoredEntry ...$shown,
         ) use (
             $viewer,
             $filters,
@@ -196,6 +196,12 @@ final readonly class TrailReader
             $presented,
             &$position,
         ): void {
+            $returned = [];
+
+            foreach ($shown as $entry) {
+                $returned[] = [$entry->id(), $entry->hmac()];
+            }
+
             $fields ??= FieldDisclosure::none($scope?->revealsEncryptedFields() ?? false);
             $evidence = AccessEvidence::forPage($this->terms($filters, $scope), get_debug_type($policy), $presented, $position, $perPage, $returned, $fields, $outcome);
 
@@ -223,12 +229,12 @@ final readonly class TrailReader
         $rows = $this->attempt(fn (): array => $this->rows($scope, $filters, $position, $perPage + 1), static fn () => $record($scope, Outcome::FAILURE, self::QUERY_FAILED));
         $more = count($rows) > $perPage ? $binding : null;
 
-        [$projected, $returned, $next] = $this->attempt(
+        [$projected, $shown, $next] = $this->attempt(
             fn (): array => $this->project(array_slice($rows, 0, $perPage), $scope->revealsEncryptedFields(), $more),
             static fn () => $record($scope, Outcome::FAILURE, self::FORMAT_FAILED),
         );
 
-        $record($scope, Outcome::SUCCESS, null, $returned, $projected->fields);
+        $record($scope, Outcome::SUCCESS, null, $projected->fields, ...$shown);
 
         return new TrailPage($projected->entries, $next, $perPage);
     }
@@ -399,14 +405,14 @@ final readonly class TrailReader
 
     /**
      * The page shown of the rows, each decoded as stored, then projected
-     * together, revealing their encrypted fields when the scope does, the id
-     * and HMAC of each, and the cursor of the last one when another page
-     * follows, which it does when a binding is given.
+     * together, revealing their encrypted fields when the scope does, the
+     * stored entries, and the cursor of the last one when another page follows,
+     * which it does when a binding is given.
      *
      * @param  list<array<string, scalar|null>>  $rows
      * @param  bool  $reveal
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\CursorBinding  $more
-     * @return array{0: \SineMacula\Laravel\AuditLog\Querying\ProjectedPage, 1: list<array{0: string, 1: string}>, 2: ?string}
+     * @return array{0: \SineMacula\Laravel\AuditLog\Querying\ProjectedPage, 1: list<\SineMacula\Laravel\AuditLog\Querying\StoredEntry>, 2: ?string}
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
@@ -415,21 +421,19 @@ final readonly class TrailReader
      */
     private function project(#[\SensitiveParameter] array $rows, bool $reveal, ?CursorBinding $more): array
     {
-        $codec    = $this->container->make(RowCodec::class);
-        $stored   = [];
-        $returned = [];
-        $last     = null;
+        $codec  = $this->container->make(RowCodec::class);
+        $stored = [];
+        $last   = null;
 
         foreach ($rows as $row) {
-            $last       = StoredEntry::fromRow($row, $codec);
-            $stored[]   = $last;
-            $returned[] = [$last->id(), $last->hmac()];
+            $last     = StoredEntry::fromRow($row, $codec);
+            $stored[] = $last;
         }
 
         $projected = $this->container->make(EntryProjector::class)->project($stored, $reveal);
         $next      = $more === null || $last === null ? null : $this->container->make(CursorCodec::class)->issue($more, $last->occurredPosition());
 
-        return [$projected, $returned, $next];
+        return [$projected, $stored, $next];
     }
 
     /**

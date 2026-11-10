@@ -408,7 +408,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
 
         $uses = $this->storageConnection()->table(KeyTables::keyUsesTable())->where('entry_id', $record->id)->pluck('key_id')->all();
 
-        self::assertSame([$ip['k']], array_map(strval(...), $uses));
+        self::assertSame([$ip['k']], self::strings($uses));
         self::assertStringNotContainsString('078-05-1120', $this->rawRow($record->id));
         self::assertStringNotContainsString(self::IP, $this->rawRow($record->id));
     }
@@ -707,6 +707,8 @@ final class MinimisedEntryRoundTripTest extends TestCase
     private static function editedJson(string $json, string $path, int|string|null $value): string
     {
         $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($decoded);
 
         if ($value === null) {
             Arr::forget($decoded, $path);

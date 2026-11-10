@@ -285,18 +285,19 @@ final class ReconciledOperations
      */
     public static function erased(#[\SensitiveParameter] JournalRow $row, #[\SensitiveParameter] array $payload): ?array
     {
-        $reasons = self::keptReasons($payload['kept'] ?? null);
-        $counts  = self::erasureCounts($payload);
+        $reasons     = self::keptReasons($payload['kept'] ?? null);
+        $counts      = self::erasureCounts($payload);
+        $fingerprint = self::fingerprintOf($payload);
 
-        if ($reasons === null || $counts === null || !self::isFingerprinted($payload)) {
+        if ($reasons === null || $counts === null || $fingerprint === null) {
             return null;
         }
 
         return self::operation(PackageActivity::SUBJECT_ERASED, $row, [
             'operation_id'      => $row->operationId,
             'erasure_id'        => $row->id,
-            'owner_fingerprint' => $payload['owner_fingerprint'],
-            'fingerprint_key'   => $payload['fingerprint_key'],
+            'owner_fingerprint' => $fingerprint[0],
+            'fingerprint_key'   => $fingerprint[1],
             'status'            => ($reasons[0] === 0 ? ErasureStatus::COMPLETE : ErasureStatus::PARTIAL)->value,
             'keys_destroyed'    => $counts[0],
             'keys_kept'         => $reasons[0],
@@ -329,17 +330,18 @@ final class ReconciledOperations
      */
     public static function reinstated(#[\SensitiveParameter] JournalRow $row, #[\SensitiveParameter] array $payload): ?array
     {
-        $floor = $payload['generation_floor'] ?? null;
+        $floor       = $payload['generation_floor'] ?? null;
+        $fingerprint = self::fingerprintOf($payload);
 
-        if (!self::isFingerprinted($payload) || !is_int($floor)) {
+        if ($fingerprint === null || !is_int($floor)) {
             return null;
         }
 
         return self::operation(PackageActivity::KEYS_REINSTATED, $row, [
             'operation_id'      => $row->operationId,
             'reinstatement_id'  => $row->id,
-            'owner_fingerprint' => $payload['owner_fingerprint'],
-            'fingerprint_key'   => $payload['fingerprint_key'],
+            'owner_fingerprint' => $fingerprint[0],
+            'fingerprint_key'   => $fingerprint[1],
             'generation_floor'  => $floor,
             'authority_reason'  => $row->reason,
             'outcome'           => Outcome::SUCCESS->value,
@@ -610,16 +612,19 @@ final class ReconciledOperations
     }
 
     /**
-     * Whether the payload names an owner's fingerprint and the ring key it was
-     * taken under, each a string.
+     * The owner's fingerprint the payload names and the ring key it was taken
+     * under, or `null` unless each is a string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<array-key, mixed>  $payload
-     * @return bool
+     * @return ?array{0: string, 1: string}
      */
-    private static function isFingerprinted(#[\SensitiveParameter] array $payload): bool
+    private static function fingerprintOf(#[\SensitiveParameter] array $payload): ?array
     {
-        return is_string($payload['owner_fingerprint'] ?? null) && is_string($payload['fingerprint_key'] ?? null);
+        $fingerprint = $payload['owner_fingerprint'] ?? null;
+        $key         = $payload['fingerprint_key']   ?? null;
+
+        return is_string($fingerprint) && is_string($key) ? [$fingerprint, $key] : null;
     }
 }

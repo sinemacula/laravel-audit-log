@@ -275,8 +275,10 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
      * Run the subject, check it began and committed the transactions given, and
      * return its reads, writes and savepoints on the default connection.
      *
+     * @template TResult
+     *
      * @param  int  $transactions
-     * @param  callable(): void  $subject
+     * @param  callable(): TResult  $subject
      * @return array{0: int, 1: int, 2: int}
      */
     private function costOf(int $transactions, callable $subject): array
@@ -292,8 +294,10 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
      * Run the subject, check it began and committed the transactions given, and
      * return every statement it ran on any connection.
      *
+     * @template TResult
+     *
      * @param  int  $transactions
-     * @param  callable(): void  $subject
+     * @param  callable(): TResult  $subject
      * @return list<string>
      */
     private function everywhereDuring(int $transactions, callable $subject): array

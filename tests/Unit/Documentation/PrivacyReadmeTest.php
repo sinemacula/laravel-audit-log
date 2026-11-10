@@ -234,15 +234,18 @@ final class PrivacyReadmeTest extends TestCase
     /**
      * A shipped default as the README's table shows it, in backticks.
      *
-     * @param  array<array-key, string>|int|string|null  $default
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  mixed  $default
      * @return string
      */
-    private static function shown(array|int|string|null $default): string
+    private static function shown(mixed $default): string
     {
         return '`' . match (true) {
-            $default === null  => 'null',
-            is_array($default) => '[]',
-            default            => (string) $default,
+            $default === null                       => 'null',
+            is_array($default)                      => '[]',
+            is_int($default) || is_string($default) => (string) $default,
+            default                                 => self::fail('A privacy default is not null, an array, an integer or a string.'),
         } . '`';
     }
 

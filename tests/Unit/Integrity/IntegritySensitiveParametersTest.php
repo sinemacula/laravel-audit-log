@@ -6,6 +6,7 @@ namespace Tests\Unit\Integrity;
 
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Encryption\Encrypter;
@@ -827,7 +828,7 @@ final class IntegritySensitiveParametersTest extends TestCase
 
         self::assertTrue(self::holdsText($entry, self::SECRET));
 
-        $database = new DatabaseManager(new Container, new ConnectionFactory(new Container));
+        $database = new DatabaseManager(self::createStub(Application::class), new ConnectionFactory(new Container));
         $verifier = new SegmentVerifier(
             new SealSigner(self::ring(['keys' => [self::KEY_ID => self::LONG_SECRET], 'current' => self::KEY_ID])),
             new RecordSigner(self::ring(['keys' => 'not a map'])),
@@ -1037,7 +1038,9 @@ final class IntegritySensitiveParametersTest extends TestCase
      * What the work throws. The work holds the secret it is given, so its own
      * frame marks it.
      *
-     * @param  \Closure(): (bool|object|string|null)  $work
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $work
      * @return \Throwable
      */
     private static function thrownBy(#[\SensitiveParameter] \Closure $work): \Throwable

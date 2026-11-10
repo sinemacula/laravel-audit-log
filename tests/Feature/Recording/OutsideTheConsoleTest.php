@@ -147,7 +147,7 @@ final class OutsideTheConsoleTest extends TestCase
     public function testEachListenerIsRegistered(string $event, string $listener): void
     {
         self::assertSame([$listener], array_values(array_filter(
-            Event::getRawListeners()[$event] ?? [],
+            self::listenersFor(Event::getRawListeners(), $event),
             static fn (mixed $registered): bool => is_string($registered) && str_starts_with($registered, 'SineMacula\\'),
         )));
     }
@@ -163,6 +163,8 @@ final class OutsideTheConsoleTest extends TestCase
     protected function defineEnvironment(mixed $app): void
     {
         parent::defineEnvironment($app);
+
+        self::assertInstanceOf(Application::class, $app);
 
         (new \ReflectionProperty(Application::class, 'isRunningInConsole'))->setValue($app, false);
     }

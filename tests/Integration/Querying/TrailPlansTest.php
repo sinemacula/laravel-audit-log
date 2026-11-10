@@ -409,8 +409,10 @@ final class TrailPlansTest extends TestCase
      * index from a bound on `occurred_at`, as a key part MySQL's range uses or
      * a column PostgreSQL's `Index Cond` names.
      *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
      * @param  string  $driver
-     * @param  array<array-key, array<array-key, bool|float|int|string|null>|bool|float|int|string|null>  $tree
+     * @param  array<array-key, mixed>  $tree
      * @param  string  $text
      * @return array{indexes: list<string>, sorted: bool, bounded: bool, text: string}
      */
@@ -442,12 +444,14 @@ final class TrailPlansTest extends TestCase
      * `occurred_at`: MySQL's `used_key_parts` naming it, or PostgreSQL's `Index
      * Cond` naming it.
      *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
      * @param  string  $driver
-     * @param  array-key  $key
-     * @param  array<array-key, bool|float|int|string|null>|bool|float|int|string|null  $value
+     * @param  mixed  $key
+     * @param  mixed  $value
      * @return bool
      */
-    private static function boundsTheTime(string $driver, int|string $key, array|bool|float|int|string|null $value): bool
+    private static function boundsTheTime(string $driver, mixed $key, mixed $value): bool
     {
         return $driver === 'mysql'
             ? $key     === 'used_key_parts' && is_array($value) && in_array('occurred_at', $value, true)
@@ -460,7 +464,7 @@ final class TrailPlansTest extends TestCase
      * order, all of it or a part, and whether a step searches an index by a
      * bound on `occurred_at`.
      *
-     * @param  list<string>  $details
+     * @param  array<array-key, string>  $details
      * @return array{indexes: list<string>, sorted: bool, bounded: bool, text: string}
      */
     private static function sqlitePlan(array $details): array
@@ -530,7 +534,9 @@ final class TrailPlansTest extends TestCase
      * it: a MySQL access of a key value or a range, or a PostgreSQL bitmap scan
      * or index scan with a condition.
      *
-     * @param  array<array-key, array<array-key, bool|float|int|string|null>|bool|float|int|string|null>  $node
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $node
      * @return bool
      */
     private static function seeks(array $node): bool

@@ -64,7 +64,7 @@ final class PruneTally
     /** @var ?string Why the run failed, once it has. */
     private ?string $failure = null;
 
-    /** @var int The most entries one chunk deletes. */
+    /** @var positive-int The most entries one chunk deletes. */
     private int $batch = 1;
 
     /** @var int When the run's time budget ends, as a Unix time; never, until the run is limited. */
@@ -106,7 +106,7 @@ final class PruneTally
      * Limit the run: the most entries a chunk deletes, and how long it runs
      * from the Unix time it started before it stops between chunks.
      *
-     * @param  int  $batch
+     * @param  positive-int  $batch
      * @param  int  $maxSeconds
      * @param  int  $startedAt
      * @return void
@@ -120,7 +120,7 @@ final class PruneTally
     /**
      * The most entries one chunk deletes.
      *
-     * @return int
+     * @return positive-int
      */
     public function batch(): int
     {

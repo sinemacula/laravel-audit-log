@@ -976,8 +976,13 @@ final class AnchorerTest extends TestCase
 
         $kept = (string) $this->seals()[0]['anchor_receipt'];
 
-        self::assertSame(json_decode($json, true), json_decode($kept, true));
-        self::assertSame(self::typesOf((array) json_decode($json, true)), self::typesOf((array) json_decode($kept, true)));
+        $expected = json_decode($json, true);
+        $actual   = json_decode($kept, true);
+
+        self::assertIsArray($expected);
+        self::assertIsArray($actual);
+        self::assertSame($expected, $actual);
+        self::assertSame(self::typesOf($expected), self::typesOf($actual));
     }
 
     /**
@@ -1225,7 +1230,9 @@ final class AnchorerTest extends TestCase
     /**
      * The type of each value, by key.
      *
-     * @param  array<array-key, scalar|null>  $values
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $values
      * @return array<array-key, string>
      */
     private static function typesOf(array $values): array

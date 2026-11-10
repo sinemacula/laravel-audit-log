@@ -54,7 +54,7 @@ trait PrunesByHand
 
         foreach ($bySeal as $sealId => $pruned) {
             $seal    = $connection->table(IntegrityTables::checkpointsTable())->where('id', $sealId)->first();
-            $members = array_map(strval(...), $connection->table(IntegrityTables::membersTable())->where('checkpoint_id', $sealId)->pluck('entry_id')->all());
+            $members = self::strings($connection->table(IntegrityTables::membersTable())->where('checkpoint_id', $sealId)->pluck('entry_id')->all());
 
             self::assertNotNull($seal);
 

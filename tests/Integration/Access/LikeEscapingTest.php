@@ -82,7 +82,7 @@ final class LikeEscapingTest extends TestCase
         self::assertStringContainsString('like ? escape \'!\'', $sql);
         self::assertStringNotContainsStringIgnoringCase('glob', $sql);
         self::assertSame(['app.a!_b.%'], $query->getBindings());
-        self::assertSame(['app.a_b.x'], array_values(array_map(strval(...), $query->pluck('event')->all())));
+        self::assertSame(['app.a_b.x'], self::strings($query->pluck('event')->all()));
     }
 
     /**
@@ -99,7 +99,7 @@ final class LikeEscapingTest extends TestCase
             ->pluck('event')
             ->all();
 
-        $events = array_values(array_map(strval(...), $events));
+        $events = self::strings($events);
 
         sort($events, SORT_STRING);
 

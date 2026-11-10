@@ -232,6 +232,7 @@ final class AuditLogTest extends TestCase
         self::assertSame('bulk', $attachment->kind);
         self::assertTrue($attachment->describes(['artifact_id' => $attachment->id, 'kind' => 'bulk', 'digest' => $attachment->digest, 'count' => 2]));
         self::assertSame($record->properties['_audit']['manifest'] ?? null, ['artifact_id' => $attachment->id, 'kind' => 'bulk', 'digest' => $attachment->digest, 'count' => 2]);
+        self::assertNotNull($attachment->members);
         self::assertSame(Manifest::encode([['invoice', '1'], ['invoice', '2']]), app(StringEncrypter::class)->decryptString($attachment->members));
         self::assertSame($record, $fake->finalised()[0]->record);
     }

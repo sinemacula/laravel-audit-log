@@ -20,6 +20,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @phpstan-type HoldFields array{id?: string, reviewBy?: ?string, placedAt?: string, reason?: string, externalReference?: ?string, operationId?: string, journalSequence?: int}
  */
 #[CoversClass(Hold::class)]
 final class HoldTest extends TestCase
@@ -133,7 +135,7 @@ final class HoldTest extends TestCase
      * Rows of `[the fields to change, the message]`: each field that is
      * malformed.
      *
-     * @return iterable<string, array{0: array<string, int|string|null>, 1: string}>
+     * @return iterable<string, array{0: HoldFields, 1: string}>
      */
     public static function provideMalformedFields(): iterable
     {
@@ -157,7 +159,7 @@ final class HoldTest extends TestCase
     /**
      * Each malformed field is refused, naming the field and never its value.
      *
-     * @param  array<string, int|string|null>  $fields
+     * @param  HoldFields  $fields
      * @param  string  $message
      * @return void
      */
