@@ -277,7 +277,7 @@ final class ExportSnapshot
      * says it, so a snapshot is never claimed that was not begun.
      *
      * @param  \Illuminate\Database\Connection  $connection
-     * @param  string  $statement
+     * @param  literal-string  $statement
      * @return void
      *
      * @throws \UnexpectedValueException
@@ -345,17 +345,31 @@ final class ExportSnapshot
     {
         $parser = new ConfigurationUrlParser;
         $config = Config::get('database.connections.' . $name);
-        $config = $parser->parseConfiguration(is_array($config) ? $config : (array) $storage->getConfig());
+        $config = $parser->parseConfiguration(self::settingsOf(is_array($config) ? $config : (array) $storage->getConfig()));
         $read   = $config['read'] ?? [];
 
         if (is_array($read) && array_is_list($read) && $read !== []) {
             $read = $read[array_rand($read)];
         }
 
-        $config = array_merge($config, is_array($read) ? $parser->parseConfiguration($read) : []);
+        $config = array_merge($config, is_array($read) ? $parser->parseConfiguration(self::settingsOf($read)) : []);
 
         unset($config['read'], $config['write'], $config['name']);
 
         return DedicatedSession::sessionOptions($config);
+    }
+
+    /**
+     * The connection settings, each under its name; an entry under an integer
+     * key names no setting.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private static function settingsOf(array $config): array
+    {
+        return array_filter($config, is_string(...), ARRAY_FILTER_USE_KEY);
     }
 }

@@ -205,7 +205,7 @@ final readonly class ManifestVerifier
             ->pluck('id')
             ->all();
 
-        return array_diff_key($findings, array_flip(array_diff($missing, $stored)));
+        return array_diff_key($findings, array_flip(array_diff($missing, array_filter($stored, is_string(...)))));
     }
 
     /**

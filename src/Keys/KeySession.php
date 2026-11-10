@@ -94,7 +94,9 @@ final class KeySession
 
         $dedicated = self::SESSION_PREFIX . str_replace('-', '', Str::uuid7()->toString());
 
-        return new self($database, $database->connectUsing($dedicated, self::sessionConfig($storage)), $dedicated);
+        $database->connectUsing($dedicated, self::sessionConfig($storage));
+
+        return new self($database, $database->connection($dedicated), $dedicated);
     }
 
     /**
