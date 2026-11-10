@@ -46,8 +46,9 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * it names is a session guard that says it signed the user in from the
  * remember-me cookie.
  *
- * A malformed setting or a failure to record is contained by the capture, so
- * the sign-in, the sign-out or the reset goes on.
+ * A malformed setting, an event whose guard breaks Laravel's contract or a
+ * failure to record is contained by the capture, so the sign-in, the sign-out
+ * or the reset goes on.
  *
  * It holds nothing: the capture, its settings, the guards and the configuration
  * come from the application serving the event when it is handled, not from the
@@ -82,7 +83,11 @@ final readonly class RecordLaravelAuthEvent
     public function handle(
         #[\SensitiveParameter] CurrentDeviceLogout|Failed|Lockout|Login|Logout|OtherDeviceLogout|PasswordReset|PasswordResetLinkSent|Registered|Verified $event,
     ): void {
-        Container::getInstance()->make(CaptureCoordinator::class)->captured($event, self::class, self::describerOf($event));
+        Container::getInstance()->make(CaptureCoordinator::class)->captured(
+            $event,
+            self::class,
+            static fn (#[\SensitiveParameter] PendingRecord $pending): ?PendingRecord => self::describerOf($event)($pending),
+        );
     }
 
     /**
@@ -215,12 +220,12 @@ final readonly class RecordLaravelAuthEvent
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
-     * @param  mixed  $guard
+     * @param  ?string  $guard
      * @param  mixed  $user
      * @param  \SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity  $code
      * @return \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): ?\SineMacula\Laravel\AuditLog\Records\PendingRecord
      */
-    private static function userEvent(mixed $guard, #[\SensitiveParameter] mixed $user, CapturedActivity $code): \Closure
+    private static function userEvent(?string $guard, #[\SensitiveParameter] mixed $user, CapturedActivity $code): \Closure
     {
         return self::unlessExcluded($guard, static function (#[\SensitiveParameter] PendingRecord $pending) use ($code, $user): PendingRecord {
             $pending->event($code);
@@ -253,17 +258,15 @@ final readonly class RecordLaravelAuthEvent
 
     /**
      * The description, skipped when the guard is one not recorded, and given
-     * the guard and the capture settings otherwise; a guard that is not a
-     * string is no guard. The settings are read when the event is described,
-     * inside the capture, so a malformed one is contained.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     * the guard and the capture settings otherwise. The settings are read when
+     * the event is described, inside the capture, so a malformed one is
+     * contained.
      *
      * @formatter:off
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @param  mixed  $guard
+     * @param  ?string  $guard
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord, \SineMacula\Laravel\AuditLog\Capture\CaptureSettings): \SineMacula\Laravel\AuditLog\Records\PendingRecord  $describe
      * @return \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): ?\SineMacula\Laravel\AuditLog\Records\PendingRecord
      *
@@ -271,10 +274,8 @@ final readonly class RecordLaravelAuthEvent
      *
      * @formatter:on
      */
-    private static function unlessExcluded(mixed $guard, #[\SensitiveParameter] \Closure $describe): \Closure
+    private static function unlessExcluded(?string $guard, #[\SensitiveParameter] \Closure $describe): \Closure
     {
-        $guard = is_string($guard) ? $guard : null;
-
         return static function (#[\SensitiveParameter] PendingRecord $pending) use ($guard, $describe): ?PendingRecord {
             $settings = Container::getInstance()->make(CaptureSettings::class);
 
@@ -313,18 +314,16 @@ final readonly class RecordLaravelAuthEvent
      * refuse it, and a configured guard the manager fails to build, such as one
      * of a driver never registered or with no user provider, is no restore.
      *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $guard
+     * @param  string  $guard
      * @return bool
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
-    private static function restoresSession(mixed $guard): bool
+    private static function restoresSession(string $guard): bool
     {
         $container = Container::getInstance();
 
-        if (!is_string($guard) || !is_array($container->make(Repository::class)->get("auth.guards.{$guard}"))) {
+        if (!is_array($container->make(Repository::class)->get("auth.guards.{$guard}"))) {
             return false;
         }
 
