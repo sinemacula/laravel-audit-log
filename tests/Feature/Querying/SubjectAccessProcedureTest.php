@@ -247,8 +247,8 @@ final class SubjectAccessProcedureTest extends TestCase
     /** @var string The code a support call is recorded under, the caller's phone sealed under the caller's key and the summary under the agent's. */
     private const string CALL = 'support.call_logged';
 
-    /** @var string The subject's card, sealed under the subject's key. */
-    private const string CARD = '4242';
+    /** @var string The subject's card, sealed under the subject's key: spaced, so no hex digest or base64 ciphertext contains it by chance. */
+    private const string CARD = '4242 4242 4242 4242';
 
     /** @var string The subject's phone number, sealed under the subject's key in an entry about someone else. */
     private const string PHONE = '+44 20 7946 0018';
