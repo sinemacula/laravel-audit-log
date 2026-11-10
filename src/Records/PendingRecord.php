@@ -35,8 +35,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  *
  * A bulk builder carries its manifest, what the operation affected, which its
  * record seals as an attachment and describes in `properties._audit.manifest`.
- * Only `AuditLog::bulk()` and the package's own read records give a builder
- * one.
+ * `covering()` gives a builder one, from the application or a mapper; the
+ * package's own read records carry theirs too.
  *
  * Only the package's own read path names one of its codes, with `forPackage()`.
  * A builder the facade made is refused when it is recorded with a code under
@@ -76,6 +76,7 @@ final class PendingRecord
      * Constructor.
      *
      * @param  ?\Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): \SineMacula\Laravel\AuditLog\Records\AuditRecord  $recorder
+     * @param  ?\Closure(iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>): \SineMacula\Laravel\AuditLog\Records\Manifest  $manifests
      *
      * @internal
      */
@@ -83,6 +84,9 @@ final class PendingRecord
 
         /** The recorder `record()` hands the builder to. */
         private readonly ?\Closure $recorder = null,
+
+        /** What builds `covering()`'s manifest, bounded, for the bound store. */
+        private readonly ?\Closure $manifests = null,
     ) {}
 
     /**
@@ -148,6 +152,30 @@ final class PendingRecord
         $this->id = self::checkedId($id);
 
         return $this;
+    }
+
+    /**
+     * Make the record a bulk operation's: carry the manifest of the subjects it
+     * covers, each a model or a reference, kept once whatever the order or
+     * repetition they come in. A manifest over the configured bounds is
+     * refused, never truncated, and so is any manifest while the bound store
+     * keeps no attachment. The application covers a builder from
+     * `AuditLog::event()`, and a mapper the builder it was handed; a builder
+     * made without a source of manifests cannot cover anything.
+     *
+     * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public function covering(#[\SensitiveParameter] iterable $subjects): self
+    {
+        $this->assertUsable();
+
+        $manifests = $this->manifests ?? throw new \LogicException('This builder has no source of manifests, so it cannot cover subjects.');
+
+        return $this->withManifest($manifests($subjects));
     }
 
     /**

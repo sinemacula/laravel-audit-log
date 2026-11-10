@@ -71,7 +71,7 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
     public function testAThousandSubjectBulkWriteIsTwoInsertsInOneTransaction(): void
     {
         $subjects = self::subjects(self::SUBJECTS);
-        $record   = static fn (): AuditRecord => AuditLog::bulk(self::CODE, $subjects)->record();
+        $record   = static fn (): AuditRecord => AuditLog::event(self::CODE)->covering($subjects)->record();
 
         $this->assertTransactionBudget(1, 1, fn (): AuditRecord => $this->assertStatementBudget(0, 2, 0, 0, $record));
 
@@ -88,7 +88,7 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
     public function testInsideAHostTransactionItIsTwoInsertsInOneSavepoint(): void
     {
         $subjects = self::subjects(self::SUBJECTS);
-        $record   = static fn (): AuditRecord => AuditLog::bulk(self::CODE, $subjects)->immediately()->record();
+        $record   = static fn (): AuditRecord => AuditLog::event(self::CODE)->covering($subjects)->immediately()->record();
 
         DB::connection()->beginTransaction();
 
@@ -157,7 +157,7 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
 
         $before = memory_get_usage();
 
-        AuditLog::bulk(self::CODE, $subjects)->record();
+        AuditLog::event(self::CODE)->covering($subjects)->record();
 
         return memory_get_peak_usage() - $before;
     }

@@ -95,6 +95,10 @@ final class OrganisationAuditPolicy implements AuditAccessPolicy
   may page through entries it may never export.
 - The package binds `Access\DenyAllPolicy` until the application binds its own, so by default every read is empty and
   recorded as denied.
+- The policy is told who is reading and why, never how they signed in or how recently. A requirement on the
+  authentication itself, such as a fresh multi-factor check or a confirmed password, belongs on the route or action
+  that reads the trail, enforced before `visibleTo()` is called. A policy that cannot tell whether such a requirement
+  is met treats the permission as not held.
 - A policy keeps no state between calls and never reads the entries table. What it throws is recorded as a failed read
   with the reason `policy_failed`, and reaches the caller unchanged.
 - A denied viewer sees what an empty trail shows: an empty page, `0`, an empty export, or a verification that cannot

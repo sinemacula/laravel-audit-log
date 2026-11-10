@@ -345,17 +345,66 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * The manifest given to a builder is marked sensitive: it holds the members
-     * of the bulk operation.
+     * A builder made without a source of manifests cannot cover subjects, and
+     * reads none of them.
+     *
+     * @return void
+     */
+    public function testABuilderWithoutASourceOfManifestsCoversNothing(): void
+    {
+        $reads    = new \ArrayObject;
+        $subjects = (static function () use ($reads): \Generator {
+            $reads->append(true);
+
+            yield Reference::of('invoice', '1');
+        })();
+
+        try {
+            (new PendingRecord)->event('invoice.voided')->covering($subjects);
+
+            self::fail('Expected the builder to refuse.');
+        } catch (\LogicException $exception) {
+            self::assertSame('This builder has no source of manifests, so it cannot cover subjects.', $exception->getMessage());
+        }
+
+        self::assertCount(0, $reads);
+    }
+
+    /**
+     * A builder given a source of manifests carries what it builds of the
+     * subjects.
+     *
+     * @return void
+     */
+    public function testABuilderCarriesTheManifestItsSourceBuilds(): void
+    {
+        $manifest = self::manifest();
+        $subjects = [Reference::of('invoice', '1')];
+        $pending  = new PendingRecord(manifests: static function (iterable $given) use ($manifest, $subjects): Manifest {
+            self::assertSame($subjects, $given);
+
+            return $manifest;
+        });
+
+        self::assertSame($pending, $pending->event('invoice.voided')->covering($subjects));
+        self::assertSame($manifest, $pending->snapshot()->manifest);
+    }
+
+    /**
+     * The manifest given to a builder, and the subjects it is built from, are
+     * marked sensitive: they hold the members of the bulk operation.
      *
      * @return void
      */
     public function testTheManifestIsSensitive(): void
     {
-        $given = (new \ReflectionMethod(PendingRecord::class, 'withManifest'))->getParameters()[0];
+        $given    = (new \ReflectionMethod(PendingRecord::class, 'withManifest'))->getParameters()[0];
+        $subjects = (new \ReflectionMethod(PendingRecord::class, 'covering'))->getParameters()[0];
 
         self::assertSame('manifest', $given->getName());
         self::assertCount(1, $given->getAttributes(\SensitiveParameter::class));
+        self::assertSame('subjects', $subjects->getName());
+        self::assertCount(1, $subjects->getAttributes(\SensitiveParameter::class));
     }
 
     /**
@@ -448,8 +497,9 @@ final class PendingRecordTest extends TestCase
 
     /**
      * Rows of `[call]`: one call of each public mutator, the seventeen fluent
-     * methods, the nine fillers, the manifest, the package's own code and the
-     * id of the package's own record, each with a valid argument.
+     * methods, the nine fillers, the manifest given either way, the package's
+     * own code and the id of the package's own record, each with a valid
+     * argument.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
      */
@@ -483,6 +533,9 @@ final class PendingRecordTest extends TestCase
             }],
             'withManifest' => [static function (PendingRecord $pending): void {
                 $pending->withManifest(self::manifest());
+            }],
+            'covering' => [static function (PendingRecord $pending): void {
+                $pending->covering([Reference::of('invoice', '1')]);
             }],
             'forPackage' => [static function (PendingRecord $pending): void {
                 $pending->forPackage(PackageActivity::TRAIL_READ);
@@ -603,6 +656,9 @@ final class PendingRecordTest extends TestCase
             'withManifest' => [static function (PendingRecord $pending): void {
                 $pending->withManifest(self::manifest());
             }],
+            'covering' => [static function (PendingRecord $pending): void {
+                $pending->covering([]);
+            }],
             'forPackage' => [static function (PendingRecord $pending): void {
                 $pending->forPackage(PackageActivity::TRAIL_READ);
             }],
@@ -653,7 +709,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(29, $mutators);
+        self::assertCount(30, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }

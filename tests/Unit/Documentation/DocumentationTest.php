@@ -303,7 +303,7 @@ final class DocumentationTest extends TestCase
         'raw statements'               => ['Gaps in model capture', 'raw `DB::` statements'],
         'pivots'                       => ['Gaps in model capture', 'pivots without a `using()` model'],
         'custom model events'          => ['Gaps in model capture', 'custom `$dispatchesEvents` listeners that stop the fallback'],
-        'the answer'                   => ['Gaps in model capture', '`bulk()` is the answer'],
+        'the answer'                   => ['Gaps in model capture', '`covering()` is the answer'],
         'never truncated'              => ['Bulk operations', 'A larger one is refused, never truncated'],
         'an unsealed manifest'         => ['Bulk operations', 'until an entry is sealed, its artifact is checked by nothing'],
         'the host-fatal exception'     => ['When capture fails', 'The host-fatal exception'],
@@ -870,7 +870,7 @@ final class DocumentationTest extends TestCase
             AuditLog::record('invoice.approved', subject: $invoice);
             AuditLog::event("user.suspended")->on($user)->record();
             AuditLog::accessed( 'patient.record_viewed', subject: $record);
-            AuditLog::bulk('invoice.exported', $invoices);
+            AuditLog::event('invoice.exported')->covering($invoices);
             EventDefinition::for('invoice.voided')->category('finance');
             EventDefinition::for($this)->retain('amount');
             Event::dispatch('not.a_code');
@@ -1075,11 +1075,11 @@ final class DocumentationTest extends TestCase
     {
         $known = self::knownAuditLogCalls();
 
-        foreach (['record', 'event', 'accessed', 'define', 'contribute', 'fake', 'recorder', 'bulk', 'capture', 'map', 'watch'] as $call) {
+        foreach (['record', 'event', 'accessed', 'define', 'contribute', 'fake', 'recorder', 'capture', 'map', 'watch'] as $call) {
             self::assertContains($call, $known);
         }
 
-        foreach (['__construct', '__callStatic', 'swap', 'spy', 'shouldReceive', 'getFacadeRoot', 'getFacadeAccessor', 'Record'] as $call) {
+        foreach (['__construct', '__callStatic', 'swap', 'spy', 'shouldReceive', 'getFacadeRoot', 'getFacadeAccessor', 'Record', 'bulk'] as $call) {
             self::assertNotContains($call, $known);
         }
     }
@@ -2839,15 +2839,15 @@ final class DocumentationTest extends TestCase
 
     /**
      * The codes examples record or declare: the first string-literal argument
-     * of each `record(`, `event(`, `accessed(`, `bulk(` and `for(` call, and
-     * the value of each upper-case enum case, in the order they appear.
+     * of each `record(`, `event(`, `accessed(` and `for(` call, and the value
+     * of each upper-case enum case, in the order they appear.
      *
      * @param  string  $code
      * @return list<string>
      */
     private static function exampleCodesIn(string $code): array
     {
-        $pattern = '/(?:(?<![\w$])(?:record|event|accessed|bulk|for)\(\s*|\bcase\s+[A-Z][A-Z0-9_]*\s*=\s*)' . self::LITERAL . '/';
+        $pattern = '/(?:(?<![\w$])(?:record|event|accessed|for)\(\s*|\bcase\s+[A-Z][A-Z0-9_]*\s*=\s*)' . self::LITERAL . '/';
 
         preg_match_all($pattern, $code, $matches, PREG_SET_ORDER);
 

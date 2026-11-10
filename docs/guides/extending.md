@@ -34,7 +34,7 @@ A store that keeps attachments, a bulk operation's subjects, a read's disclosure
 entry atomically, both or neither, so an entry never points at an artifact that is not there. It answers from its own
 configuration, never from the record. Storing the same id with the same artifact again is a success, and the same id
 with a different artifact, or an entry without its own, is a `Stores\RecordConflictException`. A store that does not
-implement the contract, or returns `false`, is never handed an attachment: `AuditLog::bulk()` is refused while it is
+implement the contract, or returns `false`, is never handed an attachment: `covering()` is refused while it is
 bound, and, since every read of the trail is recorded with a disclosure or an export manifest, in sync mode every page,
 count, export and verification is refused with `Querying\AuditReadRefusedException` before anything is queried.
 
@@ -71,6 +71,9 @@ AuditLog::map(OrderEvent::class, OrderEventMapper::class, except: [OrderViewed::
   nothing it records is written: calling `record()`, recording through the facade, returning another builder, choosing
   a timing, `failClosed()` or `transactional()` are each a contained failure that writes nothing. The capture writes
   the builder returned, at once.
+- An event that is a bulk operation is mapped with `covering($subjects)` on the builder, as the application records
+  one: the record carries the manifest of the subjects, bounded and refused as a bulk operation's is (see
+  [Bulk operations](automatic-capture.md#bulk-operations)). A refusal is a contained failure that writes nothing.
 - What the mapper's own work sets off is captured as it would be anywhere else: a watched model it saves and a Gate
   check it denies are each recorded by their own capture. Capturing or dispatching the event it is mapping again
   writes nothing, so a mapper never runs inside itself.

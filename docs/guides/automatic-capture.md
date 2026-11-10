@@ -193,7 +193,7 @@ Each of these changes rows without a model event, so none of them records anythi
 - custom `$dispatchesEvents` listeners that stop the fallback: a listener of a model's own event that returns a value
   stops Eloquent dispatching the `eloquent.*` event the watch listens for
 
-`bulk()` is the answer: record the operation itself, with the manifest of what it touched, in the same transaction:
+`covering()` is the answer: record the operation itself, with the manifest of what it touched, in the same transaction:
 
 ```php
 use Illuminate\Support\Facades\DB;
@@ -202,26 +202,29 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 DB::transaction(function () use ($invoices): void {
     Invoice::query()->whereKey($invoices->modelKeys())->update(['status' => 'void']);
 
-    AuditLog::bulk('invoice.voided', $invoices)->record();
+    AuditLog::event('invoice.voided')->covering($invoices)->record();
 });
 ```
 
 ## Bulk operations
 
-`AuditLog::bulk()` returns a builder, as `AuditLog::event()` does, for one entry of the operation and a manifest of its
-subjects. It writes nothing until `record()`, and its timing is chosen as for any record: after commit by default.
+`covering($subjects)` makes any builder one entry of a bulk operation, with a manifest of its subjects:
+`AuditLog::event($code)->covering($subjects)` from the application, or the builder a mapper is handed (see
+[Mapping another package's events](extending.md#mapping-another-packages-events)). It writes nothing until
+`record()`, and its timing is chosen as for any record: after commit by default. A builder takes one manifest.
 
 - The subjects are models or references. The manifest holds each `[type, id]` once, sorted. The entry signs its
   descriptor, `properties._audit.manifest`, holding the manifest's artifact id, the SHA-256 digest of its canonical
   form and its count, and the members are kept in `entries.artifacts_table`, one row per operation, beside the entry.
-- A manifest is bounded by `capture.bulk.max_members` (`AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS`, 100,000 by default, from
-  1 to 1,000,000) and `capture.bulk.max_bytes` (`AUDIT_LOG_CAPTURE_BULK_MAX_BYTES`, 4,194,304 by default, from 65,536 to
+- A manifest is bounded by `capture.bulk.max_members` (`AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS`, 100,000 by default, from 1
+  to 1,000,000) and `capture.bulk.max_bytes` (`AUDIT_LOG_CAPTURE_BULK_MAX_BYTES`, 4,194,304 by default, from 65,536 to
   8,388,608), the size of its canonical form. A larger one is refused, never truncated, with an
-  `\InvalidArgumentException` from `bulk()`, and nothing is written; record a larger operation as several. At most four
-  times `max_members` subjects are read, duplicates included, so an input that never ends is refused too.
+  `\InvalidArgumentException` from `covering()`, and nothing is written; record a larger operation as
+  several. At most four times `max_members` subjects are read, duplicates included, so an input that never ends is
+  refused too.
 - Only a store that keeps attachments can take one. `DatabaseAuditStore`, the fake and `NullAuditStore` do;
-  `LogAuditStore` does not, since its line would lose the members; a stack does only when every destination does; and
-  a store that does not implement `Contracts\AcceptsAttachments` does not. With any other store bound, `bulk()` is a
+  `LogAuditStore` does not, since its line would lose the members; a stack does only when every destination does; and a
+  store that does not implement `Contracts\AcceptsAttachments` does not. With any other store bound, `covering()` is a
   `\LogicException` before anything is built, so a manifest is never silently discarded.
 - The database store writes the artifact and the entry in one transaction, in a savepoint when one is open, so both are
   kept or neither is. Storing the same bundle again is a no-op, and a different one under the same id is a conflict.
