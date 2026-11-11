@@ -20,6 +20,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Listeners\TrackJobFrames;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\CarriedContext;
@@ -314,13 +315,13 @@ final class TrackJobFramesTest extends TestCase
      */
     public function testTheFrameKeepsTheCarriedActor(): void
     {
-        CarriedContext::carryActor(app(Repository::class), new ActorSnapshot(Reference::of('user', 'user-7'), 'admin'));
+        CarriedContext::carryActor(app(Repository::class), new ActorSnapshot(new HeldActor(Reference::of('user', 'user-7')), 'admin'));
 
         (new TrackJobFrames)(new JobProcessing('sync', $this->job(['job' => 'App\Jobs\SendInvoice'])));
 
         $sync = $this->frames()->carriedActor();
 
-        self::assertSame('user-7', $sync?->reference->id);
+        self::assertSame('user-7', $sync?->held->actor->id);
 
         $job = $this->workerJob();
 
@@ -330,7 +331,7 @@ final class TrackJobFramesTest extends TestCase
 
         self::assertNotNull($frame);
         self::assertSame($job, $frame->owner);
-        self::assertSame('user-7', $frame->carried?->reference->id);
+        self::assertSame('user-7', $frame->carried?->held->actor->id);
     }
 
     /**

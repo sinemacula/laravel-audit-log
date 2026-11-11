@@ -9,6 +9,8 @@ use Illuminate\Contracts\Auth\Factory;
 use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\AuditLog\Contracts\HeldActorReader;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\CachedUser;
@@ -21,12 +23,12 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
  * from configuration so `Auth::shouldUse()` counts.
  *
  * The first guard that holds a user decides. A guard is asked `hasUser()`, and
- * nothing else unless it is one `CachedUser` can read; when that guard's user
- * cannot be read (a foreign guard, an unsaved model, an identifier that is no
- * string or integer) there is no ambient actor, and the walk does not go on to
- * a later guard, which could name a different person. A guard that is not
- * configured lets `AuthManager`'s exception propagate: it is a misconfiguration
- * `audit-log:check` reports.
+ * nothing else unless a bound `HeldActorReader` reads it or `CachedUser` can;
+ * when that guard's user cannot be read (a foreign guard no reader reads, an
+ * unsaved model, an identifier that is no string or integer) there is no
+ * ambient actor, and the walk does not go on to a later guard, which could name
+ * a different person. A guard that is not configured lets `AuthManager`'s
+ * exception propagate: it is a misconfiguration `audit-log:check` reports.
  *
  * Laravel's guards outlive a job on a worker, so a user a guard already held
  * when the job started is an earlier job's and is treated as no user at all,
@@ -50,6 +52,7 @@ final readonly class AmbientActor
      * @param  \SineMacula\Laravel\AuditLog\Runtime\ContextSettings  $settings
      * @param  \Illuminate\Contracts\Config\Repository  $config
      * @param  \SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames  $frames
+     * @param  ?\SineMacula\Laravel\AuditLog\Contracts\HeldActorReader  $reader
      */
     public function __construct(
 
@@ -64,6 +67,9 @@ final readonly class AmbientActor
 
         /** What the current code is running in, and the users left on the guards. */
         private ExecutionFrames $frames,
+
+        /** Reads a guard that does not use `GuardHelpers`, when an integration binds one. */
+        private ?HeldActorReader $reader = null,
     ) {}
 
     /**
@@ -82,7 +88,7 @@ final readonly class AmbientActor
             $guard = $this->auth->guard($name);
 
             if ($guard->hasUser() && !$this->isLeftOn($guard, $name)) {
-                return self::snapshotOf($guard, $name);
+                return $this->snapshotOf($guard, $name);
             }
         }
 
@@ -148,19 +154,25 @@ final readonly class AmbientActor
     }
 
     /**
-     * The actor the guard's user gives, or `null` when it gives none: a user
-     * that cannot be referred to is no actor, not a failed record.
+     * The actor the bound reader reads from the guard, else the one its
+     * `GuardHelpers` user gives, or `null` when neither gives one: a user that
+     * cannot be referred to is no actor, not a failed record.
      *
      * @param  \Illuminate\Contracts\Auth\Guard  $guard
      * @param  string  $name
      * @return ?\SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot
      */
-    private static function snapshotOf(Guard $guard, string $name): ?ActorSnapshot
+    private function snapshotOf(Guard $guard, string $name): ?ActorSnapshot
     {
         try {
-            $reference = self::referenceTo(CachedUser::of($guard));
+            $held = $this->reader?->read($name, $guard);
 
-            return $reference === null ? null : new ActorSnapshot($reference, $name);
+            if ($held === null) {
+                $reference = self::referenceTo(CachedUser::of($guard));
+                $held      = $reference === null ? null : new HeldActor($reference);
+            }
+
+            return $held === null ? null : new ActorSnapshot($held, $name);
         } catch (\InvalidArgumentException) {
             return null;
         }

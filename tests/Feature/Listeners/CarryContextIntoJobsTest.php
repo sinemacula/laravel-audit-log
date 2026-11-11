@@ -6,6 +6,7 @@ namespace Tests\Feature\Listeners;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Log\Context\Events\ContextDehydrating;
@@ -15,8 +16,10 @@ use Illuminate\Support\Facades\Context;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Contracts\HeldActorReader;
 use SineMacula\Laravel\AuditLog\Contributors\AmbientActor;
 use SineMacula\Laravel\AuditLog\Listeners\CarryContextIntoJobs;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\CarriedContext;
@@ -25,6 +28,8 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
+use Tests\Unit\Stubs\StubForeignGuard;
+use Tests\Unit\Stubs\StubHeldActorReader;
 
 /**
  * Feature tests for what a queued job carries: everything goes on the copy of
@@ -46,7 +51,10 @@ final class CarryContextIntoJobsTest extends TestCase
     private const string TRACE_ID = '0af7651916cd43dd8448eb211c80319c';
 
     /** @var list<string> The actor's hidden keys. */
-    private const array ACTOR_KEYS = [CarriedContext::ACTOR_TYPE, CarriedContext::ACTOR_ID, CarriedContext::ACTOR_GUARD];
+    private const array ACTOR_KEYS = [
+        CarriedContext::ACTOR_TYPE, CarriedContext::ACTOR_ID, CarriedContext::ACTOR_GUARD,
+        CarriedContext::PRINCIPAL_TYPE, CarriedContext::PRINCIPAL_ID, CarriedContext::TENANT_TYPE, CarriedContext::TENANT_ID, CarriedContext::SESSION,
+    ];
 
     /**
      * Put the application back as the current container.
@@ -146,6 +154,31 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
+     * The actor a bound reader reads goes into the job with its principal,
+     * tenant and session, and reads back as it went out.
+     *
+     * @return void
+     */
+    public function testCarriesTheReadActorsContext(): void
+    {
+        $held = new HeldActor(Reference::of('identity', 'id-9'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1');
+
+        Auth::extend('foreign', static fn (): Guard => new StubForeignGuard(holdsUser: true));
+
+        $config = app(ConfigRepository::class);
+
+        $config->set('auth.guards.foreign', ['driver' => 'foreign', 'provider' => 'users']);
+        $config->set('audit-log.actor.guards', ['foreign']);
+
+        $this->app?->instance(HeldActorReader::class, new StubHeldActorReader($held));
+
+        $carried = CarriedContext::actor($this->carried());
+
+        self::assertEquals($held, $carried?->held);
+        self::assertSame('foreign', $carried?->guard);
+    }
+
+    /**
      * With no actor there is no envelope at all.
      *
      * @return void
@@ -181,7 +214,7 @@ final class CarryContextIntoJobsTest extends TestCase
      */
     public function testACarriedEnvelopeIsKeptInsideAJob(): void
     {
-        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(Reference::of('user', 'user-7'), 'admin'));
+        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(new HeldActor(Reference::of('user', 'user-7')), 'admin'));
 
         $hidden = $this->carried()->allHidden();
 
@@ -198,7 +231,7 @@ final class CarryContextIntoJobsTest extends TestCase
      */
     public function testTheFramesActorReplacesWhatASyncJobLeftInContext(): void
     {
-        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(Reference::of('user', 'user-1'), 'web'));
+        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(new HeldActor(Reference::of('user', 'user-1')), 'web'));
 
         $hidden = $this->carried(self::copyHoldingAnActor())->allHidden();
 
@@ -231,7 +264,7 @@ final class CarryContextIntoJobsTest extends TestCase
 
         Auth::guard('web')->setUser($user);
 
-        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(Reference::of('user', 'user-7'), 'admin'), ['web' => $user]);
+        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(new HeldActor(Reference::of('user', 'user-7')), 'admin'), ['web' => $user]);
 
         self::assertSame('user-7', $this->carried()->getHidden(CarriedContext::ACTOR_ID));
     }
@@ -245,7 +278,7 @@ final class CarryContextIntoJobsTest extends TestCase
     {
         Auth::guard('web')->setUser(self::user());
 
-        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(Reference::of('user', 'user-7'), 'admin'));
+        app(ExecutionFrames::class)->enterJob(new \stdClass, 'App\Jobs\SendInvoice', new ActorSnapshot(new HeldActor(Reference::of('user', 'user-7')), 'admin'));
 
         $hidden = $this->carried(self::copyHoldingAnActor())->allHidden();
 
@@ -469,7 +502,7 @@ final class CarryContextIntoJobsTest extends TestCase
     {
         $copy = new Repository(app(Dispatcher::class));
 
-        CarriedContext::carryActor($copy, new ActorSnapshot(Reference::of('user', 'user-7'), 'admin'));
+        CarriedContext::carryActor($copy, new ActorSnapshot(new HeldActor(Reference::of('user', 'user-7')), 'admin'));
 
         return $copy;
     }

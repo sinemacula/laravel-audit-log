@@ -9,6 +9,7 @@ use Illuminate\Log\Context\Repository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\CarriedContext;
@@ -69,6 +70,11 @@ final class CarriedContextTest extends TestCase
         self::assertSame('audit-log.actor_type', CarriedContext::ACTOR_TYPE);
         self::assertSame('audit-log.actor_id', CarriedContext::ACTOR_ID);
         self::assertSame('audit-log.actor_guard', CarriedContext::ACTOR_GUARD);
+        self::assertSame('audit-log.principal_type', CarriedContext::PRINCIPAL_TYPE);
+        self::assertSame('audit-log.principal_id', CarriedContext::PRINCIPAL_ID);
+        self::assertSame('audit-log.tenant_type', CarriedContext::TENANT_TYPE);
+        self::assertSame('audit-log.tenant_id', CarriedContext::TENANT_ID);
+        self::assertSame('audit-log.session', CarriedContext::SESSION);
     }
 
     /**
@@ -80,7 +86,7 @@ final class CarriedContextTest extends TestCase
     {
         $context = self::context();
 
-        CarriedContext::carryActor($context, new ActorSnapshot(Reference::of('App\Models\User', 42), 'web'));
+        CarriedContext::carryActor($context, new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', 42)), 'web'));
 
         self::assertSame(self::ENVELOPE, $context->allHidden());
         self::assertSame([], $context->all());
@@ -95,14 +101,44 @@ final class CarriedContextTest extends TestCase
     {
         $context = self::context();
 
-        CarriedContext::carryActor($context, new ActorSnapshot(Reference::of('App\Models\User', '42'), 'web'));
+        CarriedContext::carryActor($context, new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', '42')), 'web'));
 
         $actor = CarriedContext::actor($context);
 
         self::assertNotNull($actor);
-        self::assertSame('App\Models\User', $actor->reference->type);
-        self::assertSame('42', $actor->reference->id);
+        self::assertSame('App\Models\User', $actor->held->actor->type);
+        self::assertSame('42', $actor->held->actor->id);
         self::assertSame('web', $actor->guard);
+    }
+
+    /**
+     * The actor's principal, tenant and session read back as they went out.
+     *
+     * @return void
+     */
+    public function testReadsTheCarriedContextBack(): void
+    {
+        $context = self::context();
+
+        CarriedContext::carryActor($context, self::fullSnapshot());
+
+        self::assertEquals(self::fullSnapshot(), CarriedContext::actor($context));
+    }
+
+    /**
+     * Carrying an actor replaces the whole envelope, so the context of an
+     * earlier actor never goes on with a later one.
+     *
+     * @return void
+     */
+    public function testCarryingReplacesTheWholeEnvelope(): void
+    {
+        $context = self::context();
+
+        CarriedContext::carryActor($context, self::fullSnapshot());
+        CarriedContext::carryActor($context, new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', 42)), 'web'));
+
+        self::assertSame(self::ENVELOPE, $context->allHidden());
     }
 
     /**
@@ -115,7 +151,7 @@ final class CarriedContextTest extends TestCase
     {
         $context = self::context()->addHidden([...self::ENVELOPE, CarriedContext::ACTOR_TYPE => 'App\Models\Gone']);
 
-        self::assertSame('App\Models\Gone', CarriedContext::actor($context)?->reference->type);
+        self::assertSame('App\Models\Gone', CarriedContext::actor($context)?->held->actor->type);
     }
 
     /**
@@ -148,27 +184,37 @@ final class CarriedContextTest extends TestCase
     public static function provideMalformedEnvelopes(): iterable
     {
         yield from [
-            'an array for the type'     => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => ['App\Models\User']]],
-            'an array for the id'       => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => ['42']]],
-            'an array for the guard'    => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => ['web']]],
-            'an integer for the type'   => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => 42]],
-            'an integer for the id'     => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => 42]],
-            'an integer for the guard'  => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => 42]],
-            'a boolean for the id'      => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => true]],
-            'null for the id'           => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => null]],
-            'an empty type'             => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => '']],
-            'an empty id'               => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => '']],
-            'an empty guard'            => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => '']],
-            'a missing type'            => [array_diff_key(self::ENVELOPE, [CarriedContext::ACTOR_TYPE => true])],
-            'a missing id'              => [array_diff_key(self::ENVELOPE, [CarriedContext::ACTOR_ID => true])],
-            'a missing guard'           => [array_diff_key(self::ENVELOPE, [CarriedContext::ACTOR_GUARD => true])],
-            'a 192-character type'      => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => str_repeat('a', 192)]],
-            'a 192-character id'        => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => str_repeat('a', 192)]],
-            'a 65-character guard'      => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => str_repeat('a', 65)]],
-            'a control character type'  => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => "App\0User"]],
-            'a control character id'    => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => "4\n2"]],
-            'a control character guard' => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => "we\tb"]],
-            'invalid UTF-8 in the id'   => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => "4\xC32"]],
+            'an array for the type'       => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => ['App\Models\User']]],
+            'an array for the id'         => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => ['42']]],
+            'an array for the guard'      => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => ['web']]],
+            'an integer for the type'     => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => 42]],
+            'an integer for the id'       => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => 42]],
+            'an integer for the guard'    => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => 42]],
+            'a boolean for the id'        => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => true]],
+            'null for the id'             => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => null]],
+            'an empty type'               => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => '']],
+            'an empty id'                 => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => '']],
+            'an empty guard'              => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => '']],
+            'a missing type'              => [array_diff_key(self::ENVELOPE, [CarriedContext::ACTOR_TYPE => true])],
+            'a missing id'                => [array_diff_key(self::ENVELOPE, [CarriedContext::ACTOR_ID => true])],
+            'a missing guard'             => [array_diff_key(self::ENVELOPE, [CarriedContext::ACTOR_GUARD => true])],
+            'a 192-character type'        => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => str_repeat('a', 192)]],
+            'a 192-character id'          => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => str_repeat('a', 192)]],
+            'a 65-character guard'        => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => str_repeat('a', 65)]],
+            'a control character type'    => [[...self::ENVELOPE, CarriedContext::ACTOR_TYPE => "App\0User"]],
+            'a control character id'      => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => "4\n2"]],
+            'a control character guard'   => [[...self::ENVELOPE, CarriedContext::ACTOR_GUARD => "we\tb"]],
+            'invalid UTF-8 in the id'     => [[...self::ENVELOPE, CarriedContext::ACTOR_ID => "4\xC32"]],
+            'a null principal type'       => [[...self::ENVELOPE, CarriedContext::PRINCIPAL_TYPE => null]],
+            'a null tenant id'            => [[...self::ENVELOPE, CarriedContext::TENANT_TYPE => 'tenant', CarriedContext::TENANT_ID => null]],
+            'a null session'              => [[...self::ENVELOPE, CarriedContext::SESSION => null]],
+            'a principal with no id'      => [[...self::ENVELOPE, CarriedContext::PRINCIPAL_TYPE => 'principal']],
+            'a tenant with no type'       => [[...self::ENVELOPE, CarriedContext::TENANT_ID => 't-1']],
+            'an integer principal id'     => [[...self::ENVELOPE, CarriedContext::PRINCIPAL_TYPE => 'principal', CarriedContext::PRINCIPAL_ID => 7]],
+            'an empty tenant id'          => [[...self::ENVELOPE, CarriedContext::TENANT_TYPE => 'tenant', CarriedContext::TENANT_ID => '']],
+            'an array for the session'    => [[...self::ENVELOPE, CarriedContext::SESSION => ['session-1']]],
+            'an empty session'            => [[...self::ENVELOPE, CarriedContext::SESSION => '']],
+            'a control character session' => [[...self::ENVELOPE, CarriedContext::SESSION => "sess\nion"]],
         ];
     }
 
@@ -195,8 +241,13 @@ final class CarriedContextTest extends TestCase
     {
         $context = self::context()->addHidden([
             ...self::ENVELOPE,
-            CarriedContext::REQUEST_ID => 'app:request-1',
-            CarriedContext::TRACE_ID   => '4bf92f3577b34da6a3ce929d0e0e4736',
+            CarriedContext::PRINCIPAL_TYPE => 'principal',
+            CarriedContext::PRINCIPAL_ID   => 'p-1',
+            CarriedContext::TENANT_TYPE    => 'tenant',
+            CarriedContext::TENANT_ID      => 't-1',
+            CarriedContext::SESSION        => 'session-1',
+            CarriedContext::REQUEST_ID     => 'app:request-1',
+            CarriedContext::TRACE_ID       => '4bf92f3577b34da6a3ce929d0e0e4736',
         ]);
 
         CarriedContext::forgetActor($context);
@@ -220,7 +271,7 @@ final class CarriedContextTest extends TestCase
             ->add(['tenant' => 'acme', CarriedContext::ACTOR_ID => 'visible'])
             ->addHidden('app.secret', 'kept');
 
-        CarriedContext::carryActor($context, new ActorSnapshot(Reference::of('App\Models\User', '42'), 'web'));
+        CarriedContext::carryActor($context, new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', '42')), 'web'));
         CarriedContext::actor($context);
 
         self::assertSame(['tenant' => 'acme', CarriedContext::ACTOR_ID => 'visible'], $context->all());
@@ -230,6 +281,16 @@ final class CarriedContextTest extends TestCase
 
         self::assertSame(['tenant' => 'acme', CarriedContext::ACTOR_ID => 'visible'], $context->all());
         self::assertSame(['app.secret' => 'kept'], $context->allHidden());
+    }
+
+    /**
+     * A snapshot with a principal, a tenant and a session.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot
+     */
+    private static function fullSnapshot(): ActorSnapshot
+    {
+        return new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', '42'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1'), 'web');
     }
 
     /**

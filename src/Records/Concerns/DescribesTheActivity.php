@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Records\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
+use SineMacula\Laravel\AuditLog\Records\CorrelationId;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\Normalised;
@@ -38,9 +39,6 @@ trait DescribesTheActivity
 {
     /** @var int Longest credential or correlation id, in characters: their columns. */
     private const int ID_MAX_CHARACTERS = 191;
-
-    /** @var string Pattern of a correlation id: a lower-case namespace, a colon, then a value that starts with a non-space. */
-    private const string CORRELATION_PATTERN = '/\A[a-z][a-z0-9_-]{0,31}:\S.*\z/u';
 
     /** @var string Prefix of the property keys that belong to the package's own metadata. */
     private const string RESERVED_KEY = '_audit';
@@ -343,9 +341,7 @@ trait DescribesTheActivity
      */
     private static function checkCorrelationId(string $correlationId): void
     {
-        $fits = mb_strlen($correlationId, 'UTF-8') <= self::ID_MAX_CHARACTERS && TextSanitizer::isClean($correlationId);
-
-        if ($fits && preg_match(self::CORRELATION_PATTERN, $correlationId) === 1) {
+        if (CorrelationId::isValid($correlationId)) {
             return;
         }
 

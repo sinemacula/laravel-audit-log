@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\Enums\FrameKind;
@@ -449,7 +450,7 @@ final class ExecutionFramesTest extends TestCase
     public function testTheInnermostJobsCarriedActorApplies(): void
     {
         $frames = new ExecutionFrames;
-        $outer  = new ActorSnapshot(Reference::of('user', 'user-1'), 'web');
+        $outer  = new ActorSnapshot(new HeldActor(Reference::of('user', 'user-1')), 'web');
         $inner  = new \stdClass;
 
         $frames->enterJob(new \stdClass, 'App\Jobs\Outer', $outer);

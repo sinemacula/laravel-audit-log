@@ -46,6 +46,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Access\DenyAllPolicy;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
@@ -120,6 +121,7 @@ use Tests\Fixtures\Capture\Mappers\PortalMapper;
 use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
+use Tests\Fixtures\Querying\ClosurePolicy;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
@@ -781,6 +783,39 @@ final class AuditLogServiceProviderTest extends TestCase
 
         self::assertSame($policy, app(AuditAccessPolicy::class));
         self::assertSame($reader, app(FieldReader::class));
+    }
+
+    /**
+     * isPackageDefault() is true while the contract resolves to the package's
+     * own default, resolved or not, and false for anything bound over it.
+     *
+     * @return void
+     */
+    public function testIsPackageDefaultTellsThePackagesDefaultFromAnyOther(): void
+    {
+        $app = $this->app;
+
+        self::assertInstanceOf(Container::class, $app);
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class));
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class));
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, 'audit-log.nothing-bound-here'));
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, Recorder::class), 'A class bound to itself is no default.');
+
+        app(AuditAccessPolicy::class);
+        app(FieldReader::class);
+
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class), 'A resolved shared default is still the default.');
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class));
+
+        $app->instance(AuditAccessPolicy::class, new ClosurePolicy(static fn (): AccessScope => AccessScope::all()));
+        $app->instance(FieldReader::class, new SealedFieldReader);
+
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class), 'Another instance held over the default is not the default.');
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class), 'Any instance held over a transient default is not the default.');
+
+        $app->singleton(AuditAccessPolicy::class, DenyAllPolicy::class);
+
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class), 'The default class bound by the application is not the package\'s binding.');
     }
 
     /**

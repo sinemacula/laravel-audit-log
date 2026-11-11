@@ -17,6 +17,7 @@ or registered from a service provider's `boot()`; each contract's docblock says 
 | Attachments on a custom store                | Implement `Contracts\AcceptsAttachments` on the store, as below: bulk members, read disclosures, export manifests                                                                       |
 | Events of the application or another package | Implement `Contracts\EventMapper` and register it with `AuditLog::map()`, as below                                                                                                      |
 | What a record leaves out                     | Implement `Contracts\ContextContributor` and register it with `AuditLog::contribute()`                                                                                                  |
+| Who a guard without `GuardHelpers` holds     | Implement `Contracts\HeldActorReader` and bind it, as below: the actor, principal, tenant and session it has bound, carried into queued jobs                                            |
 | The application's event codes                | Implement `Contracts\DefinesAuditEvents` on a string-backed enum and register it with `AuditLog::define()`                                                                              |
 | Encrypted fields                             | Implement `Contracts\FieldEncrypter`, given each value's place, and bind it; the package seals under each owner's key, and `Privacy\NoFieldEncrypter` never encrypts                    |
 | How an owner's key is wrapped                | Implement `Contracts\KeyWrapper` and bind it to wrap owners' keys with an external key service; the package binds `Keys\LocalKeyWrapper`                                                |
@@ -28,6 +29,10 @@ or registered from a service provider's `boot()`; each contract's docblock says 
 | Which entries a viewer may read              | Implement `Contracts\AuditAccessPolicy` and bind it; it is asked on every terminal call, and `Access\DenyAllPolicy` denies all                                                          |
 | How an entry's encrypted fields are shown    | Implement `Contracts\FieldReader`; asked a page at a time through `readAll()`, under the reveal grant only; the default answers `encrypted`, a decrypting one also `erased`             |
 | The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                                                                                                 |
+
+An integration that binds over a contract only while it still holds the package's default asks
+`AuditLogServiceProvider::isPackageDefault($container, $contract)`: true while the contract resolves to the package's
+own default, resolved or not, and false for any binding or instance made over it, even of the default's class.
 
 A store that keeps attachments, a bulk operation's subjects, a read's disclosure and an export's manifest, implements
 `Contracts\AcceptsAttachments` and returns `true` from `acceptsAttachments()` only when it keeps the attachment and its
@@ -183,7 +188,8 @@ AuditLog::event('invoice.approved')->on($invoice)->correlatedWith('app:ticket-12
 - The value starts with a character that is not a space. The whole id is 1 to 191 characters, with no control
   characters.
 - The id is validated, never cleaned or cut: one that does not fit is an `\InvalidArgumentException` from
-  `correlatedWith()`, and the last id given wins.
+  `correlatedWith()`, and the last id given wins. `Records\CorrelationId::isValid()` checks an id first, so a mapper
+  can skip one built from outside values rather than lose the record.
 - Choose a namespace per source, such as `identity` for the attempts of the recipe above, so ids from two systems never
   collide.
 
@@ -194,3 +200,32 @@ included. Register one from a service provider's `boot()` with `AuditLog::contri
 `Contracts\ContextContributor` and fills only what is still a gap, so a value a mapper set, or an actor a capture
 names as no one, is never replaced. [The context note](../design/context-resolution.md) says what each contributor may
 fill and in what order.
+
+## Guards without GuardHelpers
+
+The ambient actor is read without calling a guard's `user()`, and the package can do that only for a guard using
+Laravel's `GuardHelpers`. For any other guard, bind a `Contracts\HeldActorReader`. It is asked about the first guard in
+`actor.guards` whose `hasUser()` is true, and returns a `Records\HeldActor` built from what that guard has already
+bound, with the principal, tenant and session reference when it knows them:
+
+```php
+$this->app->bind(HeldActorReader::class, TokenGuardReader::class);
+
+final class TokenGuardReader implements HeldActorReader
+{
+    public function read(string $guard, Guard $instance): ?HeldActor
+    {
+        if (!$instance instanceof TokenGuard) {
+            return null;
+        }
+
+        return new HeldActor(Reference::to($instance->identity()), tenant: Reference::of('tenant', $instance->tenantId()));
+    }
+}
+```
+
+- `null` leaves the guard to the `GuardHelpers` reading, and an `\InvalidArgumentException` means no ambient actor.
+- The reader must read only what the guard holds: never `user()`, never authenticate, never read a request.
+- The session reference is an application-owned, non-secret reference, never Laravel's session id.
+- The actor and its context fill a record whose actor is open, or already that same actor, and are carried into the
+  jobs it queues. A guard the reader reads must not keep its user from one queued job to the next on a worker.
