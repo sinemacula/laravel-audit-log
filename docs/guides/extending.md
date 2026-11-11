@@ -30,6 +30,10 @@ or registered from a service provider's `boot()`; each contract's docblock says 
 | How an entry's encrypted fields are shown    | Implement `Contracts\FieldReader`; asked a page at a time through `readAll()`, under the reveal grant only; the default answers `encrypted`, a decrypting one also `erased`             |
 | The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                                                                                                 |
 
+An integration that binds over a contract only while it still holds the package's default asks
+`AuditLogServiceProvider::isPackageDefault($container, $contract)`: true while the contract resolves to the package's
+own default, resolved or not, and false for any binding or instance made over it, even of the default's class.
+
 A store that keeps attachments, a bulk operation's subjects, a read's disclosure and an export's manifest, implements
 `Contracts\AcceptsAttachments` and returns `true` from `acceptsAttachments()` only when it keeps the attachment and its
 entry atomically, both or neither, so an entry never points at an artifact that is not there. It answers from its own
@@ -181,7 +185,8 @@ AuditLog::event('invoice.approved')->on($invoice)->correlatedWith('app:ticket-12
 - The value starts with a character that is not a space. The whole id is 1 to 191 characters, with no control
   characters.
 - The id is validated, never cleaned or cut: one that does not fit is an `\InvalidArgumentException` from
-  `correlatedWith()`, and the last id given wins.
+  `correlatedWith()`, and the last id given wins. `Records\CorrelationId::isValid()` checks an id first, so a mapper
+  can skip one built from outside values rather than lose the record.
 - Choose a namespace per source, such as `identity` for the attempts of the recipe above, so ids from two systems never
   collide.
 

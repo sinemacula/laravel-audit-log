@@ -18,6 +18,7 @@ use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Events\TransactionCommitting;
@@ -135,15 +136,25 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
  * once. Booting still issues no query and reads no setting that could stop it,
  * so a malformed one, a capture setting included, reaches `audit-log:check`.
  *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @internal
  */
 final class AuditLogServiceProvider extends ServiceProvider
 {
     /** @var string The key the package's configuration is merged under. */
     public const string CONFIG = 'audit-log';
+
+    /** @var array<class-string, class-string> Each public contract with a shared default, and that default's class. */
+    private const array SHARED_DEFAULTS = [
+        Clock::class             => SystemClock::class,
+        AuditStore::class        => DatabaseAuditStore::class,
+        KeyWrapper::class        => LocalKeyWrapper::class,
+        RetentionPolicy::class   => ConfiguredRetentionPolicy::class,
+        PruneLedger::class       => JournalPruneLedger::class,
+        AuditAccessPolicy::class => DenyAllPolicy::class,
+    ];
 
     /** @var list<string> File names of the shipped migrations, published under the `audit-log-migrations` tag. */
     private const array MIGRATIONS = [
@@ -162,6 +173,29 @@ final class AuditLogServiceProvider extends ServiceProvider
         '2026_11_02_001200_create_audit_log_owner_erasures_table.php',
         '2026_11_02_001300_create_audit_log_key_uses_table.php',
     ];
+
+    /**
+     * Whether the contract still resolves to the package's own default: the
+     * binding is the package's, and any instance held under it is exactly the
+     * default's class, as resolving a shared default leaves.
+     *
+     * @param  \Illuminate\Container\Container  $container
+     * @param  string  $contract
+     * @return bool
+     */
+    public static function isPackageDefault(Container $container, string $contract): bool
+    {
+        $concrete = $container->getBindings()[$contract]['concrete'] ?? null;
+
+        if (!$concrete instanceof \Closure || (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() !== self::class) {
+            return false;
+        }
+
+        // Laravel offers no public way to read an instance held over a binding
+        $held = \Closure::bind(static fn (Container $container): ?object => $container->instances[$contract] ?? null, null, Container::class)($container);
+
+        return $held === null || $held::class === (self::SHARED_DEFAULTS[$contract] ?? null);
+    }
 
     /**
      * Register container bindings.
@@ -188,16 +222,14 @@ final class AuditLogServiceProvider extends ServiceProvider
             self::CONFIG,
         );
 
-        $this->app->singletonIf(Clock::class, SystemClock::class);
+        foreach (self::SHARED_DEFAULTS as $contract => $default) {
+            $this->app->singletonIf($contract, static fn (Application $app): object => $app->make($default));
+        }
+
         $this->app->singletonIf(IntegritySettings::class);
         $this->app->singletonIf(KeyRing::class);
-        $this->app->singletonIf(AuditStore::class, DatabaseAuditStore::class);
-        $this->app->bindIf(FieldEncrypter::class, SubjectKeyEncrypter::class);
-        $this->app->singletonIf(KeyWrapper::class, LocalKeyWrapper::class);
-        $this->app->singletonIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
-        $this->app->singletonIf(PruneLedger::class, JournalPruneLedger::class);
-        $this->app->singletonIf(AuditAccessPolicy::class, DenyAllPolicy::class);
-        $this->app->bindIf(FieldReader::class, SubjectKeyFieldReader::class);
+        $this->app->bindIf(FieldEncrypter::class, static fn (Application $app): FieldEncrypter => $app->make(SubjectKeyEncrypter::class));
+        $this->app->bindIf(FieldReader::class, static fn (Application $app): FieldReader => $app->make(SubjectKeyFieldReader::class));
         $this->app->bindIf(CheckpointAnchor::class, static fn (Application $app): CheckpointAnchor => $app->make(AnchorFactory::class)->make());
         $this->app->singletonIf(EventCatalogue::class);
         $this->app->singletonIf(ContributorRegistry::class);
