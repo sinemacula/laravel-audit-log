@@ -146,6 +146,16 @@ final class AuditLogServiceProvider extends ServiceProvider
     /** @var string The key the package's configuration is merged under. */
     public const string CONFIG = 'audit-log';
 
+    /** @var array<class-string, class-string> Each public contract with a shared default, and that default's class. */
+    private const array SHARED_DEFAULTS = [
+        Clock::class             => SystemClock::class,
+        AuditStore::class        => DatabaseAuditStore::class,
+        KeyWrapper::class        => LocalKeyWrapper::class,
+        RetentionPolicy::class   => ConfiguredRetentionPolicy::class,
+        PruneLedger::class       => JournalPruneLedger::class,
+        AuditAccessPolicy::class => DenyAllPolicy::class,
+    ];
+
     /** @var list<string> File names of the shipped migrations, published under the `audit-log-migrations` tag. */
     private const array MIGRATIONS = [
         '2026_11_02_000000_create_audit_log_entries_table.php',
@@ -165,10 +175,9 @@ final class AuditLogServiceProvider extends ServiceProvider
     ];
 
     /**
-     * Whether the contract still holds the package's own default binding,
-     * untouched and never resolved: an instance held under it, a resolved
-     * shared default included, and any binding the package did not make answer
-     * false.
+     * Whether the contract still resolves to the package's own default: the
+     * binding is the package's, and any instance held under it is exactly the
+     * default's class, as resolving a shared default leaves.
      *
      * @param  \Illuminate\Container\Container  $container
      * @param  string  $contract
@@ -178,10 +187,14 @@ final class AuditLogServiceProvider extends ServiceProvider
     {
         $concrete = $container->getBindings()[$contract]['concrete'] ?? null;
 
-        // Laravel offers no public way to see an instance held over a binding
-        $isHeld = \Closure::bind(static fn (Container $container): bool => isset($container->instances[$contract]), null, Container::class);
+        if (!$concrete instanceof \Closure || (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() !== self::class) {
+            return false;
+        }
 
-        return !$isHeld($container) && $concrete instanceof \Closure && (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() === self::class;
+        // Laravel offers no public way to read an instance held over a binding
+        $held = \Closure::bind(static fn (Container $container): ?object => $container->instances[$contract] ?? null, null, Container::class)($container);
+
+        return $held === null || $held::class === (self::SHARED_DEFAULTS[$contract] ?? null);
     }
 
     /**
@@ -209,15 +222,13 @@ final class AuditLogServiceProvider extends ServiceProvider
             self::CONFIG,
         );
 
-        $this->app->singletonIf(Clock::class, static fn (Application $app): Clock => $app->make(SystemClock::class));
+        foreach (self::SHARED_DEFAULTS as $contract => $default) {
+            $this->app->singletonIf($contract, static fn (Application $app): object => $app->make($default));
+        }
+
         $this->app->singletonIf(IntegritySettings::class);
         $this->app->singletonIf(KeyRing::class);
-        $this->app->singletonIf(AuditStore::class, static fn (Application $app): AuditStore => $app->make(DatabaseAuditStore::class));
         $this->app->bindIf(FieldEncrypter::class, static fn (Application $app): FieldEncrypter => $app->make(SubjectKeyEncrypter::class));
-        $this->app->singletonIf(KeyWrapper::class, static fn (Application $app): KeyWrapper => $app->make(LocalKeyWrapper::class));
-        $this->app->singletonIf(RetentionPolicy::class, static fn (Application $app): RetentionPolicy => $app->make(ConfiguredRetentionPolicy::class));
-        $this->app->singletonIf(PruneLedger::class, static fn (Application $app): PruneLedger => $app->make(JournalPruneLedger::class));
-        $this->app->singletonIf(AuditAccessPolicy::class, static fn (Application $app): AuditAccessPolicy => $app->make(DenyAllPolicy::class));
         $this->app->bindIf(FieldReader::class, static fn (Application $app): FieldReader => $app->make(SubjectKeyFieldReader::class));
         $this->app->bindIf(CheckpointAnchor::class, static fn (Application $app): CheckpointAnchor => $app->make(AnchorFactory::class)->make());
         $this->app->singletonIf(EventCatalogue::class);

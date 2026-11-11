@@ -30,8 +30,8 @@ or registered from a service provider's `boot()`; each contract's docblock says 
 | The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                                                                                                 |
 
 An integration that binds over a contract only while it still holds the package's default asks
-`AuditLogServiceProvider::isPackageDefault($container, $contract)`: true while the binding is the package's own,
-untouched and unresolved, so a binding the application made, or a shared default already resolved, is left alone.
+`AuditLogServiceProvider::isPackageDefault($container, $contract)`: true while the contract resolves to the package's
+own default, resolved or not, and false for any binding or instance made over it, even of the default's class.
 
 A store that keeps attachments, a bulk operation's subjects, a read's disclosure and an export's manifest, implements
 `Contracts\AcceptsAttachments` and returns `true` from `acceptsAttachments()` only when it keeps the attachment and its
