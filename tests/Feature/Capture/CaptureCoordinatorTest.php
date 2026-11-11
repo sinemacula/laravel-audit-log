@@ -32,6 +32,7 @@ use Tests\Fixtures\Capture\Events\PackageShapedEvent;
 use Tests\Fixtures\Capture\Events\PortalEvent;
 use Tests\Fixtures\Capture\Events\PortalSignedIn;
 use Tests\Fixtures\Capture\Events\SignedInToPortal;
+use Tests\Fixtures\Capture\Mappers\AfterTransactionMapper;
 use Tests\Fixtures\Capture\Mappers\CodelessMapper;
 use Tests\Fixtures\Capture\Mappers\ConsumingMapper;
 use Tests\Fixtures\Capture\Mappers\FailClosedMapper;
@@ -357,6 +358,28 @@ final class CaptureCoordinatorTest extends TestCase
     public function testAMapperChoosingTheTimingIsContained(): void
     {
         $this->assertContained(TimingMapper::class, \LogicException::class);
+    }
+
+    /**
+     * A mapper may write its record after the transaction, which keeps it when
+     * the transaction rolls back.
+     *
+     * @return void
+     */
+    public function testAMapperMayWriteAfterTheTransaction(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+
+        self::registry()->map(PortalEvent::class, AfterTransactionMapper::class);
+
+        $connection->beginTransaction();
+
+        self::assertNotNull(self::coordinator()->mapped(new SignedInToPortal));
+        self::assertSame(0, $this->fake->count());
+
+        $connection->rollBack();
+
+        self::assertSame(1, $this->fake->count());
     }
 
     /**

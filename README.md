@@ -229,6 +229,7 @@ AuditLog::event('invoice.approved')->on($invoice)->afterCommit()->record();     
 AuditLog::event('invoice.approved')->on($invoice)->afterCommit('billing')->record(); // that connection's transaction
 AuditLog::event('invoice.approved')->on($invoice)->immediately()->record();          // now, whatever is open
 AuditLog::event('invoice.approved')->on($invoice)->transactional()->record();        // atomic with an open transaction
+AuditLog::event('invoice.approved')->on($invoice)->afterTransaction()->record();     // when it ends, kept on a rollback
 AuditLog::event('invoice.approved')->on($invoice)->failClosed()->record();           // now, and a failure must throw
 ```
 

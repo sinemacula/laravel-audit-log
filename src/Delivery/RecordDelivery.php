@@ -207,14 +207,13 @@ final readonly class RecordDelivery
             return;
         }
 
-        if ($timing !== Timing::AFTER_COMMIT) {
-
+        if ($timing === Timing::AFTER_COMMIT) {
+            $this->writeAfterCommit($record, $rule, $this->transactions()->selected($this->transactionNameOf($connection)), $capture);
+        } elseif ($timing === Timing::AFTER_TRANSACTION) {
+            $this->writeAfterTransaction($record, $rule, $capture);
+        } else {
             $this->write($record, $rule, false, $capture, $package);
-
-            return;
         }
-
-        $this->writeAfterCommit($record, $rule, $this->transactions()->selected($this->transactionNameOf($connection)), $capture);
     }
 
     /**
@@ -300,6 +299,48 @@ final readonly class RecordDelivery
             },
             function (#[\SensitiveParameter] \Throwable $aborted) use ($sealed): void {
                 $this->abandonSealed($sealed, $aborted);
+            },
+        );
+    }
+
+    /**
+     * Write the record once the outermost transaction on the storage connection
+     * ends, under its rule when it commits and contained when it rolls back,
+     * and now when none is open. A capture's signal is marked deferred before
+     * the write is queued.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \Illuminate\Database\DeadlockException
+     * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
+     */
+    private function writeAfterTransaction(#[\SensitiveParameter] AuditRecord $record, FailureRule $rule, #[\SensitiveParameter] ?CaptureSignal $capture): void
+    {
+        $connection = $this->storageConnection();
+        $selected   = $connection === null ? null : $this->transactions()->selected($connection->getName() ?? StorageConnection::resolvedName());
+
+        if ($selected === null) {
+
+            $this->write($record, $rule, false, $capture);
+
+            return;
+        }
+
+        $sealed = new \SensitiveParameterValue($record);
+
+        $capture?->defer();
+
+        $this->container->make(CommitQueue::class)->deferToEnd(
+            $selected,
+            function () use ($sealed, $rule, $capture): void {
+                $this->writeSealed($sealed, $rule, $capture);
+            },
+            function () use ($sealed, $capture): void {
+                $this->writeRolledBack($sealed, $capture);
             },
         );
     }
@@ -487,6 +528,31 @@ final readonly class RecordDelivery
             $this->write($record, $rule, true, $capture);
         } catch (\Throwable $failure) {
             (new FailureHandler($this->container))->contain($record, $failure, FailedOperation::STORE, AuditStore::class, $capture);
+        }
+    }
+
+    /**
+     * Write the record held sealed past a rollback under the `REPORT` rule,
+     * letting nothing out: it runs inside the host's rollback, whose own
+     * exception must not be masked.
+     *
+     * @param  \SensitiveParameterValue  $sealed
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @return void
+     */
+    private function writeRolledBack(\SensitiveParameterValue $sealed, #[\SensitiveParameter] ?CaptureSignal $capture): void
+    {
+        /** @var \SineMacula\Laravel\AuditLog\Records\AuditRecord $record */
+        $record = $sealed->getValue();
+
+        try {
+            $this->write($record, FailureRule::REPORT, false, $capture);
+        } catch (\Throwable $failure) {
+            $handler = new FailureHandler($this->container);
+
+            $capture === null
+                ? $handler->abandon($record, $failure, FailedOperation::STORE, AuditStore::class)
+                : $handler->contain($record, $failure, FailedOperation::STORE, AuditStore::class, $capture);
         }
     }
 

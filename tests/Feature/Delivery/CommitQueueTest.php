@@ -257,6 +257,134 @@ final class CommitQueueTest extends TestCase
     }
 
     /**
+     * Work deferred to the end runs its commit step when the outermost commits,
+     * and never its rollback step.
+     *
+     * @return void
+     */
+    public function testWorkDeferredToTheEndRunsItsCommitStepOnACommit(): void
+    {
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
+
+        self::assertSame([], $this->ran);
+
+        DB::commit();
+        DB::beginTransaction();
+        DB::rollBack();
+
+        self::assertSame(['commit'], $this->ran);
+    }
+
+    /**
+     * Its rollback step runs once the rollback has finished, when the manager
+     * no longer lists the transaction that rolled back.
+     *
+     * @return void
+     */
+    public function testWorkDeferredToTheEndRunsItsRollbackStepAfterTheRollback(): void
+    {
+        $pending = [];
+
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), static function () use (&$pending): void {
+            $manager = app('db.transactions');
+
+            self::assertInstanceOf(DatabaseTransactionsManager::class, $manager);
+
+            $pending[] = $manager->getPendingTransactions()->count();
+        });
+
+        DB::rollBack();
+
+        self::assertSame([0], $pending);
+        self::assertSame([], $this->ran);
+    }
+
+    /**
+     * A rollback inside the outermost leaves the work waiting for the outermost
+     * to end, and it then runs once.
+     *
+     * @return void
+     */
+    public function testANestedRollbackLeavesWorkDeferredToTheEndWaiting(): void
+    {
+        $this->begin();
+
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
+
+        DB::rollBack();
+
+        self::assertSame([], $this->ran);
+
+        DB::rollBack();
+
+        self::assertSame(['rollback'], $this->ran);
+    }
+
+    /**
+     * A commit that proves to be a rollback runs the rollback step.
+     *
+     * @return void
+     */
+    public function testAnAbortedCommitRunsTheRollbackStep(): void
+    {
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
+
+        $this->queue()->probe(new TransactionCommitting(self::postgresAnswering(self::answer('25P02'))));
+
+        DB::commit();
+
+        self::assertSame(['rollback'], $this->ran);
+    }
+
+    /**
+     * A rollback on another connection releases nothing.
+     *
+     * @return void
+     */
+    public function testARollbackOnAnotherConnectionReleasesNothing(): void
+    {
+        config()->set('database.connections.other', ['driver' => 'sqlite', 'database' => ':memory:']);
+
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
+
+        $other = DB::connection('other');
+
+        $other->beginTransaction();
+        $other->rollBack();
+
+        self::assertSame([], $this->ran);
+
+        DB::commit();
+
+        self::assertSame(['commit'], $this->ran);
+    }
+
+    /**
+     * Under the testing manager the rollback of the transaction inside its
+     * wrapper runs the rollback step, though the connection stays at level 1.
+     *
+     * @return void
+     */
+    public function testUnderATestWrapperTheRollbackStepRuns(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+        $manager    = new TestingManager([self::CONNECTION]);
+
+        app()->instance('db.transactions', $manager);
+        $connection->setTransactionManager($manager);
+
+        $connection->beginTransaction();
+
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
+
+        DB::rollBack();
+
+        self::assertSame(['rollback'], $this->ran);
+
+        $connection->rollBack();
+    }
+
+    /**
      * Two records under `throw` in one transaction: the first failure costs the
      * second nothing, both are spilled and attempted, and only the first leaves
      * the commit, with the second reported instead of lost.

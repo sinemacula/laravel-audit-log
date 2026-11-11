@@ -34,6 +34,9 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  * the reason only when `audit-log.capture.gate.reason_codes` lists it, since a
  * token can look like a code; its message is free text and never read.
  *
+ * A denial is written after the transaction, so a rollback around it keeps its
+ * record.
+ *
  * A malformed setting or a failure to record is contained by the capture, so
  * the Gate's check returns its result as before.
  *
@@ -82,7 +85,8 @@ final readonly class RecordGateDenial
                     'arguments'      => GateArguments::of($arguments),
                     'argument_count' => GateArguments::count($arguments),
                 ])
-                ->denied(self::reasonOf($settings, $event->result));
+                ->denied(self::reasonOf($settings, $event->result))
+                ->afterTransaction();
         };
 
         $container->make(CaptureCoordinator::class)->captured($event, self::class, $describe);

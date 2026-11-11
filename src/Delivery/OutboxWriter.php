@@ -108,6 +108,13 @@ final readonly class OutboxWriter
         #[\SensitiveParameter] ?CaptureSignal $capture = null,
         #[\SensitiveParameter] ?PackageWrite $package = null,
     ): void {
+        if ($timing === Timing::AFTER_TRANSACTION) {
+
+            $this->insertAfterTransaction($record, $rule, $capture);
+
+            return;
+        }
+
         $afterCommit = $timing === Timing::AFTER_COMMIT;
         $selected    = $afterCommit ? $this->transactions()->selected($transaction) : null;
 
@@ -144,6 +151,74 @@ final readonly class OutboxWriter
                 $this->abandonSealed($sealed, $aborted);
             },
         );
+    }
+
+    /**
+     * Insert the record once the outermost transaction holding the insert on
+     * the outbox connection ends, under its rule when it commits and contained
+     * when it rolls back, and now when none holds it. A capture's signal is
+     * marked deferred before the insert is queued.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \Illuminate\Database\DeadlockException
+     * @throws \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException
+     */
+    private function insertAfterTransaction(#[\SensitiveParameter] AuditRecord $record, FailureRule $rule, #[\SensitiveParameter] ?CaptureSignal $capture): void
+    {
+        $connection = $this->connectionName();
+        $selected   = $connection === null ? null : $this->transactions()->selected($connection);
+
+        if ($selected === null || !$this->holdsTheInsert($selected)) {
+
+            $this->insert($record, $rule, false, $capture);
+
+            return;
+        }
+
+        $sealed = new \SensitiveParameterValue($record);
+
+        $capture?->defer();
+
+        $this->container->make(CommitQueue::class)->deferToEnd(
+            $selected,
+            function () use ($sealed, $rule, $capture): void {
+                $this->insertSealed($sealed, $rule, $capture);
+            },
+            function () use ($sealed, $capture): void {
+                $this->insertRolledBack($sealed, $capture);
+            },
+        );
+    }
+
+    /**
+     * Insert the record held sealed past a rollback under the `REPORT` rule,
+     * letting nothing out: it runs inside the host's rollback, whose own
+     * exception must not be masked.
+     *
+     * @param  \SensitiveParameterValue  $sealed
+     * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
+     * @return void
+     */
+    private function insertRolledBack(\SensitiveParameterValue $sealed, #[\SensitiveParameter] ?CaptureSignal $capture): void
+    {
+        /** @var \SineMacula\Laravel\AuditLog\Records\AuditRecord $record */
+        $record = $sealed->getValue();
+        $store  = get_debug_type($this->outbox);
+
+        try {
+            $this->insert($record, FailureRule::REPORT, false, $capture);
+        } catch (\Throwable $failure) {
+            $handler = new FailureHandler($this->container);
+
+            $capture === null
+                ? $handler->abandon($record, $failure, FailedOperation::OUTBOX, $store)
+                : $handler->contain($record, $failure, FailedOperation::OUTBOX, $store, $capture);
+        }
     }
 
     /**

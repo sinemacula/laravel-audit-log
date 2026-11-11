@@ -496,7 +496,7 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * Rows of `[call]`: one call of each public mutator, the seventeen fluent
+     * Rows of `[call]`: one call of each public mutator, the eighteen fluent
      * methods, the nine fillers, the manifest given either way, the package's
      * own code and the id of the package's own record, each with a valid
      * argument.
@@ -518,6 +518,9 @@ final class PendingRecordTest extends TestCase
             }],
             'afterCommit' => [static function (PendingRecord $pending): void {
                 $pending->afterCommit();
+            }],
+            'afterTransaction' => [static function (PendingRecord $pending): void {
+                $pending->afterTransaction();
             }],
             'immediately' => [static function (PendingRecord $pending): void {
                 $pending->immediately();
@@ -617,6 +620,9 @@ final class PendingRecordTest extends TestCase
             'afterCommit' => [static function (PendingRecord $pending): void {
                 $pending->afterCommit('');
             }],
+            'afterTransaction' => [static function (PendingRecord $pending): void {
+                $pending->afterTransaction();
+            }],
             'immediately' => [static function (PendingRecord $pending): void {
                 $pending->immediately();
             }],
@@ -709,7 +715,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(30, $mutators);
+        self::assertCount(31, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }

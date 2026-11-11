@@ -9,6 +9,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseTransactionRecord;
 use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Database\Events\TransactionCommitting;
+use Illuminate\Database\Events\TransactionRolledBack;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 
 /**
@@ -46,6 +47,9 @@ final class CommitQueue
 
     /** @var \WeakMap<\Illuminate\Database\DatabaseTransactionRecord, \SineMacula\Laravel\AuditLog\Delivery\CommitFlush> The flush of each outermost transaction the audit log has used; it goes with its transaction. */
     private \WeakMap $flushes;
+
+    /** @var list<array{connection: string, level: int, work: \Closure(): void}> Work whose transaction rolled back, run once that rollback has finished. */
+    private array $rolledBack = [];
 
     /**
      * Constructor.
@@ -100,6 +104,62 @@ final class CommitQueue
         $transaction->addCallback(static function () use ($flush, $work, $abandon): void {
             $flush->add($work, $abandon);
         });
+    }
+
+    /**
+     * Run one of the steps, once, when the transaction's outermost ends: the
+     * commit step when it commits, and the rollback step when it rolls back or
+     * its commit proves to be a rollback. A rollback inside it changes nothing.
+     * The rollback step waits for Laravel's rollback event, since the manager
+     * still lists the rolled-back transactions while its callbacks run.
+     *
+     * @param  \Illuminate\Database\DatabaseTransactionRecord  $transaction
+     * @param  \Closure(): void  $onCommit
+     * @param  \Closure(): void  $onRollback
+     * @return void
+     */
+    public function deferToEnd(DatabaseTransactionRecord $transaction, #[\SensitiveParameter] \Closure $onCommit, #[\SensitiveParameter] \Closure $onRollback): void
+    {
+        $outermost = $this->outermostOf($transaction);
+        $flush     = $this->flushOf($outermost);
+        $ended     = false;
+        $once      = static function (#[\SensitiveParameter] \Closure $step) use (&$ended): void {
+            if ($ended) {
+                return;
+            }
+
+            $ended = true;
+
+            $step();
+        };
+
+        $flush->expect();
+        $flush->add(static fn () => $once($onCommit), static fn () => $once($onRollback));
+
+        $outermost->addCallbackForRollback(function () use ($outermost, $once, $onRollback): void {
+            $this->rolledBack[] = ['connection' => $outermost->connection, 'level' => $outermost->level - 1, 'work' => static fn () => $once($onRollback)];
+        });
+    }
+
+    /**
+     * Once a rollback has finished, run the work waiting on every transaction
+     * it ended on that connection.
+     *
+     * @param  \Illuminate\Database\Events\TransactionRolledBack  $event
+     * @return void
+     */
+    public function release(#[\SensitiveParameter] TransactionRolledBack $event): void
+    {
+        $name    = $event->connection->getName();
+        $level   = $event->connection->transactionLevel();
+        $ready   = array_filter($this->rolledBack, static fn (array $entry): bool => $entry['connection'] === $name && $level <= $entry['level']);
+        $waiting = array_diff_key($this->rolledBack, $ready);
+
+        $this->rolledBack = array_values($waiting);
+
+        foreach ($ready as $entry) {
+            $entry['work']();
+        }
     }
 
     /**

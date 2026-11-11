@@ -28,7 +28,7 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 final class ChoosesDeliveryTest extends TestCase
 {
     /** @var string The refusal of a fail-closed record after commit. */
-    private const string FAIL_CLOSED = 'A fail-closed record is written immediately or transactionally, never after commit.';
+    private const string FAIL_CLOSED = 'A fail-closed record is written immediately or transactionally, never after commit or after the transaction.';
 
     /**
      * A record has no timing, no connection and is not fail-closed until told

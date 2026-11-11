@@ -38,7 +38,10 @@ Each of these events is recorded as one row, under a code of the package's own:
   list dropped. An application or an integration that defines one of them differently is refused at boot; record your
   own activity under codes of your own.
 - One event object is recorded once, even when a mapping of the application sees it too.
-- A captured record is written at once, and a failure is reported rather than thrown, as the last section says.
+- A captured record is written at once, and a failure is reported rather than thrown, as the last section says. A
+  failed sign-in and a lockout are written after the transaction instead: once the outermost transaction open on the
+  storage connection (the outbox connection in outbox mode) ends, whether it commits or rolls back, so the refusal is
+  kept when the work around it is undone.
 
 ## Excluding guards
 
@@ -118,11 +121,11 @@ boolean. Each denial is `authorization.gate_denied`, outcome `denied`.
   code. Treat that list as application-controlled data: list the codes the application's own policies return, never a
   value that came from a request, because a token can look like a code. The response's message is free text and is
   never read.
-- A denial is written at once, so inside a transaction open on the storage connection, or in outbox mode on the
-  outbox's, each one costs a savepoint, which on PostgreSQL is a subtransaction held until that transaction ends. Past
-  64 in one transaction PostgreSQL's snapshots overflow and every session of the cluster slows. An application on
-  PostgreSQL that wraps a request in a transaction and may meet many denials in it, such as a `@can` inside a loop,
-  puts the storage, or the outbox, on a connection of its own.
+- A denial is written after the transaction: once the outermost transaction open on the storage connection, or in
+  outbox mode on the outbox's, ends, whether it commits or rolls back, so a denial that makes the application roll
+  back is kept. With none open it is written at once. Waiting denials are held in memory, so a process that dies
+  first, or a transaction that ends without Laravel's rollback event (a failed commit or a lost connection), loses
+  them.
 - `Gate::allowIf()`, `Gate::denyIf()` and callbacks that throw fire no `GateEvaluated`, so they record nothing. A
   policy that throws its own `AuthorizationException` ends the check before the Gate can say what it decided. Record
   these explicitly:
@@ -256,6 +259,8 @@ setting, a watched field the instance hides and a failed write are each containe
   `Stores\AuditWriteFailedException` is reported and `AuditWriteFailed` is dispatched, then `AuditCaptureFailed`. A
   capture always follows the `report` rule and never reads `failure.mode`, so `throw` never reaches the dispatching
   flow, and a captured record is never `failClosed()` or `transactional()`.
+- A record written after the transaction lets nothing out once the transaction has ended: a failure after a commit or a
+  rollback is spilled and reported, and the rollback's own exception reaches the application unchanged.
 - Any other failure is reported as a `Capture\CaptureFailedException`, which names the classes of the event, of what
   translated it and of the exception, and holds no previous exception.
 - The host-fatal exception: a deadlock or a lost connection that ended a transaction open on its connection, during a

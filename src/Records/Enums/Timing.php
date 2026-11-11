@@ -24,4 +24,8 @@ enum Timing: string
 
     // Written inside the open transaction on the connection, atomic with it
     case TRANSACTIONAL = 'transactional';
+
+    // Deferred until the outermost transaction on its connection ends, whether
+    // it commits or rolls back
+    case AFTER_TRANSACTION = 'after_transaction';
 }

@@ -1440,7 +1440,7 @@ final class RecordDeliveryTest extends TestCase
             }
         }
 
-        self::assertSame(['deliver', 'writeAfterCommit', 'refuse', 'abandonSealed', 'write'], $checked);
+        self::assertSame(['deliver', 'writeAfterCommit', 'writeAfterTransaction', 'refuse', 'abandonSealed', 'write'], $checked);
     }
 
     /**
