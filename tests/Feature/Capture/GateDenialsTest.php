@@ -10,6 +10,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
@@ -120,6 +121,24 @@ final class GateDenialsTest extends TestCase
         self::assertNull($entry->guard);
         self::assertSame(['ability' => self::ABILITY, 'arguments' => [], 'argument_count' => 0], $entry->properties);
         self::assertSame(['security', 1], [$entry->category, $entry->event_version]);
+    }
+
+    /**
+     * A denial inside a transaction that rolls back keeps its row.
+     *
+     * @return void
+     */
+    public function testADenialSurvivesARollback(): void
+    {
+        $this->assertThrows(function (): void {
+            DB::connection(self::CONNECTION)->transaction(function (): never {
+                Gate::forUser($this->user)->allows(self::ABILITY);
+
+                throw new \DomainException('Refused.');
+            });
+        }, \DomainException::class);
+
+        self::assertSame(CapturedActivity::GATE_DENIED->value, $this->onlyEntry()->event);
     }
 
     /**

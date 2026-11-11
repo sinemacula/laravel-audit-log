@@ -64,7 +64,8 @@ final readonly class CaptureCoordinator
     private const string NOT_ITS_BUILDER = 'A capture\'s source returns the builder it was given, still to be recorded, or `null`.';
 
     /** @var string Why a source choosing how its record is written is refused. */
-    private const string CHOSE_DELIVERY = 'A capture decides how its record is written, so its source sets no timing, `failClosed()` or `transactional()`.';
+    private const string CHOSE_DELIVERY = 'A capture decides how its record is written, so its source sets no timing but `afterTransaction()`,'
+        . ' and no `failClosed()` or `transactional()`.';
 
     /**
      * Constructor.
@@ -284,9 +285,10 @@ final readonly class CaptureCoordinator
 
     /**
      * Refuse what a source returned unless it is the builder it was given,
-     * still to be recorded, with no say in how it is written: no timing, unless
-     * the source may defer, and then only immediately or after commit, and
-     * neither fail-closed nor transactional.
+     * still to be recorded, with no say in how it is written beyond writing it
+     * after the transaction: no other timing, unless the source may defer, and
+     * then only immediately or after commit, and neither fail-closed nor
+     * transactional.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $returned
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $given
@@ -303,7 +305,9 @@ final readonly class CaptureCoordinator
 
         $snapshot = $given->snapshot();
 
-        if ($snapshot->failClosed || $snapshot->timing === Timing::TRANSACTIONAL || ($snapshot->timing !== null && !$mayDefer)) {
+        $chose = $snapshot->timing !== null && $snapshot->timing !== Timing::AFTER_TRANSACTION && !$mayDefer;
+
+        if ($snapshot->failClosed || $snapshot->timing === Timing::TRANSACTIONAL || $chose) {
             throw new \LogicException(self::CHOSE_DELIVERY);
         }
     }

@@ -22,6 +22,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
@@ -225,6 +226,29 @@ final class LaravelAuthEventsTest extends TestCase
         self::assertSame([null, null, null, null], self::actorAndSubject($unknown));
         self::assertSame(self::hashOf($known), self::hashOf($unknown));
         self::assertNotSame(self::hashOf($known), self::hashOf($other));
+    }
+
+    /**
+     * A failed sign-in and a lockout inside a transaction that rolls back keep
+     * their rows.
+     *
+     * @return void
+     */
+    public function testAFailureAndALockoutSurviveARollback(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+        $request    = Request::create('/login', 'POST', ['email' => self::EMAIL]);
+
+        $connection->beginTransaction();
+
+        Event::dispatch(new Failed('web', null, ['email' => self::EMAIL]));
+        Event::dispatch(new Lockout($request));
+
+        $connection->rollBack();
+
+        $events = array_map(static fn (AuditEntry $entry): string => $entry->event, $this->entries());
+
+        self::assertSame([CapturedActivity::SIGN_IN_FAILED->value, CapturedActivity::LOCKED_OUT->value], $events);
     }
 
     /**

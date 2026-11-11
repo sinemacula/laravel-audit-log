@@ -74,8 +74,11 @@ AuditLog::map(OrderEvent::class, OrderEventMapper::class, except: [OrderViewed::
   recorded once, whoever captures it first.
 - A mapper is resolved from the container for each capture and keeps no state. Its builder has no recorder, and
   nothing it records is written: calling `record()`, recording through the facade, returning another builder, choosing
-  a timing, `failClosed()` or `transactional()` are each a contained failure that writes nothing. The capture writes
-  the builder returned, at once.
+  a timing other than `afterTransaction()`, `failClosed()` or `transactional()` are each a contained failure that
+  writes nothing. The capture writes the builder returned, at once.
+- A mapper of a refusal, such as a failed sign-in or a denied decision, ends its builder with `afterTransaction()`. The
+  record then waits for the outermost transaction open on the storage connection to end, and is written whether it
+  commits or rolls back, so a refusal that makes the caller roll back is still kept.
 - An event that is a bulk operation is mapped with `covering($subjects)` on the builder, as the application records
   one: the record carries the manifest of the subjects, bounded and refused as a bulk operation's is (see
   [Bulk operations](automatic-capture.md#bulk-operations)). A refusal is a contained failure that writes nothing.

@@ -32,6 +32,7 @@ use Tests\Fixtures\Capture\Events\PackageShapedEvent;
 use Tests\Fixtures\Capture\Events\PortalEvent;
 use Tests\Fixtures\Capture\Events\PortalSignedIn;
 use Tests\Fixtures\Capture\Events\SignedInToPortal;
+use Tests\Fixtures\Capture\Mappers\AfterTransactionMapper;
 use Tests\Fixtures\Capture\Mappers\CodelessMapper;
 use Tests\Fixtures\Capture\Mappers\ConsumingMapper;
 use Tests\Fixtures\Capture\Mappers\FailClosedMapper;
@@ -360,6 +361,28 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
+     * A mapper may write its record after the transaction, which keeps it when
+     * the transaction rolls back.
+     *
+     * @return void
+     */
+    public function testAMapperMayWriteAfterTheTransaction(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+
+        self::registry()->map(PortalEvent::class, AfterTransactionMapper::class);
+
+        $connection->beginTransaction();
+
+        self::assertNotNull(self::coordinator()->mapped(new SignedInToPortal));
+        self::assertSame(0, $this->fake->count());
+
+        $connection->rollBack();
+
+        self::assertSame(1, $this->fake->count());
+    }
+
+    /**
      * A mapper that names no code is contained.
      *
      * @return void
@@ -589,6 +612,21 @@ final class CaptureCoordinatorTest extends TestCase
         self::assertCount(1, $this->writeFailures);
         self::assertCount(1, $this->failures);
         self::assertSame([SignedInToPortal::class, self::SOURCE, \RuntimeException::class], self::classesOf($this->failures[0]));
+    }
+
+    /**
+     * A strict choice is refused before the event object is claimed, so a later
+     * capture of the same object still writes it.
+     *
+     * @return void
+     */
+    public function testAStrictChoiceLeavesTheEventUnclaimed(): void
+    {
+        $event  = new SignedInToPortal;
+        $strict = static fn (PendingRecord $pending): PendingRecord => $pending->event(self::SOURCE_CODE)->failClosed();
+
+        self::assertNull(self::coordinator()->captured($event, self::SOURCE, $strict, mayDefer: true));
+        self::assertNotNull(self::coordinator()->captured($event, self::SOURCE, self::describer()));
     }
 
     /**

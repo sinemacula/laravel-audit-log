@@ -68,6 +68,8 @@ invents a record changes what the log is evidence of, so each of those limits is
    - after commit, with the selected transaction on the outbox connection: now, inside that transaction, so the row
      exists exactly when the transaction commits and an inner rollback removes it
    - after commit, with the selected transaction on another connection: in that transaction's commit callback
+   - after the transaction, with a transaction open on the outbox connection: once its outermost ends, committed or
+     rolled back
    - `immediately()`, `transactional()` or no selected transaction: now, in a savepoint when a transaction is open on
      the outbox connection
 5. The application runs `audit-log:drain`, from its scheduler or a worker of its own. The package does not schedule it:
@@ -122,6 +124,14 @@ invents a record changes what the log is evidence of, so each of those limits is
   remaining steps have run, as the write's own failure does. Which connections had one open is read before the write,
   because Laravel forgets it when a connection is lost. A failure on a connection with none open is contained and
   reported.
+- A record written after the transaction waits in the commit queue for its outermost transaction on the storage or
+  outbox connection to end. A commit runs it in that transaction's flush, under its rule; a rollback only marks it
+  ready, and `Delivery\CommitQueue::release()` writes it on Laravel's `TransactionRolledBack`, under `REPORT`, letting
+  nothing out. Inside the rollback callbacks the transactions manager still lists the rolled-back transactions, and a
+  write that opened a transaction there could run their commit callbacks. A transaction that ends without that event
+  (a failed commit, a lost connection, `disconnect()`) leaves the record waiting for the next rollback on that
+  connection, at or below the level it waited at, and the record is lost when the request or job ends first, as a
+  process that dies loses any deferred one.
 - Deferred writes and bound spills wait in one commit callback per outermost transaction, so one record's failure stops
   no other, and `outcomes.md` says what that leaves. On PostgreSQL that commit first asks whether the transaction is
   already aborted, and writes nothing if so.
@@ -310,10 +320,10 @@ $this->app->singleton(AuditStore::class, static fn ($app): AuditStore => new Sta
 A record captured from an event, by a mapper, by Laravel's authentication events, by a Gate denial or by a watched
 model, is written through the same delivery as any other, with one difference: its failures go back to the capture.
 
-- The capture hands the delivery a `Delivery\CaptureSignal`. The record is written now, or after commit for a watched
-  model's change, never fail-closed or transactional: a capture asking for either is a `\LogicException` before
-  anything is consumed. A capture never reads `failure.mode`, so a malformed mode never stops one, and its rule is
-  always `REPORT`.
+- The capture hands the delivery a `Delivery\CaptureSignal`. The record is written now, after commit for a watched
+  model's change, or after the transaction for a refusal, never fail-closed or transactional: a capture asking for
+  either is a `\LogicException` before anything is consumed. A capture never reads `failure.mode`, so a malformed mode
+  never stops one, and its rule is always `REPORT`.
 - A failed write is handled once by `Delivery\FailureHandler`, spilled, reported and said as `AuditWriteFailed`, then
   the signal is told once, and the capture dispatches `AuditCaptureFailed`. A later failure of the same write changes
   nothing.
@@ -402,7 +412,8 @@ else does yet. A projection is never the integrity artefact.
 - `src/Delivery/Receipts.php`: `attempting()`, `delivered()`, `failed()`, `resetFailed()`; `src/Delivery/Receipt.php`.
 - `src/Delivery/OutboxDrainer.php`: `drain()`, `MAX_BACKOFF_SECONDS`; `src/Delivery/DeliveryCoordinator.php`:
   `deliver()`, `STORE_DESTINATION`; `src/Delivery/DeliveryResult.php`: `failure()`; `src/Console/DrainCommand.php`.
-- `src/Delivery/CommitQueue.php`: `defer()`, `reserve()`, `probe()`; `src/Delivery/CommitFlush.php`: `run()`.
+- `src/Delivery/CommitQueue.php`: `defer()`, `deferToEnd()`, `reserve()`, `probe()`, `release()`;
+  `src/Delivery/CommitFlush.php`: `run()`.
 - `src/Delivery/Replayer.php`: `spill()`, `outbox()`; `src/Delivery/SpillReader.php`: `lines()`, `extract()`;
   `src/Delivery/SpillLine.php`, `src/Delivery/ReplayResult.php`: `pruned()`, `src/Console/ReplayCommand.php`.
 - `src/Lifecycle/PruneTombstones.php`; `src/Delivery/DrainResult.php`: `pruned()`;
@@ -453,6 +464,9 @@ else does yet. A projection is never the integrity artefact.
 - `tests/Feature/Console/ReplayCommandTest.php` `testNeitherOptionIsInvalid`, `testAllowUnsignedIsNoOption`,
   `testPrintsCountsAndIds`, `testPrintsNoPayload`, `testAHostileIdIsNotPrinted`, `testASkippedLineExitsNonZero`,
   `testAFailedStoreExitsNonZero`, `testACleanRunExitsZero`, `testBothOptionsRun`, `testAMissingFileExitsNonZero`
+- `tests/Feature/Delivery/AfterTransactionDeliveryTest.php` `testItSurvivesARollback`,
+  `testANestedRollbackLeavesItWaiting`, `testWritingAfterARollbackRunsNoCallbackOfTheUndoneWork`,
+  `testAFailureAfterARollbackIsContainedWhateverTheMode`, `testTheOutboxRowSurvivesARollback`
 - `tests/Feature/Delivery/OutboxWriterTest.php` `testNoTransactionInsertsNow`, `testImmediatelyInsertsNow`,
   `testTransactionalInsertsNow`, `testAfterCommitOnTheOutboxConnectionInsertsInsideIt`,
   `testAfterCommitOnAnotherConnectionWaitsForItsCommit`, `testASelectorMatchesItsConnection`,

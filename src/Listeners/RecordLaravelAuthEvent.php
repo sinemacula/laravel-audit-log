@@ -46,6 +46,9 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * it names is a session guard that says it signed the user in from the
  * remember-me cookie.
  *
+ * A failed sign-in and a lockout are written after the transaction, so a
+ * rollback around them keeps their record.
+ *
  * A malformed setting or a failure to record is contained by the capture, so
  * the sign-in, the sign-out or the reset goes on.
  *
@@ -176,7 +179,7 @@ final readonly class RecordLaravelAuthEvent
                 $pending->withIdentifier($identifier);
             }
 
-            return $pending->event(CapturedActivity::SIGN_IN_FAILED)->by(null)->failed();
+            return $pending->event(CapturedActivity::SIGN_IN_FAILED)->by(null)->failed()->afterTransaction();
         });
     }
 
@@ -204,7 +207,7 @@ final readonly class RecordLaravelAuthEvent
                 $pending->withIdentifier($identifier);
             }
 
-            return $pending->event(CapturedActivity::LOCKED_OUT)->by(null)->denied();
+            return $pending->event(CapturedActivity::LOCKED_OUT)->by(null)->denied()->afterTransaction();
         });
     }
 

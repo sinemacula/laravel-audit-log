@@ -28,6 +28,7 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Events\TransactionCommitting;
+use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
@@ -1042,6 +1043,20 @@ final class AuditLogServiceProviderTest extends TestCase
     {
         self::assertSame([[CommitQueue::class, 'probe']], array_values(array_filter(
             self::listenersFor(Event::getRawListeners(), TransactionCommitting::class),
+            static fn (mixed $registered): bool => is_array($registered) && is_string($registered[0] ?? null) && str_starts_with($registered[0], 'SineMacula\\'),
+        )));
+    }
+
+    /**
+     * The commit queue hears each rollback once, so work held past a rollback
+     * is written once the rollback has finished.
+     *
+     * @return void
+     */
+    public function testTheRollbackReleaseListensOnce(): void
+    {
+        self::assertSame([[CommitQueue::class, 'release']], array_values(array_filter(
+            self::listenersFor(Event::getRawListeners(), TransactionRolledBack::class),
             static fn (mixed $registered): bool => is_array($registered) && is_string($registered[0] ?? null) && str_starts_with($registered[0], 'SineMacula\\'),
         )));
     }

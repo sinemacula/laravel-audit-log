@@ -29,9 +29,10 @@ final class TimingTest extends TestCase
     public function testTheCasesAndTheirStoredValues(): void
     {
         self::assertSame([
-            'AFTER_COMMIT'  => 'after_commit',
-            'IMMEDIATE'     => 'immediate',
-            'TRANSACTIONAL' => 'transactional',
+            'AFTER_COMMIT'      => 'after_commit',
+            'IMMEDIATE'         => 'immediate',
+            'TRANSACTIONAL'     => 'transactional',
+            'AFTER_TRANSACTION' => 'after_transaction',
         ], array_column(Timing::cases(), 'value', 'name'));
     }
 }

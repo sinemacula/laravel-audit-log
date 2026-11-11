@@ -22,6 +22,7 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Events\TransactionCommitting;
+use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Foundation\Http\Kernel;
 use Illuminate\Log\Context\Events\ContextDehydrating;
 use Illuminate\Queue\Events\JobExceptionOccurred;
@@ -374,6 +375,7 @@ final class AuditLogServiceProvider extends ServiceProvider
         Event::listen(JobProcessing::class, TrackJobFrames::class);
         Event::listen(ContextDehydrating::class, CarryContextIntoJobs::class);
         Event::listen(TransactionCommitting::class, [CommitQueue::class, 'probe']);
+        Event::listen(TransactionRolledBack::class, [CommitQueue::class, 'release']);
 
         $this->app->booted(static function (): void {
             Event::listen(CommandFinished::class, TrackCommandFrames::class);

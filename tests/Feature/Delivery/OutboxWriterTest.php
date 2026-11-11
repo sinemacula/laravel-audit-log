@@ -1140,7 +1140,7 @@ final class OutboxWriterTest extends TestCase
             }
         }
 
-        self::assertSame(['write', 'abandonSealed', 'insert', 'enqueue'], $checked);
+        self::assertSame(['write', 'insertAfterTransaction', 'abandonSealed', 'insert', 'enqueue'], $checked);
     }
 
     /**

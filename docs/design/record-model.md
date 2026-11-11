@@ -109,8 +109,8 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
 - A builder is used once. `record()` hands it to its recorder, which builds the record; afterwards every call on it,
   `record()` included, is a `\LogicException`. A builder made without a recorder can be described but not recorded.
   Nothing is written without `record()`.
-- A builder has one timing (`after_commit`, `immediate` or `transactional`), and `failClosed()` never combines with
-  `afterCommit()`. What each timing does when the record is written is in `outcomes.md`.
+- A builder has one timing (`after_commit`, `immediate`, `transactional` or `after_transaction`), and `failClosed()`
+  never combines with `afterCommit()` or `afterTransaction()`. What each timing does when the record is written is in `outcomes.md`.
 - A programming error (an invalid code, reason, reference, identifier or payload, a reused builder, a conflicting
   timing) is an SPL exception, `\InvalidArgumentException` or `\LogicException`, thrown whatever the configured
   failure policy: it is the caller's bug, not a write failure to contain.
@@ -151,7 +151,8 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   `_audit`: the context keeps such keys as given.
 - A note that is empty once cleaned, or owned by an unsaved model: `\InvalidArgumentException`. A note never replaces
   the code, which stays required.
-- A second, different timing, or `failClosed()` with `afterCommit()` in either order: `\LogicException`. Repeating the
+- A second, different timing, or `failClosed()` with `afterCommit()` or `afterTransaction()` in either order:
+  `\LogicException`. Repeating the
   same timing, or `failClosed()`, changes nothing.
 - `record()` on a used builder, or on one made without a recorder; building a record from a builder with no code, or
   with no origin: `\LogicException`.

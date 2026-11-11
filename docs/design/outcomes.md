@@ -109,8 +109,8 @@ What the table cannot say in a cell:
 
 - **A record for an uncommitted operation must not later become committed evidence.** So a transactional record's failed
   write leaves no replayable spill: the event and the thrown exception are its diagnostics. A failure or a denial can be
-  true even when the business change rolls back, and it can be kept by writing it `immediately()` on a dedicated
-  connection.
+  true even when the business change rolls back, and it can be kept by writing it `afterTransaction()`, or
+  `immediately()` on a dedicated connection.
 - The steps run in the order spill, report, event, each on its own, because the spill is the only lasting trace and a
   reporter may block or end the process. One that fails stops no other: its failure is reported, sanitised, and goes no
   further. With no transaction open, nothing it raises reaches the code that recorded.
@@ -193,11 +193,12 @@ What the table cannot say in a cell:
 A record has exactly one timing, and `record()` returns the captured record (`AuditRecord`) whichever it is. The timing
 decides when that record is stored, and so what its return promises:
 
-| Timing            | Default for                                                        | When it is written                                                                                                               | On the host's rollback                                                            | What `record()` returning means                                                                       |
-|-------------------|--------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| `afterCommit()`   | explicit records: `record()`, `event()` and `accessed()`           | at the selected transaction's outermost commit; now when none is selected, or in outbox mode when it is on the outbox connection | dropped unwritten, by the selected transaction or one around it on its connection | captured and held in memory; already written only when none was selected, or in a row inside the host |
-| `immediately()`   | captured records (`capture()`) and `failClosed()`                  | now, in a savepoint when the connection has an open transaction                                                                  | rolled back on a shared connection; kept on a dedicated one                       | written, or under `report` in the spill; durable once any transaction open on the connection commits  |
-| `transactional()` | nothing: it is always asked for                                    | now, inside the open transaction on the connection, in a savepoint                                                               | rolled back with it, always                                                       | written inside that transaction; durable only when it commits                                         |
+| Timing               | Default for                                              | When it is written                                                                                                               | On the host's rollback                                                            | What `record()` returning means                                                                       |
+|----------------------|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| `afterCommit()`      | explicit records: `record()`, `event()` and `accessed()` | at the selected transaction's outermost commit; now when none is selected, or in outbox mode when it is on the outbox connection | dropped unwritten, by the selected transaction or one around it on its connection | captured and held in memory; already written only when none was selected, or in a row inside the host |
+| `immediately()`      | captured records (`capture()`) and `failClosed()`        | now, in a savepoint when the connection has an open transaction                                                                  | rolled back on a shared connection; kept on a dedicated one                       | written, or under `report` in the spill; durable once any transaction open on the connection commits  |
+| `afterTransaction()` | Laravel's `Failed` and `Lockout`, and Gate denials       | once the outermost transaction open on the connection ends, committed or rolled back; now when none is open                      | kept: written once the rollback has finished                                      | captured and held in memory; already written only when none was open                                  |
+| `transactional()`    | nothing: it is always asked for                          | now, inside the open transaction on the connection, in a savepoint                                                               | rolled back with it, always                                                       | written inside that transaction; durable only when it commits                                         |
 
 - The connection is the storage connection in sync mode and the outbox connection in outbox mode.
 - A return is a written record only when a failed write would have thrown: with `failClosed()`, `transactional()` or
@@ -269,10 +270,27 @@ decides when that record is stored, and so what its return promises:
   storage connection, and a stack only when every destination does. A store without the contract counts as joining
   nothing. In outbox mode the row is what joins the transaction, so the store is not asked.
 
+### After Transaction
+
+- For a refusal, which stays a fact when the work around it is undone. The record waits for the outermost transaction
+  open on the connection to end, and is written whether it commits or rolls back; with none open, or with only another
+  connection's, it is written now. A rollback inside the outermost leaves it waiting. A transaction the testing manager
+  wraps a test in is never the outermost.
+- Its context is captured when it is recorded. It is written once, under its rule at the commit, and under `report` once
+  a rollback has finished, letting nothing out, so the rollback's own exception reaches the application unchanged.
+- The write after a rollback waits for Laravel's `TransactionRolledBack` event, since the transactions manager still
+  lists the rolled-back transactions while its rollback callbacks run, and a write that opened a transaction of its own
+  there could run their commit callbacks.
+- It is held in memory, so a process that dies first loses it, as it loses an after-commit record. A transaction that
+  ends without that event (a failed commit, a lost connection or `disconnect()`) leaves it waiting for the next
+  rollback on that connection, and it is lost when the request or job ends first.
+- A mapper may choose it, and no other timing. Laravel's `Failed` and `Lockout` and Gate denials are written this way.
+
 ### Fail Closed
 
 - A `failClosed()` record is written immediately unless it is transactional, when it stays transactional and needs the
-  transaction. `failClosed()` never combines with `afterCommit()`, whichever is called first (see `record-model.md`).
+  transaction. `failClosed()` never combines with `afterCommit()` or `afterTransaction()`, whichever is called first (see
+  `record-model.md`).
 - It needs a store that says a return is durable through `Contracts\DurableAuditStore::isDurable()`, or it is refused
   with a `\LogicException`. In outbox mode the row is the acknowledgement, so the store is not asked.
 - A return means the insert succeeded, of the entry or of the outbox row, and it is durable once any transaction open on
@@ -332,7 +350,8 @@ decides when that record is stored, and so what its return promises:
 - `src/Stores/AuditWriteFailedException.php`, `src/Stores/WriteDiagnostics.php`, `src/Stores/FailureSettings.php`.
 - `src/Stores/FailureSpill.php`: `spillFinalised()`, `spillUnsigned()`.
 - `src/Integrity/UnknownKeyException.php`, `src/Integrity/RecordSigner.php`: `verifies()`, `capturedDigest()`.
-- `src/Records/Concerns/ChoosesDelivery.php`: `afterCommit()`, `immediately()`, `transactional()`, `failClosed()`.
+- `src/Records/Concerns/ChoosesDelivery.php`: `afterCommit()`, `afterTransaction()`, `immediately()`, `transactional()`,
+  `failClosed()`.
 - `src/Delivery/RecordDelivery.php`: `check()`, `deliver()`.
 - `src/Delivery/OutboxWriter.php`: `write()`.
 - `src/Delivery/OutboxDrainer.php`: `drain()`.
