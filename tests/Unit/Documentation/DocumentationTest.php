@@ -284,7 +284,9 @@ final class DocumentationTest extends TestCase
     ];
 
     /** @var list<string> The sections of the extending guide, in order. */
-    private const array EXTENDING_SECTIONS = ['Extensibility', 'Mapping another package\'s events', 'Recording one row per sign-in', 'Correlation ids', 'Contributors'];
+    private const array EXTENDING_SECTIONS = [
+        'Extensibility', 'Mapping another package\'s events', 'Recording one row per sign-in', 'Correlation ids', 'Contributors', 'Guards without GuardHelpers',
+    ];
 
     /** @var array<string, array{0: string, 1: string}> Each gap in capture, by what it is, as the section of the automatic-capture guide that states it and what it says. */
     private const array CAPTURE_GAPS = [
@@ -1143,7 +1145,7 @@ final class DocumentationTest extends TestCase
             'the actor is never loaded'           => [$context, 'never through `user()`'],
             'guards with the trait only'          => [$context, '`GuardHelpers` trait'],
             'a foreign guard is asked one thing'  => [$context, '`hasUser()` and nothing else'],
-            'the guard goes with the actor'       => [$context, 'The guard goes with the ambient actor only'],
+            'the guard goes with the actor'       => [$context, 'The guard, principal, tenant and session go with the ambient or carried actor only'],
             'a record before the middleware'      => [$context, 'before the `auth` middleware'],
             'outside any frame'                   => [$context, 'Outside any frame the origin is `console`'],
             'a nested call without events'        => [$context, '`$this->call()` inside a command emits no command event'],
