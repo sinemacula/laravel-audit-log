@@ -154,7 +154,7 @@ final class CarriedContext
     }
 
     /**
-     * The string the key carries, or `null` when it is not there.
+     * The string the key carries, or `null` when the key is not there.
      *
      * @param  \Illuminate\Log\Context\Repository  $context
      * @param  string  $key
@@ -164,8 +164,12 @@ final class CarriedContext
      */
     private static function stringIn(Repository $context, string $key): ?string
     {
+        if (!$context->hasHidden($key)) {
+            return null;
+        }
+
         $value = $context->getHidden($key);
 
-        return $value === null || is_string($value) ? $value : throw new \InvalidArgumentException(sprintf('The carried %s is not a string.', $key));
+        return is_string($value) ? $value : throw new \InvalidArgumentException(sprintf('The carried %s is not a string.', $key));
     }
 }
