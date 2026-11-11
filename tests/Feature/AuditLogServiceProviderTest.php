@@ -783,6 +783,41 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * isPackageDefault() is true only while the contract holds the package's
+     * own binding, untouched and unresolved.
+     *
+     * @return void
+     */
+    public function testIsPackageDefaultTellsThePackagesBindingFromAnyOther(): void
+    {
+        $app = $this->app;
+
+        self::assertInstanceOf(Container::class, $app);
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class));
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class));
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, 'audit-log.nothing-bound-here'));
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, Recorder::class), 'A class bound to itself is no default.');
+
+        app(FieldReader::class);
+
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class), 'A transient default stays the default once resolved.');
+
+        app(AuditAccessPolicy::class);
+
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class), 'A resolved shared default is held as an instance.');
+
+        $app->forgetInstance(AuditAccessPolicy::class);
+        $app->instance(FieldReader::class, new SealedFieldReader);
+
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class));
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class), 'An instance held over the default is not the default.');
+
+        $app->singleton(AuditAccessPolicy::class, DenyAllPolicy::class);
+
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class), 'The default class bound by the application is not the package\'s binding.');
+    }
+
+    /**
      * The runtime state dies with its scope: forgetting scoped instances gives
      * new frames and a new identity, as Octane and a queue worker do. Within a
      * scope each is one instance, so a read guard opened by one class is the
