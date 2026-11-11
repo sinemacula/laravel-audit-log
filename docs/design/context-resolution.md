@@ -201,7 +201,8 @@ where it came from, so each value's source, and what it does not claim, is fixed
   from, and `audit-log:check` reports it. A flag must be a real boolean, so a truthy string never turns trust on.
 - A malformed `source.id` or `source.region`, or an `app.name` that slugs to nothing when `source.id` is not set, fails
   closed the same way.
-- A guard that is not configured lets `AuthManager`'s exception propagate from the record; `audit-log:check` reports it.
+- A guard that is not configured lets `AuthManager`'s exception propagate from a record whose actor is open;
+  `audit-log:check` reports it. A record whose actor is already settled is written without the guards' context.
 - `CarryContextIntoJobs` runs inside the host's `dispatch()`, so a malformed setting or a user that cannot be referred
   to never stops a job being queued: the failure is reported and the job goes without the actor. A reporter that fails
   too is ignored, and one that dispatches while it reports does not report that dispatch's failure in turn.

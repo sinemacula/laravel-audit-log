@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Contributors;
 
 use SineMacula\Laravel\AuditLog\Contracts\ContextContributor;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
+use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 
 /**
@@ -60,7 +61,7 @@ final readonly class ActorContributor implements ContextContributor
             return;
         }
 
-        $actor = $this->ambient->current() ?? $this->frames->carriedActor();
+        $actor = $this->actorFor($contribution);
 
         if ($actor === null) {
             return;
@@ -78,5 +79,27 @@ final readonly class ActorContributor implements ContextContributor
         $contribution->fillPrincipal($held->principal);
         $contribution->fillTenant($held->tenant);
         $contribution->fillSession($held->session);
+    }
+
+    /**
+     * The ambient or the carried actor; for a record whose actor is already
+     * settled, guards that cannot be read give none rather than fail it.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Contribution  $contribution
+     * @return ?\SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function actorFor(Contribution $contribution): ?ActorSnapshot
+    {
+        try {
+            return $this->ambient->current() ?? $this->frames->carriedActor();
+        } catch (\InvalidArgumentException $exception) {
+            if ($contribution->isActorSettled()) {
+                return null;
+            }
+
+            throw $exception;
+        }
     }
 }

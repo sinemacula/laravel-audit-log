@@ -92,6 +92,25 @@ final class ActorContributorTest extends TestCase
     }
 
     /**
+     * An explicit actor is kept when the guards cannot be read, while an open
+     * one still fails on that misconfiguration.
+     *
+     * @return void
+     */
+    public function testUnreadableGuardsNeverFailAnExplicitActor(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.actor.guards', ['not-configured']);
+
+        $explicit = Reference::of('admin', 'admin-1');
+
+        self::assertSame($explicit, $this->contributed((new PendingRecord)->event('invoice.approved')->by($explicit))->actor);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->contributed();
+    }
+
+    /**
      * With no one signed in and nothing carried, nothing is filled, so the
      * actor stays open for a later contributor.
      *
