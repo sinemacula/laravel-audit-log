@@ -615,6 +615,21 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
+     * A strict choice is refused before the event object is claimed, so a later
+     * capture of the same object still writes it.
+     *
+     * @return void
+     */
+    public function testAStrictChoiceLeavesTheEventUnclaimed(): void
+    {
+        $event  = new SignedInToPortal;
+        $strict = static fn (PendingRecord $pending): PendingRecord => $pending->event(self::SOURCE_CODE)->failClosed();
+
+        self::assertNull(self::coordinator()->captured($event, self::SOURCE, $strict, mayDefer: true));
+        self::assertNotNull(self::coordinator()->captured($event, self::SOURCE, self::describer()));
+    }
+
+    /**
      * Only a source that may defer chooses a timing: it may wait for the
      * commit, which it then does, while a source that may not is contained;
      * neither may be fail-closed or transactional.

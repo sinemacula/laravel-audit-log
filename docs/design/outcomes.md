@@ -281,8 +281,9 @@ decides when that record is stored, and so what its return promises:
 - The write after a rollback waits for Laravel's `TransactionRolledBack` event, since the transactions manager still
   lists the rolled-back transactions while its rollback callbacks run, and a write that opened a transaction of its own
   there could run their commit callbacks.
-- It is held in memory: a process that dies first, or a transaction that ends without that event (a failed commit, a
-  lost connection or `disconnect()`), loses it, as an after-commit record is lost to a process that dies.
+- It is held in memory, so a process that dies first loses it, as it loses an after-commit record. A transaction that
+  ends without that event (a failed commit, a lost connection or `disconnect()`) leaves it waiting for the next
+  rollback on that connection, and it is lost when the request or job ends first.
 - A mapper may choose it, and no other timing. Laravel's `Failed` and `Lockout` and Gate denials are written this way.
 
 ### Fail Closed

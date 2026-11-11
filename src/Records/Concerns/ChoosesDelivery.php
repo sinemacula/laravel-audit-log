@@ -82,9 +82,10 @@ trait ChoosesDelivery
      * is written to has ended, whether it commits or rolls back, and now when
      * none is open: for a refusal, which stays a fact when the work around it
      * is undone. Its context is captured now. Held in memory, it is lost when
-     * the transaction ends without Laravel's rollback event (a failed commit, a
-     * lost connection) or the process dies first. A fail-closed record is never
-     * written after the transaction.
+     * the process dies first, and waits for a later rollback when the
+     * transaction ends without Laravel's rollback event (a failed commit, a
+     * lost connection). A fail-closed record is never written after the
+     * transaction.
      *
      * @return self
      *

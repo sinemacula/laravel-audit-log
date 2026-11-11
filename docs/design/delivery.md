@@ -129,7 +129,9 @@ invents a record changes what the log is evidence of, so each of those limits is
   ready, and `Delivery\CommitQueue::release()` writes it on Laravel's `TransactionRolledBack`, under `REPORT`, letting
   nothing out. Inside the rollback callbacks the transactions manager still lists the rolled-back transactions, and a
   write that opened a transaction there could run their commit callbacks. A transaction that ends without that event
-  (a failed commit, a lost connection, `disconnect()`) loses the record, as a process that dies loses any deferred one.
+  (a failed commit, a lost connection, `disconnect()`) leaves the record waiting for the next rollback on that
+  connection, at or below the level it waited at, and the record is lost when the request or job ends first, as a
+  process that dies loses any deferred one.
 - Deferred writes and bound spills wait in one commit callback per outermost transaction, so one record's failure stops
   no other, and `outcomes.md` says what that leaves. On PostgreSQL that commit first asks whether the transaction is
   already aborted, and writes nothing if so.

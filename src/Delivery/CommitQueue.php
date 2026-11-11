@@ -107,11 +107,12 @@ final class CommitQueue
     }
 
     /**
-     * Run one of the steps, once, when the transaction's outermost ends: the
-     * commit step when it commits, and the rollback step when it rolls back or
-     * its commit proves to be a rollback. A rollback inside it changes nothing.
-     * The rollback step waits for Laravel's rollback event, since the manager
-     * still lists the rolled-back transactions while its callbacks run.
+     * Run one of the steps when the transaction's outermost ends: the commit
+     * step when it commits, and the rollback step when it rolls back or its
+     * commit proves to be a rollback. A rollback inside it changes nothing. The
+     * rollback step waits for Laravel's rollback event, since the manager still
+     * lists the rolled-back transactions while its callbacks run; a rollback
+     * without that event leaves it for the next one on the connection.
      *
      * @param  \Illuminate\Database\DatabaseTransactionRecord  $transaction
      * @param  \Closure(): void  $onCommit
@@ -122,22 +123,12 @@ final class CommitQueue
     {
         $outermost = $this->outermostOf($transaction);
         $flush     = $this->flushOf($outermost);
-        $ended     = false;
-        $once      = static function (#[\SensitiveParameter] \Closure $step) use (&$ended): void {
-            if ($ended) {
-                return;
-            }
-
-            $ended = true;
-
-            $step();
-        };
 
         $flush->expect();
-        $flush->add(static fn () => $once($onCommit), static fn () => $once($onRollback));
+        $flush->add($onCommit, $onRollback);
 
-        $outermost->addCallbackForRollback(function () use ($outermost, $once, $onRollback): void {
-            $this->rolledBack[] = ['connection' => $outermost->connection, 'level' => $outermost->level - 1, 'work' => static fn () => $once($onRollback)];
+        $outermost->addCallbackForRollback(function () use ($outermost, $onRollback): void {
+            $this->rolledBack[] = ['connection' => $outermost->connection, 'level' => $outermost->level - 1, 'work' => $onRollback];
         });
     }
 
@@ -152,13 +143,23 @@ final class CommitQueue
     {
         $name    = $event->connection->getName();
         $level   = $event->connection->transactionLevel();
-        $ready   = array_filter($this->rolledBack, static fn (array $entry): bool => $entry['connection'] === $name && $level <= $entry['level']);
-        $waiting = array_diff_key($this->rolledBack, $ready);
+        $ready   = [];
+        $waiting = [];
 
-        $this->rolledBack = array_values($waiting);
+        foreach ($this->rolledBack as $entry) {
+            if ($entry['connection'] === $name && $level <= $entry['level']) {
+                $ready[] = $entry['work'];
 
-        foreach ($ready as $entry) {
-            $entry['work']();
+                continue;
+            }
+
+            $waiting[] = $entry;
+        }
+
+        $this->rolledBack = $waiting;
+
+        foreach ($ready as $work) {
+            $work();
         }
     }
 

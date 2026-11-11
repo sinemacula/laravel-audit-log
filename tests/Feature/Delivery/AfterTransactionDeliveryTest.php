@@ -223,6 +223,23 @@ final class AfterTransactionDeliveryTest extends TestCase
     }
 
     /**
+     * A transaction on another instance of the storage connection, as a
+     * selector gives, does not hold the record.
+     *
+     * @return void
+     */
+    public function testATransactionOnAnotherInstanceDoesNotHoldIt(): void
+    {
+        $fake = FakeAuditStore::fake();
+
+        DB::connection(self::CONNECTION . '::write')->beginTransaction();
+
+        $this->deliver();
+
+        self::assertSame(1, $fake->count());
+    }
+
+    /**
      * The record is written once, however many transactions end after it.
      *
      * @return void

@@ -321,7 +321,11 @@ final readonly class RecordDelivery
     private function writeAfterTransaction(#[\SensitiveParameter] AuditRecord $record, FailureRule $rule, #[\SensitiveParameter] ?CaptureSignal $capture): void
     {
         $connection = $this->storageConnection();
-        $selected   = $connection === null ? null : $this->transactions()->selected($connection->getName() ?? StorageConnection::resolvedName());
+
+        // A selector's other instance under this name cannot hold the write
+        $selected = $connection === null || $connection->transactionLevel() === 0
+            ? null
+            : $this->transactions()->selected($connection->getName() ?? StorageConnection::resolvedName());
 
         if ($selected === null) {
 

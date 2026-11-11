@@ -72,6 +72,7 @@ final class CommitQueueTest extends TestCase
 
         app()->instance(ExceptionHandler::class, $this->reporter);
         config()->set('logging.channels.' . self::SPILL_CHANNEL, ['driver' => 'monolog', 'handler' => NullHandler::class]);
+        config()->set('database.connections.other', ['driver' => 'sqlite', 'database' => ':memory:']);
         config()->set('audit-log.failure.log_channel', self::SPILL_CHANNEL);
 
         $this->captureLogLines();
@@ -337,14 +338,76 @@ final class CommitQueueTest extends TestCase
     }
 
     /**
+     * A transaction that ends without the rollback event leaves the rollback
+     * step for the next rollback on the connection.
+     *
+     * @return void
+     */
+    public function testARollbackWithoutTheEventLeavesTheStepForTheNext(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+        $events     = $connection->getEventDispatcher();
+
+        self::assertNotNull($events);
+
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
+
+        $connection->unsetEventDispatcher();
+        $connection->rollBack();
+        $connection->setEventDispatcher($events);
+
+        self::assertSame([], $this->ran);
+
+        DB::beginTransaction();
+        DB::rollBack();
+        DB::beginTransaction();
+        DB::rollBack();
+
+        self::assertSame(['rollback'], $this->ran);
+    }
+
+    /**
+     * Work left by a rollback without the event waits through a rollback on
+     * another connection and one inside a transaction still open, and runs on
+     * the next rollback back to its level.
+     *
+     * @return void
+     */
+    public function testLeftWorkWaitsForARollbackBackToItsLevel(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+        $events     = $connection->getEventDispatcher();
+        $other      = DB::connection('other');
+
+        self::assertNotNull($events);
+
+        $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
+
+        $connection->unsetEventDispatcher();
+        $connection->rollBack();
+        $connection->setEventDispatcher($events);
+
+        $other->beginTransaction();
+        $other->rollBack();
+
+        DB::beginTransaction();
+        DB::beginTransaction();
+        DB::rollBack();
+
+        self::assertSame([], $this->ran);
+
+        DB::rollBack();
+
+        self::assertSame(['rollback'], $this->ran);
+    }
+
+    /**
      * A rollback on another connection releases nothing.
      *
      * @return void
      */
     public function testARollbackOnAnotherConnectionReleasesNothing(): void
     {
-        config()->set('database.connections.other', ['driver' => 'sqlite', 'database' => ':memory:']);
-
         $this->queue()->deferToEnd($this->begin(), $this->noting('commit'), $this->noting('rollback'));
 
         $other = DB::connection('other');

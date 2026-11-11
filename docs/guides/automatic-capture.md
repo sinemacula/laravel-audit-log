@@ -124,8 +124,8 @@ boolean. Each denial is `authorization.gate_denied`, outcome `denied`.
 - A denial is written after the transaction: once the outermost transaction open on the storage connection, or in
   outbox mode on the outbox's, ends, whether it commits or rolls back, so a denial that makes the application roll
   back is kept. With none open it is written at once. Waiting denials are held in memory, so a process that dies
-  first, or a transaction that ends without Laravel's rollback event (a failed commit or a lost connection), loses
-  them.
+  first loses them, and a transaction that ends without Laravel's rollback event (a failed commit or a lost
+  connection) leaves them for the next rollback in the same request or job.
 - `Gate::allowIf()`, `Gate::denyIf()` and callbacks that throw fire no `GateEvaluated`, so they record nothing. A
   policy that throws its own `AuthorizationException` ends the check before the Gate can say what it decided. Record
   these explicitly:
