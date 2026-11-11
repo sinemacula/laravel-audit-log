@@ -29,6 +29,10 @@ or registered from a service provider's `boot()`; each contract's docblock says 
 | How an entry's encrypted fields are shown    | Implement `Contracts\FieldReader`; asked a page at a time through `readAll()`, under the reveal grant only; the default answers `encrypted`, a decrypting one also `erased`             |
 | The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                                                                                                 |
 
+An integration that binds over a contract only while it still holds the package's default asks
+`AuditLogServiceProvider::isPackageDefault($container, $contract)`: true while the contract resolves to the package's
+own default, resolved or not, and false for any binding or instance made over it, even of the default's class.
+
 A store that keeps attachments, a bulk operation's subjects, a read's disclosure and an export's manifest, implements
 `Contracts\AcceptsAttachments` and returns `true` from `acceptsAttachments()` only when it keeps the attachment and its
 entry atomically, both or neither, so an entry never points at an artifact that is not there. It answers from its own
