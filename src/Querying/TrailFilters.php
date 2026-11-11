@@ -5,11 +5,11 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Querying;
 
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
+use SineMacula\Laravel\AuditLog\Records\CorrelationId;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
-use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
  * What a caller narrows a read of the trail to, validated as it is given: who
@@ -43,12 +43,6 @@ final readonly class TrailFilters
 
     /** @var string Pattern of an event code prefix: lower-case dotted segments, each a letter, then letters, digits or underscores, ending in a dot. */
     private const string PREFIX_PATTERN = '/\A[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.\z/';
-
-    /** @var int Longest correlation id, in characters: the `correlation_id` column. */
-    private const int CORRELATION_MAX_CHARACTERS = 191;
-
-    /** @var string Pattern of a correlation id, as a record's builder holds it: a lower-case namespace, a colon, then a value that starts with a non-space. */
-    private const string CORRELATION_PATTERN = '/\A[a-z][a-z0-9_-]{0,31}:\S.*\z/u';
 
     /** @var list<string> The dimensions a reference filters on. */
     private const array REFERENCES = ['actor', 'subject', 'principal', 'tenant'];
@@ -269,9 +263,7 @@ final readonly class TrailFilters
      */
     public function withCorrelation(string $correlationId): self
     {
-        $fits = mb_strlen($correlationId, 'UTF-8') <= self::CORRELATION_MAX_CHARACTERS && TextSanitizer::isClean($correlationId);
-
-        if (!$fits || preg_match(self::CORRELATION_PATTERN, $correlationId) !== 1) {
+        if (!CorrelationId::isValid($correlationId)) {
             throw new \InvalidArgumentException('A correlation filter must be namespaced, as `<namespace>:<value>`, and from 1 to 191 characters with no control characters.');
         }
 
