@@ -13,12 +13,16 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Contracts\HeldActorReader;
 use SineMacula\Laravel\AuditLog\Contributors\AmbientActor;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
+use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 use Tests\Unit\Stubs\StubForeignGuard;
+use Tests\Unit\Stubs\StubHeldActorReader;
 use Tests\Unit\Stubs\StubHelperGuard;
 
 /**
@@ -233,6 +237,94 @@ final class AmbientActorTest extends TestCase
         self::assertNull($this->actor());
         self::assertSame(['hasUser'], $empty->calls);
         self::assertSame(['hasUser'], $holding->calls);
+    }
+
+    /**
+     * A bound reader gives the actor of a foreign guard, with its context, and
+     * the guard is still asked only `hasUser()`.
+     *
+     * @return void
+     */
+    public function testABoundReaderReadsAForeignGuard(): void
+    {
+        $guard = new StubForeignGuard(holdsUser: true);
+        $held  = new HeldActor(Reference::of('identity', 'id-9'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1');
+
+        $this->addCustomGuard('foreign', $guard);
+        $this->configureGuards(['foreign']);
+        $this->app?->instance(HeldActorReader::class, new StubHeldActorReader($held));
+
+        $actor = $this->actor();
+
+        self::assertInstanceOf(ActorSnapshot::class, $actor);
+        self::assertSame($held, $actor->held);
+        self::assertSame('foreign', $actor->guard);
+        self::assertSame(['hasUser'], $guard->calls);
+    }
+
+    /**
+     * A reader is asked only about the first guard holding a user.
+     *
+     * @return void
+     */
+    public function testAReaderIsAskedOnlyAboutTheFirstGuardHoldingAUser(): void
+    {
+        $reader = new StubHeldActorReader(new HeldActor(Reference::of('identity', 'id-9')));
+
+        $this->addCustomGuard('empty', new StubForeignGuard(holdsUser: false));
+        $this->addCustomGuard('holding', new StubForeignGuard(holdsUser: true));
+        $this->configureGuards(['empty', 'holding', 'web']);
+        $this->app?->instance(HeldActorReader::class, $reader);
+
+        $this->assertActorIs('holding', 'identity', 'id-9');
+        self::assertSame(['holding'], $reader->asked);
+    }
+
+    /**
+     * A reader that reads nothing leaves a `GuardHelpers` guard to be read as
+     * before.
+     *
+     * @return void
+     */
+    public function testAReaderThatReadsNothingFallsBackToGuardHelpers(): void
+    {
+        Auth::guard('web')->setUser(self::user());
+
+        $this->app?->instance(HeldActorReader::class, new StubHeldActorReader);
+
+        $this->assertActorIs('web', StubAuthUser::class, '42');
+        self::assertNull($this->actor()?->held->principal);
+    }
+
+    /**
+     * A reader's actor beats the `GuardHelpers` reading of the same guard.
+     *
+     * @return void
+     */
+    public function testAReadersActorBeatsGuardHelpers(): void
+    {
+        Auth::guard('web')->setUser(self::user());
+
+        $this->app?->instance(HeldActorReader::class, new StubHeldActorReader(new HeldActor(Reference::of('identity', 'id-9'))));
+
+        $this->assertActorIs('web', 'identity', 'id-9');
+    }
+
+    /**
+     * A reader that refuses the guard's user gives no actor, and the walk stops
+     * there.
+     *
+     * @return void
+     */
+    public function testAReaderThatRefusesGivesNoActor(): void
+    {
+        Auth::guard('web')->setUser(self::user());
+
+        $this->addCustomGuard('foreign', new StubForeignGuard(holdsUser: true));
+        $this->configureGuards(['foreign', 'web']);
+        $this->app?->instance(HeldActorReader::class, new StubHeldActorReader(refuses: true));
+
+        self::assertNull($this->actor());
     }
 
     /**
@@ -545,8 +637,8 @@ final class AmbientActorTest extends TestCase
 
         self::assertInstanceOf(ActorSnapshot::class, $actor);
         self::assertSame($guard, $actor->guard);
-        self::assertSame($type, $actor->reference->type);
-        self::assertSame($id, $actor->reference->id);
+        self::assertSame($type, $actor->held->actor->type);
+        self::assertSame($id, $actor->held->actor->id);
     }
 
     /**

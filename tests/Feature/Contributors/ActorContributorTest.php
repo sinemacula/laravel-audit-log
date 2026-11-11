@@ -13,8 +13,10 @@ use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Contracts\HeldActorReader;
 use SineMacula\Laravel\AuditLog\Contributors\ActorContributor;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -24,6 +26,7 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 use Tests\Unit\Stubs\StubForeignGuard;
+use Tests\Unit\Stubs\StubHeldActorReader;
 
 /**
  * Feature tests for the default contributor of the actor: an explicit actor is
@@ -86,6 +89,25 @@ final class ActorContributorTest extends TestCase
 
         self::assertNull($snapshot->actor);
         self::assertNull($snapshot->guard);
+    }
+
+    /**
+     * An explicit actor is kept when the guards cannot be read, while an open
+     * one still fails on that misconfiguration.
+     *
+     * @return void
+     */
+    public function testUnreadableGuardsNeverFailAnExplicitActor(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.actor.guards', ['not-configured']);
+
+        $explicit = Reference::of('admin', 'admin-1');
+
+        self::assertSame($explicit, $this->contributed((new PendingRecord)->event('invoice.approved')->by($explicit))->actor);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->contributed();
     }
 
     /**
@@ -245,7 +267,7 @@ final class ActorContributorTest extends TestCase
         $this->carryActor();
         $this->enterAJob();
 
-        CarriedContext::carryActor(app(Repository::class), new ActorSnapshot(Reference::of('user', 'user-8'), 'web'));
+        CarriedContext::carryActor(app(Repository::class), new ActorSnapshot(new HeldActor(Reference::of('user', 'user-8')), 'web'));
 
         $snapshot = $this->contributed();
 
@@ -329,6 +351,85 @@ final class ActorContributorTest extends TestCase
     }
 
     /**
+     * An open actor is filled with the reader's actor, guard, principal, tenant
+     * and session.
+     *
+     * @return void
+     */
+    public function testFillsTheReadActorWithItsContext(): void
+    {
+        $this->bindAReader();
+
+        $snapshot = $this->contributed();
+
+        self::assertTrue(Reference::of('identity', 'id-9')->equals(self::actorOf($snapshot)));
+        self::assertSame('foreign', $snapshot->guard);
+        self::assertSame('p-1', $snapshot->principal?->id);
+        self::assertSame('t-1', $snapshot->tenant?->id);
+        self::assertSame('session-1', $snapshot->sessionId);
+    }
+
+    /**
+     * An actor settled to the ambient actor gets its principal, tenant and
+     * session but no guard, and an explicit principal is kept.
+     *
+     * @return void
+     */
+    public function testAnActorSettledToTheAmbientOneGetsItsContext(): void
+    {
+        $this->bindAReader();
+
+        $principal = Reference::of('principal', 'p-explicit');
+        $snapshot  = $this->contributed((new PendingRecord)->event('invoice.approved')->by(Reference::of('identity', 'id-9'))->asPrincipal($principal));
+
+        self::assertNull($snapshot->guard);
+        self::assertSame($principal, $snapshot->principal);
+        self::assertSame('t-1', $snapshot->tenant?->id);
+        self::assertSame('session-1', $snapshot->sessionId);
+    }
+
+    /**
+     * An actor settled to anyone else, or to no one, gets none of the ambient
+     * actor's context.
+     *
+     * @return void
+     */
+    public function testAnActorSettledToSomeoneElseGetsNoContext(): void
+    {
+        $this->bindAReader();
+
+        foreach ([Reference::of('identity', 'id-other'), null] as $actor) {
+
+            $snapshot = $this->contributed((new PendingRecord)->event('invoice.approved')->by($actor));
+
+            self::assertSame($actor, $snapshot->actor);
+            self::assertNull($snapshot->guard);
+            self::assertNull($snapshot->principal);
+            self::assertNull($snapshot->tenant);
+            self::assertNull($snapshot->sessionId);
+        }
+    }
+
+    /**
+     * A job fills the carried actor's context.
+     *
+     * @return void
+     */
+    public function testAJobFillsTheCarriedActorsContext(): void
+    {
+        CarriedContext::carryActor(app(Repository::class), new ActorSnapshot(self::heldWithContext(), 'foreign'));
+
+        $this->enterAJob();
+
+        $snapshot = $this->contributed();
+
+        self::assertSame('id-9', $snapshot->actor?->id);
+        self::assertSame('p-1', $snapshot->principal?->id);
+        self::assertSame('t-1', $snapshot->tenant?->id);
+        self::assertSame('session-1', $snapshot->sessionId);
+    }
+
+    /**
      * A user with a key, which is never saved.
      *
      * @return \Tests\Unit\Stubs\StubAuthUser
@@ -352,6 +453,34 @@ final class ActorContributorTest extends TestCase
     }
 
     /**
+     * An actor with a principal, a tenant and a session.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\HeldActor
+     */
+    private static function heldWithContext(): HeldActor
+    {
+        return new HeldActor(Reference::of('identity', 'id-9'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1');
+    }
+
+    /**
+     * Read the actor from a foreign guard holding a user, through a bound
+     * reader.
+     *
+     * @return void
+     */
+    private function bindAReader(): void
+    {
+        Auth::extend('foreign', static fn (): Guard => new StubForeignGuard(holdsUser: true));
+
+        $config = app(ConfigRepository::class);
+
+        $config->set('auth.guards.foreign', ['driver' => 'foreign', 'provider' => 'users']);
+        $config->set('audit-log.actor.guards', ['foreign']);
+
+        $this->app?->instance(HeldActorReader::class, new StubHeldActorReader(self::heldWithContext()));
+    }
+
+    /**
      * The frames of the application.
      *
      * @return \SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames
@@ -368,7 +497,7 @@ final class ActorContributorTest extends TestCase
      */
     private function carryActor(): void
     {
-        CarriedContext::carryActor(app(Repository::class), new ActorSnapshot(Reference::of('user', 'user-7'), 'admin'));
+        CarriedContext::carryActor(app(Repository::class), new ActorSnapshot(new HeldActor(Reference::of('user', 'user-7')), 'admin'));
     }
 
     /**

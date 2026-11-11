@@ -7,6 +7,7 @@ namespace Tests\Unit\Runtime;
 use Illuminate\Http\Request;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\Enums\FrameKind;
@@ -117,7 +118,7 @@ final class ExecutionFrameTest extends TestCase
      */
     public function testAJobFrameKeepsWhatItStartedWith(): void
     {
-        $carried = new ActorSnapshot(Reference::of('user', 'user-7'), 'web');
+        $carried = new ActorSnapshot(new HeldActor(Reference::of('user', 'user-7')), 'web');
         $user    = new \stdClass;
         $frame   = ExecutionFrame::job(new \stdClass, 'App\Jobs\SendInvoice', $carried, ['web' => $user]);
 

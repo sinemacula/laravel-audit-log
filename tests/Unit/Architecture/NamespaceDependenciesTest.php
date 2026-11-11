@@ -110,7 +110,7 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Records'],
             'allows'  => ['Records\EventCode'],
         ],
-        'contracts name nothing of the package but contracts, the definitions, access scopes and field readings they return, the records, '
+        'contracts name nothing of the package but contracts, the definitions, access scopes, field readings and held actors they return, the records, '
         . 'references, pending records, read purposes, encrypted fields, field contexts and seal values they take and the conflict they raise' => [
             'from'    => ['Contracts'],
             'except'  => [],
@@ -124,6 +124,7 @@ final class NamespaceDependenciesTest extends TestCase
                 'Records\Contribution',
                 'Records\Reference',
                 'Records\PendingRecord',
+                'Records\HeldActor',
                 'Privacy\EncryptedField',
                 'Privacy\FieldContext',
                 'Privacy\FieldReading',
@@ -375,11 +376,12 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Routing', 'Support\Facades\Route', 'View', 'Contracts\View', 'Support\Facades\View', 'Support\Facades\Blade'],
             'allows'  => ['Routing\Route'],
         ],
-        'only the contributors, the cached user, the core capture listeners, the user reference and the service provider read authentication state; '
-        . 'naming the authenticatable type reads none' => [
+        'only the contributors, the held actor reader contract, the cached user, the core capture listeners, the user reference and the service provider '
+        . 'read authentication state; naming the authenticatable type reads none' => [
             'from'   => ['*'],
             'except' => [
                 'Contributors',
+                'Contracts\HeldActorReader',
                 'Runtime\CachedUser',
                 'Listeners\RecordLaravelAuthEvent',
                 'Listeners\RecordGateDenial',

@@ -7,6 +7,7 @@ namespace Tests\Unit\Runtime;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 
@@ -31,9 +32,9 @@ final class ActorSnapshotTest extends TestCase
     {
         $reference = Reference::of('App\Models\User', '42');
 
-        $snapshot = new ActorSnapshot($reference, 'web');
+        $snapshot = new ActorSnapshot(new HeldActor($reference), 'web');
 
-        self::assertSame($reference, $snapshot->reference);
+        self::assertSame($reference, $snapshot->held->actor);
         self::assertSame('web', $snapshot->guard);
     }
 
@@ -61,7 +62,7 @@ final class ActorSnapshotTest extends TestCase
     #[DataProvider('provideGuardsAtTheBounds')]
     public function testKeepsAGuardAtTheBounds(string $guard): void
     {
-        self::assertSame($guard, (new ActorSnapshot(Reference::of('App\Models\User', '42'), $guard))->guard);
+        self::assertSame($guard, (new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', '42')), $guard))->guard);
     }
 
     /**
@@ -97,6 +98,6 @@ final class ActorSnapshotTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('A guard name must be from 1 to 64 characters, with no control characters.');
 
-        new ActorSnapshot(Reference::of('App\Models\User', '42'), $guard);
+        new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', '42')), $guard);
     }
 }
