@@ -180,7 +180,8 @@ AuditLog::event('invoice.approved')->on($invoice)->correlatedWith('app:ticket-12
 - The value starts with a character that is not a space. The whole id is 1 to 191 characters, with no control
   characters.
 - The id is validated, never cleaned or cut: one that does not fit is an `\InvalidArgumentException` from
-  `correlatedWith()`, and the last id given wins.
+  `correlatedWith()`, and the last id given wins. `Records\CorrelationId::isValid()` checks an id first, so a mapper
+  can skip one built from outside values rather than lose the record.
 - Choose a namespace per source, such as `identity` for the attempts of the recipe above, so ids from two systems never
   collide.
 
