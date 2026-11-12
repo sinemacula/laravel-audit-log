@@ -21,10 +21,8 @@ use Tests\Concerns\ServesRequestsThroughOctane;
 use Tests\TestCase;
 
 /**
- * Tests for the harness that serves requests through one Laravel Octane worker,
- * so a leakage test built on it passes for the right reason: each request runs
- * through the real worker, in a sandbox cloned from the booted application, and
- * an error the worker catches fails the test. No package class is under test.
+ * Tests for the harness that serves requests through one Octane worker; no
+ * package class is under test.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,8 +101,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * A request reaches its route through the worker's whole lifecycle, and the
-     * route's response comes back.
+     * A request reaches its route through the worker, and its response returns.
      *
      * @return void
      */
@@ -133,10 +130,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * Each request runs in an application of its own, cloned from the booted
-     * one: what the booted application held is there, a scoped instance and an
-     * instance bound in the request are not carried to the next, and the
-     * sandbox is flushed once the worker is done with it.
+     * Each request runs in a sandbox cloned from the booted application.
      *
      * @return void
      */
@@ -164,8 +158,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * An error the worker catches outside the HTTP kernel fails the test that
-     * served the request.
+     * An error the worker catches outside the kernel fails the test.
      *
      * @return void
      */
@@ -187,8 +180,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * An error the worker caught for one request does not fail the next, which
-     * the same worker serves.
+     * A worker error for one request does not fail the next.
      *
      * @return void
      */
@@ -213,8 +205,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * An exception a route throws is the HTTP kernel's to answer: the request
-     * gets an error response, and the worker catches nothing.
+     * A route's exception is an error response, not a worker error.
      *
      * @return void
      */
@@ -255,8 +246,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * Configuration a request changes stays in its sandbox: neither the next
-     * request nor the booted application sees it.
+     * Configuration set in a request does not reach the next.
      *
      * @return void
      */
@@ -271,9 +261,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * Between requests the booted application is current again, and the test
-     * can open a new database connection, which reads the configuration through
-     * the application the database manager holds.
+     * Between requests the booted application is current again.
      *
      * @return void
      */
@@ -300,8 +288,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * A request comes from a client, asks for JSON, and carries the identifying
-     * server variables that were given and no others.
+     * A request has a client, asks for JSON and carries the variables given.
      *
      * @return void
      */
@@ -318,8 +305,7 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * The bearer token, the address and any other server variable can be given,
-     * and a server variable given replaces the default.
+     * A request takes the bearer token, address and server variables given.
      *
      * @return void
      */
@@ -334,10 +320,8 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * Make the next request fail outside the HTTP kernel, where the worker
-     * catches it. Octane streams what it catches to standard error only in the
-     * local and testing environments, so the test leaves them for its output to
-     * stay PHPUnit's.
+     * Make the next request fail outside the kernel; Octane prints what it
+     * catches only in local and testing, so leave both.
      *
      * @return void
      */
@@ -363,8 +347,8 @@ final class WorkerHarnessTest extends TestCase
     }
 
     /**
-     * Close the output buffers a request left open. The worker opens one around
-     * each request and closes it only when the kernel returns a response.
+     * Close the output buffers a request left open; the worker closes its own
+     * only when the kernel responds.
      *
      * @param  int  $level
      * @return void

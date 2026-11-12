@@ -17,15 +17,8 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\TestCase;
 
 /**
- * Integration tests for a hold scope's matching on whichever engine the suite
- * runs against: every dimension, and combinations of them, decided in PHP over
- * the rows the engine stored and returned, with and without tenants, actors,
- * subjects and batches, and with each time in the form the engine returns it,
- * trailing zeros trimmed or kept, so a hold keeps the same entries on SQLite,
- * MySQL and PostgreSQL.
- *
- * Rows are seeded with literal inserts of the columns the scope reads, so the
- * scope reads what the engine stored, not what the package wrote.
+ * Integration tests for hold scope matching over rows each engine stored and
+ * returned; rows are seeded by literal inserts, not by the package.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -112,8 +105,7 @@ final class HoldScopeEnginesTest extends TestCase
     ];
 
     /**
-     * Rows of `[scope, the indexes of the rows it keeps]`: every dimension
-     * alone, and combinations of them.
+     * Rows of `[scope, the indexes of the rows it keeps]`.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope, 1: list<int>}>
      */
@@ -154,8 +146,7 @@ final class HoldScopeEnginesTest extends TestCase
     }
 
     /**
-     * Each scope keeps exactly the rows its dimensions match, read back from
-     * the engine as it stored them.
+     * Each scope keeps exactly the rows its dimensions match.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $scope
      * @param  list<int>  $kept
@@ -182,8 +173,7 @@ final class HoldScopeEnginesTest extends TestCase
     }
 
     /**
-     * Every time the engine returns, trimmed or not, reads back as the instant
-     * stored, to the microsecond, so the window compares what was stored.
+     * Every stored time reads back as the instant stored, to the microsecond.
      *
      * @return void
      */

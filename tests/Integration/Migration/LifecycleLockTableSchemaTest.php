@@ -17,19 +17,8 @@ use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the lifecycle lock the shipped migration
- * creates, on whichever engine the suite runs against: its columns, their
- * types, lengths and nullability, its key, the one row it seeds, the update
- * that takes it, and the collision guard, the setting that renames it and its
- * rollback.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the lifecycle lock the shipped migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,8 +49,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     private const array TIMES = ['locked_at'];
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -100,9 +88,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the three columns of the lock, in order, each with the
-     * type family, length and nullability the shape gives it: the id, and the
-     * token and time of the last lock, which the seeded row lacks.
+     * The lock's three columns in order; the token and time are nullable.
      *
      * @return void
      */
@@ -162,9 +148,8 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name fits
-     * PostgreSQL's 63 characters. SQLite names its primary key index itself and
-     * limits no name, so there the primary key is left out.
+     * Every index name fits PostgreSQL's 63 characters at the longest table
+     * name; SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -191,8 +176,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is binary without padding and on InnoDB, as every
-     * table the package keeps.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -209,8 +193,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The migration seeds exactly one row, `id` 1, with no token and no time,
-     * so the first lifecycle transaction finds a row to lock.
+     * The migration seeds one row, `id` 1, for the first transaction to lock.
      *
      * @return void
      */
@@ -225,8 +208,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The lock row is taken by an update that writes a new token and time and
-     * affects the one row, and a second row under its id is refused.
+     * The lock row is taken by an update; a second row under its id is refused.
      *
      * @return void
      */
@@ -245,10 +227,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `lifecycle.lock_table` setting that renames it, and leaves the table as
-     * it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -272,8 +251,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The table is created under whatever name its setting gives, and its
-     * indexes are named after it.
+     * A renamed table and its indexes are created under its setting's name.
      *
      * @return void
      */
@@ -305,8 +283,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
+     * Require the shipped migration file and return its instance.
      *
      * @return \Illuminate\Database\Migrations\Migration
      *

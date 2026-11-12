@@ -9,10 +9,7 @@ use Laravel\Octane\ApplicationFactory;
 use Laravel\Octane\Octane;
 
 /**
- * Octane's application factory over an application the test has already booted,
- * in place of one it would bootstrap from a skeleton: the worker binds its
- * instances on it and warms it with Octane's default services, as a worker does
- * with the application it creates at start.
+ * Octane's application factory over an application the test already booted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -37,24 +37,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for the lifecycle under the grants the storage note
- * documents, run exactly as written by the tables' owner, on MySQL and
- * PostgreSQL: the maintenance user, granted exactly its privileges, holds,
- * prunes and releases; the writer, granted exactly its own, imports, held, and
- * seals; the verifier verifies a pruned log reading the evidence alone; the
- * writer writes neither the journal nor the holds, and no lifecycle operation
- * runs on its credentials; the maintenance user never updates or deletes a
- * journal row; with the documented triggers installed every operation still
- * runs; and a projection row the owner deletes is refused by its trigger, while
- * one the maintenance user deletes changes nothing a hold decides.
- *
- * Each worker creates logins of its own, `audit_writer_<token>`,
- * `audit_maintenance_<token>` and `audit_verifier_<token>`, which the
- * documented grants and triggers name; the writer's login is the storage
- * connection and the maintenance user's the maintenance connection. Every
- * operation goes through `AuditLog::lifecycle()` or a command, on the
- * provider's default bindings. SQLite has no privileges, so these tests are
- * skipped there.
+ * Integration tests for the lifecycle under the documented grants and triggers,
+ * on MySQL and PostgreSQL; SQLite has no privileges.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -101,11 +85,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     private array $files = [];
 
     /**
-     * Create this worker's logins, run the documented grants for them as the
-     * tables' owner, make the writer's login the storage connection and the
-     * maintenance user's the maintenance connection, keep every category thirty
-     * days, freeze the clock and report to a recording handler, on MySQL and
-     * PostgreSQL only.
+     * Create this worker's logins, grant them as documented, connect as them.
      *
      * @return void
      */
@@ -145,9 +125,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * Drop the documented triggers when this test installed them, close the
-     * logins' connections, drop the logins, put the clock back and remove the
-     * files this test wrote.
+     * Drop this test's triggers and the logins, and put the clock back.
      *
      * @return void
      */
@@ -172,10 +150,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * The maintenance user, granted exactly its documented privileges, places a
-     * hold, prunes around it, releases it and prunes what it kept, rebuilds the
-     * projection, and journals each step; every operation is recorded through
-     * the writer, and the writer then verifies the pruned log.
+     * The maintenance user, granted as documented, holds, prunes and releases.
      *
      * @return void
      */
@@ -214,10 +189,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * The writer, granted exactly its documented privileges, imports a file
-     * with a hold placed on its start, writing the batch and its entries while
-     * the maintenance user journals the start, the hold and the finish; the
-     * writer then seals the imported entries and verifies them.
+     * The writer, granted as documented, imports under a hold and seals.
      *
      * @return void
      */
@@ -244,10 +216,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * After the maintenance user prunes, the verifier, which reads the entries,
-     * the seals, the members, the journal, the holds and the key tables and
-     * writes only the progress of verification, verifies the whole log, the
-     * seal `pruned`, and can change none of the evidence.
+     * The verifier verifies a pruned log, and can change none of the evidence.
      *
      * @return void
      */
@@ -283,10 +252,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * The writer can insert, update or delete no journal row, insert or delete
-     * no hold and take no lock, and a lifecycle operation run on the writer's
-     * credentials as its maintenance connection is refused before it writes
-     * anything.
+     * The writer can write no journal row or hold, nor run the lifecycle.
      *
      * @return void
      */
@@ -328,10 +294,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * The maintenance user inserts journal rows through the lifecycle, and can
-     * update or delete none of them, nor truncate the journal, update a hold,
-     * read a batch, or insert or update an entry: the journal stays as it was
-     * written, and the writer still verifies it.
+     * The maintenance user never updates or deletes a journal row.
      *
      * @return void
      */
@@ -368,10 +331,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * With the documented triggers installed beside the grants, every lifecycle
-     * operation still runs on the users' own credentials: sealing, holds, an
-     * import held on its start, prunes, releases, a projection rebuild, a
-     * reconciliation and a verification.
+     * With the documented triggers installed, every lifecycle operation runs.
      *
      * @return void
      */
@@ -408,11 +368,8 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * With the documented triggers installed, the tables' owner's delete of a
-     * projection row is refused by its trigger; the maintenance user's, which a
-     * rebuild makes, is allowed, and with the row gone the hold still keeps its
-     * entry through a prune and is still listed, since both read the journal; a
-     * rebuild puts the row back.
+     * The owner's projection delete is refused; the maintenance user's changes
+     * nothing a hold decides.
      *
      * @return void
      */
@@ -444,8 +401,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * Roll back and close the logins' connections, drop the documented triggers
-     * when this test installed them, then drop the logins.
+     * Close the logins' connections, drop the triggers, then drop the logins.
      *
      * @return void
      */
@@ -473,8 +429,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * Install the engine's documented triggers, for this worker's logins, as
-     * the tables' owner.
+     * Install the engine's documented triggers for this worker's logins.
      *
      * @return void
      */
@@ -488,8 +443,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * Place a hold of the scope through the lifecycle, on the test's authority,
-     * and assert it was recorded.
+     * Place a hold through the lifecycle and assert it was recorded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $scope
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\HoldResult
@@ -504,9 +458,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * Store a captured record with the fields given over its own, happening at
-     * the instant given and recorded at the test's time, through the writer,
-     * and return its id.
+     * Store a record through the writer, occurring at the instant given.
      *
      * @param  string  $occurredAt
      * @param  array<string, ?string>  $fields
@@ -523,8 +475,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * Seal every entry recorded so far through `audit-log:seal --sweep`, on the
-     * storage connection's credentials.
+     * Seal every entry recorded so far with `audit-log:seal --sweep`.
      *
      * @return void
      */
@@ -534,8 +485,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * Run `audit-log:verify --json` on the storage connection's credentials and
-     * return its exit code and each segment's integrity, in order.
+     * Run `audit-log:verify --json` on the storage connection's credentials.
      *
      * @return array{0: int, 1: list<string>}
      *
@@ -560,8 +510,7 @@ final class LeastPrivilegeLifecycleTest extends TestCase
     }
 
     /**
-     * The ids among those given whose entries are still stored, read as the
-     * tables' owner, sorted.
+     * The given ids whose entries are still stored, read as the owner, sorted.
      *
      * @param  list<string>  $ids
      * @return list<string>

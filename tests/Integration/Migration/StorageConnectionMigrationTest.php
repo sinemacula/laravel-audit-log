@@ -14,16 +14,7 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use Tests\TestCase;
 
 /**
- * Integration tests for where the shipped migration, run by Laravel's own
- * `migrate` and `migrate:rollback` commands, creates the entries table while
- * `audit-log.storage.connection` names a connection other than the default: on
- * that connection and not on the default, on the default once none is named,
- * and never on the maintenance connection.
- *
- * The storage connection is a second connection to the test database with a
- * table prefix of its own: a database of its own on SQLite, where each
- * in-memory connection has one, and prefixed tables beside the default
- * connection's on PostgreSQL and MySQL.
+ * Integration tests for the connection `migrate` puts the entries table on.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,8 +40,7 @@ final class StorageConnectionMigrationTest extends TestCase
     private const string TABLE = 'audit_log_entries';
 
     /**
-     * The migration creates the table on the storage connection, and the
-     * default connection has none.
+     * The table is created on the storage connection, not the default.
      *
      * @return void
      */
@@ -63,8 +53,7 @@ final class StorageConnectionMigrationTest extends TestCase
     }
 
     /**
-     * Rolling the migration back drops the table from the storage connection,
-     * and running it again creates it there once more.
+     * A rollback drops the table from the storage connection.
      *
      * @return void
      */
@@ -81,8 +70,7 @@ final class StorageConnectionMigrationTest extends TestCase
     }
 
     /**
-     * With no storage connection named, the table is created on the default
-     * connection, and rolled back from it.
+     * With no storage connection named, the default connection is used.
      *
      * @return void
      */
@@ -105,8 +93,7 @@ final class StorageConnectionMigrationTest extends TestCase
     }
 
     /**
-     * With no storage connection named, the table follows the connection the
-     * migrator is run on, as `--database` chooses it.
+     * With no storage connection named, the migrator's `--database` is used.
      *
      * @return void
      */
@@ -132,9 +119,7 @@ final class StorageConnectionMigrationTest extends TestCase
     }
 
     /**
-     * A maintenance connection of its own never holds the table: the migration
-     * creates it on the storage connection, which maintenance must reach the
-     * same database as.
+     * The maintenance connection never holds the table.
      *
      * @return void
      */
@@ -152,9 +137,8 @@ final class StorageConnectionMigrationTest extends TestCase
     }
 
     /**
-     * Put the package's tables on a second connection to the test database,
-     * with a prefix of its own, and register the maintenance and the chosen
-     * connections the same way.
+     * Prefix the other connections to the test database, each a database of its
+     * own on in-memory SQLite, and put the package's tables on one.
      *
      * @param  mixed  $app
      * @return void

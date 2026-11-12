@@ -14,14 +14,8 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shipped entries migration's collision guard, on
- * every engine; the guard's own cases are its unit test's.
- *
- * The migration aborts with a `TableAlreadyExistsException` carrying an
- * actionable message when the configured entries table already exists on the
- * connection it runs on, before any schema change, and creates the table when
- * there is no collision. The table is configured as `audit_collision_entries`,
- * so the table the test case keeps is never touched.
+ * Integration tests for the entries migration's collision guard on every
+ * engine, under a table name the test case never uses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,9 +60,7 @@ final class EntriesMigrationCollisionTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `entries.table` setting that renames it.
+     * An existing table stops the migration, naming the setting.
      *
      * @return void
      */
@@ -88,9 +80,7 @@ final class EntriesMigrationCollisionTest extends TestCase
     }
 
     /**
-     * When the guard throws, the existing table is left as it was: the guard
-     * aborts before the table is created, so none of the entries table's
-     * columns or indexes is added.
+     * The guard leaves an existing table as it was.
      *
      * @return void
      */
@@ -127,8 +117,7 @@ final class EntriesMigrationCollisionTest extends TestCase
     }
 
     /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
+     * Require the shipped migration file and return its instance.
      *
      * @return \Illuminate\Database\Migrations\Migration
      *
@@ -147,8 +136,7 @@ final class EntriesMigrationCollisionTest extends TestCase
     }
 
     /**
-     * Invoke the migration's `up()` method without statically calling it on the
-     * parent `Migration` class (which does not declare `up`).
+     * Run `up()`, which the `Migration` parent does not declare.
      *
      * @param  \Illuminate\Database\Migrations\Migration  $migration
      * @return void

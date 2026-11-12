@@ -39,13 +39,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for a real prune on whichever engine the suite runs
- * against: the cut-off to the microsecond as each engine stores a time, two
- * categories of one seal pruned apart, held, unsealed and protected entries
- * kept, a verification after the prune passing with the seal `pruned`, the
- * storage note's SQLite triggers dropped and restored around the deletes, and
- * on MySQL and PostgreSQL the maintenance user pruning under the documented
- * grants and triggers.
+ * Integration tests for a real prune on every engine, under the documented
+ * triggers and, on MySQL and PostgreSQL, the documented grants.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,8 +85,7 @@ final class PruneEnginesTest extends TestCase
     private bool $triggers = false;
 
     /**
-     * Stop the clock, keep every category thirty days, bind the configured
-     * policy and the journal's ledger, and seal at the test's time.
+     * Stop the clock, keep thirty days, and bind the policy and the ledger.
      *
      * @return void
      */
@@ -110,8 +104,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * Drop the documented triggers and the logins this test made, and put the
-     * clock back.
+     * Drop the triggers and logins this test made, and put the clock back.
      *
      * @return void
      */
@@ -136,9 +129,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * On each engine the cut-off holds to the microsecond as the engine stores
-     * a time: an entry one microsecond before it is pruned, one at it and one
-     * after it are kept.
+     * The cut-off holds to the microsecond as each engine stores a time.
      *
      * @return void
      */
@@ -155,8 +146,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * On each engine two categories of one seal are pruned each by its own
-     * retention, and the seal verifies `pruned`.
+     * Two categories of one seal are each pruned by their own retention.
      *
      * @return void
      */
@@ -177,8 +167,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * On each engine a held, an unsealed and a protected entry survive a prune
-     * that takes the entry beside them.
+     * Held, unsealed and protected entries survive a prune.
      *
      * @return void
      */
@@ -207,8 +196,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * On each engine a verification after a real prune passes, every seal
-     * `pruned` or `valid`, and the journal it reads verifies.
+     * Verification after a real prune passes.
      *
      * @return void
      */
@@ -229,9 +217,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * On SQLite a prune deletes under the storage note's triggers: it drops the
-     * two delete triggers in its own transaction, deletes, and restores them,
-     * so a delete outside a prune is refused after as before.
+     * On SQLite a prune drops and restores the documented delete triggers.
      *
      * @return void
      */
@@ -265,9 +251,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL the maintenance user, granted exactly its
-     * documented privileges, prunes under the documented triggers while the
-     * writer records and seals, and the writer then verifies.
+     * The maintenance user prunes under the documented grants and triggers.
      *
      * @return void
      */
@@ -323,8 +307,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * Verify the whole log through the journal's ledger, and return the summary
-     * and each segment's integrity, in order.
+     * Verify the whole log through the journal's ledger.
      *
      * @return array{0: \SineMacula\Laravel\AuditLog\Integrity\VerificationSummary, 1: list<string>}
      */
@@ -343,8 +326,7 @@ final class PruneEnginesTest extends TestCase
     }
 
     /**
-     * Store a captured record with the fields given over its own, happening at
-     * the instant given, recorded at the test's time, and return its id.
+     * Store a record with the fields given, occurring at the instant given.
      *
      * @param  string  $occurredAt
      * @param  array<string, ?string>  $fields

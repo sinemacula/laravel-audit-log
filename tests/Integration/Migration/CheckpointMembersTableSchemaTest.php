@@ -13,14 +13,8 @@ use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the table the shipped checkpoint members
- * migration creates, on whichever engine the suite runs against.
- *
- * The migration runs for the longest table name the setting accepts, so the
- * index names are what the migration itself declares at their longest.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the checkpoint members migration's table on every
+ * engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,8 +61,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the seal, the entry and the entry's HMAC, in that order,
-     * and none of them may be missing.
+     * The seal, entry and HMAC columns, in order, none nullable.
      *
      * @return void
      */
@@ -82,8 +75,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * Both ids are stored as UUIDs, and the HMAC has the length of SHA-256 in
-     * hex.
+     * Both ids are UUIDs and the HMAC is the length of SHA-256 in hex.
      *
      * @return void
      */
@@ -103,8 +95,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * The primary key is the seal and the entry, in that order, so a seal's
-     * members are read by its id alone.
+     * The primary key is the seal, then the entry.
      *
      * @return void
      */
@@ -117,8 +108,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * Beside the primary key, the only index is the entry's own, unique: the
-     * one the sealer's anti-join probes.
+     * Beside the primary key, the only index is the entry's unique one.
      *
      * @return void
      */
@@ -133,8 +123,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * A seal holds many entries, and every member of one seal is read by the
-     * seal's id.
+     * A seal holds many entries, read by its id.
      *
      * @return void
      */
@@ -147,8 +136,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * An entry belongs to at most one seal: a second member row for the entry,
-     * under another seal, is refused.
+     * An entry belongs to at most one seal.
      *
      * @return void
      */
@@ -176,10 +164,8 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name, the
-     * primary key's included, fits PostgreSQL's 63 characters. SQLite names its
-     * primary key index itself and limits no name, so there the primary key is
-     * left out.
+     * Every index name fits PostgreSQL's 63 characters at the longest table
+     * name; SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -197,8 +183,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys and no timestamps, so pruning an entry
-     * leaves its member, and with it the seal's count, whole.
+     * The table has no foreign keys and no timestamps.
      *
      * @return void
      */
@@ -210,8 +195,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL every character column takes the table's binary collation
-     * without padding, whatever the connection's collation is.
+     * On MySQL every character column is binary without padding.
      *
      * @return void
      */
@@ -235,8 +219,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is on InnoDB, so the members commit with their seal or
-     * not at all.
+     * On MySQL the table is on InnoDB.
      *
      * @return void
      */
@@ -264,10 +247,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `integrity.members_table` setting that renames it, and leaves the table
-     * as it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -317,8 +297,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
     }
 
     /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
+     * Require the shipped migration file and return its instance.
      *
      * @return \Illuminate\Database\Migrations\Migration
      *

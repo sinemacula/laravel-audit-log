@@ -17,20 +17,8 @@ use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the subject keys table the shipped
- * migration creates, on whichever engine the suite runs against: its columns in
- * order with their types, lengths and nullability, one key per unit and
- * generation, tenantless rows included, the owner and the erasure indexed, a
- * wrapped key kept byte for byte, and the collision guard, the setting that
- * renames it and its rollback.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the subject keys table the shipped migration creates,
+ * on every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,8 +44,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     private const string UNIT = '6f1ed002ab5595859014ebf0951522d9e1a2b3c4d5e6f708192a3b4c5d6e7f80';
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -96,11 +83,8 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the fifteen columns of a key row, in order, each with the
-     * type family, length and nullability the shape gives it, and the schema
-     * checks find nothing wrong with it: only the tenant, the wrapped key, the
-     * wrapping key's id and the erasure may be missing, and the creation time
-     * keeps its microseconds.
+     * Fifteen columns in order; only the tenant, wrapped key, its key id and
+     * erasure are nullable.
      *
      * @return void
      */
@@ -129,9 +113,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * A unit holds one key per generation: a second row with the same unit and
-     * generation is refused, while the next generation of the unit and the same
-     * generation of another unit are both kept.
+     * A unit holds one key per generation.
      *
      * @return void
      */
@@ -149,10 +131,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * Two rows of a unit without a tenant cannot share a generation either,
-     * which a composite unique index over the nullable tenant columns would
-     * allow on every engine: the uniqueness is on the unit's digest, so the
-     * unit's next generation is kept and a repeated one refused.
+     * Tenantless rows cannot share a generation; the unit's digest is unique.
      *
      * @return void
      */
@@ -169,9 +148,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * The primary key is the key's id, and the other indexes are exactly the
-     * shape's: the unique unit and generation, an owner's keys, and the keys an
-     * erasure destroyed, each named after the table.
+     * The indexes are the primary key and the shape's three.
      *
      * @return void
      */
@@ -202,9 +179,8 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name fits
-     * PostgreSQL's 63 characters. SQLite names its primary key index itself and
-     * limits no name, so there the primary key is left out.
+     * Every index name fits PostgreSQL's 63 characters at the longest table
+     * name; SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -221,8 +197,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys, so nothing cascades into or out of it, an
-     * erasure's journal row included.
+     * The table has no foreign keys.
      *
      * @return void
      */
@@ -232,8 +207,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is binary without padding and on InnoDB, as every
-     * table the package keeps.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -250,9 +224,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * A key is read back as written: its wrapped key byte for byte, its
-     * creation time to the microsecond, trailing zeros included, and an erased
-     * key with neither a wrapped key nor its wrapping key's id.
+     * A key reads back as written, its wrapped key byte for byte.
      *
      * @return void
      *
@@ -281,10 +253,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `privacy.subject_keys_table` setting that renames it, and leaves the
-     * table and its keys as they were.
+     * An existing table is refused naming the setting, and keeps its keys.
      *
      * @return void
      */
@@ -308,8 +277,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * The table is created under whatever name its setting gives, and its
-     * indexes are named after it.
+     * A renamed table and its indexes are created under its setting's name.
      *
      * @return void
      */
@@ -341,8 +309,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * A live key of a tenant's unit with every column a key must have, numbered
-     * so its id is its own, with the given columns replaced.
+     * A live key of a tenant's unit, numbered so its id is its own.
      *
      * @param  int  $number
      * @param  array<string, int|string|null>  $columns
@@ -370,8 +337,7 @@ final class SubjectKeysTableSchemaTest extends TestCase
     }
 
     /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
+     * Require the shipped migration file and return its instance.
      *
      * @return \Illuminate\Database\Migrations\Migration
      *

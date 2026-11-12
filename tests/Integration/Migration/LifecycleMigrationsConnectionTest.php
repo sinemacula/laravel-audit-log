@@ -13,20 +13,8 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use Tests\TestCase;
 
 /**
- * Integration tests for where the shipped lifecycle migrations, run by
- * Laravel's own `migrate` and `migrate:rollback` commands, create the journal,
- * the holds, the lock and the import batches: always on the storage connection,
- * beside the entries and the seals they describe, never on the default
- * connection, the maintenance connection or wherever the outbox goes, with the
- * lock's one row seeded there.
- *
- * The storage, the maintenance and the outbox connections are further
- * connections to the test database, each with a table prefix of its own: a
- * database of its own on SQLite, where each in-memory connection has one, and
- * prefixed tables beside the default connection's on PostgreSQL and MySQL.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the connection `migrate` puts the lifecycle tables on;
+ * a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,9 +40,7 @@ final class LifecycleMigrationsConnectionTest extends TestCase
     private const array TABLES = ['audit_log_lifecycle', 'audit_log_holds', 'audit_log_lifecycle_lock', 'audit_log_import_batches'];
 
     /**
-     * The lifecycle tables are created on the storage connection, beside the
-     * entries and the seals, and on no other, the maintenance connection
-     * included; the lock's one row is seeded there.
+     * The lifecycle tables and the lock's row are on the storage connection.
      *
      * @return void
      */
@@ -77,8 +63,7 @@ final class LifecycleMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Moving the outbox leaves the lifecycle tables on the storage connection,
-     * and puts none of them on the outbox connection.
+     * Moving the outbox leaves the lifecycle tables on the storage connection.
      *
      * @return void
      */
@@ -104,9 +89,7 @@ final class LifecycleMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Rolling the migrations back drops each lifecycle table from the storage
-     * connection, and running them again creates each there once more, the lock
-     * seeded again with its one row.
+     * A rollback drops each lifecycle table, and migrating reseeds the lock.
      *
      * @return void
      */
@@ -137,9 +120,8 @@ final class LifecycleMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Put the package's tables on a second connection to the test database,
-     * with a prefix of its own, name a maintenance connection of its own, and
-     * register the outbox connection the same way.
+     * Prefix the other connections to the test database, each a database of its
+     * own on in-memory SQLite, and put the package's tables on one.
      *
      * @param  mixed  $app
      * @return void

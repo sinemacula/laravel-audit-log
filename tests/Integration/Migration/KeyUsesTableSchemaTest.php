@@ -16,17 +16,8 @@ use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the key uses table the shipped migration
- * creates, on whichever engine the suite runs against: its two columns, keyed
- * by the key and the entry together, so a pair is recorded once, the entry
- * indexed on its own, and the collision guard, the setting that renames it and
- * its rollback.
- *
- * The migration runs for the longest table name the setting accepts, so the
- * index names are what the migration itself declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the key uses table the shipped migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,9 +77,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the key's id and the entry's, in that order, neither
-     * nullable, both keyed together as the table's primary key, and the schema
-     * checks find nothing wrong with it.
+     * The key and entry columns, in order, are together the primary key.
      *
      * @return void
      */
@@ -106,8 +95,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * A key and an entry are paired once: the same pair again is refused, while
-     * the key with another entry and the entry with another key are both kept.
+     * A key and entry pair is recorded once.
      *
      * @return void
      */
@@ -123,9 +111,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * Besides the primary key, the entry alone is indexed, not unique, under a
-     * name after the table, so an entry's keys are found without reading a
-     * key's entries.
+     * The entry alone has a non-unique index named after the table.
      *
      * @return void
      */
@@ -141,8 +127,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys, so a pruned entry's key uses are left as
-     * they are and a key use never cascades into a key.
+     * The table has no foreign keys.
      *
      * @return void
      */
@@ -152,8 +137,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is binary without padding and on InnoDB, so a key use
-     * commits with its entry.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -170,10 +154,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `privacy.key_uses_table` setting that renames it, and leaves the table
-     * and its key uses as they were.
+     * An existing table is refused naming the setting, and keeps its rows.
      *
      * @return void
      */
@@ -197,8 +178,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table is created under whatever name its setting gives, and its
-     * indexes are named after it.
+     * A renamed table and its indexes are created under its setting's name.
      *
      * @return void
      */
@@ -242,8 +222,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
+     * Require the shipped migration file and return its instance.
      *
      * @return \Illuminate\Database\Migrations\Migration
      *

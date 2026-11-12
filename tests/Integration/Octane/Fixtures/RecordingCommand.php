@@ -8,8 +8,7 @@ use Illuminate\Console\Command;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 
 /**
- * An Artisan command a request calls, which records an activity and, when told
- * to, then fails, so the exception reaches the request that called it.
+ * An Artisan command that records an activity, then fails when told to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

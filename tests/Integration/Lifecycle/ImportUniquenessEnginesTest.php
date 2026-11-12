@@ -30,22 +30,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for an import's uniqueness on every engine: two imports of
- * one file racing in real processes store each record once, the loser's lines
- * duplicates; a unique violation rolls its chunk back and it is classified
- * again; a second makes the batch partial; an import killed mid-run leaves its
- * batch running until it is closed; and every imported column round-trips.
- *
- * SQLite runs on a file in WAL mode, so the processes share it; a chunk's first
- * statement takes its write lock, so two imports take turns on SQLite and meet
- * the unique index on MySQL and PostgreSQL. A violation within one process is
- * caused by a row of the same source identity inserted on the chunk's own
- * connection just after it classifies, which the rollback removes with the
- * chunk's rows on every engine alike; on MySQL and PostgreSQL a row another
- * writer commits between the classification and the insert is the one the
- * retried chunk must classify, as a conflict. The two processes are a smoke
- * test of the outcome: whether they overlap depends on timing, so the
- * committed-row variant is what proves the reclassification.
+ * Integration tests for import uniqueness on every engine, SQLite on a WAL
+ * file, where two imports take turns rather than meet the unique index.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,8 +65,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     private const string RESULTS = 'results';
 
     /**
-     * Freeze the clock, name this installation, bind the configured retention
-     * policy and import in chunks of 100 lines.
+     * Freeze the clock, name the installation, bind retention, chunk by 100.
      *
      * @return void
      */
@@ -100,8 +85,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * Put the clock back, and remove what the children shared once the
-     * migrations have rolled back.
+     * Put the clock back and remove the children's files after the rollback.
      *
      * @return void
      */
@@ -116,10 +100,8 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * Two processes importing one file at once store each record once: every
-     * line ends imported by one of them and a duplicate for the other, and both
-     * batches are complete. A smoke test of the outcome, not of the race:
-     * whether the two overlap is timing, and on SQLite they take turns.
+     * Two concurrent imports store each record once; whether they overlap is
+     * timing, so this is a smoke test.
      *
      * @return void
      */
@@ -133,9 +115,7 @@ final class ImportUniquenessEnginesTest extends TestCase
 
         for ($child = 0; $child < 2; $child++) {
             $children[] = $this->startChild(function () use ($path, $child): void {
-                // A fork shares its parent's state, so each child's clock is
-                // its own, or both would draw the same ids from the frozen
-                // instant
+                // Each fork needs its own clock, or both draw the same ids
                 CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 09:00:0' . ($child + 1), 'UTC'));
 
                 $this->awaitGate(self::START);
@@ -169,9 +149,8 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * A unique violation rolls its whole chunk back, the interfering row with
-     * it, and the chunk is classified once more and stored: each record once,
-     * and the batch complete.
+     * A unique violation rolls the chunk back, and the chunk is classified
+     * again.
      *
      * @return void
      */
@@ -187,13 +166,8 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL, a row of the same source identity that another
-     * writer commits between a chunk's classification and its insert makes the
-     * insert violate the unique index; the chunk rolls back and is classified
-     * again, and the committed row, whose source digest differs, makes that
-     * line a conflict: the other lines are imported, and each record id is
-     * stored once. SQLite takes its write lock before a chunk classifies, so no
-     * other writer commits between the two there.
+     * On MySQL and PostgreSQL a row committed between classify and insert
+     * becomes a conflict; SQLite locks before it classifies.
      *
      * @return void
      */
@@ -244,8 +218,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * A second violation makes the chunk's new lines conflicts: nothing of it
-     * is stored, its ids are listed, and the batch is partial.
+     * A second violation makes the chunk's lines conflicts, the batch partial.
      *
      * @return void
      */
@@ -265,9 +238,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * An import killed in the middle of a chunk leaves its batch `running`,
-     * reported stale once an hour has passed, and its close makes it
-     * `interrupted` and journals its finish.
+     * A killed import's batch stays running, then closes `interrupted`.
      *
      * @return void
      */
@@ -305,8 +276,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * Every column of an imported row reads back as it was written, and the row
-     * verifies, whatever the engine stores it as.
+     * Every imported column reads back as written, and the row verifies.
      *
      * @return void
      */
@@ -420,9 +390,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * Insert a row of the first line's source identity after each of the first
-     * classifications, on the chunk's own connection, and return the
-     * classifications seen.
+     * Insert a clashing row after each of the first classifications.
      *
      * @param  int  $times
      * @return \ArrayObject<int, string>
@@ -518,8 +486,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * Write a file of the number of lines given, `rec-1` onwards, and return
-     * its path.
+     * Write a file of the given number of lines, `rec-1` onwards.
      *
      * @param  int  $count
      * @return string
@@ -530,8 +497,7 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * Write a file of the lines given among the children's files, and return
-     * its path.
+     * Write the lines to a file the children share.
      *
      * @param  list<string>  $lines
      * @return string

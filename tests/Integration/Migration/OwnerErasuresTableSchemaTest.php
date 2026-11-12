@@ -16,19 +16,8 @@ use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the owner erasures table the shipped
- * migration creates, on whichever engine the suite runs against: its columns in
- * order with their types, lengths and nullability, an owner's markers indexed
- * in journal order, a journal sequence beyond 32 bits, and the collision guard,
- * the setting that renames it and its rollback.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the owner erasures table the shipped migration creates,
+ * on every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +40,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     private const string RENAMED = 'audit_renamed_owner_erasures';
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -91,9 +79,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the seven columns of a marker, in order, each with the
-     * type family, length and nullability the shape gives it, none of them
-     * nullable, and the schema checks find nothing wrong with it.
+     * Seven columns in order with their types, none nullable.
      *
      * @return void
      */
@@ -118,9 +104,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * The primary key is the journal row's id, and the one other index is an
-     * owner's markers in journal order, named after the table: the owner's
-     * latest marker is read from it.
+     * The only other index holds an owner's markers in journal order.
      *
      * @return void
      */
@@ -139,9 +123,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * An owner may hold any number of markers, each at its own journal
-     * sequence, a sequence beyond 32 bits included, and the latest is the one
-     * with the highest sequence.
+     * An owner's markers are kept in journal order, past 32-bit sequences.
      *
      * @return void
      */
@@ -175,9 +157,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name fits
-     * PostgreSQL's 63 characters; on MySQL the table is binary without padding
-     * and on InnoDB, as every table the package keeps.
+     * Index names fit PostgreSQL's limit; on MySQL the table is binary InnoDB.
      *
      * @return void
      */
@@ -202,10 +182,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `privacy.owner_erasures_table` setting that renames it, and leaves the
-     * table and its markers as they were.
+     * An existing table is refused naming the setting, and keeps its markers.
      *
      * @return void
      */
@@ -229,8 +206,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * The table is created under whatever name its setting gives, and its index
-     * is named after it.
+     * A renamed table and its index are created under its setting's name.
      *
      * @return void
      */
@@ -262,8 +238,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * A marker of one owner, numbered so its id is its own, with its transition
-     * and its journal row's sequence.
+     * A marker of one owner, numbered so its id is its own.
      *
      * @param  int  $number
      * @param  string  $transition
@@ -284,8 +259,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
     }
 
     /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
+     * Require the shipped migration file and return its instance.
      *
      * @return \Illuminate\Database\Migrations\Migration
      *

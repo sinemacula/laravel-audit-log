@@ -15,17 +15,8 @@ use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the table the shipped integrity state
- * migration creates, on whichever engine the suite runs against, and for the
- * installation id it seeds.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * key's name and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the integrity state migration's table and seeded id; a
+ * migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +36,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     private const string UUID_V7 = '/\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/';
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -84,8 +74,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds a name, its value and when it was written, in that order,
-     * and none of them may be missing.
+     * A name, a value and a time, in order, none nullable.
      *
      * @return void
      */
@@ -99,8 +88,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * The name is the primary key, alone, so each name holds one value, and is
-     * the table's only index.
+     * The name alone is the primary key and the only index.
      *
      * @return void
      */
@@ -123,8 +111,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * The name has 64 characters, and the value is text, so a value is never
-     * cut to a length.
+     * The name has 64 characters and the value is uncut text.
      *
      * @return void
      */
@@ -147,8 +134,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * When a value was written is stored to the microsecond, as the migration
-     * declares whatever the builder's default.
+     * The time is stored to the microsecond, whatever the builder's default.
      *
      * @return void
      */
@@ -164,9 +150,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * The migration seeds exactly one row, the installation id: a JSON object
-     * `{id}` of a lower-case UUID version 7, drawn at the time it is written,
-     * which is stored in UTC to the microsecond.
+     * The migration seeds the installation id once, a UUID v7 written in UTC.
      *
      * @return void
      */
@@ -195,8 +179,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * The seeded id is kept once: a second row under its name is refused, so a
-     * later write can never replace it.
+     * A second row under the seeded id's name is refused.
      *
      * @return void
      */
@@ -208,8 +191,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, the key's name fits
-     * PostgreSQL's 63 characters; MySQL calls every primary key `primary`.
+     * The key's name fits PostgreSQL's 63 characters; MySQL names it `primary`.
      *
      * @return void
      */
@@ -231,8 +213,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys, so progress needs nothing of the seals it
-     * describes, and may be lost without touching them.
+     * The table has no foreign keys.
      *
      * @return void
      */
@@ -243,9 +224,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL every character column takes the table's binary collation
-     * without padding, and the table is on InnoDB, whatever the connection's
-     * defaults are.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -278,10 +257,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `integrity.state_table` setting that renames it, and leaves the table as
-     * it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -323,8 +299,7 @@ final class IntegrityStateTableSchemaTest extends TestCase
     }
 
     /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
+     * Require the shipped migration file and return its instance.
      *
      * @return \Illuminate\Database\Migrations\Migration
      *
