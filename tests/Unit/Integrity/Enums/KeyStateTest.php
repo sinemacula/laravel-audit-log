@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\KeyState;
 
 /**
- * Unit tests for the key state enum: its cases and their stored values, the
- * states that still hold a wrapped key, and the one state that encrypts.
+ * Unit tests for the key state enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -10,8 +10,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Integrity\SealResult;
 
 /**
- * Unit tests for the tally of one seal run: the seals and entries, the retries,
- * the skipped entries, the first and last sequence, and a complete sweep.
+ * Unit tests for the tally of one seal run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

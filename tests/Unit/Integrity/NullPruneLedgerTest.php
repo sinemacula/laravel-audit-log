@@ -11,8 +11,7 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 
 /**
- * Unit tests for the prune ledger of an application that never prunes: it is a
- * prune ledger, it has no record of any seal, and it keeps no state.
+ * Unit tests for the prune ledger of an application that never prunes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

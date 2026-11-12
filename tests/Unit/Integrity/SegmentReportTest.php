@@ -12,10 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 
 /**
- * Unit tests for one segment's report: what it keeps, its line of output, and
- * the verdict of several findings, the most severe status first, then the first
- * finding in enum order, then the first id bytewise, with a valid prune record
- * giving `pruned` only while nothing worse is found.
+ * Unit tests for one segment's report.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,9 +35,8 @@ final class SegmentReportTest extends TestCase
     private const string SECOND = '01932b4e-8a40-7000-8000-000000000002';
 
     /**
-     * Raise every PHP warning as an exception, so each report is also built and
-     * read quietly: inside a Laravel application a warning becomes an
-     * exception, which would turn verifying the log into an error.
+     * Raise every warning as an exception, as Laravel does, so each report is
+     * built quietly.
      *
      * @return void
      */
@@ -68,9 +64,7 @@ final class SegmentReportTest extends TestCase
     }
 
     /**
-     * The line names the segment, both statuses, whether it awaits its first
-     * anchoring, the member rows found, and the finding and first id, in that
-     * order of keys, and nothing else.
+     * The line's keys and their order are pinned.
      *
      * @return void
      */
@@ -108,9 +102,8 @@ final class SegmentReportTest extends TestCase
     }
 
     /**
-     * The report keeps the digest recomputed from the seal's fields, which the
-     * next seal's link is checked against, and `null` for a seal that could not
-     * be read; neither is in the line.
+     * The report keeps the recomputed digest, `null` for an unreadable seal,
+     * out of its line.
      *
      * @return void
      */
@@ -136,9 +129,7 @@ final class SegmentReportTest extends TestCase
     }
 
     /**
-     * The most severe status wins whatever order the findings come in: a
-     * tampered finding beats an unverifiable and an incomplete one, though it
-     * comes last and is later in enum order.
+     * The most severe status wins whatever the order of the findings.
      *
      * @return void
      */

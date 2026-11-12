@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 
 /**
- * Unit tests for the unknown key exception: the message naming the key id, the
- * id it keeps for a caller, and the class it specialises.
+ * Unit tests for the unknown key exception.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

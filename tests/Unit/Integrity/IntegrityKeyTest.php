@@ -12,9 +12,7 @@ use Symfony\Component\VarDumper\Cloner\VarCloner;
 use Symfony\Component\VarDumper\Dumper\CliDumper;
 
 /**
- * Unit tests for an integrity key: the id and secret it keeps, the ids the
- * `key_id` column cannot hold and the short secrets it refuses, and the secret
- * it never shows in a dump or a stack trace.
+ * Unit tests for an integrity key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -110,8 +108,7 @@ final class IntegrityKeyTest extends TestCase
     }
 
     /**
-     * A secret of 31 bytes is refused and one of 32 bytes is accepted, which
-     * pins the boundary against an off-by-one mutant.
+     * A secret of 31 bytes is refused and one of 32 bytes is accepted.
      *
      * @return void
      */
@@ -140,9 +137,8 @@ final class IntegrityKeyTest extends TestCase
     }
 
     /**
-     * A dump of the key shows the id and never the secret: `print_r()` and
-     * `var_dump()` both read `__debugInfo()`, so the one `print_r()` call the
-     * debug-statement sniff allows in a test covers both.
+     * A dump of the key shows the id, never the secret; `print_r` stands for
+     * every dumper that reads `__debugInfo()`.
      *
      * @return void
      */
@@ -159,10 +155,8 @@ final class IntegrityKeyTest extends TestCase
     }
 
     /**
-     * The secret is no part of the key's visible state, so neither Symfony's
-     * dumper, which `dump()` and `dd()` use and which reads an object's
-     * properties rather than its `__debugInfo()` alone, nor `json_encode()`,
-     * nor `var_export()` shows it.
+     * Symfony's dumper, `json_encode` and `var_export` never show the secret;
+     * the dumper reads properties, not just `__debugInfo()`.
      *
      * @return void
      */

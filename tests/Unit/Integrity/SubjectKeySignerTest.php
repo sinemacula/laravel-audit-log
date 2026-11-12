@@ -20,10 +20,7 @@ use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the key row signer: the HKDF key row key under its own info,
- * the golden HMAC reproduced, every immutable field covered and every mutable
- * one left out, verification that selects the key by the stored id, and the
- * refusals of an unknown key and an unsigned row.
+ * Unit tests for the key row signer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,9 +40,8 @@ final class SubjectKeySignerTest extends TestCase
     private const string RETIRED_SECRET = 'audit-log retired key 0123456789';
 
     /**
-     * The derivation's info is pinned, and the key row key is HKDF-SHA256 of
-     * the secret under it with an empty salt: neither the secret nor the key
-     * that signs seals, the journal or fingerprints.
+     * The key row key is HKDF-SHA256 of the secret under its pinned info with
+     * an empty salt, unlike any other key.
      *
      * @return void
      *
@@ -68,9 +64,8 @@ final class SubjectKeySignerTest extends TestCase
     }
 
     /**
-     * The golden row signs to the golden HMAC under the golden key: the HMAC of
-     * the label and the digest of the canonical encoding of its signed fields,
-     * and it verifies.
+     * The golden row signs to the golden HMAC under the golden key, and
+     * verifies.
      *
      * @return void
      *
@@ -92,9 +87,8 @@ final class SubjectKeySignerTest extends TestCase
     }
 
     /**
-     * Signing names the ring's signing key, and verification selects the key
-     * the row names, so a row signed before a rotation verifies while its key
-     * stays in the ring.
+     * Verification selects the key the row names, so a row signed before a
+     * rotation still verifies.
      *
      * @return void
      */
@@ -110,8 +104,7 @@ final class SubjectKeySignerTest extends TestCase
 
     /**
      * Rows of `[what changes, the stored columns it changes]`: each immutable
-     * field changed in turn, the unit kept its columns' digest where the
-     * columns move, so only the signature can tell.
+     * field, the unit kept consistent.
      *
      * @return iterable<string, array{0: array<string, int|string|null>}>
      */
@@ -149,9 +142,8 @@ final class SubjectKeySignerTest extends TestCase
     }
 
     /**
-     * A change of the state, the wrapped key, its wrapping key id or the
-     * erasure id leaves the signature as it is: those are bound by the wrap
-     * context and the journal.
+     * Changing a mutable field leaves the signature alone; the wrap context and
+     * journal bind those.
      *
      * @return void
      */

@@ -15,10 +15,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentRows;
 
 /**
- * Unit tests for how a segment's verification reads what it was given: the
- * findings of a seal's set of members and of its link to the seal before, the
- * genesis rule, the receipt kept beside a seal, a stored sequence, the earlier
- * of two ids and a stored value as text, each read from what it is given alone.
+ * Unit tests for how a segment's verification reads what it was given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,8 +88,7 @@ final class SegmentRowsTest extends TestCase
 
     /**
      * Rows of `[the previous report's id, its digest, whether the link is
-     * broken]`: the link must name the seal before by its id and its recomputed
-     * digest, and a seal before that could not be read has none.
+     * broken]`.
      *
      * @return iterable<string, array{0: string, 1: ?string, 2: bool}>
      */
@@ -135,8 +131,7 @@ final class SegmentRowsTest extends TestCase
 
     /**
      * Rows of `[sequence, previous id, previous digest, whether the genesis
-     * rule is broken]`: the first seal links to none, and every later one to
-     * the seal before by both.
+     * rule is broken]`.
      *
      * @return iterable<string, array{0: int, 1: ?string, 2: ?string, 3: bool}>
      */

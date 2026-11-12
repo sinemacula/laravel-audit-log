@@ -10,9 +10,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\PruneCoverageResult;
 
 /**
- * Unit tests for what a seal's prune records say of its members: the findings,
- * the missing members covered and the present members to read again, each kept
- * as given.
+ * Unit tests for what a seal's prune records say of its members.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

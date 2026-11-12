@@ -10,12 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\PruneBitmap;
 
 /**
- * Unit tests for the prune bitmap: the golden bitmaps encoded and decoded, bit
- * `i` as bit `i % 8` of byte `i / 8`, least significant first, exactly the
- * members' bytes, and each refusal of a stored form that is not the one
- * canonical text: padding, a foreign character, an impossible length, another
- * encoding of the bytes, another length and a padding bit set; and each refusal
- * of a set to encode.
+ * Unit tests for the prune bitmap.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -331,9 +326,7 @@ final class PruneBitmapTest extends TestCase
     }
 
     /**
-     * `PruneBitmap` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *

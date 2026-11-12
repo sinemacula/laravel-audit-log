@@ -53,23 +53,8 @@ use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Holds the integrity classes, the seal command and the integrity progress to
- * the rule that keeps key material and entries out of a stack trace: with
- * `zend.exception_ignore_args` off every frame keeps its arguments, so a
- * parameter that holds a secret, a data key, a wrapped key, an entry row, a
- * stored row, an owner's key row, an owner or a failure is marked
- * `#[\SensitiveParameter]` on every method it passes through, private helpers
- * and closures included, and a closure's parameters, which reflection of a
- * class cannot reach, are read from the source.
- *
- * Each scan must find what it expects, so it cannot pass by finding nothing,
- * and is shown to flag what it should. A seal goes by `$stored` or `$seal`,
- * never by `$row`, and an owner's key row by neither `$row` nor `$rows`. The
- * reading of a stored seal, which holds ids, digests, counts and times and
- * never an owner or a value, is the one exemption from the rule on `$stored`,
- * listed parameter by parameter. A source scan shows that nothing chains a
- * failure or reads its text, and real throws of verification and of signing
- * show what the marking leaves in a frame.
+ * Checks that integrity code marks each parameter holding key material, an
+ * entry, an owner or a failure sensitive, keeping it out of stack traces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,13 +78,13 @@ final class IntegritySensitiveParametersTest extends TestCase
     /** @var list<string> The further files under `src` the rule holds. */
     private const array FILES = ['Console/IntegrityAlarm.php', 'Console/SealCommand.php', 'Database/IntegrityProgress.php'];
 
-    /** @var list<string> The names a parameter holding key material, an entry row, a stored row, an owner or a failure goes by. */
+    /** @var list<string> The names a held parameter goes by. */
     private const array HELD_NAMES = ['secret', 'sealKey', 'applicationKey', 'row', 'rows', 'entry', 'failure', 'exception', 'dataKey', 'wrapped', 'owner', 'stored'];
 
-    /** @var list<class-string> The types a parameter holding key material, an owner's key row or a reference goes by; any class of throwable is one too. */
+    /** @var list<class-string> The types a held parameter goes by, besides any throwable. */
     private const array HELD_TYPES = [IntegrityKey::class, SubjectKeyRow::class, Reference::class];
 
-    /** @var string What a closure's held parameter is typed as, read from the source, where no type can be resolved. */
+    /** @var string A closure's held parameter type as written in the source. */
     private const string HELD_TYPE_IN_SOURCE = '/\b(?:IntegrityKey|SubjectKeyRow|Reference|Throwable|\w*Exception)\b/';
 
     /** @var list<class-string> The classes the scan must find a held parameter in. */
@@ -121,7 +106,7 @@ final class IntegritySensitiveParametersTest extends TestCase
         SubjectKeySigner::class,
     ];
 
-    /** @var list<string> The parameters the scan must find, as `class::method.parameter`: the seal key's secret, the verifier's entry row and the sealer's failure among them. */
+    /** @var list<string> The parameters the scan must find, as `class::method.parameter`. */
     private const array MUST_FIND = [
         SealSigner::class . '::sealKey.secret',
         SealSigner::class . '::signature.key',
@@ -149,7 +134,7 @@ final class IntegritySensitiveParametersTest extends TestCase
         KeyStoreVerifier::class . '::fingerprintUnder.owner',
     ];
 
-    /** @var list<string> The parameters named `$stored` that read a stored seal's own columns, as `class::method.parameter`; each holds ids, digests, counts and times, never an owner or a value. */
+    /** @var list<string> The `$stored` parameters that read a seal's own columns, which hold no owner or value. */
     private const array SEAL_READING = [
         CheckpointWriter::class . '::timeOf.stored',
         SealEnvelope::class . '::fromRow.stored',
@@ -164,7 +149,7 @@ final class IntegritySensitiveParametersTest extends TestCase
     /** @var list<string> The closures' held parameters the scan must find, as `file:parameter`. */
     private const array MUST_FIND_IN_A_CLOSURE = ['Integrity/CheckpointWriter.php:row'];
 
-    /** @var list<string> Every parameter named `$row` or `$rows`, as `class::method.parameter` or `file:parameter`; each holds entries, never a seal. */
+    /** @var list<string> Every parameter named `$row` or `$rows`; each holds entries, never a seal. */
     private const array ENTRY_ROWS = [
         'Integrity/CheckpointWriter.php:row',
         CheckpointWriter::class . '::positionOf.row',
@@ -184,13 +169,13 @@ final class IntegritySensitiveParametersTest extends TestCase
         UnknownKeyException::class,
     ];
 
-    /** @var array<string, string> The one refusal allowed to chain what it caught, by its file, with its arguments: the encoder's refusal of a string that is not UTF-8 keeps the encoding's `\JsonException`, whose message is PHP's own and whose frames hold no more than the refusal's. */
+    /** @var array<string, string> The one refusal allowed to chain, by file, with its arguments: the encoder keeps PHP's own `\JsonException`. */
     private const array CHAINS_THE_ENCODING = ['Integrity/CanonicalEncoder.php' => '\'A string that is not valid UTF-8 cannot be encoded canonically.\', 0, $exception'];
 
     /** @var int The most arguments a throwable's inherited constructor may be given before the next would be a previous. */
     private const int BEFORE_PREVIOUS = 2;
 
-    /** @var string What a read of a failure's text looks like: its message, its SQL, its bindings, its previous, its trace or its driver's message, or a trace of its own. */
+    /** @var string A read of a failure's text, or a trace of its own. */
     private const string FAILURE_TEXT = '/(?:->|::)\s*get(?:Message|Sql|RawSql|Bindings|Previous|TraceAsString)\s*\(|\berrorInfo\b|\bdebug_(?:print_)?backtrace\s*\(/';
 
     /** @var string A secret long enough to be a key, holding the planted secret. */
@@ -246,9 +231,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Every method of every class the rule holds, private ones included, marks
-     * a parameter that goes by the name or the type of key material, an entry
-     * row or a failure, with no exemption.
+     * Every method the rule holds marks each parameter named or typed as key
+     * material, an entry row or a failure.
      *
      * @return void
      */
@@ -270,10 +254,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Each exemption names a parameter that exists, goes by `$stored` and is
-     * not marked, in a class that reads seals, so an entry left behind by a
-     * rename or a marking fails instead of silently excusing nothing, and no
-     * owner's key row or journal row is ever exempt.
+     * Each exemption names an existing, unmarked `$stored` parameter in a class
+     * that reads seals.
      *
      * @return void
      */
@@ -292,9 +274,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * No parameter that holds an owner's key row goes by `$row` or `$rows`,
-     * which name entry rows here: a key row is a `$draft`, a `$signed`, a
-     * `$keyRow` or, stored, `$stored`.
+     * No parameter holding an owner's key row is named `$row` or `$rows`, which
+     * name entry rows.
      *
      * @return void
      */
@@ -322,9 +303,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan finds a held parameter in each class that must hold one and each
-     * parameter it must find, and reads every class of the folders the rule
-     * holds, one in a nested folder and one added later included.
+     * The scan finds every class and parameter it must, so it cannot pass by
+     * finding nothing.
      *
      * @return void
      */
@@ -391,9 +371,7 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan reads a parameter as one the rule holds by its name or its type,
-     * so it flags what it should and nothing else: protects against a scan that
-     * passes by flagging nothing.
+     * The scan holds a parameter by its name or its type, and nothing else.
      *
      * @param  string  $parameter
      * @param  bool  $held
@@ -485,9 +463,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * A closure's parameters are out of a scan of methods, so they are read
-     * from the source: every one that goes by a held name or type is marked,
-     * with no exemption, and the scan finds the ones it must.
+     * Every closure parameter with a held name or type is marked; reflection
+     * cannot reach them, so they are read from source.
      *
      * @return void
      */
@@ -544,9 +521,7 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[a closure's parameters, the names the scan must flag]`: a held
-     * parameter is flagged by its name or its type unless it is marked, and
-     * anything else is left alone.
+     * Rows of `[a closure's parameters, the names the scan must flag]`.
      *
      * @return iterable<string, array{0: list<string>, 1: list<string>}>
      */
@@ -587,10 +562,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * No parameter named `$row` or `$rows` holds a seal: each one of them,
-     * method or closure, is one of the entry rows listed, so a seal row given
-     * that name is caught here, and the reading of a stored seal takes it as
-     * `$stored` throughout.
+     * Every parameter named `$row` or `$rows` is a listed entry row, so a seal
+     * row given that name fails.
      *
      * @return void
      */
@@ -625,12 +598,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Nothing the rule holds gives an exception a previous one: each `new` of a
-     * class of exception passes no more than the arguments before a previous,
-     * by position or by name, but for the one refusal allowed; each exception
-     * the package raises takes no previous in its own constructor, makes itself
-     * with no more arguments than that constructor takes, and gives its parent
-     * no previous. Each is found, so the scan cannot pass by finding none.
+     * No exception the rule holds is given a previous one but the one refusal
+     * allowed, so no frame leaks through a chain.
      *
      * @return void
      */
@@ -667,10 +636,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The one refusal allowed to chain what it caught is still there, chaining
-     * only the `\JsonException` the encoding of one string threw, which PHP
-     * words itself: a refusal changed to chain anything else is held to the
-     * rule again.
+     * The one refusal allowed to chain still chains only the encoding's
+     * `\JsonException`.
      *
      * @return void
      */
@@ -758,8 +725,7 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Nothing the rule holds reads a failure's message, SQL, bindings, previous
-     * exception, trace or driver message, or takes a trace of its own: a caught
+     * Nothing the rule holds reads a failure's text or takes a trace; a caught
      * failure is named by its class alone.
      *
      * @return void
@@ -772,9 +738,7 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[source, whether it reads a failure's text]`: each read the scan
-     * must flag, and what it must leave alone, a comment that names one
-     * included.
+     * Rows of `[source, whether it reads a failure's text]`.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -813,12 +777,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * A verification that throws while it checks an entry keeps a frame for
-     * each call that held the entry, and each shows the value PHP leaves for a
-     * marked parameter where the row was, in its arguments and in its trace as
-     * a string, and nothing of the entry. The codec is final and cannot be
-     * stubbed, so the entry signer's key ring is malformed instead, and the
-     * throw, after the entry is decoded, is one the verifier does not catch.
+     * Every frame of a verification that held the entry shows it as marked; the
+     * codec is final, so a malformed ring forces the throw.
      *
      * @return void
      */
@@ -860,9 +820,7 @@ final class IntegritySensitiveParametersTest extends TestCase
 
     /**
      * Rows of `[how the ring refuses its key, whether a frame holds the
-     * secret]`: each way a key ring can refuse its key while a seal or a prune
-     * record is signed or verified. The rows name the settings rather than hold
-     * them, since the frame that runs a test keeps its data unmarked.
+     * secret]`; rows name the settings since a test's own frame is unmarked.
      *
      * @return iterable<string, array{0: 'application'|'id'|'short', 1: bool}>
      */
@@ -876,10 +834,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Signing and verifying a seal or a prune record under a key the ring
-     * refuses keeps the frame that held the secret, which shows the value PHP
-     * leaves for a marked parameter, and nothing of the secret anywhere in the
-     * trace, its string or the exception.
+     * Signing or verifying under a refused key leaves nothing of the secret in
+     * the trace or the exception.
      *
      * @param  'application'|'id'|'short'  $refusal
      * @param  bool  $framed
@@ -931,9 +887,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * What the marking hides is really in the frame's reach: an unmarked frame
-     * of the same call keeps the secret, so the tests above cannot pass by
-     * there being nothing to hide.
+     * An unmarked frame of the same call keeps the secret, so the tests above
+     * cannot pass by there being nothing to hide.
      *
      * @return void
      */
@@ -947,9 +902,7 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Fail unless the exception the package raises takes no previous in its own
-     * constructor, makes itself with no more arguments than that constructor
-     * takes, and gives its parent's constructor no previous.
+     * Fail unless the exception takes no previous and gives its parent none.
      *
      * @param  class-string<\Throwable>  $class
      * @return void
@@ -981,9 +934,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The entry row as the verifier reads it: an entry stored as the package
-     * stores it, its properties holding the secret, beside the member row that
-     * records it.
+     * The entry row as the verifier reads it, its properties holding the
+     * secret.
      *
      * @return array<string, int|string|null>
      */
@@ -1055,9 +1007,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The arguments of each frame of the throwable in a method of one of the
-     * classes, by `class::method`, innermost first; a closure bound into one of
-     * them is left out.
+     * The arguments of each frame in one of the classes, by `class::method`,
+     * innermost first, bound closures excluded.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1095,9 +1046,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of the class's own methods that the rule holds; none for a
-     * method PHP or a framework class or trait declares, since neither can be
-     * marked.
+     * The held parameters of the class's own methods; those PHP or a framework
+     * declares cannot be marked.
      *
      * @param  class-string  $class
      * @return list<\ReflectionParameter>
@@ -1225,9 +1175,7 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of each closure in the source that takes any, in order,
-     * read from its tokens: a `function` or `fn` followed straight by a
-     * bracket, which a named method never is.
+     * The parameters of each closure in the source, read from its tokens.
      *
      * @param  string  $source
      * @return list<list<string>>
@@ -1333,9 +1281,8 @@ final class IntegritySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The arguments of the bracket that opens at the index, split at its
-     * top-level commas, each as its text with its spaces trimmed; a trailing
-     * comma adds none.
+     * The trimmed arguments of the bracket that opens at the index, split at
+     * its top-level commas.
      *
      * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  int  $open

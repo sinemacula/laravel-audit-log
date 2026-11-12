@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 
 /**
- * Unit tests for the prune record of version 2: the fields it keeps, the
- * canonical form that leaves out its signature, the golden records reproduced,
- * the count that must be the bitmap's, each malformed field refused with its
- * message, the stored form read back and refused, and the positions it covers.
+ * Unit tests for the prune record of version 2.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,9 +68,8 @@ final class PruneRecordTest extends TestCase
     }
 
     /**
-     * Both golden records give their golden fields, canonical forms and
-     * digests, and the canonical form leaves out the signature, so the digest
-     * does not change with it.
+     * The golden records reproduce, and the canonical form leaves out the
+     * signature.
      *
      * @return void
      *
@@ -319,9 +315,7 @@ final class PruneRecordTest extends TestCase
     }
 
     /**
-     * The positions are the members the bitmap sets, in member order, and a
-     * record covers exactly those: never another member, nor one the seal does
-     * not hold.
+     * A record covers exactly the members its bitmap sets, in member order.
      *
      * @return void
      */

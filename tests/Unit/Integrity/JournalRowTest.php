@@ -12,12 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
 
 /**
- * Unit tests for a lifecycle journal row: a draft's canonical payload and its
- * digest, the signed fields that hold the digest and never the payload, each
- * malformed field refused naming it, the first row alone without a previous
- * HMAC, a stored row read in every form an engine returns and refused naming
- * the column, never its value, a payload that is not the canonical text of a
- * map refused, the insert row, and the golden rows reproduced.
+ * Unit tests for a lifecycle journal row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,9 +38,8 @@ final class JournalRowTest extends TestCase
     ];
 
     /**
-     * A draft's payload is the canonical JSON text of its map, keys sorted, its
-     * digest the SHA-256 of that text, and it holds no key id and no HMAC until
-     * it is signed.
+     * A draft's payload is the canonical JSON of its map with its SHA-256
+     * digest, unsigned until signed.
      *
      * @return void
      */
@@ -216,8 +210,7 @@ final class JournalRowTest extends TestCase
     }
 
     /**
-     * Only the first row has no previous HMAC: a first row with one, and a
-     * later row without one, are refused; an authority and a hold are each
+     * Only the first row has no previous HMAC; an authority and a hold are each
      * optional.
      *
      * @return void
@@ -264,9 +257,8 @@ final class JournalRowTest extends TestCase
     }
 
     /**
-     * A privacy kind's row holds the authority that asked for it, its reason
-     * and its reference, and no hold, through its draft, its signed fields, its
-     * insert row and the stored row read back.
+     * A privacy kind's row keeps its authority, and no hold, from draft to
+     * stored row.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind  $kind
      * @return void
@@ -290,11 +282,8 @@ final class JournalRowTest extends TestCase
     }
 
     /**
-     * A privacy kind's row is refused with half an authority: an empty
-     * authority type when drafted, and a stored type without its id or an id
-     * without its type, each naming the column and never its value. That every
-     * privacy kind must carry a whole authority is the journal's check, made
-     * from the kind's `carriesAuthority()`.
+     * A privacy kind's row with half an authority is refused naming the column,
+     * never its value.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind  $kind
      * @return void
@@ -324,8 +313,7 @@ final class JournalRowTest extends TestCase
 
     /**
      * Rows of `[column, stored value, what it reads as]`: the forms the engines
-     * return, integers as their decimal strings and times with as many
-     * fractional digits as an engine keeps.
+     * return.
      *
      * @return iterable<string, array{0: string, 1: int|string, 2: int|string}>
      */
@@ -434,9 +422,8 @@ final class JournalRowTest extends TestCase
     }
 
     /**
-     * A stored row that breaks the first row's rule is read, not refused: a
-     * first row with a previous HMAC, or a later one without, is evidence the
-     * chain reports as a gap.
+     * A stored row that breaks the first row's rule is read, for the chain to
+     * report as a gap.
      *
      * @return void
      */
@@ -452,9 +439,8 @@ final class JournalRowTest extends TestCase
     }
 
     /**
-     * Rows of `[column, malformed stored value]`: a wrong type, a malformed
-     * form, and a value the row refuses, each holding the planted text where it
-     * can.
+     * Rows of `[column, malformed stored value]`, each holding the planted text
+     * where it can.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -491,9 +477,8 @@ final class JournalRowTest extends TestCase
     }
 
     /**
-     * Each malformed stored column is refused with an unexpected-value
-     * exception naming the column and never quoting the value, nor chaining the
-     * refusal that found it.
+     * A malformed stored column is refused naming the column, never quoting the
+     * value or chaining the cause.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -660,9 +645,7 @@ final class JournalRowTest extends TestCase
     }
 
     /**
-     * The golden first row, drafted with the overrides given: a hold, the first
-     * row of the chain. A field of the wrong type fails the test rather than
-     * the row.
+     * The golden first row, drafted with the overrides given.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

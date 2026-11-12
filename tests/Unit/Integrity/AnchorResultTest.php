@@ -10,10 +10,7 @@ use SineMacula\Laravel\AuditLog\Integrity\AnchorResult;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * Unit tests for the tally of one anchoring pass: whether an anchor is
- * configured, the seals anchored and the last of them, the first unavailable
- * class and where seals wait from, the first conflict and the first refusal,
- * and which of them alarm or stop the pass.
+ * Unit tests for the tally of one anchoring pass.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,9 +100,8 @@ final class AnchorResultTest extends TestCase
     }
 
     /**
-     * An anchor unavailable before any seal was read waits from no known seal,
-     * and that first record is still the one kept, so a later sequence does not
-     * replace it.
+     * An anchor unavailable before any seal waits from none, and a later
+     * sequence does not replace that first record.
      *
      * @return void
      */

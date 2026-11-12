@@ -12,8 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 
 /**
- * Unit tests for the null anchor: its name, that it refuses to anchor, that it
- * confirms nothing, and that it can discover nothing and has no head.
+ * Unit tests for the null anchor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

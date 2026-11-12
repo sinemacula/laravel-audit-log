@@ -10,8 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
 
 /**
- * Unit tests for the anchored head: the sequence and digest it keeps, and the
- * sequence and digests it refuses.
+ * Unit tests for the anchored head.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -12,10 +12,7 @@ use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 
 /**
- * Unit tests for the integrity settings: the explicit ring and its current key,
- * the application keys the default ring is derived from, the strict decoding of
- * every secret, the message each malformed value fails closed with, and the
- * secrets no message or stack trace ever shows.
+ * Unit tests for the integrity settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -124,9 +121,7 @@ final class IntegritySettingsTest extends TestCase
     }
 
     /**
-     * An empty `current`, which an empty environment line gives, reads as none:
-     * without keys the key is derived, and with keys it is the "must name a
-     * key" refusal, never matched against a key id.
+     * An empty `current` reads as none and is never matched against a key id.
      *
      * @return void
      */
@@ -191,9 +186,8 @@ final class IntegritySettingsTest extends TestCase
     }
 
     /**
-     * Each malformed ring or current key id fails closed with its message from
-     * `currentKeyId()` and `validate()`, even beside a valid `app.key`, so no
-     * reader ever falls back to the derived ring.
+     * A malformed ring or current key id fails closed even beside a valid
+     * `app.key`, never falling back to the derived ring.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -409,9 +403,8 @@ final class IntegritySettingsTest extends TestCase
     }
 
     /**
-     * No refusal shows the secret, its `base64:` form or its decoded bytes, in
-     * its message or in the arguments of the settings' own frames of its stack
-     * trace, and none shows the valid keys beside it.
+     * No refusal shows a secret, in any form, in its message or in the
+     * settings' frames of its trace.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -443,9 +436,8 @@ final class IntegritySettingsTest extends TestCase
     }
 
     /**
-     * The decoding helper marks its value sensitive, as does the helper that
-     * reads an explicit secret, so a stack trace through either never shows the
-     * key material.
+     * Both secret-reading helpers mark their value sensitive, so a trace never
+     * shows key material.
      *
      * @return void
      */

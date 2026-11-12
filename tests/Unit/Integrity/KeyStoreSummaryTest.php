@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary;
 
 /**
- * Unit tests for the summary of the key store's verification: the counts it
- * keeps and its array form, a skipped verification, and the encrypter it names
- * only when it was skipped.
+ * Unit tests for the summary of the key store's verification.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,9 +52,7 @@ final class KeyStoreSummaryTest extends TestCase
     }
 
     /**
-     * A skipped verification names the encrypter it was skipped for, keeping
-     * everything else; a verification that ran is about no encrypter, and is
-     * the same summary once named.
+     * Only a skipped verification names the encrypter it was skipped for.
      *
      * @return void
      */
@@ -72,8 +68,7 @@ final class KeyStoreSummaryTest extends TestCase
     }
 
     /**
-     * Naming a skipped verification keeps whatever counts it holds, so a
-     * mutation that resets them is caught.
+     * Naming a skipped verification keeps whatever counts it holds.
      *
      * @return void
      */

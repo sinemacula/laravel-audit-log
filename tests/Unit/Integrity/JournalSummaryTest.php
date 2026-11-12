@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\JournalSummary;
 
 /**
- * Unit tests for what a verification run read of the lifecycle journal: the
- * rows, the head and the latest seal's commitment it keeps, and its part of the
- * run's summary.
+ * Unit tests for what a verification run read of the lifecycle journal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\SealCursor;
 
 /**
- * Unit tests for the seal cursor: a position from an instant, after an entry,
- * and as progress keeps it; the malformed progress it reads as none; the
- * position of a malformed row it keeps as given; and the lengths it refuses.
+ * Unit tests for the seal cursor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,8 +21,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealCursor;
 final class SealCursorTest extends TestCase
 {
     /**
-     * A position from an instant starts at it: its time is the instant as the
-     * database stores it, and it names no entry, so the row at the instant is
+     * A position from an instant names no entry, so the row at the instant is
      * read too.
      *
      * @return void
@@ -132,10 +129,7 @@ final class SealCursorTest extends TestCase
     }
 
     /**
-     * Rows of `[time, id]`: the stored keys of rows the sealer skips as
-     * malformed, which a position must still name exactly: an empty time, a
-     * time that is no instant, an id longer than a UUID, an empty id, and
-     * multibyte text.
+     * Rows of `[time, id]`: stored keys of rows the sealer skips as malformed.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -152,10 +146,8 @@ final class SealCursorTest extends TestCase
     }
 
     /**
-     * The position of a malformed row is kept exactly as the database returned
-     * it, never checked, bounded or cut, and still names the row after it, an
-     * empty id included, so a cursor always moves past a row the sealer skipped
-     * and a malformed key at the end of a batch never stops sealing.
+     * A malformed row's position is kept as returned, so a cursor always moves
+     * past a skipped row.
      *
      * @param  string  $recordedAt
      * @param  string  $id
