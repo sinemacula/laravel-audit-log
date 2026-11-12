@@ -6,8 +6,6 @@ namespace SineMacula\Laravel\AuditLog\Records\Enums;
 
 /**
  * When a record is written relative to the database transaction around it.
- * Every record has exactly one timing; only the builder's snapshot and the
- * recorder read it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,7 +23,6 @@ enum Timing: string
     // Written inside the open transaction on the connection, atomic with it
     case TRANSACTIONAL = 'transactional';
 
-    // Deferred until the outermost transaction on its connection ends, whether
-    // it commits or rolls back
+    // Deferred to the outermost transaction's commit or rollback
     case AFTER_TRANSACTION = 'after_transaction';
 }

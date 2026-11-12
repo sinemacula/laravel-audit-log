@@ -9,17 +9,8 @@ use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The source settings, read from configuration on every call and validated as
- * they are read: the id of the source records are captured on
- * (`audit-log.source.id`) and its region (`audit-log.source.region`).
- *
- * A configured id is validated and kept as given, never slugged. With none, or
- * an empty one, which an empty environment line gives, the id is a slug of
- * `app.name`, cut to the column's 64 characters with no trailing hyphen; a name
- * that gives no slug fails closed, so a record never has a source nobody chose.
- * A region is optional, and `null` or empty reads as none. Every malformed
- * value fails closed with an `InvalidArgumentException` naming the key and
- * never the value.
+ * The source id and region, read and validated on every call; every malformed
+ * value fails closed, naming the key and never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,8 +37,8 @@ final readonly class SourceSettings
     ) {}
 
     /**
-     * The id of the source records are captured on: the configured one, or a
-     * slug of the application's name when none is configured.
+     * The id of the source records are captured on, or a slug of the
+     * application's name when none is configured.
      *
      * @return string
      *
@@ -106,8 +97,8 @@ final readonly class SourceSettings
     }
 
     /**
-     * The slug of `app.name`, which is always ASCII, cut to the longest source
-     * id and with no hyphen left at the end of the cut.
+     * The ASCII slug of `app.name`, cut to the longest source id with no
+     * trailing hyphen.
      *
      * @return string
      *
@@ -126,7 +117,7 @@ final readonly class SourceSettings
     }
 
     /**
-     * Whether the text is at most the most characters given, and already clean.
+     * Whether the text is within the limit and already clean.
      *
      * @param  string  $text
      * @param  int  $maxCharacters

@@ -11,14 +11,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 
 /**
  * A pending record's state at one moment, as the recorder reads it and the
- * captured record is built from it: every field given or filled, the properties
- * and context normalised (`null` when empty), the timing resolved (`null` when
- * the recorder applies its default), the identifier a sign-in was attempted
- * with, raw until it is hashed at capture, the diagnostics of the property and
- * context keys that collided once cleaned, which hold raw cleaned keys until
- * they are masked, a bulk operation's manifest, if it has one, and the id one
- * of the package's own records is given in place of a fresh one. Only
- * `PendingRecord` builds one.
+ * captured record is built from it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -130,7 +123,7 @@ final readonly class PendingSnapshot
         #[\SensitiveParameter]
         public ?array $context,
 
-        /** When the record is written, resolved; `null` when the recorder applies its default. */
+        /** When the record is written; `null` when the recorder applies its default. */
         public ?Timing $timing,
 
         /** The connection the timing is pinned to, if any. */
@@ -139,7 +132,7 @@ final readonly class PendingSnapshot
         /** Whether a failed write throws. */
         public bool $failClosed,
 
-        /** Concrete paths of the property keys that collided once cleaned, segment by segment, first 32. */
+        /** Paths of the property keys that collided once cleaned, first 32; raw until masked. */
         #[\SensitiveParameter]
         public array $collisions,
 
@@ -150,7 +143,7 @@ final readonly class PendingSnapshot
         #[\SensitiveParameter]
         public ?string $identifier,
 
-        /** Concrete paths of the context keys that collided once cleaned, segment by segment, first 32. */
+        /** Paths of the context keys that collided once cleaned, first 32; raw until masked. */
         #[\SensitiveParameter]
         public array $contextCollisions,
 
@@ -160,7 +153,7 @@ final readonly class PendingSnapshot
         /** What a bulk operation affected, before it is sealed; `null` for any other record. */
         public ?Manifest $manifest = null,
 
-        /** The id the package gave its own record, a lower-case UUID; `null` for a fresh one. */
+        /** The id the package gave its own record; `null` for a fresh one. */
         public ?string $id = null,
     ) {}
 }

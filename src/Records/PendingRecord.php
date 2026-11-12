@@ -12,44 +12,8 @@ use SineMacula\Laravel\AuditLog\Records\Concerns\SetsTheOutcome;
 use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 
 /**
- * A record being described, built fluently and recorded once with `record()`,
- * which returns the captured record; nothing is written without it.
- *
- * Its public methods describe the activity (`event()`, `on()`, `by()`,
- * `asPrincipal()`, `forTenant()`, `viaGuard()`, `inSession()`, `fromClient()`,
- * `usingCredential()`, `correlatedWith()`, `withProperties()`, `withNote()` and
- * `withIdentifier()`), set its outcome (`succeeded()`, the default, `failed()`
- * and `denied()`), and choose its delivery (`afterCommit()`, `immediately()`,
- * `transactional()` and `failClosed()`). Setting one field twice keeps the last
- * value given, except that properties merge at the top level, later keys
- * replacing earlier ones; different calls never interact, so the record does
- * not depend on the order they are made in. Every value is validated and
- * normalised as it is given, so its properties and context hold only strings,
- * integers, booleans, `null`, lists and maps and every other field a validated
- * value; a programming error is an `\InvalidArgumentException` or a
- * `\LogicException` whatever the configured failure mode. A record names no
- * provenance: the package sets it.
- *
- * A builder is used once: after its record is built, every further call is a
- * `\LogicException`.
- *
- * A bulk builder carries its manifest, what the operation affected, which its
- * record seals as an attachment and describes in `properties._audit.manifest`.
- * `covering()` gives a builder one, from the application or a mapper; the
- * package's own read records carry theirs too.
- *
- * Only the package's own read path names one of its codes, with `forPackage()`.
- * A builder the facade made is refused when it is recorded with a code under
- * the reserved prefix, because only the package's write path may record one, so
- * `forPackage()` is no public way to record a package code.
- *
- * The recorder is the seam `record()` hands the builder to, and it returns the
- * captured record; the package's recorder passes its own write method. A
- * builder made without one can be described and inspected but not recorded.
- *
- * Callers see this builder and contributors see `Contribution`, a narrow view
- * of it. The `fill*` methods the view delegates to are `@internal`: public only
- * so the view can reach them, and an application never calls them.
+ * A record described fluently and recorded once with `record()`; its `fill*`
+ * methods are public only so `Contribution` can delegate to them.
  *
  * @api
  *
@@ -90,9 +54,8 @@ final class PendingRecord
     ) {}
 
     /**
-     * Record the activity: hand the builder to its recorder, which writes it
-     * according to its timing, and return the captured record. A builder is
-     * recorded once.
+     * Hand the builder to its recorder, which writes it by its timing, and
+     * return the captured record.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      *
@@ -110,9 +73,8 @@ final class PendingRecord
     }
 
     /**
-     * Name what happened with one of the package's own codes, under the
-     * reserved prefix. Only the package's read path calls it; the last code
-     * given wins, as with `event()`.
+     * Name what happened with one of the package's own codes; only the
+     * package's read path calls it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @return self
@@ -132,10 +94,8 @@ final class PendingRecord
     }
 
     /**
-     * Give the record the id given, a lower-case UUID, in place of a fresh one:
-     * one of the package's own records whose id is derived from what it
-     * records, so that record is written at most once. Only the package's
-     * lifecycle records call it.
+     * Use the given lower-case UUID as the record's id, so a lifecycle record
+     * derived from what it records is written at most once.
      *
      * @param  string  $id
      * @return self
@@ -155,13 +115,8 @@ final class PendingRecord
     }
 
     /**
-     * Make the record a bulk operation's: carry the manifest of the subjects it
-     * covers, each a model or a reference, kept once whatever the order or
-     * repetition they come in. A manifest over the configured bounds is
-     * refused, never truncated, and so is any manifest while the bound store
-     * keeps no attachment. The application covers a builder from
-     * `AuditLog::event()`, and a mapper the builder it was handed; a builder
-     * made without a source of manifests cannot cover anything.
+     * Carry the manifest of the subjects a bulk operation covers; refused over
+     * the configured bounds or when the store keeps no attachment.
      *
      * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @return self
@@ -179,9 +134,7 @@ final class PendingRecord
     }
 
     /**
-     * Carry the manifest of what the record covers: a bulk operation's members,
-     * or the package's own read records' disclosure or export. A builder has
-     * one manifest, given before its record is built.
+     * Carry the manifest of what the record covers; a builder has one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
      * @return self
@@ -204,9 +157,8 @@ final class PendingRecord
     }
 
     /**
-     * The builder's state now, with its timing resolved: a fail-closed record
-     * with no timing is written immediately, and a record with neither has no
-     * timing yet, the recorder applying its default. The builder stays usable.
+     * The builder's state now, a fail-closed record with no timing resolved to
+     * immediate; the builder stays usable.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingSnapshot
      *
@@ -253,8 +205,7 @@ final class PendingRecord
     }
 
     /**
-     * The builder's final state, which uses the builder up: every later call is
-     * refused. Only the captured record calls it, as it is built.
+     * The builder's final state, using the builder up.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingSnapshot
      *

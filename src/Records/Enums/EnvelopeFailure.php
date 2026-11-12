@@ -5,10 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records\Enums;
 
 /**
- * Why an envelope kept outside the entries table, in the outbox or a spill
- * line, was refused when it was read back. Each is a distinct outcome, counted
- * on its own: a record that was altered is never confused with one whose key
- * was removed, one this release cannot read, or one that is simply broken.
+ * Why an envelope read back from the outbox or a spill line was refused, each
+ * counted on its own.
  *
  * @api
  *

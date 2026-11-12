@@ -7,16 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Records;
 use SineMacula\Laravel\AuditLog\Records\Enums\Origin;
 
 /**
- * The view of a pending record a contributor gets: it may fill the gaps in the
- * record and read what it needs to decide how, and it cannot record the record,
- * choose its timing, or read its properties or note.
- *
- * It holds nothing and validates nothing of its own, since every method
- * delegates to the builder. A filler fills only a field that is neither given
- * nor filled yet, so an explicit value is never replaced, `by(null)` included,
- * and the first contributor to fill a field wins; a filler given `null` changes
- * nothing and leaves the field open for the next. A malformed value is refused
- * whether or not it would have been used.
+ * A contributor's view of a pending record: it fills the gaps and reads what it
+ * needs, but cannot record, choose a timing, or read properties or note.
  *
  * @api
  *
@@ -34,7 +26,7 @@ final readonly class Contribution
      */
     public function __construct(
 
-        /** The builder being contributed to; only the recorder makes a view of one. */
+        /** The builder being contributed to. */
         private PendingRecord $pending,
     ) {}
 
@@ -81,8 +73,7 @@ final readonly class Contribution
     }
 
     /**
-     * Fill the name of the authentication guard the activity ran under: 1 to 64
-     * characters.
+     * Fill the authentication guard's name.
      *
      * @param  ?string  $guard
      * @return void
@@ -96,9 +87,8 @@ final readonly class Contribution
     }
 
     /**
-     * Fill the session reference: an application-owned, non-secret reference to
-     * the session, never Laravel's session id, which is the secret its cookie
-     * carries. 1 to 191 characters.
+     * Fill an application-owned session reference, never Laravel's session id,
+     * which is the secret its cookie carries.
      *
      * @param  ?string  $sessionId
      * @return void
@@ -112,9 +102,8 @@ final readonly class Contribution
     }
 
     /**
-     * Fill the request id, 1 to 64 characters, and the W3C trace id of a
-     * trusted `traceparent`, 32 lower-case hexadecimal digits not all zero,
-     * each on its own.
+     * Fill the request id and the W3C trace id of a trusted `traceparent`, each
+     * on its own.
      *
      * @param  ?string  $requestId
      * @param  ?string  $traceId
@@ -129,9 +118,8 @@ final readonly class Contribution
     }
 
     /**
-     * Fill the client's IP address, any string as it comes, and its user agent,
-     * cleaned and cut to 512 bytes, each on its own. An address that is not
-     * valid is stored as `null` and diagnosed.
+     * Fill the client's IP address, as it comes, and its user agent, each on
+     * its own; an invalid address is stored as `null`.
      *
      * @param  ?string  $ip
      * @param  ?string  $userAgent
@@ -146,8 +134,7 @@ final readonly class Contribution
     }
 
     /**
-     * Fill where the activity ran: an HTTP request, a console command or a
-     * queued job.
+     * Fill where the activity ran.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Origin  $origin
      * @return void
@@ -160,10 +147,8 @@ final readonly class Contribution
     }
 
     /**
-     * Fill the context, a map of names to values such as the route name, the
-     * method, the command or the job; only the keys the context does not hold
-     * yet are added, so the first contributor to name a key wins. Never give a
-     * URL or a query string.
+     * Add the context keys not held yet, so the first contributor to name a key
+     * wins; never give a URL or a query string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -209,8 +194,8 @@ final readonly class Contribution
     }
 
     /**
-     * Who did it, given or filled so far; `null` for no actor yet and for
-     * explicitly no one, which `isActorSettled()` tells apart.
+     * Who did it so far; `null` for no actor yet and for explicitly no one,
+     * which `isActorSettled()` tells apart.
      *
      * @return ?\SineMacula\Laravel\AuditLog\Records\Reference
      *

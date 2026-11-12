@@ -11,47 +11,8 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * A captured record: everything known about an activity when it was recorded,
- * in the envelope every later stage stores, signs and reads back.
- *
- * It holds only strings, integers, booleans, `null`, lists and maps: enums as
- * their values, references as type and id pairs (both set or both `null`, never
- * an empty string), and the time as ISO-8601 UTC with microseconds. Its id is a
- * UUID version 7, so records captured in one millisecond still sort in the
- * order they were captured. It carries the current record version, the event
- * version and category of its code's definition, and `captured` provenance,
- * which says the application asserted the activity, not that the claim is true;
- * the import fields and the source digest are `null`.
- *
- * An imported record is this installation's acceptance of another source's
- * assertion, with `imported` provenance: its id is a UUID version 7 of the time
- * it was imported, so imported ids sort near their recording, while the time
- * the activity happened is kept as the source gave it. It names the source that
- * asserted it, the record's id there, the batch it came in and the keyed digest
- * of the assertion, has no artifact, and may have no origin, when the source
- * did not know it. It carries no credential, guard, session, request, trace or
- * user agent: an import carries no ambient context.
- *
- * It holds only minimised values: its IP address, context and properties are
- * what `RecordMinimiser` left of the builder's, and the note, the identifier
- * hash, an artifact's manifest descriptor and the diagnostics of what was
- * removed sit at `properties._audit`, last and after the caller's keys, written
- * there by that minimiser.
- *
- * A record with an artifact carries its attachment: a bulk operation's sealed
- * subjects, a disclosure's evidence or an export's manifest. The attachment is
- * carried, not signed, and is never in the envelope: the record is bound to it
- * by the descriptor it signs at `properties._audit.manifest`, which names the
- * attachment's id, kind, digest and count, so a record with the descriptor is
- * built only with the attachment it describes, and a record without one only
- * with none. The rule holds for an attachment described from a stored entry's
- * descriptor too, so a record rebuilt to be read keeps it.
- *
- * The delivery pipeline later finalises it, once, adding the time it was
- * recorded and its integrity fields; nothing here knows of that. A record kept
- * in the outbox or a spill line is rebuilt from its envelope only by the codec,
- * after its signature verifies, with every field as it was signed: its id,
- * times and provenance are kept, and it is never minimised again.
+ * A captured or imported record, in the envelope every later stage stores,
+ * signs and reads back.
  *
  * @api
  *
@@ -181,13 +142,13 @@ final readonly class AuditRecord
         /** Namespaced id tying the record to other activity, if any. */
         public ?string $correlationId,
 
-        /** Where the activity ran: `http`, `console` or `queue`; never `null` for a captured record. */
+        /** Where the activity ran; never `null` for a captured record. */
         public ?string $origin,
 
-        /** Who asserts the record: `captured`, or `imported` for a record another source asserted. */
+        /** Who asserts the record: `captured` or `imported`. */
         public string $provenance,
 
-        /** The source the record was captured on, or, for an imported record, the source that asserted it. */
+        /** The source that captured or, for an import, asserted the record. */
         public string $sourceId,
 
         /** The source's region, if configured. */
@@ -199,7 +160,7 @@ final readonly class AuditRecord
         /** The import batch the record came in; `null` for a captured record. */
         public ?string $importBatchId,
 
-        /** The keyed digest of an imported record's source assertion; `null` on every captured record. */
+        /** The keyed digest of an import's source assertion; `null` if captured. */
         public ?string $sourceDigest,
 
         /** The client's IP address in the configured mode, if known and kept. */
@@ -211,25 +172,20 @@ final readonly class AuditRecord
         /** The context, minimised, as a map; `null` when there is none. */
         public ?array $context,
 
-        /** The properties, minimised, as a map, with the package's metadata last; `null` when there are none. */
+        /** The properties, minimised, with the package's metadata last; `null` if none. */
         public ?array $properties,
 
         /** When the activity happened, as ISO-8601 UTC with microseconds. */
         public string $occurredAt,
 
-        /** The artifact's attachment, carried and bound by the signed descriptor; `null` for a record with no artifact. */
+        /** The artifact's attachment, bound by the signed manifest descriptor. */
         #[\SensitiveParameter]
         public ?Attachment $attachment = null,
     ) {}
 
     /**
-     * The record an envelope holds, with every field kept as given: its id, its
-     * times, its provenance and its import fields included. Only the codec
-     * calls it, having verified the envelope, so it never minimises, sanitises
-     * or checks a value beyond its type; a field missing, or of another type,
-     * is refused. A bundle's attachment comes with it, and must be the one its
-     * signed descriptor describes; a record with a descriptor and no
-     * attachment, or with an attachment and no descriptor, is refused.
+     * The record a verified envelope holds, every field kept as signed and
+     * checked only for its type; the attachment must match its descriptor.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -288,19 +244,8 @@ final readonly class AuditRecord
     }
 
     /**
-     * The captured record of the pending record, which this uses up: built
-     * once, as the entry of the id the pipeline minted before minimising, with
-     * what minimising left of its IP address, context and properties, the event
-     * version and category of its code's definition, the instant the activity
-     * happened, and the source it was captured on. The id must be a lower-case
-     * UUID, and the pending record's own when the package gave it one, since
-     * every value was sealed for that entry. The origin must have been filled.
-     * A builder with a manifest gives a record that takes the attachment of
-     * that manifest, which its minimised properties describe, and any other
-     * record takes none.
-     *
-     * Its parameters are the record's parts, each from its own stage of the
-     * pipeline, so none groups naturally with another.
+     * The captured record of the pending record, which this uses up, under the
+     * id the pipeline minted before minimising sealed every value for it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
@@ -386,21 +331,8 @@ final readonly class AuditRecord
     }
 
     /**
-     * The imported record of the pending record, which this uses up: built
-     * once, with `imported` provenance, from the references, outcome, reason,
-     * correlation id and what minimising left of the IP address, context and
-     * properties of the pending record, the event version and category of its
-     * code's definition, and the source fields given. Its id is the one the
-     * import minted before minimising, a lower-case UUID version 7 of the time
-     * it is imported, since every value was sealed for that entry; the time the
-     * activity happened is kept as given, which must be an instant in the
-     * package's form, and its origin, if the source knew it, must be one this
-     * package names. It carries no credential, guard, session, request, trace
-     * or user agent, and no artifact: a pending record with a manifest is
-     * refused.
-     *
-     * Its parameters are the record's parts, each from its own stage of the
-     * import, so none groups naturally with another.
+     * The imported record of the pending record, which this uses up; it carries
+     * no ambient context and no artifact.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
@@ -480,8 +412,7 @@ final readonly class AuditRecord
     }
 
     /**
-     * The record as its envelope: every field under its stored key, in the
-     * order of the entries table.
+     * The record as its envelope, in the order of the entries table.
      *
      * @formatter:off
      *
@@ -535,9 +466,8 @@ final readonly class AuditRecord
     }
 
     /**
-     * Refuse an attachment that is not the snapshot's own manifest sealed, or
-     * that the minimised properties do not describe, and a snapshot with a
-     * manifest without one.
+     * Refuse an attachment other than the snapshot's sealed manifest that the
+     * minimised properties describe.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
@@ -554,9 +484,8 @@ final readonly class AuditRecord
     }
 
     /**
-     * Refuse an id that is not a lower-case UUID, and one other than the id the
-     * package gave the snapshot, when it gave one, since the record's values
-     * were sealed for the entry the id names.
+     * Refuse an id that is not a lower-case UUID or not the one the package
+     * gave the snapshot, since the values were sealed for that entry.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  string  $id
@@ -577,10 +506,8 @@ final readonly class AuditRecord
     }
 
     /**
-     * Refuse an import of a snapshot with a manifest, or of properties holding
-     * a manifest descriptor, since an imported record carries no artifact; a
-     * time that is not an instant in the package's form; and an origin this
-     * package does not name.
+     * Refuse an import with an artifact, a malformed occurrence time or an
+     * unknown origin.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Privacy\Minimised  $minimised
@@ -607,9 +534,8 @@ final readonly class AuditRecord
     }
 
     /**
-     * Whether the attachment is the one the properties' signed descriptor
-     * describes: none without a descriptor, and with one, exactly the
-     * attachment it names.
+     * Whether the attachment is exactly the one the properties' descriptor
+     * names, or none when there is no descriptor.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -644,8 +570,7 @@ final readonly class AuditRecord
     }
 
     /**
-     * Refuse a source id, or a region when one is given, that is empty, longer
-     * than its column, or not already clean text.
+     * Refuse a source id or region that is empty, too long or not clean text.
      *
      * @param  string  $sourceId
      * @param  ?string  $sourceRegion
@@ -665,8 +590,7 @@ final readonly class AuditRecord
     }
 
     /**
-     * Whether the value is from 1 to the most characters given, and already
-     * clean text.
+     * Whether the value is non-empty, within the limit and clean text.
      *
      * @param  string  $value
      * @param  int  $maxCharacters
@@ -678,8 +602,7 @@ final readonly class AuditRecord
     }
 
     /**
-     * The reference's type and id, or two `null`s when there is none, so a pair
-     * is always both set or both absent.
+     * The reference's type and id, or two `null`s when there is none.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $reference
      * @return array{0: ?string, 1: ?string}
@@ -690,8 +613,7 @@ final readonly class AuditRecord
     }
 
     /**
-     * The envelope's field, which must be present; a field holding `null` is
-     * present.
+     * The envelope's field, which must be present, even if `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -783,8 +705,7 @@ final readonly class AuditRecord
     }
 
     /**
-     * The refusal of an envelope's field of another type, naming the field and
-     * what it must be, never its value.
+     * The refusal of a mistyped field, naming the field but never its value.
      *
      * @param  string  $key
      * @param  string  $what

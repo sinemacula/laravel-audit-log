@@ -7,32 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Records\Concerns;
 use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 
 /**
- * When the pending record is written, and whether a failed write throws.
- *
- * A record has exactly one timing. `afterCommit()` defers the write until the
- * selected transaction's outermost commit and drops it on that transaction's
- * rollback, writing now when none is open; without a connection it selects the
- * innermost pending transaction on any connection, and a name pins that
- * connection. `afterTransaction()` defers the write until the outermost
- * transaction on the connection it is written to ends, committed or rolled
- * back, for a refusal that stays a fact whatever the transaction does; with
- * none open it writes now. `immediately()` writes now. `transactional()` writes
- * inside the open transaction on the connection, the storage connection by
- * default, atomic with it: it needs that transaction, and a connection other
- * than the storage connection needs the outbox on it. It also needs a store
- * that joins that transaction, or the outbox on that connection. Those
- * conditions are checked when the record is written. A second, different timing
- * is refused; the same one again changes nothing. Without a timing the recorder
- * applies the default: after commit for an explicit record, immediately for a
- * captured one.
- *
- * `failClosed()` makes a failed write throw, so returning means the insert
- * succeeded; it is written immediately unless it is transactional, and never
- * after commit or after the transaction, whichever is called first. It needs a
- * durable store, unless the outbox acknowledges for it.
- *
- * The methods sit in a trait only so the builder stays within the number of
- * methods one class may declare; they are `PendingRecord`'s public surface.
+ * When the pending record is written, and whether a failed write throws; a
+ * trait only to keep `PendingRecord` within the method-count limit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,11 +30,9 @@ trait ChoosesDelivery
     private bool $failClosed = false;
 
     /**
-     * Write the record after the selected transaction's outermost commit, and
-     * drop it on that transaction's rollback; write it now when none is open.
-     * Without a connection the innermost pending transaction on any connection
-     * is selected; a name pins that connection. A fail-closed record is never
-     * written after commit.
+     * Write the record after the selected transaction's outermost commit and
+     * drop it on its rollback, or now when none is open; `null` selects the
+     * innermost pending transaction on any connection.
      *
      * @param  ?string  $connection
      * @return self
@@ -78,14 +52,9 @@ trait ChoosesDelivery
     }
 
     /**
-     * Write the record once the outermost transaction open on the connection it
-     * is written to has ended, whether it commits or rolls back, and now when
-     * none is open: for a refusal, which stays a fact when the work around it
-     * is undone. Its context is captured now. Held in memory, it is lost when
-     * the process dies first, and waits for a later rollback when the
-     * transaction ends without Laravel's rollback event (a failed commit, a
-     * lost connection). A fail-closed record is never written after the
-     * transaction.
+     * Write the record once the outermost transaction on its connection commits
+     * or rolls back, or now when none is open. Held in memory, it is lost if
+     * the process dies and waits when Laravel fires no rollback event.
      *
      * @return self
      *
@@ -104,9 +73,9 @@ trait ChoosesDelivery
     }
 
     /**
-     * Write the record now, inside a savepoint when the storage connection has
-     * an open transaction, which isolates a failed write but does not make the
-     * record durable before that transaction commits.
+     * Write the record now, in a savepoint when the storage connection has a
+     * transaction, which isolates a failed write but is not durable before it
+     * commits.
      *
      * @return self
      *
@@ -121,12 +90,9 @@ trait ChoosesDelivery
     }
 
     /**
-     * Write the record inside the open transaction on the connection, the
-     * storage connection by default, atomic with it. The transaction must be
-     * open, a connection other than the storage connection must hold the
-     * outbox, and the store must join the transaction unless the outbox holds
-     * the record; each is checked when the record is written. A failed write
-     * always throws, and the caller must not catch it and commit.
+     * Write the record atomically inside the open transaction on the
+     * connection, the storage connection by default; a failed write always
+     * throws and must not be caught and committed.
      *
      * @param  ?string  $connection
      * @return self
@@ -143,11 +109,7 @@ trait ChoosesDelivery
 
     /**
      * Make a failed write throw, so returning means the insert succeeded; it is
-     * durable once any enclosing transaction on the storage connection commits.
-     * It needs a durable store, unless the outbox acknowledges for it, which is
-     * checked when the record is written. The record is written immediately
-     * unless it is transactional, and never after commit or after the
-     * transaction. Calling it again changes nothing.
+     * never deferred and needs a durable store or the outbox.
      *
      * @return self
      *
@@ -167,8 +129,7 @@ trait ChoosesDelivery
     }
 
     /**
-     * Set the timing and its connection, refusing a second, different one; the
-     * same timing on the same connection again changes nothing.
+     * Set the timing and its connection, refusing a second, different one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  ?string  $connection

@@ -11,51 +11,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The one conversion between a finalised record and the envelope it is kept in
- * outside the entries table, in the outbox or a spill line: the canonical
- * encoding of its 37 columns, or of the bundle a record with an attachment is
- * kept as, and the finalised record a verified envelope holds, rebuilt without
- * loss.
- *
- * An envelope takes one of two shapes. A record without an attachment is its
- * columns. A record with one is a bundle of three keys: `bundle_version`, the
- * bundle schema's version; `record`, its columns; and `attachment`, its id,
- * entry id, kind, member count, digest and sealed members. The attachment is of
- * any kind, a bulk operation's subjects, a disclosure's evidence or an export's
- * manifest, in the one schema; its kind and the count that kind allows are the
- * attachment's own rules. A record that was never finalised is kept in either
- * shape with `unsigned` set beside it. The envelope's bound applies to the
- * whole of it, the attachment included. An attachment described from a stored
- * entry carries no members and is refused as a programming error, never
- * encoded.
- *
- * Decoding reads the envelope's record version and holds it to that version's
- * schema, exactly its columns, each of its kind, before it verifies the
- * signature, and only an envelope that verifies is rebuilt. Each refusal is a
- * distinct `EnvelopeFailure`, checked in a fixed order: an input too large to
- * parse, one that is not a JSON object, an envelope that says it is unsigned, a
- * version missing or not an integer, a version this release does not read, a
- * column missing, added or of another kind, a key the ring does not hold, a
- * signature that does not match or a value with no canonical form, an id other
- * than the one expected, and a record its constructor refuses.
- *
- * A bundle is read the same way, after its own checks: exactly its three keys,
- * then a bundle version this release reads. Its record is verified as any
- * other, then its attachment is held to its schema and must name that record as
- * its entry. The attachment is not signed: it is bound by the descriptor the
- * record signs at `properties._audit.manifest`, so a bundle whose attachment
- * the descriptor does not describe is malformed, as is one of a kind the
- * release does not know or a count its kind refuses, and so is a plain envelope
- * whose properties hold a descriptor, which never becomes a record that lost
- * its members. Every refusal of a bundle names the id of its record.
- *
- * A rebuilt record keeps its id, its times, its provenance and its JSON columns
- * as they were decoded, objects as objects, so it encodes to the same bytes and
- * carries the same signature. The codec never minimises, sanitises or finalises
- * a record again: the envelope is evidence of a record already captured and
- * signed. A bundle's record nests one level deeper than a plain envelope's
- * columns and is decoded to the same depth, which captured values, bounded far
- * shallower, never approach.
+ * The one conversion between a finalised record and its outbox or spill
+ * envelope, which is held to its schema and verified before it is rebuilt.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -115,9 +72,8 @@ final readonly class EnvelopeCodec
     ) {}
 
     /**
-     * The finalised record's envelope, before it is encoded: its columns, or,
-     * for a record with an attachment, the bundle of its columns and its
-     * attachment.
+     * The finalised record's envelope before encoding: its columns, or its
+     * bundle when it has an attachment.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -132,9 +88,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The envelope of a record that was never finalised, before it is encoded:
-     * either shape, its columns or its bundle, with `unsigned` set beside it
-     * and no integrity field.
+     * The envelope of a record never finalised, before encoding, with
+     * `unsigned` set.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -149,9 +104,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The finalised record's envelope: the canonical encoding of its columns,
-     * or of its bundle, refused as oversize beyond the bound, which applies to
-     * the whole bundle.
+     * The canonical encoding of the record's envelope, refused as oversize
+     * beyond the bound.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return string
@@ -170,10 +124,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The finalised record the envelope holds, once it is held to its version's
-     * schema and its signature verifies, a bundle's attachment once it is held
-     * to its own and names the record, and, when an id is expected, once its id
-     * is that id; otherwise the refusal naming the first failure.
+     * The finalised record the envelope holds, once held to its schema,
+     * verified and, when one is expected, of the expected id.
      *
      * @param  string  $json
      * @param  ?string  $expectedId
@@ -213,9 +165,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The record's envelope of the columns given: those columns, or, when the
-     * record carries an attachment, the bundle of them and the attachment,
-     * which names the record as its entry.
+     * The record's envelope of the columns: those columns, or the bundle of
+     * them and its attachment.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -235,10 +186,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The envelope's columns, decoded with objects as `stdClass` and every
-     * number as JSON reads it, refused as malformed unless it is a JSON object.
-     * A parse that fails gives `null`, never an exception, so neither the input
-     * nor the parser's message is kept anywhere.
+     * The envelope's fields, refused unless a JSON object; a failed parse never
+     * throws, so the input is never kept.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -259,8 +208,7 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * Whether the envelope is a bundle: one that names a bundle version at its
-     * top, whatever else it holds.
+     * Whether the envelope names a bundle version at its top.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -273,8 +221,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The envelope's id as it was read, a bundle's from its record, or `null`
-     * when it has none or it is not a string.
+     * The envelope's id, a bundle's from its record, or `null` when absent or
+     * not a string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -296,10 +244,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The bundle's record columns, once the bundle has exactly its three keys
-     * and a version this release reads: refused as malformed for another key or
-     * a missing one, a version that is not an integer or a record that is not
-     * an object, and as unsupported for a version it does not read.
+     * The bundle's record columns, once it has exactly its three keys, a
+     * supported version and an object record.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -331,9 +277,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The schema of the envelope's record version: refused as malformed when
-     * either version is missing or not an integer, and as unsupported when
-     * either is one this release does not read.
+     * The schema of the envelope's record version, refusing a record or
+     * integrity version that is missing, mistyped or unsupported.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -360,9 +305,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * Refuse as malformed an envelope's record, or a bundle's attachment, that
-     * has a field the schema does not name, lacks one it names, or holds a
-     * value of another kind.
+     * Refuse as malformed fields with a column missing, added or of another
+     * kind.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -389,9 +333,7 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * Whether the value is of the kind: a string, a string or `null`, an
-     * integer, an instant in the package's form, or a JSON column's object,
-     * list or `null`.
+     * Whether the value is of the schema kind.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -426,8 +368,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * Refuse an envelope whose signature cannot be checked, because its key is
-     * not in the ring or a value has no canonical form, or does not match.
+     * Refuse an envelope whose key is unknown, whose values have no canonical
+     * form, or whose signature does not match.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -453,9 +395,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * Refuse as malformed a bundle's attachment that is not an object, has a
-     * field its schema does not name, lacks one it names, holds a value of
-     * another kind, or names an entry other than the bundle's record.
+     * Refuse as malformed a bundle's attachment that breaks its schema or names
+     * another entry.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -481,9 +422,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The finalised record of the verified plain envelope, which takes no
-     * attachment, so one whose properties hold a manifest descriptor is refused
-     * as malformed.
+     * The finalised record of the verified plain envelope; one whose properties
+     * hold a manifest descriptor is refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -506,8 +446,7 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The finalised record of the verified bundle, rebuilt with its attachment,
-     * which must be of a known kind with a count that kind allows, and the one
+     * The finalised record of the verified bundle, rebuilt with the attachment
      * its signed descriptor describes.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
@@ -529,9 +468,8 @@ final readonly class EnvelopeCodec
     }
 
     /**
-     * The finalised record of the record the closure rebuilds: its finalisation
-     * as signed, and its JSON columns as decoded; refused as malformed when a
-     * constructor refuses a value.
+     * The finalised record the closure rebuilds, its finalisation as signed and
+     * its JSON columns as decoded.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records\Enums;
 
 /**
- * Where the activity a record describes ran: an HTTP request, a console command
- * or a queued job. A captured record always has an origin; only an imported
- * record whose original origin is unknown has none.
+ * Where the activity a record describes ran; only an import of unknown origin
+ * has none.
  *
  * @api
  *

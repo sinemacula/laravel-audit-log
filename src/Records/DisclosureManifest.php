@@ -10,27 +10,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The evidence of what a read of the trail disclosed, as the canonical form of
- * a `disclosure` artifact: the read's normalised filters, the access scope it
- * ran under, or `null` when none was resolved, the position a page read after,
- * as its occurrence instant and id, or `null` for none, and each entry it
- * returned, as the entry's id and its HMAC, in the order returned, each entry
- * once and at most `MAX_MEMBERS` of them. A read that returned nothing
- * discloses the empty list, which is valid.
- *
- * The canonical form is the canonical encoding of a map of exactly six keys,
- * `disclosure_version`, `filters`, `members`, `nonce`, `page` and `scope`. The
- * nonce is 32 random bytes as 64 lower-case hex, made afresh for every
- * disclosure, so the digest a reader of the read's record is shown cannot be
- * reversed by trying candidate filters and scopes, even for a read that
- * returned nothing, and two identical disclosures never share a digest. The
- * same plaintext always gives the same digest. Reading holds a plaintext to the
- * version it names, which this release must read, and to exactly that version's
- * keys and kinds, and requires its bytes to be the canonical encoding of what
- * they hold, so a plaintext with any other spacing, key order or key is no
- * disclosure. Reading never throws for a malformed plaintext and reads no
- * catalogue, setting or container: a disclosure from an earlier release parses
- * by its own version.
+ * A `disclosure` artifact's canonical form, its fresh nonce keeping the digest
+ * from being reversed by guessing filters.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,13 +29,13 @@ final class DisclosureManifest
     /** @var int The most entries one disclosure names: the largest page a read returns. */
     public const int MAX_MEMBERS = 500;
 
-    /** @var list<string> The keys of a version 1 disclosure, sorted: exactly these and nothing else. */
+    /** @var list<string> The keys of a version 1 disclosure, sorted. */
     private const array KEYS = ['disclosure_version', 'filters', 'members', 'nonce', 'page', 'scope'];
 
     /** @var int Length of a disclosure's nonce, in bytes. */
     private const int NONCE_BYTES = 32;
 
-    /** @var int How deep a plaintext is decoded: far deeper than any normalised filters or scope nest. */
+    /** @var int How deep a plaintext is decoded. */
     private const int DEPTH = 16;
 
     /** @var string An entry's id as every engine returns it: a lower-case UUID. */
@@ -69,14 +50,8 @@ final class DisclosureManifest
     private function __construct() {}
 
     /**
-     * The manifest of a read's disclosure: its normalised filters, its scope,
-     * or `null` when none was resolved, each entry it returned, as an id and an
-     * HMAC in the order returned, and the position a page read after, or
-     * `null`, with a fresh nonce, counted by those entries. More than
-     * `MAX_MEMBERS` entries, an id that is not a lower-case UUID, an HMAC that
-     * is not 64 lower-case hex, an entry twice, a position that is not an
-     * instant and a lower-case UUID, and filters or a scope that are not maps
-     * the reader reads back are refused.
+     * The manifest of a read's disclosure: its filters, scope, returned entries
+     * in order and page position, under a fresh nonce.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -113,9 +88,8 @@ final class DisclosureManifest
     }
 
     /**
-     * The count and digest of a plaintext that is exactly a disclosure's
-     * canonical form, in a version this release reads, or `null` for any other
-     * plaintext.
+     * The count and digest of a plaintext that is exactly a supported
+     * disclosure's canonical form, or `null` for any other.
      *
      * @param  string  $plaintext
      * @return ?array{count: int, digest: string}
@@ -139,8 +113,7 @@ final class DisclosureManifest
     }
 
     /**
-     * A fresh nonce: 32 random bytes as 64 lower-case hex. A system that cannot
-     * give random bytes makes no disclosure.
+     * A fresh nonce: 32 random bytes as 64 lower-case hex.
      *
      * @return string
      *
@@ -156,9 +129,7 @@ final class DisclosureManifest
     }
 
     /**
-     * Why the members are not a disclosure's, or `null` when they are: a list
-     * of at most `MAX_MEMBERS` pairs, each a lower-case UUID and a lower-case
-     * hex HMAC, with no id twice.
+     * Why the members are not a disclosure's, or `null` when they are.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -207,8 +178,7 @@ final class DisclosureManifest
     }
 
     /**
-     * Whether the value is an entry's id and HMAC: a list of exactly a
-     * lower-case UUID and 64 lower-case hex.
+     * Whether the value is an entry's id and HMAC.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -227,8 +197,8 @@ final class DisclosureManifest
     }
 
     /**
-     * Whether the value is a disclosure's page: `null`, or a list of exactly an
-     * instant and a lower-case UUID.
+     * Whether the value is a disclosure's page: `null`, or an instant and a
+     * lower-case UUID.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -250,9 +220,7 @@ final class DisclosureManifest
 
     /**
      * Whether the decoded value holds exactly a supported version's keys, each
-     * of its kind: a supported integer version, filters that are a map, a scope
-     * that is a map or `null`, members a disclosure names, a nonce of 64
-     * lower-case hex, and a page.
+     * of its kind.
      *
      * @formatter:off
      *
@@ -301,8 +269,7 @@ final class DisclosureManifest
     }
 
     /**
-     * Whether the decoded map has exactly a version 1 disclosure's keys, in any
-     * order.
+     * Whether the decoded map has exactly a version 1 disclosure's keys.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -319,8 +286,8 @@ final class DisclosureManifest
     }
 
     /**
-     * Whether the decoded value is a map: an array with no key, or one that is
-     * not a list.
+     * Whether the decoded value is a map: an empty array or one that is not a
+     * list.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -335,8 +302,7 @@ final class DisclosureManifest
     }
 
     /**
-     * The plaintext decoded with objects as arrays, or `null` when it is not
-     * JSON or nests deeper than a disclosure is read to.
+     * The plaintext decoded, or `null` when it is not JSON or nests too deep.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

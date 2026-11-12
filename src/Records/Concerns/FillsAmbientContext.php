@@ -11,25 +11,8 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * The gaps a contributor fills in the pending record: the actor, principal and
- * tenant, the guard, the session reference, the request and trace ids, the
- * client's IP address and user agent, the origin and the context.
- *
- * A filler fills only a field that is neither given nor filled yet, and then
- * marks it filled, so the first contributor to fill a field wins and none
- * replaces an explicit value, `by(null)` included. A filler given `null`
- * changes nothing and leaves the field open for the next. A filler of two
- * fields treats each on its own. An explicit setter called after a filler
- * replaces the filled value, so explicit beats contributor in either order.
- * Every value is validated whether or not it is used, so a malformed one is
- * refused in any order. The IP address alone is taken as it comes, because one
- * that is not valid is stored as `null` and diagnosed when the record is
- * minimised, and never loses the record. The trait also keeps which fields are
- * given, and the identifier and map checks the builder's other methods share.
- *
- * The methods sit in a trait only so the builder stays within the number of
- * methods one class may declare; the package's recorder and `Contribution` call
- * the fillers, and an application never does.
+ * The gaps a contributor fills in the pending record, never over an explicit
+ * value; a trait only to keep `PendingRecord` within the method-count limit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,7 +54,7 @@ trait FillsAmbientContext
     /** @var ?string The W3C trace id of a trusted `traceparent`, if known. */
     private ?string $traceId = null;
 
-    /** @var ?string The client's IP address, as the contributor gave it and before it is minimised, if known. */
+    /** @var ?string The client's IP address as given, before it is minimised. */
     private ?string $ip = null;
 
     /** @var ?string The client's user agent, cleaned and capped, if known. */
@@ -87,7 +70,7 @@ trait FillsAmbientContext
 
     // phpcs:enable SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
 
-    /** @var list<list<int|string>> Concrete paths of the context keys that collided once cleaned, segment by segment, first 32 across every call. */
+    /** @var list<list<int|string>> Paths of the context keys that collided once cleaned, first 32 across every call. */
     private array $contextCollisions = [];
 
     /** @var int How many context keys collided once cleaned, across every call. */
@@ -160,8 +143,7 @@ trait FillsAmbientContext
     }
 
     /**
-     * Fill the name of the authentication guard the activity ran under: 1 to 64
-     * characters, validated, never cleaned or cut.
+     * Fill the authentication guard's name; validated, never cleaned or cut.
      *
      * @param  ?string  $guard
      * @return void
@@ -189,9 +171,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Fill the session reference: an application-owned, non-secret reference to
-     * the session, never Laravel's session id, which is the secret its cookie
-     * carries. 1 to 191 characters, validated, never cleaned or cut.
+     * Fill an application-owned session reference, never Laravel's session id,
+     * which is the secret its cookie carries.
      *
      * @param  ?string  $sessionId
      * @return void
@@ -219,10 +200,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Fill the request id, 1 to 64 characters, and the W3C trace id of a
-     * trusted `traceparent`, 32 lower-case hexadecimal digits not all zero,
-     * each on its own: a request id already filled does not stop the trace id
-     * being filled. Both are validated, never cleaned or cut.
+     * Fill the request id and the W3C trace id of a trusted `traceparent`, each
+     * on its own; validated, never cleaned or cut.
      *
      * @param  ?string  $requestId
      * @param  ?string  $traceId
@@ -257,10 +236,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Fill the client's IP address, any string as it comes, and its user agent,
-     * cleaned and cut to 512 bytes, each on its own. An address that is not
-     * valid is stored as `null` and diagnosed when the record is minimised. A
-     * user agent that is empty once cleaned counts as none.
+     * Fill the client's IP address, taken as it comes for minimising to judge,
+     * and its cleaned user agent, each on its own.
      *
      * @param  ?string  $ip
      * @param  ?string  $userAgent
@@ -289,8 +266,7 @@ trait FillsAmbientContext
     }
 
     /**
-     * Fill where the activity ran: an HTTP request, a console command or a
-     * queued job.
+     * Fill where the activity ran.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Origin  $origin
      * @return void
@@ -311,10 +287,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Fill the context, a map of names to values such as the route name, the
-     * method, the command or the job, normalised now; only the keys the context
-     * does not hold yet are added, so the first contributor to name a key wins.
-     * The contributor must never give a URL or a query string.
+     * Add the normalised context keys not held yet, so the first contributor to
+     * name a key wins; never a URL or query string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -339,8 +313,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Whether the actor is given explicitly or filled, so no filler can change
-     * it, `by(null)` included.
+     * Whether the actor is given or filled, so no filler can change it,
+     * `by(null)` included.
      *
      * @return bool
      *
@@ -356,8 +330,7 @@ trait FillsAmbientContext
     }
 
     /**
-     * Mark the field given, explicitly or by a contributor, so no contributor
-     * fills it.
+     * Mark the field given, so no contributor fills it.
      *
      * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
      * @return void
@@ -368,8 +341,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Claim the field for a contributor's value: when there is a value and the
-     * field was not given, mark it given and say the value should be kept.
+     * Claim an unclaimed field for a contributor's value, saying whether to
+     * keep it.
      *
      * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
      * @param  bool  $present
@@ -398,9 +371,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Refuse an identifier that is empty, longer than its column, or not
-     * already clean text; an identifier is never cleaned or cut, because one
-     * that cleaning would change is not that identifier.
+     * Refuse an identifier that is empty, too long or not clean text; one that
+     * cleaning would change is not that identifier, so it is never cleaned.
      *
      * @param  string  $value
      * @param  int  $maxCharacters
@@ -417,8 +389,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * The user agent cleaned and cut to 512 bytes, or `null` when it is empty
-     * once cleaned.
+     * The user agent cleaned and cut to 512 bytes; `null` when empty once
+     * cleaned.
      *
      * @param  ?string  $userAgent
      * @return ?string
@@ -431,8 +403,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * Refuse a trace id that is not 32 lower-case hexadecimal digits, or that
-     * is all zero, which W3C Trace Context makes invalid.
+     * Refuse a trace id that is not 32 lower-case hex digits, or is all zero,
+     * which W3C Trace Context makes invalid.
      *
      * @param  string  $traceId
      * @return void
@@ -447,8 +419,8 @@ trait FillsAmbientContext
     }
 
     /**
-     * The normalised value as a map, refusing a list that is not empty with the
-     * message given.
+     * The normalised value as a map, refusing a non-empty list with the message
+     * given.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -9,25 +9,8 @@ use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 
 /**
- * What an artifact holds before it is sealed, in its canonical form: a bulk
- * operation's subjects, a disclosure's evidence of what a read returned, or an
- * export's manifest. Its kind says which, its digest is a lower-case hex
- * SHA-256 of the canonical bytes, and its id is a lower-case UUID version 7
- * made once, so a retry, a drain and a replay of its record carry the same
- * artifact.
- *
- * A bulk operation's canonical form is built here: the JSON list of `[type,
- * id]` pairs, de-duplicated on the exact pair and sorted bytewise on the type
- * and then on the id, encoded with fixed flags, so the same subjects in any
- * order and with any repetition give the same bytes and the same digest. It
- * names at least one subject. Nothing is ever truncated: more unique subjects
- * than the cap, a canonical form over the byte bound, or more subjects read
- * than four times the cap, duplicates included, is refused. The bytes are
- * counted as the subjects arrive, so an endless or oversize input stops early.
- *
- * A disclosure's and an export's canonical forms are built by their own
- * versioned builders and given here as they are, with their count, which may be
- * zero.
+ * What an artifact holds before it is sealed, in its canonical form, under an
+ * id made once so every retry, drain and replay carries the same artifact.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,16 +19,16 @@ use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
  */
 final readonly class Manifest
 {
-    /** @var int How many subjects may be read for each one the cap allows, duplicates included. */
+    /** @var int Subjects read, duplicates included, for each one the cap allows. */
     public const int MAX_INPUT_FACTOR = 4;
 
-    /** @var int The flags the canonical form is encoded with: those every stored JSON column uses. */
+    /** @var int The flags every stored JSON column is encoded with. */
     public const int JSON_FLAGS = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR;
 
     /** @var int Bytes of the canonical form that are not a member: its opening and closing brackets. */
     private const int BRACKET_BYTES = 2;
 
-    /** @var string What separates a type from its id in the key a member is de-duplicated on; never in either. */
+    /** @var string Separates type from id in a member's de-duplication key; never in either. */
     private const string SEPARATOR = "\0";
 
     /** @var int How deep a canonical form nests: the list, its pairs and their strings. */
@@ -67,16 +50,16 @@ final readonly class Manifest
         /** The artifact's id: a lower-case UUID version 7, made once. */
         public string $id,
 
-        /** What the artifact holds: a bulk operation's subjects, a disclosure or an export's manifest. */
+        /** What the artifact holds. */
         public ArtifactKind $kind,
 
-        /** How many members the manifest holds, each once: at least one for a bulk operation, and never fewer than none. */
+        /** How many distinct members it holds; at least one for a bulk operation. */
         public int $count,
 
         /** Lower-case hex SHA-256 of the canonical form. */
         public string $digest,
 
-        /** The canonical form: a bulk operation's sorted JSON list of each member's type and id, or a builder's versioned form. */
+        /** The canonical form: a bulk operation's sorted pairs, or a builder's versioned form. */
         #[\SensitiveParameter]
         public string $canonical,
     ) {
@@ -94,8 +77,8 @@ final readonly class Manifest
     }
 
     /**
-     * The manifest of the subjects, each a model, which becomes its reference,
-     * or a reference, kept once whatever the order or repetition they come in.
+     * The bulk manifest of the subjects, de-duplicated and never truncated;
+     * counted as they arrive so an endless input stops early.
      *
      * @param  iterable<\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @param  int  $maxMembers
@@ -129,9 +112,7 @@ final readonly class Manifest
     }
 
     /**
-     * The manifest of a canonical form a kind's own builder made, given as it
-     * is with the count of what it holds: a fresh id, and the digest of the
-     * bytes.
+     * The manifest of a canonical form a kind's own builder made.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  string  $canonical
@@ -148,8 +129,8 @@ final readonly class Manifest
     }
 
     /**
-     * The canonical form of the members, which are distinct: sorted bytewise on
-     * the type and then on the id, and encoded with the manifest's flags.
+     * The canonical form of the distinct members, sorted bytewise on the type
+     * and then the id.
      *
      * @param  list<array{0: string, 1: string}>  $members
      * @return string
@@ -165,9 +146,7 @@ final readonly class Manifest
 
     /**
      * The count and digest of a plaintext that is exactly a bulk operation's
-     * canonical form, the one kind this reads: a non-empty list of type and id
-     * pairs, both strings, in strictly increasing order, which encodes back to
-     * the same bytes; `null` for any other plaintext.
+     * canonical form, or `null` for any other.
      *
      * @param  string  $plaintext
      * @return ?array{count: int, digest: string}
@@ -187,8 +166,7 @@ final readonly class Manifest
 
     /**
      * The descriptor a record with an artifact signs at
-     * `properties._audit.manifest`: the artifact's id, its kind, the digest and
-     * the count, in that order.
+     * `properties._audit.manifest`.
      *
      * @return array{artifact_id: string, kind: string, digest: string, count: int}
      */
@@ -222,7 +200,7 @@ final readonly class Manifest
 
     /**
      * Refuse more subjects read than four times the cap, more members than the
-     * cap, or a canonical form of more bytes than the bound.
+     * cap, or more bytes than the bound.
      *
      * @param  int  $read
      * @param  int  $count
@@ -253,8 +231,7 @@ final readonly class Manifest
     }
 
     /**
-     * The plaintext decoded, or `null` when it is not JSON or nests deeper than
-     * a canonical form.
+     * The plaintext decoded, or `null` when it is not JSON or nests too deep.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -272,7 +249,7 @@ final readonly class Manifest
 
     /**
      * Whether the decoded value is a non-empty list of type and id pairs in
-     * strictly increasing order, so with no member twice.
+     * strictly increasing order.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -301,8 +278,7 @@ final readonly class Manifest
     }
 
     /**
-     * Whether the decoded member is a type and id pair: a list of exactly two
-     * strings.
+     * Whether the decoded member is a pair of strings.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

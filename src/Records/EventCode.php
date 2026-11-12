@@ -7,20 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Records;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 
 /**
- * The code naming what happened, as a record stores it: lower-case dotted
- * segments such as `invoice.approved`, each a letter followed by letters,
- * digits or underscores, in at least two segments and at most 191 bytes.
- *
- * A code is given as a string or as a string-backed enum case, whose value is
- * the code; it is never derived from a class name. A code is validated, never
- * cleaned or cut: the length is checked first, then the grammar.
- *
- * There are three ways in, and only one of them writes. `of()` takes a caller's
- * code to record, which may not begin with the `audit_log.` prefix, reserved
- * for the package's own codes. `package()` mints one of those codes from the
- * package's own activity, for its read path alone. `forReading()` takes a code
- * to look for, under any prefix, so a filter, a description, a test's assertion
- * or a lookup can name a package code without a way to record one.
+ * The code naming what happened, such as `invoice.approved`; only `of()` gives
+ * a code to record, and it refuses the reserved prefix.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,8 +51,7 @@ final readonly class EventCode
     }
 
     /**
-     * A caller's code, given as a string or as a string-backed enum case: it
-     * may not begin with the prefix reserved for the package's own codes.
+     * A caller's code to record, refusing the prefix reserved for the package.
      *
      * @param  \BackedEnum|string  $code
      * @return self
@@ -84,8 +71,7 @@ final readonly class EventCode
 
     /**
      * The code of one of the package's own activities, under the reserved
-     * prefix: the activity's value, held to the length and the grammar, and
-     * refused unless it begins with the prefix.
+     * prefix.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @return self
@@ -106,9 +92,8 @@ final readonly class EventCode
     }
 
     /**
-     * A code to look for, given as a string or as a string-backed enum case:
-     * held to the length and the grammar, under any prefix, the reserved one
-     * included. Nothing is ever recorded under a code made this way.
+     * A code to look for under any prefix, the reserved one included; nothing
+     * is ever recorded under it.
      *
      * @param  \BackedEnum|string  $code
      * @return self
@@ -121,8 +106,7 @@ final readonly class EventCode
     }
 
     /**
-     * The code a string or an enum case gives: the string itself, or the case's
-     * value when the enum is backed by strings.
+     * The code a string or a string-backed enum case gives.
      *
      * @param  \BackedEnum|string  $code
      * @return string

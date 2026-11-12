@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records\Enums;
 
 /**
- * Who asserts what a record says: this application, which captured it, or
- * another source it was imported from. It is set by the package or the
- * importer, never by a caller: no public builder method takes one.
+ * Who asserts what a record says; set by the package or the importer, never by
+ * a caller.
  *
  * @api
  *

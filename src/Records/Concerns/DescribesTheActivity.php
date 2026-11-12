@@ -14,22 +14,8 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * The pending record's description of the activity: its event code, the
- * references it names (subject, actor, principal and tenant), the guard, the
- * session and the client, the credential and correlation ids, the properties,
- * the note, and the identifier a sign-in was attempted with.
- *
- * Setting a field again replaces it, the last call winning, except that
- * properties merge at the top level, later keys replacing earlier ones. A model
- * is referred to through `Reference::to()`, so an unsaved one is refused, and a
- * value is normalised when it is given, so the builder's properties hold only
- * strings, integers, booleans, `null`, lists and maps, and every other field a
- * validated value. A `null` given to `by()`, `asPrincipal()`, `forTenant()`,
- * `viaGuard()`, `inSession()` or `fromClient()` says that there is explicitly
- * none, which a contributor never fills.
- *
- * The methods sit in a trait only so the builder stays within the number of
- * methods one class may declare; they are `PendingRecord`'s public surface.
+ * The pending record's description of the activity; a trait only to keep
+ * `PendingRecord` within the method-count limit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,7 +36,7 @@ trait DescribesTheActivity
     /** @var ?\SineMacula\Laravel\AuditLog\Records\Reference What the activity was done to, if anything. */
     private ?Reference $subject = null;
 
-    /** @var ?\SineMacula\Laravel\AuditLog\Records\Reference Who did it, given or filled; `null` also when explicitly no one. */
+    /** @var ?\SineMacula\Laravel\AuditLog\Records\Reference Who did it, given or filled. */
     private ?Reference $actor = null;
 
     /** @var ?\SineMacula\Laravel\AuditLog\Records\Reference The principal the actor acted as, given or filled. */
@@ -81,16 +67,15 @@ trait DescribesTheActivity
     /** @var ?string The identifier a sign-in was attempted with, raw until it is hashed at capture. */
     private ?string $identifier = null;
 
-    /** @var list<list<int|string>> Concrete paths of the property keys that collided once cleaned, segment by segment, first 32 across every call. */
+    /** @var list<list<int|string>> Paths of the property keys that collided once cleaned, first 32 across every call. */
     private array $collisions = [];
 
     /** @var int How many property keys collided once cleaned, across every call. */
     private int $collisionCount = 0;
 
     /**
-     * Name what happened with an event code, given as a string or as a
-     * string-backed enum case; a code beginning `audit_log.` is refused. The
-     * last code given wins.
+     * Name what happened with an event code or string-backed enum case; a code
+     * beginning `audit_log.` is refused.
      *
      * @param  \BackedEnum|string  $code
      * @return self
@@ -108,8 +93,7 @@ trait DescribesTheActivity
     }
 
     /**
-     * Name what the activity was done to: a model, by its reference, or a
-     * reference. The last subject given wins.
+     * Name what the activity was done to.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $subject
      * @return self
@@ -127,10 +111,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Name who did it: a model, by its reference, or a reference; `null` says
-     * that explicitly no one did, which a contributor never fills, unlike an
-     * actor that is never given. The last actor given wins, and it replaces one
-     * a contributor filled.
+     * Name who did it; `null` says explicitly no one, which a contributor never
+     * fills.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference|null  $actor
      * @return self
@@ -150,8 +132,7 @@ trait DescribesTheActivity
 
     /**
      * Name the principal the actor acted as, such as a team or an account;
-     * `null` says that there is explicitly none, which a contributor never
-     * fills. The last principal given wins.
+     * `null` says explicitly none.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference|null  $principal
      * @return self
@@ -170,9 +151,7 @@ trait DescribesTheActivity
     }
 
     /**
-     * Name the tenant the activity happened in; `null` says that there is
-     * explicitly none, which a contributor never fills. The last tenant given
-     * wins.
+     * Name the tenant the activity happened in; `null` says explicitly none.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference|null  $tenant
      * @return self
@@ -191,9 +170,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Name the authentication guard the activity ran under, 1 to 64
-     * characters; `null` says there is explicitly none. The last guard given
-     * wins.
+     * Name the guard the activity ran under, 1 to 64 characters; `null` says
+     * explicitly none.
      *
      * @param  ?string  $guard
      * @return self
@@ -217,8 +195,7 @@ trait DescribesTheActivity
 
     /**
      * Name the session by an application-owned, non-secret reference of 1 to
-     * 191 characters, never Laravel's session id; `null` says there is
-     * explicitly none. The last reference given wins.
+     * 191 characters, never Laravel's session id; `null` says explicitly none.
      *
      * @param  ?string  $sessionId
      * @return self
@@ -241,11 +218,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Name the client by its IP address and user agent together, so no
-     * contributor fills either part; `null` says that part is explicitly
-     * unknown. The user agent is cleaned and cut to 512 bytes, and an invalid
-     * address is stored as `null` when the record is minimised. The last client
-     * given wins.
+     * Name the client's IP address and user agent together, so no contributor
+     * fills either; `null` says that part is explicitly unknown.
      *
      * @param  ?string  $ip
      * @param  ?string  $userAgent
@@ -266,9 +240,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Name the credential the activity used, by its id: an API key's or a
-     * token's identifier, never the secret itself. The id is validated, never
-     * cleaned or cut. The last id given wins.
+     * Name the credential the activity used by its identifier, never the
+     * secret; validated, never cleaned or cut.
      *
      * @param  string  $credentialId
      * @return self
@@ -288,10 +261,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Tie the record to other activity with a namespaced id, written
-     * `<namespace>:<value>` (`app:ticket-123`): a lower-case namespace of up to
-     * 32 characters, then a value that starts with a non-space. The id is
-     * validated, never cleaned or cut. The last id given wins.
+     * Tie the record to other activity with a namespaced id such as
+     * `app:ticket-123`; validated, never cleaned or cut.
      *
      * @param  string  $correlationId
      * @return self
@@ -311,12 +282,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Describe the activity with properties, a map of names to values,
-     * normalised now: a model becomes its reference, an enum its value, a date
-     * ISO-8601 UTC, and so on. The map merges into the properties already
-     * given, a later key replacing an earlier one. A key beginning `_audit`, at
-     * any depth, belongs to the package's own metadata and is refused, and then
-     * nothing is merged.
+     * Merge normalised properties into those already given; a key beginning
+     * `_audit`, at any depth, is refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -343,12 +310,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Add a note in words, cleaned and cut to 1,024 bytes on a character
-     * boundary. With an owner (a model, by its reference, a reference, or the
-     * record's actor or subject) the note is erasable and is never stored in
-     * plaintext; without one it is stored as given and cannot be erased. No
-     * note is claimed to be free of secrets. The last note given wins, its text
-     * and owner together.
+     * Add a note, cleaned and cut to 1,024 bytes; with an owner it is encrypted
+     * and erasable, without one stored as given.
      *
      * @param  string  $text
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner|\SineMacula\Laravel\AuditLog\Records\Reference|null  $owner
@@ -371,13 +334,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Name the identifier a sign-in was attempted with, such as the email
-     * address a form posted. It is kept as given and validated not at all,
-     * because it is untrusted input and not a programming error. It is hashed
-     * at capture to `properties._audit.identifier_hash` under
-     * `redaction.identifiers`. It is not in the properties, so
-     * `withProperties()` cannot spoof it and an `unlisted = DROP` definition
-     * cannot lose it. The last identifier given wins.
+     * Name the identifier a sign-in was attempted with, kept unvalidated as
+     * untrusted input and hashed at capture apart from the properties.
      *
      * @param  string  $identifier
      * @return self
@@ -407,8 +365,7 @@ trait DescribesTheActivity
     }
 
     /**
-     * Refuse a correlation id that is not namespaced, is longer than its
-     * column, or is not already clean text.
+     * Refuse a malformed correlation id.
      *
      * @param  string  $correlationId
      * @return void
@@ -425,8 +382,7 @@ trait DescribesTheActivity
     }
 
     /**
-     * Refuse properties holding a key, at any depth, that begins with the
-     * prefix of the package's own metadata.
+     * Refuse properties holding a reserved key at any depth.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -443,8 +399,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * The note's text cleaned and cut to its cap, refusing text that is empty
-     * once cleaned.
+     * The note's text cleaned and cut to its cap, refusing one empty once
+     * cleaned.
      *
      * @param  string  $text
      * @return string
@@ -463,8 +419,8 @@ trait DescribesTheActivity
     }
 
     /**
-     * Whether any key of the normalised map, at any depth, begins with the
-     * prefix of the package's own metadata.
+     * Whether any key of the map, at any depth, begins with the reserved
+     * prefix.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
