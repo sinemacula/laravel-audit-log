@@ -110,6 +110,23 @@ final class StoredTime
     }
 
     /**
+     * The instant, given in the package's form, in milliseconds since the Unix
+     * epoch.
+     *
+     * @param  string  $instant
+     * @return int
+     *
+     * @throws \InvalidArgumentException
+     * @throws \UnexpectedValueException
+     */
+    public static function epochMilliseconds(string $instant): int
+    {
+        $parsed = self::instant(self::toStorage($instant));
+
+        return $parsed->getTimestamp() * 1000 + intdiv((int) $parsed->format('u'), 1000);
+    }
+
+    /**
      * The stored time parsed in UTC, refused unless it has the stored form and
      * names a date and a time that exist.
      *

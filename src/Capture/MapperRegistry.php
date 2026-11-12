@@ -42,7 +42,7 @@ final class MapperRegistry
     public function map(string $classOrInterface, string $mapper, array $except = []): void
     {
         if ($this->frozen) {
-            self::refuse('Event mappers are registered while the application boots, and it has already booted.');
+            throw new \LogicException('Event mappers are registered while the application boots, and it has already booted.');
         }
 
         $mapped = self::mappable($classOrInterface);
@@ -56,7 +56,7 @@ final class MapperRegistry
         }
 
         if ($existing !== null) {
-            self::refuse(sprintf('`%s` is already mapped differently; an event class or interface has one mapper.', $mapped));
+            throw new \LogicException(sprintf('`%s` is already mapped differently; an event class or interface has one mapper.', $mapped));
         }
 
         $this->mappings[$mapped] = ['mapper' => $mapper, 'except' => $except];
@@ -251,18 +251,5 @@ final class MapperRegistry
         }
 
         return (new \ReflectionClass($name))->getName();
-    }
-
-    /**
-     * Refuse the registration.
-     *
-     * @param  string  $message
-     * @return never
-     *
-     * @throws \LogicException
-     */
-    private static function refuse(string $message): never
-    {
-        throw new \LogicException($message);
     }
 }

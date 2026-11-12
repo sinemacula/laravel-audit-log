@@ -35,9 +35,6 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
  */
 final readonly class AmbientActor
 {
-    /** @var string The key naming the default guard. */
-    private const string DEFAULT_GUARD = 'auth.defaults.guard';
-
     /**
      * Constructor.
      *
@@ -126,7 +123,7 @@ final readonly class AmbientActor
      */
     private function guardNames(): array
     {
-        $default = $this->config->get(self::DEFAULT_GUARD);
+        $default = $this->config->get('auth.defaults.guard');
 
         return $this->settings->guards() ?? [is_string($default) ? $default : ''];
     }

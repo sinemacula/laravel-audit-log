@@ -60,7 +60,7 @@ final class ModelWatcher
     public function watch(string $class, string $as, array $fields): void
     {
         if ($this->frozen) {
-            self::refuse('Models are watched while the application boots, and it has already booted.');
+            throw new \LogicException('Models are watched while the application boots, and it has already booted.');
         }
 
         $watch    = ModelWatch::of($class, $as, $fields);
@@ -71,7 +71,7 @@ final class ModelWatcher
         }
 
         if ($existing !== null) {
-            self::refuse(sprintf('`%s` is already watched differently; a model has one watch.', $watch->class));
+            throw new \LogicException(sprintf('`%s` is already watched differently; a model has one watch.', $watch->class));
         }
 
         $this->refuseTakenSegment($watch);
@@ -137,7 +137,7 @@ final class ModelWatcher
                 continue;
             }
 
-            self::refuse(sprintf('The segment `%s` already names the changes of `%s`; each watched model has its own.', $watch->as, $class));
+            throw new \LogicException(sprintf('The segment `%s` already names the changes of `%s`; each watched model has its own.', $watch->as, $class));
         }
     }
 
@@ -158,7 +158,7 @@ final class ModelWatcher
             return;
         }
 
-        self::refuse(sprintf('The event code `%s` is already defined differently; a code has one definition.', $definition->code));
+        throw new \LogicException(sprintf('The event code `%s` is already defined differently; a code has one definition.', $definition->code));
     }
 
     /**
@@ -178,18 +178,5 @@ final class ModelWatcher
 
             $this->events->listen('eloquent.' . $name . ': ' . $class, [RecordModelChange::class, $name]);
         }
-    }
-
-    /**
-     * Refuse the watch.
-     *
-     * @param  string  $message
-     * @return never
-     *
-     * @throws \LogicException
-     */
-    private static function refuse(string $message): never
-    {
-        throw new \LogicException($message);
     }
 }

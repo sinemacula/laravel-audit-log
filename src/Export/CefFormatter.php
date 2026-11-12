@@ -83,7 +83,7 @@ final readonly class CefFormatter implements AuditFormatter
         $fields = array_merge(
             [
                 'externalId'               => $record->id,
-                'rt'                       => (string) self::epochMilliseconds($record->occurredAt),
+                'rt'                       => (string) StoredTime::epochMilliseconds($record->occurredAt),
                 'act'                      => $record->event,
                 'outcome'                  => $record->outcome,
                 'src'                      => filter_var($record->ip, FILTER_VALIDATE_IP) === false ? null : $record->ip,
@@ -137,22 +137,6 @@ final readonly class CefFormatter implements AuditFormatter
     private static function severityOf(string $outcome): int
     {
         return self::SEVERITIES[$outcome] ?? throw new \UnexpectedValueException('A record\'s outcome must be `success`, `failure` or `denied`.');
-    }
-
-    /**
-     * When the activity occurred, in milliseconds since the Unix epoch.
-     *
-     * @param  string  $instant
-     * @return int
-     *
-     * @throws \InvalidArgumentException
-     * @throws \UnexpectedValueException
-     */
-    private static function epochMilliseconds(string $instant): int
-    {
-        $parsed = StoredTime::instant(StoredTime::toStorage($instant));
-
-        return $parsed->getTimestamp() * 1000 + intdiv((int) $parsed->format('u'), 1000);
     }
 
     /**

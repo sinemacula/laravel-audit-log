@@ -176,7 +176,7 @@ final readonly class OcsfFormatter implements AuditFormatter
         [$severityId, $severity] = self::severityOf($captured->outcome);
 
         return [
-            'time'        => self::epochMilliseconds($captured->occurredAt),
+            'time'        => StoredTime::epochMilliseconds($captured->occurredAt),
             'severity_id' => $severityId,
             'severity'    => $severity,
             ...self::status($captured->outcome, $captured->reason),
@@ -237,7 +237,7 @@ final readonly class OcsfFormatter implements AuditFormatter
             'version'         => self::VERSION,
             'product'         => self::PRODUCT,
             'original_time'   => $captured->occurredAt,
-            'logged_time'     => self::epochMilliseconds($record->recordedAt),
+            'logged_time'     => StoredTime::epochMilliseconds($record->recordedAt),
             'correlation_uid' => $captured->correlationId,
             'tenant_uid'      => $captured->tenantType === null || $captured->tenantId === null ? null : $captured->tenantType . ':' . $captured->tenantId,
         ];
@@ -316,21 +316,5 @@ final readonly class OcsfFormatter implements AuditFormatter
         $value = $attributes[$key] ?? null;
 
         return is_int($value) ? $value : throw new \UnexpectedValueException(sprintf('The OCSF mapper `%s` must return `%s` as an integer.', $mapper, $key));
-    }
-
-    /**
-     * The instant, in the package's form, in milliseconds since the Unix epoch.
-     *
-     * @param  string  $instant
-     * @return int
-     *
-     * @throws \InvalidArgumentException
-     * @throws \UnexpectedValueException
-     */
-    private static function epochMilliseconds(string $instant): int
-    {
-        $parsed = StoredTime::instant(StoredTime::toStorage($instant));
-
-        return $parsed->getTimestamp() * 1000 + intdiv((int) $parsed->format('u'), 1000);
     }
 }

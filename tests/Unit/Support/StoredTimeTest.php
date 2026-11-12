@@ -311,6 +311,33 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
+     * An instant in milliseconds since the epoch drops its last three
+     * fractional digits.
+     *
+     * @return void
+     */
+    public function testAnInstantInEpochMillisecondsTruncatesItsMicroseconds(): void
+    {
+        self::assertSame(1793534400123, StoredTime::epochMilliseconds('2026-11-01T12:00:00.123456Z'));
+        self::assertSame(1793534400999, StoredTime::epochMilliseconds('2026-11-01T12:00:00.999999Z'));
+        self::assertSame(1793534400001, StoredTime::epochMilliseconds('2026-11-01T12:00:00.001000Z'));
+        self::assertSame(-1000, StoredTime::epochMilliseconds('1969-12-31T23:59:59.000000Z'));
+    }
+
+    /**
+     * An instant off the package's form is refused in epoch milliseconds.
+     *
+     * @return void
+     */
+    public function testRefusesAMalformedInstantInEpochMilliseconds(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(self::INSTANT_MESSAGE);
+
+        StoredTime::epochMilliseconds('2026-11-01T12:00:00Z');
+    }
+
+    /**
      * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
