@@ -8,16 +8,11 @@ use Illuminate\Contracts\Config\Repository;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 
 /**
- * The monitoring settings `audit-log:check --freshness` judges the recorded
- * progress by, read from configuration on every call and validated as they are
- * read: how old the last seal run may grow (`audit-log.monitor.seal_minutes`),
- * how old the last sweep, verification and prune may grow
- * (`audit-log.monitor.daily_minutes`), and how long the oldest outbox row may
- * wait for a drain (`audit-log.monitor.outbox_minutes`).
+ * The monitoring settings `audit-log:check --freshness` judges progress by,
+ * read and validated on every call.
  *
- * A missing setting takes its default. A number is an integer, or the canonical
- * digit string an environment line gives, within its range; anything else fails
- * closed with an `InvalidArgumentException` naming the key and never the value.
+ * A malformed setting throws an `InvalidArgumentException` naming the key,
+ * never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

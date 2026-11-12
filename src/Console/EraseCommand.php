@@ -14,31 +14,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:erase`: erases an owner, destroying the owner's keys so every
- * field encrypted for the owner reads erased, journalled behind the lifecycle
- * lock and decided from the verified journal, then records it; or, with
- * `--reapply=<file>`, erases again every owner an erasures file names after a
- * restore, and journals the restore reconciled once every one is erased.
+ * `audit-log:erase`: erases an owner by destroying the owner's keys, or with
+ * `--reapply=<file>` erases every owner an erasures file names again.
  *
- * The owner is named by the `type` and `id` arguments. An erasure is all or
- * nothing: a key a hold or preservation blocks refuses it, unless `--partial`
- * lets the keys nothing blocks go and keeps the rest; outbox rows older than
- * the erasure refuse it, unless `--pending` accepts that their fields are
- * erased with the keys. A reapply erases each owner in part and accepting
- * pending deliveries, so it takes no owner, `--partial` or `--pending`.
- *
- * It trusts the shell, as every maintenance command does: `--by-type` and
- * `--by-id` assert the operator and prove nothing of who runs it, and the
- * boundary is the maintenance connection's credentials. It prints the
- * operation's id, how the erasure ended, the erasure's journal row, the owner's
- * keyed fingerprint and the id of the ring key it was taken under, never the
- * owner, the counts, every reason a key was kept, and a warning when the record
- * could not be written. A refusal prints its reason and what it names; a
- * failure prints its class alone, never its message, which can carry a failed
- * statement's bindings. It exits 0 for an erasure that ended `complete`,
- * `partial` or `already_erased` and for a reconciled restore, 1 for a refusal,
- * a failure and a reapply that left the restore unreconciled, and 2 for an
- * argument or option it refuses, before anything runs.
+ * A failure prints its class alone, since its message can carry a statement's
+ * bindings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,8 +48,7 @@ final class EraseCommand extends Command
 
     /**
      * Erase the owner the arguments name, or every owner the reapply file
-     * names, once the arguments and options are known to be well formed, and
-     * print what was done.
+     * names, and print what was done.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @return int
@@ -149,9 +128,8 @@ final class EraseCommand extends Command
     }
 
     /**
-     * The erasures file `--reapply` names, once it is known to be a readable
-     * file given with no owner, `--partial` or `--pending`; `null` without the
-     * option.
+     * The erasures file `--reapply` names, or `null` without the option;
+     * refused unless it is readable and given alone.
      *
      * @return ?string
      *
@@ -179,9 +157,8 @@ final class EraseCommand extends Command
     }
 
     /**
-     * Print how the erasure ended, its row, the owner's fingerprint, its counts
-     * and every reason a key was kept, and a warning when its record could not
-     * be written.
+     * Print how the erasure ended, its row, fingerprint and counts, the reasons
+     * a key was kept, and a warning when its record was not written.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ErasureResult  $result
      * @return void

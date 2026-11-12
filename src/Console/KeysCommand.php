@@ -9,18 +9,11 @@ use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:keys`: maintains the owners' key uses. With `--rebuild-uses` it
- * adds every key use missing from the entries whose signature verifies, on the
- * storage connection's writer, a page of entries at a time, and never removes
- * one; with `--dry-run` it counts what it would add and writes nothing.
+ * `audit-log:keys`: with `--rebuild-uses` adds every key use missing from the
+ * verified entries, never removing one; `--dry-run` only counts.
  *
- * Key uses are an index derived from the signed entries, so the rebuild needs
- * no authority and journals nothing: an entry that does not verify adds
- * nothing, and `audit-log:verify` reports a key use still missing. It prints
- * how many entries it read, verified and skipped and how many key uses it
- * added, or would add. A failure prints its class alone, never its message. It
- * exits 0 once the rebuild or the dry run has run, 1 for a failure, and 2
- * without `--rebuild-uses`, before anything runs.
+ * Key uses are an index derived from signed entries, so the rebuild needs no
+ * authority and journals nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -13,18 +13,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 
 /**
  * The integrity checks of `audit-log:check`, beyond a key that signs: the
- * checkpoints, checkpoint members and integrity state tables have the shipped
- * shape on the storage connection, and the disk a disk anchor writes to is
- * configured.
- *
- * The three tables are checked as `SchemaChecks` checks any of the package's
- * tables, each named by its label. A storage connection that is not configured
- * or cannot be opened is left to the `schema` subject, which reports it, and a
- * statement that fails is named by its class. With the `disk` driver, the disk
- * must be configured in `filesystems.disks`; the disk itself is never resolved,
- * read or written, so a check never leaves an object behind. The checks read
- * configuration and the tables' schema; they write nothing and print no
- * setting's value beyond the name of a connection or a disk.
+ * integrity tables' shape and a disk anchor's disk.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,8 +38,7 @@ final readonly class IntegrityChecks
     ) {}
 
     /**
-     * Every integrity problem: those of the three integrity tables, then the
-     * anchor disk's.
+     * Every integrity problem: the integrity tables', then the anchor disk's.
      *
      * @return list<string>
      *
@@ -62,9 +50,8 @@ final readonly class IntegrityChecks
     }
 
     /**
-     * The schema problems of the three integrity tables on the storage
-     * connection, or none when the connection cannot be checked, which the
-     * `schema` subject reports; a statement that fails is named by its class.
+     * The schema problems of the integrity tables, or none when the connection
+     * cannot be checked, which the `schema` subject reports.
      *
      * @return list<string>
      *
@@ -80,8 +67,8 @@ final readonly class IntegrityChecks
 
         $schema = new SchemaChecks($this->database);
 
-        // The framework declares nothing for a statement that fails, though it
-        // throws a `QueryException`, whose message holds the statement
+        // A failed statement throws an undeclared `QueryException`, whose
+        // message holds the statement
         try {
             return [
                 ...$schema->problems($connection, IntegrityTables::checkpointsTable(), TableShape::checkpoints()),
@@ -94,9 +81,8 @@ final readonly class IntegrityChecks
     }
 
     /**
-     * The problem of a disk anchor's disk that is not configured in
-     * `filesystems.disks`, looked up by the same dotted path the filesystem
-     * manager resolves it by, or none; the null anchor names no disk.
+     * The problem of a disk anchor's disk missing from `filesystems.disks`; the
+     * disk is never resolved, so the check leaves no object behind.
      *
      * @return list<string>
      *

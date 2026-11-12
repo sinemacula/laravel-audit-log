@@ -23,28 +23,11 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The freshness checks of `audit-log:check --freshness`: whether the runs the
- * package records progress for are still running, read from that progress and,
- * in outbox mode, from the outbox.
+ * The freshness checks of `audit-log:check --freshness`: whether sealing, the
+ * sweep, verification, retention, anchoring and the outbox are still running.
  *
- * Six signals, in order: `sealing` (`seal.last_run` within
- * `monitor.seal_minutes`), `sweep` (`sweep.completed`), `verification`
- * (`verify.last_full`, failed when it did not pass) and `retention`
- * (`retention.last_run`, failed when the run failed; applicable only when the
- * prune can delete something), each within `monitor.daily_minutes`;
- * `anchoring`, failed when `anchor.last_failure` is newer than `anchor.last`,
- * applicable only when an anchor other than the null one is bound, with no
- * limit; and `outbox`, the oldest row waiting for a drain, by when it was
- * queued, which a retry never moves, within `monitor.outbox_minutes`,
- * applicable only in outbox mode.
- *
- * A signal with no progress never ran, which is a problem only when its run is
- * scheduled and the log's oldest entry is older than its limit, so a fresh
- * install is not stale; a run whose schedule is disabled is still judged by
- * what it recorded, since it may run elsewhere. Every read is a point read by
- * name, or the first row of an index (the entries' by the time they were
- * recorded, the outbox's by when a row was queued), on the writer, so the
- * statements are fixed whatever the tables hold. The checks write nothing.
+ * A run whose schedule is disabled is still judged by its progress, since it
+ * may run elsewhere.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,8 +74,7 @@ final readonly class FreshnessChecks
     ) {}
 
     /**
-     * A reader for each monitoring setting, in the order the settings are
-     * listed; each throws when what it reads is malformed.
+     * A reader for each monitoring setting; each throws when it is malformed.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): int>
@@ -142,10 +124,8 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * The retention signal: not applicable while the prune can delete nothing,
-     * and otherwise judged by the last prune run, failed when that run failed;
-     * failed too when the bound policy cannot be resolved, named by the class
-     * of what was thrown and never reported, since a report writes to the log.
+     * The retention signal, judged by the last prune; not applicable while the
+     * prune can delete nothing, failed when the policy cannot be resolved.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @param  int  $limit
@@ -179,10 +159,8 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * The anchoring signal: not applicable while the bound anchor is the null
-     * one, failed when the last failure to anchor is newer than the last seal
-     * anchored, or when the anchor cannot be resolved, and aged by the last
-     * seal anchored, with no limit.
+     * The anchoring signal, aged by the last anchored seal with no limit;
+     * failed after a later failure, not applicable for the null anchor.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @return \SineMacula\Laravel\AuditLog\Console\FreshnessSignal
@@ -195,8 +173,7 @@ final readonly class FreshnessChecks
         try {
             $anchor = $this->container->make(CheckpointAnchor::class);
         } catch (\Throwable $exception) {
-            // An anchor that cannot be resolved anchors nothing; sealing
-            // reports why, and the check names the class of what was thrown
+            // Sealing reports why, so the check names only the class
             return new FreshnessSignal('anchoring', FreshnessSignal::FAILED, null, null, true, sprintf(self::UNRESOLVED, 'anchor', $exception::class));
         }
 
@@ -219,9 +196,8 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * The outbox signal: the oldest row that has not failed, by when it was
-     * queued, which a retry never moves, read first from the outbox's queued
-     * index; an empty outbox is fresh.
+     * The outbox signal: the oldest unfailed row by when it was queued, which a
+     * retry never moves; an empty outbox is fresh.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @param  int  $limit
@@ -247,8 +223,8 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * How old the log's oldest entry is, in seconds, read first from the index
-     * of the time entries were recorded, or `null` when the log is empty.
+     * How old the log's oldest entry is, in seconds, or `null` when the log is
+     * empty.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @return ?int
@@ -268,9 +244,8 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * A signal judged by its age against its limit: never run without an age, a
-     * problem only when overdue; failed when its run says so; stale past its
-     * limit; and otherwise ok.
+     * A signal judged by its age against its limit; one that never ran is a
+     * problem only when overdue.
      *
      * @param  string  $signal
      * @param  ?int  $age
@@ -292,8 +267,8 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * How many seconds before now the time under the field of the progress was,
-     * never less than none, or `null` when there is no such time.
+     * How many seconds ago the progress field's time was, never negative, or
+     * `null` when there is none.
      *
      * @param  ?array<string, scalar|null>  $progress
      * @param  string  $field
@@ -311,8 +286,8 @@ final readonly class FreshnessChecks
     }
 
     /**
-     * The time under the field of the progress, or `null` when the progress or
-     * the field is missing or is not an instant in the package's form.
+     * The progress field's time, or `null` when it is missing or not an instant
+     * in the package's form.
      *
      * @param  ?array<string, scalar|null>  $progress
      * @param  string  $field

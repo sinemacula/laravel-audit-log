@@ -8,22 +8,11 @@ use Illuminate\Database\DatabaseManager;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 
 /**
- * The schema checks of `audit-log:check`: one of the package's tables exists on
- * its connection with the shape the shipped migration gives it (see
- * `TableShape`): the entries table unless another shape is given, or any other
- * table a shipped migration creates.
+ * The schema checks of `audit-log:check`: a package table exists on its
+ * connection with the shape its shipped migration gives it (see `TableShape`).
  *
- * The table's prefixed name must fit every index name. Each column the package
- * writes must exist with its type family, its length or precision (which SQLite
- * does not record), and its nullability, and on MySQL with the binary, NO PAD
- * collation `utf8mb4_0900_bin`; a column the package does not write is reported
- * too, described as the shape describes it, because no entry's HMAC or no seal
- * covers it, or nothing reads it. The primary key must be over the shape's
- * columns, in order, and each index the migration creates must exist under its
- * name, over its columns in order, unique or not as the migration made it; an
- * index the application added is its own. A missing table is one problem,
- * naming the table by its label, and nothing else is checked. The checks read
- * the table's existence, its columns and its indexes, whatever the table holds.
+ * A column the package does not write is reported too, since no HMAC or seal
+ * covers it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,9 +50,8 @@ final readonly class SchemaChecks
     ) {}
 
     /**
-     * Every problem of the table on the connection, or none when it has the
-     * shape the shipped migration gives it, the entries table's unless another
-     * is given; a missing table is the one problem.
+     * Every problem of the table on the connection, against the entries table's
+     * shape unless another is given; a missing table is the one problem.
      *
      * @param  string  $connection
      * @param  string  $table
@@ -173,8 +161,7 @@ final readonly class SchemaChecks
     }
 
     /**
-     * The problems of the table's indexes: a primary key over other columns
-     * than the shape's, in its order, then those of each index the migration
+     * The problems of the primary key, then of each index the migration
      * creates.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
@@ -220,9 +207,8 @@ final readonly class SchemaChecks
     }
 
     /**
-     * The type a column is expected to have on the driver: the family's type
-     * name, with its length or precision where the engine records one (SQLite
-     * records none, and PostgreSQL's native `uuid` has none).
+     * The type a column should have on the driver, with its length or precision
+     * where the engine records one: never on SQLite or PostgreSQL's `uuid`.
      *
      * @param  string  $driver
      * @param  string  $family
@@ -237,9 +223,8 @@ final readonly class SchemaChecks
     }
 
     /**
-     * The type a column has, in the form `expectedType()` gives: the type name
-     * the engine reports, with the length or precision its full type carries,
-     * except on SQLite.
+     * The type a column has, in `expectedType()`'s form: the engine's type name
+     * with its length or precision, except on SQLite.
      *
      * @param  string  $driver
      * @param  array{type: string, type_name: string}  $column

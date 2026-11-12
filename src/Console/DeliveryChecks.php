@@ -17,36 +17,8 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
 
 /**
- * The delivery checks of `audit-log:check`: where a failed write's spill line
- * goes, whether a return of the store can mean a record is kept when a failure
- * is thrown, and, in outbox mode, the outbox and deliveries tables.
- *
- * The spill channel is the one `audit-log.failure.log_channel` names, or the
- * default channel. A channel the setting names must be configured in
- * `logging.channels`. A channel, or any member of a `stack` channel however
- * deeply nested, with the `database` driver on the storage connection, or in
- * outbox mode on the outbox connection, is a problem, because a spill written
- * there fails together with the write it stands in for; a cycle of stacks is
- * followed once. With `audit-log.failure.mode` at `throw` in sync mode, a store
- * that does not say it is durable is a problem, since a return could then not
- * mean a record is kept; it is checked only while the integrity settings pass,
- * because resolving the store builds the key ring and a malformed ring is the
- * settings' own problem. In outbox mode the outbox connection must be
- * configured and supported, the outbox table must have the shipped shape on it
- * and the deliveries table on the storage connection; a connection that is not
- * configured or cannot be opened is left to the subject that names it, except
- * an outbox connection of its own, which only this one does, and a statement
- * that fails is named by its class.
- *
- * Apart from the problems, a note says whether the spill channel is the one the
- * documentation gives, a `single` or `daily` channel whose `LineFormatter`
- * writes the message alone with inline line breaks off, the only format a
- * replay is verified against, whose `permission` keeps out group and others and
- * whose existing file agrees. Whole records go to that channel in plaintext, so
- * the note says so for any other. The checks read configuration, a spill file's
- * permission bits and, in outbox mode only, the tables' schema; they write
- * nothing and print no setting's value beyond the name of a channel or a
- * connection and a permission.
+ * The delivery checks of `audit-log:check`: the spill channel, the store's
+ * durability when a failure is thrown, and in outbox mode the outbox tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -88,8 +60,7 @@ final readonly class DeliveryChecks
 
     /**
      * Every delivery problem: the spill channel's, the store's when a failure
-     * is thrown in sync mode, and in outbox mode those of the outbox and
-     * deliveries tables.
+     * is thrown in sync mode, and in outbox mode the outbox tables'.
      *
      * @return list<string>
      *
@@ -109,10 +80,7 @@ final readonly class DeliveryChecks
 
     /**
      * The note on the spill channel, or `null` when it is the documented
-     * channel: a `single` or `daily` channel whose formatter is
-     * `LineFormatter`, writing `%message%` and a line feed, with inline line
-     * breaks absent or off, and with a `permission` that its file, once it
-     * exists, also has, keeping out group and others.
+     * channel with a permission that keeps out group and others.
      *
      * @return ?string
      *
@@ -134,10 +102,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * The problems of the spill channel: a channel the setting names that is
-     * not configured, or each channel it reaches with the `database` driver on
-     * the storage connection, or in outbox mode on the outbox connection, where
-     * a failed write is an insert.
+     * The problems of the spill channel: unconfigured, or a `database` channel
+     * on the storage or, in outbox mode, the outbox connection.
      *
      * @param  ?string  $setting
      * @param  bool  $outbox
@@ -173,9 +139,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * Each channel with the `database` driver the channel is or reaches through
-     * its `stack` members, however deeply nested, with the connection it writes
-     * to; each channel is visited once, so a cycle ends.
+     * Each `database` channel the channel is or reaches through nested `stack`
+     * members, with its connection; each is visited once, so a cycle ends.
      *
      * @param  string  $name
      * @return array<string, string>
@@ -215,10 +180,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * The problem of a store that does not say it is durable while failures are
-     * thrown in sync mode, or none; none either while the integrity settings
-     * are malformed, since resolving the store builds the key ring. A store
-     * that cannot be resolved is named by the class of what was thrown.
+     * The problem of a store not marked durable; none while the integrity
+     * settings are malformed, since resolving the store builds the key ring.
      *
      * @return list<string>
      */
@@ -239,9 +202,7 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * Whether the integrity settings can be read, so the store, which builds
-     * the key ring, can be resolved; a malformed one is the settings' own
-     * problem, reported once.
+     * Whether the integrity settings can be read, so the store can be resolved.
      *
      * @return bool
      */
@@ -257,9 +218,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * The problems of outbox mode: an outbox connection of its own that is not
-     * configured or cannot be checked, then the outbox table on the outbox
-     * connection and the deliveries table on the storage connection.
+     * The problems of outbox mode: its own connection, then the outbox and
+     * deliveries tables.
      *
      * @return list<string>
      *
@@ -296,10 +256,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * The schema problems of a delivery table on its connection, or none when
-     * the connection is not configured or cannot be checked, which the subject
-     * naming the connection reports; a statement that fails is named by its
-     * class.
+     * The schema problems of a delivery table, or none when its connection is
+     * unconfigured or cannot be checked, which the subject naming it reports.
      *
      * @param  'outbox'|'storage'  $role
      * @param  string  $connection
@@ -313,8 +271,8 @@ final readonly class DeliveryChecks
             return [];
         }
 
-        // The framework declares nothing for a statement that fails, though it
-        // throws a `QueryException`, whose message holds the statement
+        // A failed statement throws an undeclared `QueryException`, whose
+        // message holds the statement
         try {
             return (new SchemaChecks($this->database))->problems($connection, $table, $shape);
         } catch (\PDOException $exception) { // @phpstan-ignore catch.neverThrown
@@ -381,10 +339,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * The members of a `stack` channel, as the log manager reads them: a list
-     * of names, or one string of names separated by commas, each trimmed, and a
-     * number naming the channel of its digits; anything else, such as a logger
-     * given as itself, names no channel.
+     * The members of a `stack` channel as the log manager reads them: a list or
+     * a comma-separated string of names; anything else names none.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -414,11 +370,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * The note on a documented channel's permission, or `null` when both the
-     * setting and any file it already wrote keep out group and others. Monolog
-     * applies a permission only when it is given and only when it creates the
-     * file, so one that is missing leaves the process's umask, and an existing
-     * file keeps what it has.
+     * The note on a documented channel's permission, or `null` when it and any
+     * existing file are private; Monolog applies it only on creating the file.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -496,9 +449,8 @@ final readonly class DeliveryChecks
     }
 
     /**
-     * Whether the channel's configuration is the documented spill channel's: a
-     * file driver, `LineFormatter`, the message alone, and inline line breaks
-     * absent or off.
+     * Whether the channel is the documented spill channel: a file driver and
+     * `LineFormatter` writing the message alone, without inline line breaks.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

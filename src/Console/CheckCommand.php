@@ -24,89 +24,11 @@ use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:check`: reads every setting the package stores entries, captures
- * records, seals, anchors, delivers, reads, exports and encrypts them with, the
- * connections, guards, log channels and disks they name, the entries and
- * artifacts tables, the integrity keys and tables, the lifecycle and owners'
- * key tables and, in outbox mode, the outbox and deliveries tables, and exits
- * non-zero on a problem, for deploy pipelines and readiness probes.
+ * `audit-log:check`: reports every malformed setting and every connection,
+ * schema, integrity, delivery, lifecycle and privacy problem.
  *
- * Every check runs, so one run lists every problem, each as
- * `[<subject>] <message>`, and a subject without one as `[<subject>] OK`, in
- * this order: `[config]` (the storage and maintenance connection settings, the
- * entries table's name, the integrity settings (the keys, the log id, the
- * integrity tables' names, sealing, verification, the schedules and the
- * anchor), and the context, source and definition settings, each named by its
- * full path, with `app.key` and `app.previous_keys` read together as the one
- * key ring they make; then the guards the actor is read from, or the default
- * guard when no list is set, each configured in `auth.guards`, skipped when the
- * list is malformed; then the redaction settings, with `app.key` read for them
- * only beside an explicit ring and an empty `audit-log.redaction.key`, since
- * otherwise the integrity settings read it and it is listed once; then the
- * failure and delivery settings, the delivery tables' names and the outbox
- * connection; then the capture settings and the artifacts table's name, and the
- * guards the automatic capture skips, each configured in `auth.guards`, skipped
- * when the list is malformed or is `['*']`; then the read and export settings),
- * `[connections]` (the storage and maintenance connections are each configured
- * in `database.connections`, and use the same driver; skipped when a connection
- * setting is malformed), `[schema]` (the storage connection's engine and the
- * entries and artifacts tables' shapes; see `EngineChecks` and `SchemaChecks`,
- * skipped when the storage connection or the entries table's name is malformed
- * or the connection is not configured, and the artifacts table left out while
- * its name is malformed), `[integrity]` (a key signs and, once the storage
- * connection, the sealing and anchor settings and the integrity tables' names
- * are well formed, the checkpoints, checkpoint members and integrity state
- * tables have their shape and a disk anchor's disk is configured; see
- * `IntegrityChecks`, skipped when the integrity key settings are malformed) and
- * `[delivery]` (the spill channel, the store when a failure is thrown, and in
- * outbox mode the outbox and deliveries tables; see `DeliveryChecks`, skipped
- * when the storage connection or a failure or delivery setting is malformed),
- * `[lifecycle]` (the journal, holds, lifecycle lock and import batches tables'
- * shapes, the lock's row, the bound retention policy's version, the
- * installation's identity through both connections, the journal's verification
- * and the holds projection's drift; see `LifecycleChecks`, skipped when the
- * storage connection is malformed or not configured, or a lifecycle table's
- * name or an integrity setting the journal is read with is malformed) and
- * `[privacy]` (the subject keys, owner erasures and key uses tables' shapes,
- * keys restored or destroyed without a journalled erasure, and a database
- * restored behind its anchor until its erasures are re-applied; see
- * `PrivacyChecks`, skipped when the storage connection is malformed or not
- * configured, or an owners' key setting, an integrity key setting, the log id
- * or a table's name it is read with is malformed). The lifecycle, retention,
- * import and owners' key settings are read under `[config]` too, after the read
- * and export settings. A malformed context, source, definition, redaction,
- * capture, read, export, retention or import setting, or artifacts table's
- * name, skips nothing, since no later subject reads it. After every subject,
- * `[spill] OK` says the spill channel is the one the documentation
- * gives, or a `[spill]` warning says replaying what it holds is unverified;
- * that is a note, not a problem, and leaves the exit code as it is, and it is
- * left out while the channel setting is malformed. Each lifecycle note follows
- * it as `[lifecycle] note: …`, a hold past its review date or an import that
- * stopped moving, then each privacy note as `[privacy] note: …`, a field
- * encrypter that is not the package's, which leave the exit code as it is too.
- * It does not warn about a storage connection shared with the application,
- * which every default install would trip. The command writes nothing, reading
- * the installation id the migrations seed, and prints no secret, statement or
- * binding: a malformed setting is named by its key and never its value, only
- * the name of a connection, guard, log channel or disk, the id of a journal
- * row, a hold, an import batch or a key and the sequence of a seal is printed,
- * and a connection that cannot be opened or read, or a store, a policy, a key
- * store or an anchor that cannot be resolved or read, is named with the class
- * of what was thrown, never its message.
- *
- * In production, a `[production]` subject follows `[privacy]`: the testing fake
- * store bound as the store, or as a destination of a stack, is a problem, and
- * each disabled seal, sweep or verification schedule is noted as
- * `[production] note: …` after the privacy notes; see `ProductionChecks`. The
- * monitoring settings are read under `[config]` too, last.
- *
- * With `--freshness` only the freshness checks run, for a scheduled monitor
- * rather than a deploy: one line per signal, `[freshness] <signal>: <status>`
- * with its age and limit in seconds, or with `--json` one JSON object of
- * `signal`, `status`, `age_seconds` and `limit_seconds` per line; see
- * `FreshnessChecks`. It exits non-zero on a problem or a malformed setting,
- * which is named under `[config]`, and writes nothing. `--json` without
- * `--freshness` is refused with exit code 2.
+ * A setting is named by its key and a failure by its exception class, never a
+ * value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -127,9 +49,8 @@ final class CheckCommand extends Command
     protected $description = 'Check the audit log settings, connections, schema, integrity keys, tables and anchor, delivery, lifecycle and privacy';
 
     /**
-     * Run every check, then report each problem, or that a subject has none,
-     * and last the notes on the spill channel, the lifecycle, privacy and
-     * production; or, with `--freshness`, run the freshness checks alone.
+     * Run every check and report each subject's problems, then the notes; or,
+     * with `--freshness`, run the freshness checks alone.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @param  \Illuminate\Database\DatabaseManager  $database
@@ -224,8 +145,7 @@ final class CheckCommand extends Command
         }
 
         // Integrity settings that pass always give a key that signs, so the
-        // subject is listed exactly when they pass, and checks the integrity
-        // tables and the anchor disk only once what those read is well formed
+        // subject is listed even when its table checks are skipped
         $sealing = $storage && !self::fails($sealCheck) ? [$integrity->problems(...)] : [];
 
         if (!self::fails($integrityCheck)) {
@@ -240,20 +160,12 @@ final class CheckCommand extends Command
             $checks['lifecycle'] = [$lifecycle->problems(...)];
         }
 
-        // The privacy subject is listed only once every setting it reads the
-        // key tables, the integrity keys, the journal and the seals with passes
         return [...$checks, ...$privacy->subject()];
     }
 
     /**
-     * The checks of the settings themselves, in order: the storage connection,
-     * the maintenance connection, the entries table's name, the integrity key
-     * settings, the storage connection with the failure and delivery settings
-     * together, the sealing and anchor settings and the integrity tables' names
-     * together, and what the lifecycle subject reads: the lifecycle tables'
-     * names, the integrity key settings, the log id and the integrity tables'
-     * names the journal is verified and the installation id read with, and a
-     * storage connection configured in `database.connections`.
+     * The checks later subjects depend on: storage, maintenance, entries table,
+     * integrity keys, delivery, sealing and lifecycle, in that order.
      *
      * @formatter:off
      *
@@ -322,13 +234,8 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The checks of the integrity settings, one for each, so one run reports
-     * every malformed setting: the current key's id, the explicit ring and,
-     * when no ring is set, the application's keys it would be derived from;
-     * then the log id, the three integrity tables' names, the sealing numbers,
-     * the overdue age, the three schedules, and the anchor's driver, disk, path
-     * and batch. A setting two of them read is listed once, since a run lists a
-     * problem once.
+     * The checks of the integrity settings, one each; the application keys are
+     * read only when no ring is set.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -364,18 +271,7 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The checks of the settings records are captured, delivered, read and
-     * exported with, one for each, so one run reports every malformed setting:
-     * the context settings, the source settings, the definition setting, the
-     * guards the actor is read from, the redaction settings, the failure and
-     * delivery settings, the delivery tables' names and the outbox connection,
-     * then the capture settings, the artifacts table's name and the guards the
-     * automatic capture skips, then the read and export settings, then the
-     * lifecycle tables' names and the retention and import settings, then the
-     * owners' key settings, then the monitoring settings. Only the delivery
-     * subject depends on any of them: the failure and delivery settings, the
-     * delivery tables' names and the outbox connection; the lifecycle and
-     * privacy subjects' tables are read by setting checks of their own.
+     * The checks of every other setting, one each.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -416,12 +312,7 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The checks of the redaction settings, one for each, so one run reports
-     * every malformed setting: the configured key names, what is kept of an
-     * identifier and of an IP address, the two byte budgets, the explicit key
-     * and, beside an explicit ring, the application key the hashes would derive
-     * from. A malformed explicit key or ring has the same message as its own
-     * check, so a run lists it once.
+     * The checks of the redaction settings, one each.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -451,8 +342,7 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The check that a setting can be read, which its reader refuses with an
-     * exception when it is malformed.
+     * The check that a setting's reader does not throw.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -469,9 +359,8 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The check of the connections the settings name: each is configured in
-     * `database.connections`, and a maintenance connection of its own uses the
-     * storage connection's driver. It reads configuration only.
+     * The check that each connection the settings name is configured, and that
+     * a separate maintenance connection uses the storage connection's driver.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return \Closure(): list<string>
@@ -493,10 +382,8 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The check of the storage connection's engine and the entries and
-     * artifacts tables on it; the tables are checked only when the engine is
-     * supported and the connection opens, and a statement that fails is named
-     * by its class.
+     * The check of the storage connection's engine, then, once it is supported
+     * and opens, the entries and artifacts tables.
      *
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @return \Closure(): list<string>
@@ -509,8 +396,8 @@ final class CheckCommand extends Command
             $engine     = new EngineChecks($database);
             $schemas    = new SchemaChecks($database);
 
-            // The framework declares nothing for a statement that fails, though
-            // it throws a `QueryException`, whose message holds the statement
+            // A failed statement throws an undeclared `QueryException`, whose
+            // message holds the statement
             try {
                 $blocking = $engine->blockingProblem($connection);
 
@@ -526,9 +413,8 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The problems of the artifacts table on the storage connection, or none
-     * while its name is malformed, which `config` reports and which leaves the
-     * entries table's checks to run.
+     * The problems of the artifacts table, or none while its name is malformed,
+     * which `config` reports.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\SchemaChecks  $schemas
      * @param  string  $connection
@@ -539,8 +425,6 @@ final class CheckCommand extends Command
         try {
             $table = EntrySettings::artifactsTable();
         } catch (\InvalidArgumentException) {
-            // The malformed name is listed under `config`, and names no table
-            // to check
             return [];
         }
 
@@ -548,10 +432,8 @@ final class CheckCommand extends Command
     }
 
     /**
-     * Run the freshness checks alone and report each signal, as a line or, with
-     * `--json`, as one JSON object a line, failing on a problem. A malformed
-     * setting fails the run and is named by its key, and progress that cannot
-     * be read by the class of what was thrown.
+     * Run the freshness checks alone and report each signal as a line or, with
+     * `--json`, a JSON object.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\FreshnessChecks  $freshness
      * @return int
@@ -587,11 +469,8 @@ final class CheckCommand extends Command
     }
 
     /**
-     * Say whether the spill channel is the one the documentation gives, by
-     * `info()`, or that replaying what it holds is unverified, by `warn()`,
-     * saying nothing of it while the channel setting is malformed, which
-     * `config` reports; then give each lifecycle note, each privacy note and
-     * each production note, by `warn()`.
+     * Report the spill channel's note, unless its setting is malformed, then
+     * each lifecycle, privacy and production note.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\DeliveryChecks  $delivery
      * @param  \SineMacula\Laravel\AuditLog\Console\LifecycleChecks  $lifecycle
@@ -606,8 +485,7 @@ final class CheckCommand extends Command
 
             $note === null ? $this->info('[spill] OK') : $this->warn("[spill] {$note}");
         } catch (\InvalidArgumentException) {
-            // The malformed setting is listed under `config`, and names no
-            // channel to describe
+            // The malformed setting is listed under `config`
         }
 
         foreach ($lifecycle->notes() as $lifecycleNote) {
@@ -624,10 +502,8 @@ final class CheckCommand extends Command
     }
 
     /**
-     * The problem of each guard the actor would be read from that is not
-     * configured in `auth.guards`, which `AuthManager` refuses with an
-     * exception the capture lets through, or none when the list itself is
-     * malformed, the problem the context settings' check reports.
+     * The problem of each actor guard not configured in `auth.guards`, which
+     * `AuthManager` refuses; none for a malformed list.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<string>

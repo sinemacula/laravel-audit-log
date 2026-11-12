@@ -12,28 +12,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:hold`: places a hold, which keeps the entries its scope matches
- * from being pruned until it is released, journalled and projected behind the
- * lifecycle lock, then records it.
- *
- * The scope starts from exactly one of `--all`, every entry, `--tenant`, the
- * entries of the tenants given as `type:id`, or `--tenantless`, the entries of
- * no tenant; `--tenant` with `--tenantless` adds the entries of no tenant to
- * the tenants'. It is then narrowed by `--about`, the activity of the
- * references given as `type:id`, as actor or subject, `--category`, the
- * categories given, `--from` and `--to`, a window from its start inclusive to
- * its end exclusive, each an ISO-8601 time or a `Y-m-d` date, and
- * `--import-batch`, one import's entries. `--basis` names why the hold is
- * placed, and `--review-by` when it is due for review, which the package
- * reports and never acts on.
- *
- * It trusts the shell, as every maintenance command does: `--by-type` and
- * `--by-id` assert the operator and prove nothing of who runs it, and the
- * boundary is the maintenance connection's credentials. It prints the hold's
- * id, and a warning when its record could not be written, since
- * `audit-log:reconcile` writes it from the journal. It exits 0 once the hold is
- * placed, 1 when it is refused, named by the class of the refusal alone, and 2
- * for an option it refuses, before anything runs.
+ * `audit-log:hold`: places a hold that keeps the entries its scope matches from
+ * being pruned until it is released.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,8 +44,7 @@ final class HoldCommand extends Command
     protected $description = 'Place a hold that keeps audit entries from being pruned';
 
     /**
-     * Place the hold the options describe, once they are known to be well
-     * formed, and print its id.
+     * Place the hold the options describe and print its id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @return int
@@ -79,8 +58,7 @@ final class HoldCommand extends Command
             $reviewBy  = is_string($reviewBy) ? LifecycleOptions::instant('review-by', $reviewBy) : null;
             $authority = LifecycleOptions::authority($this);
         } catch (\InvalidArgumentException $refusal) {
-            // Each refusal names the option or the dimension, never what was
-            // given
+            // Each refusal names the option or dimension, never what was given
             $this->error($refusal->getMessage());
 
             return self::INVALID;
@@ -196,7 +174,7 @@ final class HoldCommand extends Command
     }
 
     /**
-     * The values the option, which takes many, gives.
+     * The values a repeatable option gives.
      *
      * @param  'about'|'category'|'tenant'  $option
      * @return list<string>

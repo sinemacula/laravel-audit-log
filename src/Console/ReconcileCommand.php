@@ -12,18 +12,8 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * `audit-log:reconcile`: writes again the activity records of the lifecycle
- * operations the journal holds and no entry records, for the operations
- * journalled within the days `--since` looks back, 7 unless it says otherwise,
- * from 1 to 3650.
- *
- * It is never scheduled: run it by hand, one at a time, after a lifecycle
- * command warned that its record could not be written. It prints how many
- * operations it examined, recorded, found recorded already, could not verify,
- * found unfinished and failed to record; `--json` writes them as one JSON
- * object instead. It exits 0 when every operation examined is recorded, 1 when
- * one could not be recorded or verified, or the run stopped, named by the class
- * of the failure alone, and 2 for a `--since` it refuses, before anything runs.
+ * `audit-log:reconcile`: rewrites the lifecycle activity records the journal
+ * holds but no entry records, for the last `--since` days.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,8 +32,7 @@ final class ReconcileCommand extends Command
     protected $description = 'Write again the lifecycle activity records the journal says are missing';
 
     /**
-     * Reconcile the days looked back, once they are known to be well formed,
-     * and print the counts.
+     * Reconcile the days looked back and print the counts.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @return int

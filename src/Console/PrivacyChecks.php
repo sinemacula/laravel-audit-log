@@ -40,39 +40,10 @@ use SineMacula\Laravel\AuditLog\Privacy\KeyStoreUse;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 
 /**
- * The privacy checks of `audit-log:check`: a reader for each owners' key
- * setting; the privacy subject, listed only while every setting it is read with
- * passes and the storage connection is configured; the problems of the wrapping
- * ring and the key tables' settings, of the subject keys, owner erasures and
- * key uses tables, of keys restored or destroyed without a journalled erasure,
- * of keys wrapped under a wrapping key the ring does not hold, and of a
- * database restored behind its anchor; and the note on a field encrypter that
- * is not the package's.
+ * The privacy checks of `audit-log:check`: key settings and tables, restored or
+ * unjournalled keys, unheld wrapping keys, and a restore behind the anchor.
  *
- * The three tables are checked as `SchemaChecks` checks any of the package's
- * tables, and nothing reads them until all three have their shape. With the
- * package's key store in use, which it is while the bound field encrypter is
- * the package's own or none, the key store is verified as `audit-log:verify`
- * verifies it, without unwrapping a key, and a key that is `key_restored` or
- * `key_destroyed_unjournalled` is a problem, counted and named by its first id:
- * a database restored from before an erasure brings the erased keys back, and
- * re-applying the erasures with `audit-log:erase --reapply=<file>` destroys
- * them again. With the package's own key wrapper bound, a live or superseded
- * key whose wrapping key id the ring does not hold is a problem too, found by
- * comparing the ids alone: it cannot be unwrapped, so its fields read
- * `unreadable` and its owner's next fields are dropped. With an anchor that can
- * report its head, the head is asked for first, and a database that does not
- * hold the anchored seal at the head's sequence, beyond its own latest seal or
- * under another digest, was restored from a backup or rewritten: it is a
- * problem until a `restore_reconciled` journal row of this log, whose payload
- * is its digest's and whose signature verifies, names that sequence and digest.
- * Without such an anchor a full restore cannot be found, and none is claimed.
- *
- * The note is no problem and leaves the exit code as it is. The checks write
- * nothing and unwrap nothing; every statement reads the storage connection's
- * writer, a failure to read is named by the class of what was thrown and never
- * its message, and no owner, secret or value is printed, only key ids and
- * sequences.
+ * Nothing is unwrapped, and only key ids and sequences are printed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -141,11 +112,8 @@ final readonly class PrivacyChecks
     ) {}
 
     /**
-     * A reader for each owners' key setting, in the order the settings are
-     * listed: the three key tables' names, the explicit wrapping ring, the key
-     * that wraps and the rewrap batch; and last the application keys the
-     * wrapping keys are derived from, when nothing else reads them. Each throws
-     * when what it reads is malformed.
+     * A reader for each owners' key setting, then the application keys the
+     * wrapping keys derive from when nothing else reads them.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -170,9 +138,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * The privacy subject's checks, by its name, when every setting it is read
-     * with passes and the storage connection is configured; otherwise none,
-     * since `config` and `connections` report what is wrong.
+     * The privacy subject's checks, or none while a setting it reads is
+     * malformed or the storage connection unconfigured, which others report.
      *
      * @return array<string, list<\Closure(): list<string>>>
      */
@@ -190,10 +157,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * Every privacy problem, in order: a malformed setting it is read with,
-     * which stops the rest; the three tables' shapes; and once they have it,
-     * the restored and unjournalled keys, then a restore behind the anchor.
-     * Nothing is checked on a storage connection the `schema` subject reports.
+     * Every privacy problem: a malformed setting, which stops the rest, then
+     * the tables' shapes, the keys and a restore behind the anchor.
      *
      * @return list<string>
      */
@@ -215,10 +180,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * The notes, which are no problems: a bound field encrypter that is not the
-     * package's, with which erasure and the trail filter for an owner's entries
-     * are unavailable. An encrypter that cannot be resolved is a problem,
-     * reported as one.
+     * The note on a bound field encrypter that is not the package's; one that
+     * cannot be resolved is reported as a problem.
      *
      * @return list<string>
      */
@@ -251,17 +214,16 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * The problems of what the storage connection holds: the three tables'
-     * shapes, and once they have it, the restored and unjournalled keys, then a
-     * restore behind the anchor.
+     * The problems of the key tables' shapes, then, once they have it, the keys
+     * and a restore behind the anchor.
      *
      * @param  string  $name
      * @return list<string>
      */
     private function storedProblems(string $name): array
     {
-        // The framework declares nothing for a statement that fails, though it
-        // throws a `QueryException`, whose message holds the statement
+        // A failed statement throws an undeclared `QueryException`, whose
+        // message holds the statement
         try {
             $tables = $this->tableProblems($name);
         } catch (\PDOException $exception) { // @phpstan-ignore catch.neverThrown
@@ -279,9 +241,7 @@ final readonly class PrivacyChecks
 
     /**
      * The problems of keys restored or destroyed without a journalled erasure,
-     * found by verifying the key store without unwrapping a key, then of keys
-     * wrapped under a wrapping key the ring does not hold, or none when the
-     * package's key store is not in use.
+     * then of unheld wrapping keys; none without the package's key store.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<string>
@@ -321,12 +281,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * The problem of live and superseded keys wrapped under a wrapping key the
-     * ring does not hold, found from the ids alone, unwrapping nothing: one
-     * statement reads the distinct ids the keys name, and two more count and
-     * name the keys only when some id is not held. None when the package's own
-     * key wrapper is not bound, since a custom wrapper's keys are not the
-     * ring's.
+     * The problem of live or superseded keys under a wrapping key the ring does
+     * not hold, judged by ids alone; none without the package's own wrapper.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<string>
@@ -360,10 +316,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * The problem of a database that does not hold the seal its anchor holds
-     * at the head's sequence, unless a verified reconciliation names that head;
-     * none without an anchor that can report its head, or while the anchor's
-     * settings, which `config` or `integrity` reports, name none to ask.
+     * The problem of a database without its anchor's head seal, unless a
+     * verified reconciliation names that head; none without an anchor to ask.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<string>
@@ -390,9 +344,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * The anchor's head, or `null` when it holds none, when no anchor that can
-     * report its head is bound, or when the anchor's settings name none to
-     * ask; it throws when the anchor cannot be resolved or read.
+     * The anchor's head, or `null` when there is none or no anchor that can
+     * report one; throws when the anchor cannot be resolved or read.
      *
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead
      *
@@ -412,9 +365,7 @@ final readonly class PrivacyChecks
 
     /**
      * Whether the anchor's settings are well formed and a disk anchor's disk is
-     * configured in `filesystems.disks`; any other, `config` or `integrity`
-     * reports, and an anchor is never resolved on a disk that is not
-     * configured.
+     * configured, so an anchor is never resolved on a missing disk.
      *
      * @return bool
      */
@@ -450,8 +401,7 @@ final readonly class PrivacyChecks
 
     /**
      * Whether a believed `restore_reconciled` row names the anchored head,
-     * reading those rows newest first, a page at a time, and stopping at the
-     * first that does.
+     * reading those rows newest first a page at a time.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Integrity\AnchoredHead  $head
@@ -488,11 +438,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * Whether the stored `restore_reconciled` row is a believed reconciliation
-     * of the anchored head: a row of this log, its payload the text its digest
-     * was taken of, its signature its own under a key the ring holds, and its
-     * payload naming the head's sequence and digest. A row that cannot be read
-     * or judged reconciles nothing.
+     * Whether the row is a believed reconciliation of the head: this log's,
+     * digest and signature verified, and naming the head's sequence and digest.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -521,10 +468,7 @@ final readonly class PrivacyChecks
 
     /**
      * Read every setting the privacy problems are read with, failing on the
-     * first malformed one: the key tables' names, the wrapping ring, or the
-     * application keys it is derived from, and the rewrap batch, then the
-     * integrity keys, the log id, the journal's name and the checkpoints
-     * table's name the key store and a restore are judged by.
+     * first malformed one.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return void
@@ -552,9 +496,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * The problem a reported key finding gives: how many keys it was found at,
-     * and the first key's id when it is a lower-case UUID, so no byte a table
-     * holds reaches a console.
+     * The problem a reported key finding gives, naming the first key's id only
+     * when it is a lower-case UUID, so no byte a table holds reaches a console.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\RunFinding  $finding
      * @return string
@@ -573,11 +516,8 @@ final readonly class PrivacyChecks
     }
 
     /**
-     * Read the application keys the wrapping keys are derived from, when no
-     * other check reads them: a wrapping ring of its own reads none, without an
-     * integrity ring the integrity settings read the same keys, and a missing
-     * or malformed `app.key` the redaction key falls back to is listed by the
-     * redaction settings.
+     * Read the application keys the wrapping keys derive from, unless another
+     * check already reads or lists them.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return void
@@ -635,8 +575,7 @@ final readonly class PrivacyChecks
         try {
             $explicit = (new RedactionSettings($config))->explicitKey();
         } catch (\InvalidArgumentException) {
-            // A malformed redaction key is what they list, and reads no
-            // `app.key`
+            // A malformed redaction key is listed instead; it reads no app key
             return false;
         }
 

@@ -9,17 +9,8 @@ use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 
 /**
- * The capture checks of `audit-log:check`: a reader for each capture setting,
- * then for the artifacts table's name, so one run reports every malformed
- * setting, and the problem of each guard
- * `audit-log.capture.laravel.except_guards` names that `auth.guards` does not
- * configure. No event comes under such a name, so it is most likely a mistake
- * that leaves the guard it meant recorded.
- *
- * A guard is looked up by the same dotted path `AuthManager` resolves it by. A
- * malformed list, and the wildcard, name no guard to look up: the first is the
- * problem its reader reports, and the second excludes every guard. The checks
- * read configuration only, and print no setting's value beyond a guard's name.
+ * The capture checks of `audit-log:check`: every capture setting reads, and
+ * every guard the except list names is configured in `auth.guards`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,14 +20,13 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 final class CaptureChecks
 {
     /**
-     * Disallow instantiation; utility container only.
+     * Disallow instantiation.
      */
     private function __construct() {}
 
     /**
-     * A reader for each capture setting, in the order the settings are listed,
-     * then for the artifacts table's name; each throws when its setting is
-     * malformed.
+     * A reader for each capture setting, then the artifacts table's name; each
+     * throws when its setting is malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -61,9 +51,8 @@ final class CaptureChecks
     }
 
     /**
-     * The problem of each guard the except list names that is not configured in
-     * `auth.guards`, in the list's order; none for the wildcard, and none when
-     * the list is malformed, the problem its reader reports.
+     * The problem of each excepted guard not configured in `auth.guards`; none
+     * for the wildcard or a malformed list, which its reader reports.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<string>

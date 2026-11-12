@@ -5,18 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Console;
 
 /**
- * The shape a shipped migration gives one of the package's tables, as the
- * schema checks of `audit-log:check` compare a table against it: the table's
- * label in a problem, each column the package writes with its type family, its
- * length or precision and its nullability, each index the migration creates by
- * its name's suffix, the primary key's columns, and the sentence that describes
- * a column the package does not write.
- *
- * There is one shape for each of fourteen tables: the entries, the artifacts,
- * the outbox, the deliveries, the checkpoints, the checkpoint members, the
- * integrity state, the lifecycle journal, the holds, the lifecycle lock, the
- * import batches, the subject keys, the owner erasures and the key uses. Each
- * is built by its named constructor, and none can be built otherwise.
+ * The shape a shipped migration gives one of the package's tables, for the
+ * schema checks to compare against; built only by its named constructors.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -347,8 +337,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the artifacts table: keyed by the
-     * artifact's id, and an entry with at most one artifact.
+     * The shape the shipped migration gives the artifacts table.
      *
      * @return self
      */
@@ -358,10 +347,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the outbox table: its rows are
-     * claimed by an index over the failure time and the time a row falls due,
-     * and the backlog's age is read by one over the failure time and the time a
-     * row was queued.
+     * The shape the shipped migration gives the outbox table.
      *
      * @return self
      */
@@ -373,8 +359,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the deliveries table: one receipt
-     * for each entry and destination, which is its key, and no other index.
+     * The shape the shipped migration gives the deliveries table.
      *
      * @return self
      */
@@ -384,8 +369,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the checkpoints table: one seal per
-     * sequence, and the seals not yet anchored found in order.
+     * The shape the shipped migration gives the checkpoints table.
      *
      * @return self
      */
@@ -395,8 +379,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the checkpoint members table: keyed
-     * by the seal and the entry, and an entry held by at most one seal.
+     * The shape the shipped migration gives the checkpoint members table.
      *
      * @return self
      */
@@ -406,8 +389,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the integrity state table: one
-     * value for each name, which is its key, and no other index.
+     * The shape the shipped migration gives the integrity state table.
      *
      * @return self
      */
@@ -417,9 +399,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the lifecycle journal: keyed by the
-     * row's id, one row per sequence, and its rows found by seal, by hold and
-     * by kind.
+     * The shape the shipped migration gives the lifecycle journal.
      *
      * @return self
      */
@@ -429,8 +409,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the holds table: keyed by the
-     * hold's id, and its holds found by review date and by import batch.
+     * The shape the shipped migration gives the holds table.
      *
      * @return self
      */
@@ -440,8 +419,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the lifecycle lock table: keyed by
-     * its one row's id, and no other index.
+     * The shape the shipped migration gives the lifecycle lock table.
      *
      * @return self
      */
@@ -451,9 +429,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the import batches table: keyed by
-     * the batch's id, and its batches found by status and by when each was last
-     * written.
+     * The shape the shipped migration gives the import batches table.
      *
      * @return self
      */
@@ -463,9 +439,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the subject keys table: keyed by
-     * the key's id, one key per unit and generation, and its keys found by
-     * owner and by the erasure that destroyed them.
+     * The shape the shipped migration gives the subject keys table.
      *
      * @return self
      */
@@ -475,8 +449,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the owner erasures table: keyed by
-     * its journal row's id, and an owner's markers found in journal order.
+     * The shape the shipped migration gives the owner erasures table.
      *
      * @return self
      */
@@ -486,8 +459,7 @@ final readonly class TableShape
     }
 
     /**
-     * The shape the shipped migration gives the key uses table: keyed by the
-     * key and the entry, and an entry's keys found by the entry alone.
+     * The shape the shipped migration gives the key uses table.
      *
      * @return self
      */

@@ -28,30 +28,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The lifecycle checks of `audit-log:check`: a reader for each lifecycle,
- * retention and import setting; the problems of the journal, the holds
- * projection, the lifecycle lock and the import batches tables, of the bound
- * retention policy, of the installation's identity and of the journal itself;
- * and the notes on holds past their review date and imports that stopped
- * moving.
- *
- * The four tables are checked as `SchemaChecks` checks any of the package's
- * tables; once they have their shape, the lock's one row must be there, the
- * journal must verify, read-only and outside any lock, and the holds projection
- * must hold exactly the holds the verified journal holds active, each drifted
- * hold named by its id. The policy is resolved from the container, its settings
- * well formed, and its version must be 1 to 64 characters of clean text. The
- * installation id, which the migrations seed, must be read through the storage
- * connection, well formed, and the maintenance connection must read the same
- * one. A storage connection that cannot be opened is left to the `schema`
- * subject, and each failure to read is named by the class of what was thrown,
- * never its message.
- *
- * The notes are no problems and leave the exit code as it is: they are read
- * from the holds projection by review date and from the import batches table by
- * status and time, each listing at most 100 ids, and are left out when they
- * cannot be read. The checks write nothing, and print no value of an entry, a
- * journal row or a setting.
+ * The lifecycle checks of `audit-log:check`: settings, tables, lock row,
+ * policy, installation id and journal, and notes on stale holds and imports.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -94,9 +72,8 @@ final readonly class LifecycleChecks
     ) {}
 
     /**
-     * A reader for each lifecycle, retention and import setting, in the order
-     * the settings are listed, and last the check that no category is kept for
-     * less than it is preserved; each throws when what it reads is malformed.
+     * A reader for each lifecycle, retention and import setting, then the
+     * retention-against-preservation check; each throws when malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -127,13 +104,8 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * Every lifecycle problem, in order: the four tables' shapes, the lock's
-     * row, the policy's version, the installation's identity, the journal's
-     * verification and the projection's drift. What reads a table is checked
-     * only once the four have their shape, and the installation's identity only
-     * on a maintenance connection the `connections` subject finds no fault
-     * with; nothing is checked on a storage connection the `schema` subject
-     * reports.
+     * Every lifecycle problem; table reads wait for the four tables' shapes,
+     * and a storage connection the `schema` subject reports is skipped.
      *
      * @return list<string>
      *
@@ -149,8 +121,8 @@ final readonly class LifecycleChecks
 
         $connection = $this->database->connection($name);
 
-        // The framework declares nothing for a statement that fails, though it
-        // throws a `QueryException`, whose message holds the statement
+        // A failed statement throws an undeclared `QueryException`, whose
+        // message holds the statement
         try {
             $tables = $this->tableProblems($name);
         } catch (\PDOException $exception) { // @phpstan-ignore catch.neverThrown
@@ -169,9 +141,8 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * The notes, which are no problems: the holds past their review date, and
-     * the import batches still running that have not moved for an hour. A note
-     * that cannot be read is left out, since the problems name what is wrong.
+     * The notes on holds past their review date and import batches idle for an
+     * hour; a note that cannot be read is left out.
      *
      * @return list<string>
      */
@@ -182,8 +153,7 @@ final readonly class LifecycleChecks
 
             return [...$this->reviewNotes($connection), ...$this->staleNotes($connection)];
         } catch (\Exception) {
-            // A malformed setting, a connection that cannot be opened or a
-            // table that cannot be read is a problem, reported as one
+            // Each such failure is reported as a problem
             return [];
         }
     }
@@ -267,10 +237,8 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * The problem of an installation the two connections do not agree on: the
-     * storage connection reads no id, or a malformed one, or the maintenance
-     * connection reads none or another; or none. The id is only read, never
-     * written.
+     * The problem of an installation id that is absent, malformed or read
+     * differently by the two connections, or none; the id is never written.
      *
      * @return list<string>
      */
@@ -290,9 +258,8 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * Whether the maintenance connection can be checked: its setting is well
-     * formed, and it is configured with the storage connection's driver; any
-     * other, `config` or `connections` reports.
+     * Whether the maintenance connection can be checked: well formed and on the
+     * storage connection's driver, as `config` and `connections` require.
      *
      * @return bool
      */
@@ -311,9 +278,8 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * The problem of a journal that fails verification, naming the finding and
-     * the row it was found at, or else those of the holds projection against
-     * the verified journal.
+     * The problem of a journal that fails verification, by its finding and row,
+     * or else the holds projection's drift.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<string>
@@ -422,9 +388,8 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * The ids, each in backticks, at most 100 of them and only those that are a
-     * lower-case UUID, so no byte a table holds reaches a console, followed by
-     * how many more there are of the count given, when there are more.
+     * The ids in backticks, at most 100 and only lower-case UUIDs so no byte a
+     * table holds reaches a console, then how many more of the count there are.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
