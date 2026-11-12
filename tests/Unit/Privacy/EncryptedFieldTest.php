@@ -128,6 +128,21 @@ final class EncryptedFieldTest extends TestCase
     }
 
     /**
+     * The parts of an envelope, from an array or an object, are its version,
+     * key reference and ciphertext.
+     *
+     * @return void
+     */
+    public function testPartsReadsAnEnvelopeAsAnArrayOrAnObject(): void
+    {
+        $expected = ['v' => 2, 'k' => 'key_42', 'c' => 'Y2lwaGVy'];
+
+        self::assertSame($expected, EncryptedField::parts(['c' => 'Y2lwaGVy', 'k' => 'key_42', 'v' => 2]));
+        self::assertSame($expected, EncryptedField::parts((object) ['v' => 2, 'k' => 'key_42', 'c' => 'Y2lwaGVy']));
+        self::assertNull(EncryptedField::parts(['v' => 2, 'k' => 'key_42']));
+    }
+
+    /**
      * A value is well formed exactly when the factory builds a field of it, so
      * the projector can check without building one.
      *
