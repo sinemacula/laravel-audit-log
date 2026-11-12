@@ -8,14 +8,8 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 
 /**
- * The evidence the record of a lifecycle operation must keep exactly: its
- * properties, a map of scalars, lists and maps in the order of the operation's
- * code, which name the operation by its `operation_id` first, so
- * `audit-log:reconcile` can tell a recorded operation from one that is not.
- *
- * Evidence is never minimised away: `assertKeptBy()` refuses a record whose
- * properties do not encode canonically to exactly the evidence's, or that carry
- * the package's metadata at all, since a lifecycle record carries no artifact.
+ * The properties a lifecycle record must keep exactly, naming its
+ * `operation_id` so `audit-log:reconcile` can find it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,7 +47,7 @@ final readonly class LifecycleEvidence
      */
     public function __construct(
 
-        /** The properties the record keeps, in the order of the operation's code, the operation's id among them. */
+        /** The record's properties, in the order of its code, `operation_id` among them. */
         #[\SensitiveParameter]
         public array $properties,
     ) {
@@ -67,9 +61,8 @@ final readonly class LifecycleEvidence
     }
 
     /**
-     * Refuse the record unless it keeps the evidence exactly: its properties
-     * encode canonically to the very bytes of the evidence's, and it carries
-     * none of the package's metadata.
+     * Refuse the record unless its properties encode canonically to the
+     * evidence's and carry no package metadata.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return void
@@ -86,8 +79,7 @@ final readonly class LifecycleEvidence
     }
 
     /**
-     * Whether the two maps have the same canonical encoding; a value with none
-     * is never alike.
+     * Whether the two maps have the same canonical encoding.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

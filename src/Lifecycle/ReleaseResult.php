@@ -7,15 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
- * What releasing a hold did: the operation that released it, that it committed,
- * whether its `audit_log.released` record was written, and the hold as it was
- * until it was released.
- *
- * `committed` is always `true` on a result that is returned, since a release
- * that did not commit throws instead: the release's journal row is in the
- * database and the hold's projection row is gone. `recorded` is `false` when
- * the record could not be written after the commit, which never undoes the
- * release; `audit-log:reconcile` writes the record later from the journal.
+ * What releasing a hold did; `recorded` is `false` when the record failed after
+ * the commit, which `audit-log:reconcile` repairs.
  *
  * @api
  *
@@ -59,8 +52,7 @@ final readonly class ReleaseResult implements Arrayable
     }
 
     /**
-     * The result as a map: the operation, that it committed, whether it was
-     * recorded, and the hold released as a listing shows it.
+     * The result as a map, with the hold as a listing shows it.
      *
      * @formatter:off
      *

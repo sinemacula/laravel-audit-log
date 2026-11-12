@@ -7,17 +7,11 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 
 /**
- * Reported when a lifecycle operation committed and the record of its activity
- * could not be written after it: the write failed, was refused, was never
- * acknowledged, or was not attempted because a transaction was open on the
- * connection that would acknowledge it. The operation stands, since its journal
- * row committed with it and the journal is the authority, and
- * `audit-log:reconcile` records what is missing.
+ * Reported when a lifecycle operation committed but its record was not written;
+ * the journal stands and `audit-log:reconcile` repairs it.
  *
- * It names the operation's id, the record's code and the class of the failure,
- * or the open connection, and nothing else: the package never gives it another
- * exception, so nothing a record or a failed statement held reaches whoever
- * reads it.
+ * It never wraps the failure, so nothing a record or a failed statement held
+ * reaches its reader.
  *
  * @api
  *
@@ -51,8 +45,7 @@ final class LifecycleRecordFailedException extends \RuntimeException
     }
 
     /**
-     * The exception for a record whose write failed or was refused, by the
-     * class of the failure.
+     * The exception for a record whose write failed or was refused.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
@@ -65,8 +58,7 @@ final class LifecycleRecordFailedException extends \RuntimeException
     }
 
     /**
-     * The exception for a record whose write returned without the store or the
-     * outbox acknowledging it, so it is never taken as written.
+     * The exception for a write neither the store nor the outbox acknowledged.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
@@ -79,7 +71,7 @@ final class LifecycleRecordFailedException extends \RuntimeException
 
     /**
      * The exception for a record not attempted because a transaction was open
-     * on the connection that would acknowledge it, by that connection's name.
+     * on the acknowledging connection.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity

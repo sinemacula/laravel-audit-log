@@ -11,30 +11,11 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 
 /**
- * Builds the evidence of each lifecycle operation's activity record, and has
- * `LifecycleRecorder` write it once the operation has committed: a hold, a
- * release, a prune, an import, an erasure, a reinstatement and a rewrap, each
- * with the properties its code retains, in that code's order, by the
- * authority's operator, or by no one for a prune.
+ * Builds each lifecycle operation's record evidence for `LifecycleRecorder`;
+ * each method answers whether the record was written.
  *
- * A refusal is recorded `denied` with the reason it names: a release of a hold
- * that is not active `unknown_hold`, an erasure by its refusal, and a
- * reinstatement of an owner who is not erased `not_erased`. A failure is
- * recorded `failure`: an import's `import_failed` or `interrupted`, a prune's
- * own reason, and an erasure's or a rewrap's `journal_broken` when the journal
- * did not verify, and `erasure_failed` or `rewrap_failed` for anything else, a
- * code and never the failure's message, since a failed statement's message
- * carries its bindings. A refused or failed operation wrote nothing, so its
- * record names no journal row and counts nothing it did not do.
- *
- * An erasure's `blocked` holds the reasons its kept keys were blocked by, or
- * the reasons a `blocked` refusal gave, each once and counted 1, at most 50,
- * sorted bytewise, with how many more there were under `_other`. An owner is
- * named by nothing but its keyed fingerprint and the id of the ring key it was
- * taken under, which are personal data while they can be linked to the owner.
- *
- * Each method answers whether the record was written; a record that was not is
- * reported once by the recorder and never undoes the operation.
+ * A failure is recorded by a reason code, never its message, since a failed
+ * statement's message carries its bindings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,8 +60,7 @@ final readonly class LifecycleRecords
     ) {}
 
     /**
-     * Record the hold placed, by its operator, and say whether the record was
-     * written.
+     * Record the hold placed.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Hold  $hold
      * @return bool
@@ -105,8 +85,7 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the release of the hold, or its refusal, by the authority's
-     * operator, and say whether the record was written.
+     * Record the release of the hold, or its refusal.
      *
      * @param  string  $operationId
      * @param  string  $holdId
@@ -131,9 +110,7 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the prune run, by no one: a success for a complete or partial run
-     * and a failure, with its reason, for a failed one; and say whether the
-     * record was written.
+     * Record the prune run, by no one; a failed run records its reason.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneResult  $result
      * @return bool
@@ -163,10 +140,8 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the import, or the close of its batch, by the authority's
-     * operator: a success for a complete or partial batch, and a failure, with
-     * its reason, for a failed or interrupted one; and say whether the record
-     * was written.
+     * Record the import or the close of its batch; a failed or interrupted
+     * batch is a failure.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportResult  $result
      * @param  ?string  $sourceId
@@ -207,10 +182,8 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * The erasure the closure makes under the operation, recorded: one that
-     * committed or found the owner already erased is recorded as such, and
-     * anything it throws is recorded as a refusal or a failure about the owner
-     * of the fingerprint given, then rethrown.
+     * Run the erasure and record it; anything it throws is recorded as a
+     * refusal or failure, then rethrown.
      *
      * @param  string  $operationId
      * @param  array{0: string, 1: string}  $fingerprint
@@ -234,8 +207,7 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the erasure that committed, or found the owner already erased, by
-     * the authority's operator, and say whether the record was written.
+     * Record the erasure that committed or found the owner already erased.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ErasureResult  $result
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -266,10 +238,8 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the erasure that was refused, `denied` with its refusal, or that
-     * failed, a `failure` with `journal_broken` or `erasure_failed`, about the
-     * owner of the fingerprint given, by the authority's operator; and say
-     * whether the record was written. A refusal's own fingerprint is preferred.
+     * Record the erasure refused or failed, preferring a refusal's own
+     * fingerprint over the one given.
      *
      * @param  string  $operationId
      * @param  array{0: string, 1: string}  $fingerprint
@@ -296,8 +266,7 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the reinstatement that committed, by the authority's operator, and
-     * say whether the record was written.
+     * Record the reinstatement that committed.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ReinstateResult  $result
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -323,9 +292,7 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the reinstatement refused because the owner of the fingerprint
-     * given is not erased, `denied` with `not_erased`, by the authority's
-     * operator, and say whether the record was written.
+     * Record the reinstatement refused because the owner is not erased.
      *
      * @param  string  $operationId
      * @param  array{0: string, 1: string}  $fingerprint
@@ -352,8 +319,7 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the rewrap that ended, complete or partial, by the authority's
-     * operator, and say whether the record was written.
+     * Record the rewrap that ended, complete or partial.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RewrapResult  $result
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -381,10 +347,8 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record the rewrap that failed, with `journal_broken` or `rewrap_failed`,
-     * by the authority's operator, and say whether the record was written. The
-     * batches it committed stand, and their journal rows count them; the record
-     * counts nothing.
+     * Record the failed rewrap; the batches it committed stand in the journal,
+     * so the record counts nothing.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -415,9 +379,8 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * The `blocked` an erasure's record keeps of the reasons: each once,
-     * counted 1, the first 50 bytewise, and how many more there were under
-     * `_other`.
+     * The reasons each once, counted 1, the first 50 bytewise, and how many
+     * more under `_other`.
      *
      * @param  list<string>  $reasons
      * @return array<string, int>
@@ -435,9 +398,7 @@ final readonly class LifecycleRecords
     }
 
     /**
-     * Record an erasure that wrote nothing, refused or failed, about the owner
-     * of the fingerprint, with its outcome, its reason and the reasons it was
-     * blocked by, and say whether the record was written.
+     * Record an erasure that wrote nothing, refused or failed.
      *
      * @param  string  $operationId
      * @param  array{0: string, 1: string}  $fingerprint

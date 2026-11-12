@@ -7,20 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
- * What erasing again the owners of an erasures file did after a restore: the
- * operation, the file's SHA-256, how many distinct owners it named and how each
- * ended, erased whole, already erased, erased in part or refused, how many
- * lines it rejected, whether every erasure's `audit_log.subject_erased` record
- * was written, and, once the restore is reconciled, the id of the
- * `restore_reconciled` journal row and the anchor's head it names.
- *
- * Each owner's erasure commits on its own, so a result that is not reconciled
- * still reports erasures that stand. The restore is reconciled only when the
- * file was read whole and unchanged, rejected no line, and every owner it names
- * ended erased whole or already erased: an owner erased in part, or refused,
- * leaves keys the restore brought back, and a rejected line an owner unread.
- * The anchor's head is `null` when the anchor cannot report one. The result
- * names no owner.
+ * What erasing an erasures file's owners again after a restore did; each
+ * erasure commits alone and stands even when the restore is not reconciled.
  *
  * @api
  *

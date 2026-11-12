@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle\Enums;
 
 /**
- * Where an import batch stands: still running, or finished in one of four ways.
- * A batch is written `running` before its first entry, and moves once to a
- * final status, which it never leaves.
+ * Where an import batch stands; a batch starts `running` and moves once to a
+ * final status.
  *
  * @api
  *
@@ -22,19 +21,17 @@ enum ImportStatus: string
     // Every line read was imported or was a duplicate of one already imported
     case COMPLETE = 'complete';
 
-    // The import reached the end of the file, but some lines were rejected or
-    // conflicted with what was already imported
+    // The import reached the end of the file with rejected or conflicting lines
     case PARTIAL = 'partial';
 
     // The import stopped on a failure before the end of the file
     case FAILED = 'failed';
 
-    // The batch was closed by hand while it was still running, after the import
-    // that ran it stopped
+    // The batch was closed by hand after the import that ran it stopped
     case INTERRUPTED = 'interrupted';
 
     /**
-     * Whether the status is final: every status but `running` is.
+     * Whether the status is final.
      *
      * @return bool
      */

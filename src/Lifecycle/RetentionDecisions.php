@@ -11,18 +11,11 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The decisions of one prune, each made once: the bound policy is asked once
- * per category and tenant pair, its answers are checked, and the decision is
- * kept for the rest of the run, so a run never applies two cut-offs to one
- * pair, whatever the clock or the policy does meanwhile.
+ * The decisions of one prune: each pair is asked of the policy once and kept
+ * for the run, so it never gets two cut-offs.
  *
- * The cut-off of a pair is the run's midnight, the UTC midnight that starts the
- * day of the instant given, less the days the pair is kept. A retention is 1 to
- * 36500 days or `null`, and a preservation is 1 to 36500 days, `PHP_INT_MAX` or
- * `null`; anything else, and a version that is not 1 to 64 characters of clean
- * text, is an `UnexpectedValueException` naming the policy's class and the
- * method, never the category or the tenant. A finite retention shorter than a
- * preservation is a `RetentionConflictException`.
+ * A malformed answer is refused naming the policy's class and method, never the
+ * category or the tenant.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,7 +62,7 @@ final class RetentionDecisions
         /** The policy the decisions are asked of. */
         private readonly RetentionPolicy $policy,
 
-        // Any instant of the run's day; its UTC midnight is the run's.
+        // Not promoted: kept as the UTC midnight of its day
         \DateTimeInterface $midnight,
     ) {
         $this->midnight = \DateTimeImmutable::createFromInterface($midnight)
@@ -78,9 +71,8 @@ final class RetentionDecisions
     }
 
     /**
-     * The decision for the category and the tenant: made the first time the
-     * pair is asked for, from the policy's checked answers, and the same one
-     * every time after.
+     * The pair's decision, made from the policy's checked answers the first
+     * time it is asked for.
      *
      * @param  string  $category
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
@@ -148,8 +140,7 @@ final class RetentionDecisions
     }
 
     /**
-     * The retention the policy gave, refused unless it is 1 to 36500 days or
-     * `null`.
+     * The policy's retention, refused unless it is 1 to 36500 days or `null`.
      *
      * @param  ?int  $days
      * @return ?int
@@ -166,8 +157,8 @@ final class RetentionDecisions
     }
 
     /**
-     * The preservation the policy gave, refused unless it is 1 to 36500 days,
-     * `PHP_INT_MAX` or `null`.
+     * The policy's preservation, refused unless 1 to 36500 days, `PHP_INT_MAX`
+     * or `null`.
      *
      * @param  ?int  $days
      * @return ?int
@@ -201,8 +192,7 @@ final class RetentionDecisions
     }
 
     /**
-     * The cut-off of a pair kept for the days: the run's midnight less them, or
-     * `null` for a pair kept forever.
+     * The run's midnight less the days, or `null` for a pair kept forever.
      *
      * @param  ?int  $days
      * @return ?string

@@ -5,10 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle\Enums;
 
 /**
- * Why a hold was placed, as the operator who placed it states it. The package
- * records the basis and decides nothing from it: whether a claim, a regulation
- * or an investigation needs the entries kept is the operator's judgement, and a
- * hold of any basis keeps every entry its scope matches.
+ * Why a hold was placed, as its operator states it; recorded only, since a hold
+ * of any basis keeps every entry its scope matches.
  *
  * @api
  *

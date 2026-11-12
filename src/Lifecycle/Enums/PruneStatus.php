@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle\Enums;
 
 /**
- * How a prune run ended: every entry it found eligible was deleted, it stopped
- * or left some eligible entries behind, or it failed. The journal's finish row
- * of a run and its `audit_log.pruned` record both carry it.
+ * How a prune run ended; the run's journal finish row and its
+ * `audit_log.pruned` record carry it.
  *
  * @api
  *
@@ -16,12 +15,11 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle\Enums;
  */
 enum PruneStatus: string
 {
-    // The run walked every seal to its boundary and deleted every entry it
-    // found eligible
+    // The run walked every seal and deleted every eligible entry
     case COMPLETE = 'complete';
 
-    // The run stopped on its time budget, skipped a seal it could not
-    // authenticate, or left an eligible entry that is held or awaits delivery
+    // The run hit its time budget, skipped an unauthenticated seal, or kept a
+    // held or undelivered entry
     case PARTIAL = 'partial';
 
     // The run stopped on a failure; the chunks it committed stand

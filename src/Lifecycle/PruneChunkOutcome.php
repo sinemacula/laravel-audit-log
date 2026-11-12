@@ -5,14 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 /**
- * What one prune chunk did under the lifecycle lock: the entries it deleted,
- * and how many of the ids it was given it left, because a hold matched them,
- * their delivery was not finished, or the verified row was no longer eligible;
- * or that a candidate failed verification, so the chunk deleted nothing and the
- * seal is skipped for the run.
- *
- * It also holds the replay the chunk ended with, which the pruner carries to
- * its next transaction only once the chunk's transaction has committed.
+ * What one prune chunk did under the lock, with the replay it ended with.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,8 +46,7 @@ final readonly class PruneChunkOutcome
     ) {}
 
     /**
-     * The outcome of a chunk a candidate of which failed verification: nothing
-     * deleted, the seal to be skipped.
+     * The outcome of a chunk with a candidate that failed verification.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
      * @return self

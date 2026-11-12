@@ -5,13 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 /**
- * Thrown when a release names a hold the verified journal does not hold active:
- * one never placed, or one already released. The release is refused and nothing
- * is written; whether a hold is active is decided from the journal's chain,
- * never from the holds projection.
- *
- * Its message names the hold id, an opaque UUID the package minted, and no
- * other value; the package never gives it another exception.
+ * Thrown when a release names a hold the verified journal does not hold active;
+ * nothing is written.
  *
  * @api
  *

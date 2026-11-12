@@ -7,15 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
- * What rebuilding the key uses did, or for a dry run would do: how many entries
- * it read, how many of them verified and how many it skipped because their
- * signature did not, and how many missing key uses it added from the verified
- * ones.
- *
- * A rebuild only adds: a key use it did not find in a verified entry is left as
- * it is, and an entry that does not verify adds nothing, since what it says
- * cannot be trusted. A dry run reads as a rebuild does and counts what it would
- * add, writing nothing.
+ * What rebuilding the key uses did, or for a dry run would do; a rebuild only
+ * adds, and only from entries that verify.
  *
  * @api
  *
@@ -40,10 +33,10 @@ final readonly class KeyUseRebuildResult implements Arrayable
         /** How many entries the rebuild read. */
         public int $entries,
 
-        /** How many of them verified under their signature. */
+        /** How many of them verified. */
         public int $verified,
 
-        /** How many of them it skipped: a signature that does not match, a signing key the ring does not hold, or a row it cannot read. */
+        /** How many it skipped as unverifiable or unreadable. */
         public int $skipped,
 
         /** How many missing key uses it added, or for a dry run would add. */

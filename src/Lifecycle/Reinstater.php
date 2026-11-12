@@ -20,32 +20,11 @@ use SineMacula\Laravel\AuditLog\Keys\OwnerMarkers;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Reinstates an erased owner, so a key may be created for the owner again, in a
- * generation above the floor its erasure set: an erased generation never
- * reopens, and reinstatement creates no key.
+ * Reinstates an erased owner, so a key may be created again above its erasure's
+ * floor; an erased generation never reopens.
  *
- * The installation is confirmed first, once, then the reinstatement runs in one
- * `MaintenanceTransaction`: the lifecycle lock, the whole journal verified,
- * then the owner's lock, so no key of the owner is created meanwhile, and the
- * owner's latest marker read after both. A marker that does not record an
- * erasure, or no marker, is refused with a `ReinstatementRefusedException`
- * (`not_erased`), writing nothing. The marker is not trusted on its own: it
- * must name, by its id and its sequence, a row of the verified chain, signed,
- * whose payload is its digest's, that is an erasure of this owner, by the
- * fingerprint the row records, at the marker's floor. A marker that does not is
- * refused with a `JournalBrokenException`, since the journal and the markers
- * contradict each other, and nothing is written.
- *
- * Otherwise a `reinstate` row is appended onto the verified head, naming the
- * authority and the owner's fingerprint under the ring's signing key and the
- * floor, and a `reinstated` marker is inserted under the row's id, at its
- * sequence and time, with the same floor; both commit together or not at all.
- * On MySQL the owner's lock is released once the transaction has ended, however
- * it ended; elsewhere the transaction's end released it.
- *
- * A reinstatement makes new keys possible, never an old key readable again:
- * whoever holds the maintenance credentials can still change the markers, and
- * the journal makes that detectable, not impossible.
+ * The owner's marker is trusted only when it names a signed erasure row of the
+ * verified chain; otherwise the journal is broken.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,9 +69,8 @@ final readonly class Reinstater
     ) {}
 
     /**
-     * Reinstate the erased owner in one lifecycle transaction, and return what
-     * it did: a `reinstate` row and a `reinstated` marker at the floor of the
-     * owner's erasure.
+     * Reinstate the erased owner in one lifecycle transaction; on MySQL the
+     * owner's lock outlives it, so it is released after.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -131,9 +109,8 @@ final readonly class Reinstater
     }
 
     /**
-     * Reinstate the owner inside the lifecycle transaction the connection
-     * holds, after the owner's lock: the latest marker checked, then the row
-     * appended and the marker inserted.
+     * Check the owner's latest marker, then append the `reinstate` row and
+     * insert its marker.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
@@ -168,9 +145,8 @@ final readonly class Reinstater
     }
 
     /**
-     * Refuse an erased marker that names no row of the verified chain by its id
-     * and sequence, or one whose row is not a signed erasure of the marker's
-     * owner at the marker's floor.
+     * Refuse an erased marker that does not name a signed erasure row of the
+     * verified chain at its floor.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
@@ -198,8 +174,8 @@ final readonly class Reinstater
     }
 
     /**
-     * Whether the row's payload is its digest's and its HMAC its own, under a
-     * key the ring holds.
+     * Whether the row's payload matches its digest and its HMAC verifies under
+     * a ring key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
      * @return bool
@@ -214,8 +190,8 @@ final readonly class Reinstater
     }
 
     /**
-     * Whether the signed row is an erasure, in the configured log, of the
-     * marker's owner by the fingerprint it records, at the marker's floor.
+     * Whether the signed row is an erasure of the marker's owner in the
+     * configured log, at the marker's floor.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
      * @param  \SineMacula\Laravel\AuditLog\Keys\OwnerMarker  $marker
@@ -233,8 +209,8 @@ final readonly class Reinstater
     }
 
     /**
-     * Whether the payload records the owner's fingerprint under the ring key it
-     * names; a key the ring no longer holds proves nothing.
+     * Whether the payload records the owner's fingerprint; a key the ring no
+     * longer holds proves nothing.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -259,8 +235,8 @@ final readonly class Reinstater
     }
 
     /**
-     * The journal row of the id on the connection's writer, with its payload,
-     * or `null` when there is none or it cannot be read.
+     * The journal row of the id on the writer, or `null` when there is none or
+     * it cannot be read.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $id

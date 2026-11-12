@@ -6,12 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 /**
  * Thrown when every attempt at a lifecycle operation was lost to concurrent
- * operations: each met a deadlock, a serialisation failure, a lock wait timeout
- * or a locked database, and was rolled back whole, so nothing it attempted was
- * committed and the operation may be asked for again.
- *
- * Its message names the number of attempts alone, and the package never gives
- * it another exception, so nothing it holds can reach a row.
+ * ones; nothing was committed, so it may be retried.
  *
  * @api
  *
