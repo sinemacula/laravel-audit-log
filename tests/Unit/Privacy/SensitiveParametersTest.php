@@ -36,6 +36,7 @@ use SineMacula\Laravel\AuditLog\Privacy\TypedPlaintext;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Attachment;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
+use SineMacula\Laravel\AuditLog\Records\Concerns\DescribesTheActivity;
 use SineMacula\Laravel\AuditLog\Records\Concerns\FillsAmbientContext;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
@@ -157,6 +158,8 @@ final class SensitiveParametersTest extends TestCase
             'the snapshot an origin is read from' => [AuditRecord::class, 'originOf', 'snapshot'],
             'the address a builder is filled'     => [FillsAmbientContext::class, 'fillClient', 'ip'],
             'the user agent a builder is filled'  => [FillsAmbientContext::class, 'fillClient', 'userAgent'],
+            'the address a builder is given'      => [DescribesTheActivity::class, 'fromClient', 'ip'],
+            'the user agent a builder is given'   => [DescribesTheActivity::class, 'fromClient', 'userAgent'],
             'the address a contributor fills'     => [Contribution::class, 'fillClient', 'ip'],
             'the user agent a contributor fills'  => [Contribution::class, 'fillClient', 'userAgent'],
             'the path a rule is chosen for'       => [EventDefinition::class, 'ruleFor', 'path'],

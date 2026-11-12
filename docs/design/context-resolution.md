@@ -73,11 +73,12 @@ where it came from, so each value's source, and what it does not claim, is fixed
   the frame, so a record they make has the job's or the command's origin, name and carried actor.
 - Outside any frame the origin is `console`, with no name and no request metadata: a provider's `boot()` and a test body
   are outside any frame. Recording never branches on `runningInConsole()`.
-- Request metadata (the IP address, the user agent, the method and the route's name) comes only from an active HTTP
-  frame, and only when it is innermost, so a command or a job inside a request has the request's identifiers and no
-  client or route. Laravel's placeholder console request is never a frame, so it is never read. The IP address is read
-  through `Request::ip()`, so the application's trusted proxies decide it, and `redaction.ip` decides what is stored of
-  it.
+- The default contributor fills request metadata (the IP address, the user agent, the method and the route's name) only
+  from an active HTTP frame, and only when it is innermost, so a command or a job inside a request has the request's
+  identifiers and no client or route; a record that knows its client, such as a mapper's for a queued event, names it
+  with `fromClient()`. Laravel's placeholder console request is never a frame, so it is never read. The IP address is
+  read through `Request::ip()`, so the application's trusted proxies decide it, and `redaction.ip` decides what is
+  stored of it.
 - The request id is what Context carries, or else one already known, or else a trusted inbound id, or else a UUID v7
   from the `Clock`, generated on first use. The trace id is what Context carries, or else one already known, or else a
   trusted `traceparent`, and is never generated. Each is kept in hidden Context (`audit-log.request_id`,

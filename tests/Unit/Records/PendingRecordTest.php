@@ -265,12 +265,12 @@ final class PendingRecordTest extends TestCase
         self::assertSame(['amount' => '1200.00', 'currency' => 'GBP', 'lines' => [1, 2]], $snapshot->properties);
         self::assertSame('Approved after review', $snapshot->note);
         self::assertEquals(Reference::of(StubUser::class, '5'), $snapshot->noteOwner);
-        self::assertSame('web', $snapshot->guard);
-        self::assertSame('sess_ref_1', $snapshot->sessionId);
+        self::assertSame('api', $snapshot->guard);
+        self::assertSame('sess_ref_2', $snapshot->sessionId);
         self::assertSame('01932b4e-8a40-7000-8000-0000000000aa', $snapshot->requestId);
         self::assertSame('4bf92f3577b34da6a3ce929d0e0e4736', $snapshot->traceId);
-        self::assertSame('203.0.113.7', $snapshot->ip);
-        self::assertSame('Mozilla/5.0', $snapshot->userAgent);
+        self::assertSame('198.51.100.9', $snapshot->ip);
+        self::assertSame('curl/8.0', $snapshot->userAgent);
         self::assertSame(Origin::HTTP, $snapshot->origin);
         self::assertSame(['route' => 'invoices.approve', 'method' => 'POST'], $snapshot->context);
         self::assertSame(Timing::TRANSACTIONAL, $snapshot->timing);
@@ -608,6 +608,15 @@ final class PendingRecordTest extends TestCase
             'withIdentifier' => [static function (PendingRecord $pending): void {
                 $pending->withIdentifier('');
             }],
+            'viaGuard' => [static function (PendingRecord $pending): void {
+                $pending->viaGuard("\n");
+            }],
+            'inSession' => [static function (PendingRecord $pending): void {
+                $pending->inSession('');
+            }],
+            'fromClient' => [static function (PendingRecord $pending): void {
+                $pending->fromClient(null, null);
+            }],
             'succeeded' => [static function (PendingRecord $pending): void {
                 $pending->succeeded();
             }],
@@ -715,7 +724,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(31, $mutators);
+        self::assertCount(34, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }
@@ -805,6 +814,12 @@ final class PendingRecordTest extends TestCase
             'a reserved key' => [static function (PendingRecord $pending): void {
                 $pending->withProperties(['_audit' => 1]);
             }, \InvalidArgumentException::class],
+            'a bad guard' => [static function (PendingRecord $pending): void {
+                $pending->viaGuard('');
+            }, \InvalidArgumentException::class],
+            'a bad session reference' => [static function (PendingRecord $pending): void {
+                $pending->inSession(str_repeat('s', 192));
+            }, \InvalidArgumentException::class],
             'a bad correlation id' => [static function (PendingRecord $pending): void {
                 $pending->correlatedWith('ticket-123');
             }, \InvalidArgumentException::class],
@@ -865,6 +880,15 @@ final class PendingRecordTest extends TestCase
             },
             'forTenant' => static function (PendingRecord $pending): void {
                 $pending->forTenant(Reference::of('organisation', 'org_01'));
+            },
+            'viaGuard' => static function (PendingRecord $pending): void {
+                $pending->viaGuard('api');
+            },
+            'inSession' => static function (PendingRecord $pending): void {
+                $pending->inSession('sess_ref_2');
+            },
+            'fromClient' => static function (PendingRecord $pending): void {
+                $pending->fromClient('198.51.100.9', 'curl/8.0');
             },
             'usingCredential' => static function (PendingRecord $pending): void {
                 $pending->usingCredential('key_01');

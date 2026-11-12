@@ -16,19 +16,19 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
  * which returns the captured record; nothing is written without it.
  *
  * Its public methods describe the activity (`event()`, `on()`, `by()`,
- * `asPrincipal()`, `forTenant()`, `usingCredential()`, `correlatedWith()`,
- * `withProperties()`, `withNote()` and `withIdentifier()`), set its outcome
- * (`succeeded()`, the default, `failed()` and `denied()`), and choose its
- * delivery (`afterCommit()`, `immediately()`, `transactional()` and
- * `failClosed()`).
- * Setting one field twice keeps the last value given, except that properties
- * merge at the top level, later keys replacing earlier ones; different calls
- * never interact, so the record does not depend on the order they are made in.
- * Every value is validated and normalised as it is given, so its properties and
- * context hold only strings, integers, booleans, `null`, lists and maps and
- * every other field a validated value; a programming error is an
- * `\InvalidArgumentException` or a `\LogicException` whatever the configured
- * failure mode. A record names no provenance: the package sets it.
+ * `asPrincipal()`, `forTenant()`, `viaGuard()`, `inSession()`, `fromClient()`,
+ * `usingCredential()`, `correlatedWith()`, `withProperties()`, `withNote()` and
+ * `withIdentifier()`), set its outcome (`succeeded()`, the default, `failed()`
+ * and `denied()`), and choose its delivery (`afterCommit()`, `immediately()`,
+ * `transactional()` and `failClosed()`). Setting one field twice keeps the last
+ * value given, except that properties merge at the top level, later keys
+ * replacing earlier ones; different calls never interact, so the record does
+ * not depend on the order they are made in. Every value is validated and
+ * normalised as it is given, so its properties and context hold only strings,
+ * integers, booleans, `null`, lists and maps and every other field a validated
+ * value; a programming error is an `\InvalidArgumentException` or a
+ * `\LogicException` whatever the configured failure mode. A record names no
+ * provenance: the package sets it.
  *
  * A builder is used once: after its record is built, every further call is a
  * `\LogicException`.

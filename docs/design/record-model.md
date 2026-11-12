@@ -49,9 +49,10 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
 - In the envelope a reference is a pair of columns (`actor_type` and `actor_id`, and likewise for the subject, the
   principal and the tenant), both set or both `null`, never an empty string.
 - `by(null)` is an explicit "no actor" and differs from not calling `by()`: `Contribution::fillActor()` fills an actor
-  only when none was given, so `by(null)` stays `null` while an unset actor may be filled. `asPrincipal(null)` and
-  `forTenant(null)` work the same way. Explicit values beat filled ones in either order, and the first contributor to
-  fill a field wins.
+  only when none was given, so `by(null)` stays `null` while an unset actor may be filled. `asPrincipal(null)`,
+  `forTenant(null)`, `viaGuard(null)` and `inSession(null)` work the same way, and `fromClient()` gives the IP address
+  and the user agent together, so a part given as `null` is not filled either. Explicit values beat filled ones in
+  either order, and the first contributor to fill a field wins.
 - A contributor never sees the builder. It is given a `Contribution`, a narrow view (`@api`) that holds nothing of its
   own and delegates to the builder: the fillers (`fillActor()`, `fillPrincipal()`, `fillTenant()`, `fillGuard()`,
   `fillSession()`, `fillRequest()`, `fillClient()`, `fillOrigin()`, `fillContext()`) and the reads `code()`,
@@ -118,8 +119,10 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
 ## Success Path
 
 - The application names a code with `event()`, then describes the activity in any order: `on()` the subject, `by()` the
-  actor, `asPrincipal()`, `forTenant()`, `usingCredential()` with a credential's id (never a secret), `correlatedWith()`
-  a namespaced id such as `app:ticket-123`, `withProperties()`, `withNote()`, `withIdentifier()`, and an outcome.
+  actor, `asPrincipal()`, `forTenant()`, `viaGuard()`, `inSession()` with an application-owned session reference,
+  `fromClient()` with the IP address and user agent, `usingCredential()` with a credential's id (never a secret),
+  `correlatedWith()` a namespaced id such as `app:ticket-123`, `withProperties()`, `withNote()`, `withIdentifier()`, and
+  an outcome.
 - Each value is validated and normalised as it is given, so the builder's properties and context hold only strings,
   integers, booleans, `null`, lists and maps, and every other field a validated value.
 - Contributors fill the gaps the application left, each through a `Contribution`. The package's defaults fill the

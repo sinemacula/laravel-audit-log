@@ -270,6 +270,166 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
+     * Rows of `[value]`: a name and `null`, an explicit none.
+     *
+     * @return iterable<string, array{0: ?string}>
+     */
+    public static function provideGuardsAndSessions(): iterable
+    {
+        yield from [
+            'a name' => ['web'],
+            'null'   => [null],
+        ];
+    }
+
+    /**
+     * A guard and a session reference given explicitly beat a filler in either
+     * order, `null` included.
+     *
+     * @param  ?string  $value
+     * @return void
+     */
+    #[DataProvider('provideGuardsAndSessions')]
+    public function testViaGuardAndInSessionBeatAFillerInEitherOrder(?string $value): void
+    {
+        $before = (new PendingRecord)->viaGuard($value)->inSession($value);
+        $after  = new PendingRecord;
+
+        $before->fillGuard('filled');
+        $before->fillSession('filled');
+        $after->fillGuard('filled');
+        $after->fillSession('filled');
+        $after->viaGuard($value)->inSession($value);
+
+        foreach ([$before, $after] as $pending) {
+            self::assertSame($value, $pending->snapshot()->guard);
+            self::assertSame($value, $pending->snapshot()->sessionId);
+        }
+    }
+
+    /**
+     * The last guard and session reference given win.
+     *
+     * @return void
+     */
+    public function testTheLastGuardAndSessionWin(): void
+    {
+        $snapshot = (new PendingRecord)->viaGuard('web')->viaGuard('api')->inSession('sess_1')->inSession(null)->snapshot();
+
+        self::assertSame('api', $snapshot->guard);
+        self::assertNull($snapshot->sessionId);
+    }
+
+    /**
+     * Rows of `[call, the refusal]`: a guard or session reference that is
+     * empty, too long or not clean text.
+     *
+     * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void, 1: string}>
+     */
+    public static function provideInvalidGuardsAndSessions(): iterable
+    {
+        $guard   = 'A guard name must be from 1 to 64 characters, with no control characters.';
+        $session = 'A session reference must be from 1 to 191 characters, with no control characters.';
+
+        yield from [
+            'an empty guard' => [static function (PendingRecord $pending): void {
+                $pending->viaGuard('');
+            }, $guard],
+            'a guard too long' => [static function (PendingRecord $pending): void {
+                $pending->viaGuard(str_repeat('g', 65));
+            }, $guard],
+            'a guard with a control character' => [static function (PendingRecord $pending): void {
+                $pending->viaGuard("web\n");
+            }, $guard],
+            'an empty session' => [static function (PendingRecord $pending): void {
+                $pending->inSession('');
+            }, $session],
+            'a session too long' => [static function (PendingRecord $pending): void {
+                $pending->inSession(str_repeat('s', 192));
+            }, $session],
+        ];
+    }
+
+    /**
+     * An invalid guard or session reference is refused and changes nothing.
+     *
+     * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void  $call
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('provideInvalidGuardsAndSessions')]
+    public function testViaGuardAndInSessionRefuseAnInvalidValue(\Closure $call, string $message): void
+    {
+        $pending = new PendingRecord;
+
+        try {
+            $call($pending);
+            self::fail('Expected the value to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame($message, $exception->getMessage());
+        }
+
+        $pending->fillGuard('web');
+        $pending->fillSession('sess_1');
+
+        self::assertSame('web', $pending->snapshot()->guard);
+        self::assertSame('sess_1', $pending->snapshot()->sessionId);
+    }
+
+    /**
+     * A guard and a session reference as long as their columns are kept.
+     *
+     * @return void
+     */
+    public function testViaGuardAndInSessionKeepAValueAsLongAsItsColumn(): void
+    {
+        $snapshot = (new PendingRecord)->viaGuard(str_repeat('g', 64))->inSession(str_repeat('s', 191))->snapshot();
+
+        self::assertSame(str_repeat('g', 64), $snapshot->guard);
+        self::assertSame(str_repeat('s', 191), $snapshot->sessionId);
+    }
+
+    /**
+     * The client is given whole: a part given as `null` is not filled, in
+     * either order, and the last client given replaces both parts.
+     *
+     * @return void
+     */
+    public function testFromClientGivesBothPartsTogether(): void
+    {
+        $before = (new PendingRecord)->fromClient('203.0.113.7', null);
+        $after  = new PendingRecord;
+
+        $before->fillClient('198.51.100.1', 'Mozilla/5.0');
+        $after->fillClient('198.51.100.1', 'Mozilla/5.0');
+        $after->fromClient('203.0.113.7', null);
+
+        foreach ([$before, $after] as $pending) {
+            self::assertSame('203.0.113.7', $pending->snapshot()->ip);
+            self::assertNull($pending->snapshot()->userAgent);
+        }
+
+        $after->fromClient(null, 'curl/8.0');
+
+        self::assertNull($after->snapshot()->ip);
+        self::assertSame('curl/8.0', $after->snapshot()->userAgent);
+    }
+
+    /**
+     * The address is kept as given, and the user agent cleaned and capped, one
+     * empty once cleaned counting as none.
+     *
+     * @return void
+     */
+    public function testFromClientKeepsTheAddressAndCleansTheUserAgent(): void
+    {
+        self::assertSame('not an address', (new PendingRecord)->fromClient('not an address', null)->snapshot()->ip);
+        self::assertSame('Mozilla/5.0 (X11)', (new PendingRecord)->fromClient(null, "Mozilla\0/5.0\t(X11)\u{202E}")->snapshot()->userAgent);
+        self::assertSame(str_repeat('é', 256), (new PendingRecord)->fromClient(null, str_repeat('é', 300))->snapshot()->userAgent);
+        self::assertNull((new PendingRecord)->fromClient(null, "\0\u{202E}")->snapshot()->userAgent);
+    }
+
+    /**
      * A credential id is kept exactly; the last one given wins, and an id as
      * long as its column is kept (protects against an off-by-one mutation of
      * the cap).
