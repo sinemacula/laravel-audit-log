@@ -40,12 +40,6 @@ final readonly class Pruner
     /** @var int The attempts a chunk whose deletes mismatch makes in all: the first and one retry. */
     private const int MISMATCH_ATTEMPTS = 2;
 
-    /** @var string The phase a run's first row names. */
-    private const string START = 'start';
-
-    /** @var string The refusal of a run inside a transaction. */
-    private const string IN_TRANSACTION = 'A prune runs in transactions of its own on the maintenance connection, and refuses to run inside one.';
-
     /** @var string What a run that stopped on a failure reports, by the run's id and the failure's class. */
     private const string STOPPED = 'The prune run `%s` stopped with %s; the chunks it committed stand.';
 
@@ -203,7 +197,7 @@ final readonly class Pruner
 
             $start = [
                 'run_id'            => $runId,
-                'phase'             => self::START,
+                'phase'             => 'start',
                 'policy_version'    => $version,
                 'boundary_sequence' => $boundary,
                 'cutoff_midnight'   => $decisions->midnight(),
@@ -462,7 +456,7 @@ final readonly class Pruner
             return;
         }
 
-        throw new \LogicException(self::IN_TRANSACTION);
+        throw new \LogicException('A prune runs in transactions of its own on the maintenance connection, and refuses to run inside one.');
     }
 
     /**

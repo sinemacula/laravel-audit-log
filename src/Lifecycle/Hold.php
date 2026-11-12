@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Contracts\Support\Arrayable;
+use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
@@ -26,9 +27,6 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  */
 final readonly class Hold implements Arrayable
 {
-    /** @var string A hold or operation id: a lower-case UUID. */
-    private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
-
     /**
      * Constructor.
      *
@@ -79,7 +77,7 @@ final readonly class Hold implements Arrayable
         public int $journalSequence,
     ) {
         foreach (['id' => $id, 'operation id' => $operationId] as $field => $value) {
-            if (preg_match(self::UUID_PATTERN, $value) !== 1) {
+            if (preg_match(SealEnvelope::UUID_PATTERN, $value) !== 1) {
                 throw new \InvalidArgumentException(sprintf('A hold\'s %s must be a lower-case UUID.', $field));
             }
         }

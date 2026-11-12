@@ -37,9 +37,6 @@ final readonly class ErasureReapplier
     /** @var int Longest line of an erasures file, in bytes, without its newline. */
     public const int MAX_LINE_BYTES = 1024;
 
-    /** @var string Why a file that changed between its two reads fails the run. */
-    private const string CHANGED = 'The erasures file changed while its owners were erased again; the restore is not reconciled.';
-
     /**
      * Constructor.
      *
@@ -106,11 +103,16 @@ final readonly class ErasureReapplier
         $file   = new ImportFile($path);
         $digest = self::measured($file);
         $erase ??= function (#[\SensitiveParameter] Reference $owner, ErasureRun $erasures) use ($authority): ErasureResult {
-            $ownOperationId = $this->ownOperationId();
+            $ownOperationId = Str::uuid7($this->clock->now())->toString();
 
             return $this->eraser->erase($ownOperationId, $owner, $authority, true, true, $erasures);
         };
-        $tally  = self::unchanged($file, $digest, $this->eraseEach($file, $erase));
+        $tally = $this->eraseEach($file, $erase);
+
+        if (!hash_equals($digest, $file->readDigest())) {
+            throw new \UnexpectedValueException('The erasures file changed while its owners were erased again; the restore is not reconciled.');
+        }
+
         $counts = [$tally['owners'], $tally['erased'], $tally['already']];
 
         if ($tally['rejected'] > 0 || $tally['partial'] > 0 || $tally['refused'] > 0) {
@@ -169,25 +171,6 @@ final readonly class ErasureReapplier
         }
 
         return $file->readDigest();
-    }
-
-    /**
-     * The tally, refused when the file changed since it was measured.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportFile  $file
-     * @param  string  $digest
-     * @param  array{owners: int, erased: int, already: int, partial: int, refused: int, rejected: int, recorded: bool}  $tally
-     * @return array{owners: int, erased: int, already: int, partial: int, refused: int, rejected: int, recorded: bool}
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function unchanged(ImportFile $file, string $digest, array $tally): array
-    {
-        if (!hash_equals($digest, $file->readDigest())) {
-            throw new \UnexpectedValueException(self::CHANGED);
-        }
-
-        return $tally;
     }
 
     /**
@@ -346,15 +329,5 @@ final readonly class ErasureReapplier
             return $this->journal->append($connection, $replay, JournalKind::RESTORE_RECONCILED, $operationId, $authority, $payload)->lastAppended()
                 ?? throw new \LogicException('The journal accepted a reconciliation its replay does not hold.');
         });
-    }
-
-    /**
-     * A fresh UUID v7 operation id for one owner's erasure.
-     *
-     * @return string
-     */
-    private function ownOperationId(): string
-    {
-        return Str::uuid7($this->clock->now())->toString();
     }
 }

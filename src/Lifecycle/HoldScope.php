@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use Illuminate\Contracts\Support\Arrayable;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
+use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
@@ -40,9 +41,6 @@ final readonly class HoldScope implements Arrayable
 
     /** @var list<string> The keys of the canonical form. */
     private const array KEYS = ['v', 'tenants', 'tenantless', 'about', 'categories', 'from', 'to', 'import_batch'];
-
-    /** @var string An import batch id: a lower-case UUID. */
-    private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
     /** @var string Why a stored scope is refused, by key. */
     private const string MALFORMED = 'A stored hold scope\'s `%s` is malformed.';
@@ -215,7 +213,7 @@ final readonly class HoldScope implements Arrayable
      */
     public function importBatch(string $batchId): self
     {
-        if (preg_match(self::UUID_PATTERN, $batchId) !== 1) {
+        if (preg_match(SealEnvelope::UUID_PATTERN, $batchId) !== 1) {
             throw new \InvalidArgumentException('A hold scope\'s import batch must be a lower-case UUID.');
         }
 

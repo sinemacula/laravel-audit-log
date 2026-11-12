@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
+use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
@@ -39,9 +40,6 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class AuditImporter
 {
-    /** @var string A batch id: a lower-case UUID. */
-    private const string BATCH_ID = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
-
     /** @var string The refusal of a batch that cannot be closed. */
     private const string NOT_CLOSABLE = 'Only a running import batch, or a final one whose finish was never journalled, is closed.';
 
@@ -534,7 +532,7 @@ final readonly class AuditImporter
      */
     private static function closable(string $batchId, #[\SensitiveParameter] \Closure $find): array
     {
-        $batch     = preg_match(self::BATCH_ID, $batchId) === 1 ? $find($batchId) : null;
+        $batch     = preg_match(SealEnvelope::UUID_PATTERN, $batchId) === 1 ? $find($batchId) : null;
         $status    = ImportStatus::tryFrom(self::textOf($batch['status'] ?? null) ?? '');
         $startedAt = self::textOf($batch['started_at'] ?? null);
 

@@ -48,9 +48,6 @@ final readonly class Eraser
     /** @var int The most keys one tombstone update names. */
     public const int STATEMENT_IDS = 500;
 
-    /** @var string Why an erasure rolls back when a tombstone update misses. */
-    private const string MISMATCH = 'A subject key changed while its owner was erased; the erasure is rolled back.';
-
     /**
      * Constructor.
      *
@@ -496,7 +493,7 @@ final readonly class Eraser
                 ->update(['state' => KeyState::ERASED->value, 'wrapped_key' => null, 'erasure_id' => $erasureId]);
 
             if ($updated !== count($chunk)) {
-                throw new \UnexpectedValueException(self::MISMATCH);
+                throw new \UnexpectedValueException('A subject key changed while its owner was erased; the erasure is rolled back.');
             }
         }
     }
