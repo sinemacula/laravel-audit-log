@@ -15,14 +15,11 @@ namespace SineMacula\Laravel\AuditLog\Delivery;
  */
 final class StaleClaimException extends \RuntimeException
 {
-    /** @var string The fixed message. */
-    private const string MESSAGE = 'The drain no longer owns the outbox row, so the delivery inside its transaction was rolled back.';
-
     /**
      * Constructor.
      */
     public function __construct()
     {
-        parent::__construct(self::MESSAGE);
+        parent::__construct('The drain no longer owns the outbox row, so the delivery inside its transaction was rolled back.');
     }
 }

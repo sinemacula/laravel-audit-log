@@ -38,12 +38,6 @@ use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
  */
 final readonly class RecordDelivery
 {
-    /** @var string Why a capture is refused a strict guarantee. */
-    private const string STRICT_CAPTURE = 'A captured record is written immediately or after commit, never fail-closed or transactional.';
-
-    /** @var string Why a package write is refused any other timing. */
-    private const string LOOSE_PACKAGE_WRITE = 'A package write is delivered immediately and fail-closed.';
-
     /** @var string Why a strict record made inside the write guard is refused. */
     private const string STRICT_RECORD_IN_A_WRITE = 'A fail-closed or transactional record was made while an audit record was being written or its failure handled,'
         . ' so its guarantee cannot be met.';
@@ -178,7 +172,7 @@ final readonly class RecordDelivery
     private static function refuseAStrictCapture(Timing $timing, bool $failClosed, #[\SensitiveParameter] ?CaptureSignal $capture): void
     {
         if ($capture !== null && ($failClosed || $timing === Timing::TRANSACTIONAL)) {
-            throw new \LogicException(self::STRICT_CAPTURE);
+            throw new \LogicException('A captured record is written immediately or after commit, never fail-closed or transactional.');
         }
     }
 
@@ -205,7 +199,7 @@ final readonly class RecordDelivery
             return;
         }
 
-        throw new \LogicException(self::LOOSE_PACKAGE_WRITE);
+        throw new \LogicException('A package write is delivered immediately and fail-closed.');
     }
 
     /**
