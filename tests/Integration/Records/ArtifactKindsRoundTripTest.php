@@ -28,14 +28,7 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
- * Integration tests for an artifact of every kind, a bulk operation's
- * subjects, a disclosure and an export's manifest, on the engine the suite runs
- * against: each is stored with its entry by the database store, drained from
- * the outbox whole, and replayed from the documented spill channel's real file
- * whole, its row of the kind and count its descriptor signs, its members
- * opening to the canonical form its kind's builder made, and its entry and
- * artifact verifying; a disclosure and an export of nothing, counting none in
- * the engine's unsigned column, alike. On SQLite, MySQL and PostgreSQL.
+ * Integration tests for storing, draining and replaying every artifact kind.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,8 +50,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
     private string $file = '';
 
     /**
-     * Stop the clock, keep what a report would say out of the output, and spill
-     * to the documented channel, in a file of the test's own.
+     * Freeze the clock, silence reports, and spill to a file of the test's own.
      *
      * @return void
      */
@@ -115,8 +107,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * The database store writes an artifact of each kind with its entry: one
-     * entry, which verifies, and one artifact of that kind and count.
+     * The database store writes an artifact of each kind with its entry.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  int  $members
@@ -133,8 +124,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * An artifact of each kind written to the outbox, encrypted as its whole
-     * envelope, is drained to one entry and one artifact, and the row goes.
+     * An artifact of each kind drains from the outbox once, and the row goes.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  int  $members
@@ -155,8 +145,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * An artifact of each kind spilled to the documented channel's file replays
-     * to one entry and one artifact, and a second replay adds nothing.
+     * An artifact of each kind replays from the spill file once, and only once.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  int  $members
@@ -181,9 +170,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * A disclosure of nothing and an export of no line, counting no member, are
-     * stored, drained and replayed whole, their count of 0 kept by the engine's
-     * unsigned column.
+     * An empty disclosure and export store, drain and replay with a count of 0.
      *
      * @return void
      */
@@ -231,10 +218,8 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * Assert the record's entry verifies and its artifact is stored as it was
-     * sealed: its id, its entry, its kind and count, its digest, and members
-     * that open to the canonical form, with no finding when its manifest is
-     * checked.
+     * Assert the entry verifies and the artifact is stored as sealed, its
+     * members opening to the canonical form.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
@@ -259,8 +244,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
             [$artifact->id, $artifact->entry_id, $artifact->kind, (int) $artifact->member_count, $artifact->digest],
         );
 
-        // A disclosure's form carries a nonce of its own, so the stored members
-        // are held to the form this record sealed rather than to a fresh build
+        // Each build has its own disclosure nonce, so compare the sealed form
         $encrypter = app(StringEncrypter::class);
         $stored    = $encrypter->decryptString((string) $artifact->members);
 
@@ -291,8 +275,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * The canonical form with a disclosure's nonce blanked, so two builds of
-     * the same disclosure compare equal; any other form is returned as it is.
+     * The canonical form with a disclosure's nonce blanked, to compare builds.
      *
      * @param  string  $canonical
      * @return string
@@ -303,8 +286,7 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * A finalised record carrying an artifact of the kind holding the number of
-     * members, in the canonical form its kind's builder makes.
+     * A finalised record with an artifact of the kind and that many members.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  int  $members

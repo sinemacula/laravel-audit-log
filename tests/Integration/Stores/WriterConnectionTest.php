@@ -15,10 +15,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the store on a read/write split storage connection
- * whose replica lags behind the primary: the insert reaches the writer, and so
- * does the lookup that resolves a duplicate, which a replica would answer
- * without the row.
+ * Integration tests for the store on a read/write split with a lagging replica.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,9 +70,7 @@ final class WriterConnectionTest extends TestCase
     }
 
     /**
-     * A row seeded on the primary alone is found by the duplicate's lookup, so
-     * storing the same record again succeeds; a replica read would find no row
-     * and propagate the insert's own exception instead.
+     * A row on the primary alone is found by the duplicate lookup.
      *
      * @return void
      */

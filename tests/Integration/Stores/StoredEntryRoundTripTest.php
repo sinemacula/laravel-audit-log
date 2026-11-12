@@ -18,12 +18,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the round trip of a record through the engine the suite
- * runs against: each record is stored through the store, read back through the
- * row codec, and verified by the signer, so whatever the engine does to what it
- * stores (reordering JSON keys, dropping trailing fractional zeros, reading
- * times in a session time zone) the evidence still verifies, and an edit to it
- * does not.
+ * Integration tests for a record's round trip through the suite's engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -85,9 +80,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * An imported record, with no origin, its source fields and its source
-     * digest, verifies once read back, its digest as written: the engine keeps
-     * the 64 characters of text the signature covers.
+     * An imported record verifies once read back, its digest as written.
      *
      * @return void
      */
@@ -103,8 +96,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A captured record's source digest is stored and read back as `null`,
-     * never as an empty string.
+     * A captured record's source digest reads back `null`, not an empty string.
      *
      * @return void
      */
@@ -118,9 +110,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Nested properties whose keys MySQL's JSON reorders (by length, then
-     * bytes) and numeric keys among them still verify: the canonical encoding
-     * sorts the keys itself.
+     * Nested properties MySQL reorders still verify; the encoding sorts keys.
      *
      * @return void
      */
@@ -143,9 +133,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Unicode and text that is hostile to JSON, HTML or a line-based reader
-     * still verifies: a 4-byte emoji, combining marks, a quote, a backslash, a
-     * closing script tag, U+2028, and keys containing `.` and `*`.
+     * Unicode and text hostile to JSON, HTML or line readers still verifies.
      *
      * @return void
      */
@@ -167,9 +155,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The record's integer and float rules survive the engine: the largest safe
-     * integer stays an integer, one beyond it is a decimal string, and floats
-     * are their shortest decimal strings, negative zero as `"0"`.
+     * The integer and float string rules survive the engine.
      *
      * @return void
      */
@@ -188,8 +174,8 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Both times keep all six fractional digits through the engine, trailing
-     * zeros included, which PostgreSQL drops and the codec restores.
+     * Both times keep all six fractional digits, which PostgreSQL drops and the
+     * codec restores.
      *
      * @return void
      */
@@ -212,9 +198,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The instant reads back unchanged, and is stored as UTC, under a session
-     * time zone of MySQL or PostgreSQL that is not UTC and under PHP's and the
-     * application's time zone of Auckland.
+     * Times stay UTC under non-UTC session, PHP and application time zones.
      *
      * @return void
      */
@@ -242,8 +226,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A map with numeric keys stays a map, and an empty list stays a list,
-     * through the engine.
+     * Numeric-key maps stay maps and empty lists stay lists through the engine.
      *
      * @return void
      */
@@ -262,8 +245,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The stored row decodes to the finalised record: their canonical encodings
-     * are equal, every column included.
+     * The stored row decodes to the finalised record, every column included.
      *
      * @return void
      */
@@ -277,8 +259,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A nested property edited in the stored row, with its HMAC left as it was,
-     * fails verification.
+     * A nested property edited in the stored row fails verification.
      *
      * @return void
      */
@@ -292,8 +273,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Actor ids that differ only in case are two actors: each finds its own
-     * entry, and both verify.
+     * Actor ids differing only in case are two actors, each finding its entry.
      *
      * @return void
      */
@@ -303,8 +283,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Actor ids that differ only by a trailing space are two actors, which a
-     * padding collation would compare equal.
+     * Actor ids differing only by a trailing space stay distinct.
      *
      * @return void
      */
@@ -314,9 +293,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Imported records whose source record ids differ only by a trailing space
-     * are both stored, under the source-identity index a padding collation
-     * would trip, and both verify.
+     * Source ids differing only by a trailing space are both stored.
      *
      * @return void
      */
@@ -326,8 +303,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Store the record finalised on the frozen clock, read it back and assert
-     * it verifies; the decoded row.
+     * Store the record, read it back and assert it verifies; the decoded row.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -349,8 +325,7 @@ final class StoredEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Store two records whose column holds the two values, and assert each is
-     * its own row, found by its own value alone, and verifies.
+     * Store a record per value and assert each is its own row and verifies.
      *
      * @param  'actor_id'|'source_record_id'  $column
      * @param  string  $one

@@ -16,17 +16,8 @@ use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
 /**
- * Integration tests for the trail holding an owner's data, on whichever engine
- * the suite runs against: the entries holding a fragment sealed under any of
- * the owner's keys, in any of its tenants and categories, are found by a page,
- * a count and an export, through the key uses the store wrote with each entry
- * and the keys the key creator made; another owner's entries are not, an owner
- * whose id differs only in case included, since every engine compares the ids
- * byte for byte; and an entry holding two owners' fragments is found for each.
- *
- * Every key is made and every entry stored as the package makes and stores
- * them, so the `exists` runs over the engine's own key types: native `uuid`
- * columns on PostgreSQL, binary strings on MySQL and text on SQLite.
+ * Integration tests for finding an owner's entries through key uses on the
+ * suite's engine, over its native key column types.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,8 +37,7 @@ final class HoldingDataOfEnginesTest extends TestCase
     private string $directory = '';
 
     /**
-     * Bind the read path and the package's key wrapper, let every viewer see
-     * every entry, and make the directory.
+     * Bind the read path and key wrapper, reveal all, and make the directory.
      *
      * @return void
      */
@@ -83,10 +73,7 @@ final class HoldingDataOfEnginesTest extends TestCase
     }
 
     /**
-     * The entries holding the owner's fragments, under its keys of two tenants
-     * and two categories, and one entry of no tenant, are found by a page, a
-     * count and an export, each once, however many of the owner's fragments it
-     * holds.
+     * A page, a count and an export find each of the owner's entries once.
      *
      * @return void
      */
@@ -111,8 +98,7 @@ final class HoldingDataOfEnginesTest extends TestCase
     }
 
     /**
-     * Another owner's entries are not found: neither an owner of another type,
-     * nor one whose id differs only in case, nor one with no key at all.
+     * Another owner's entries are not found, nor an id differing in case.
      *
      * @return void
      */
@@ -134,8 +120,7 @@ final class HoldingDataOfEnginesTest extends TestCase
     }
 
     /**
-     * An entry holding the fragments of two owners is found for each of them,
-     * beside the entries holding only that owner's, and is exported for each.
+     * An entry holding two owners' fragments is found and exported for each.
      *
      * @return void
      */
@@ -155,9 +140,7 @@ final class HoldingDataOfEnginesTest extends TestCase
     }
 
     /**
-     * Store an entry holding a fragment of each owner, each sealed under the
-     * key of the owner's unit in the entry's tenant and category, in a field of
-     * its own, and return its id.
+     * Store an entry with a fragment sealed for each owner and return its id.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Records\Reference>  $owners
      * @param  ?string  $tenant
@@ -182,8 +165,7 @@ final class HoldingDataOfEnginesTest extends TestCase
     }
 
     /**
-     * Export the trail as NDJSON and return the ids of the entries the export
-     * holds, sorted.
+     * Export the trail as NDJSON and return the exported ids, sorted.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $trail
      * @return list<string>

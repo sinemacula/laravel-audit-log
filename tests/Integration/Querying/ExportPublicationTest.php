@@ -19,18 +19,7 @@ use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
 /**
- * Integration tests for publishing an export on whichever engine the suite
- * runs against, once its journal is stored: a directory that can no longer be
- * written fails the publication, which publishes nothing, is recorded as
- * `audit_log.export_publish_failed` naming the journal, and refuses the
- * export; a target or a bundle that appears once the journal is stored is
- * never replaced without `force`, and the failure leaves no temporary file; a
- * journal that cannot be written leaves no file at all; and no file the export
- * writes, temporary or published, can be read by anyone but its owner,
- * whatever the umask.
- *
- * Each failure is made when the journal is stored, by a listener on its
- * `AuditRecorded`, which the package dispatches before anything is published.
+ * Integration tests for publishing an export once its journal is stored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,8 +51,7 @@ final class ExportPublicationTest extends TestCase
     private string $directory = '';
 
     /**
-     * Bind the read path, let every viewer see every entry, seed two entries
-     * and make the directory.
+     * Bind the read path, reveal every entry, seed two and make the directory.
      *
      * @return void
      */
@@ -82,8 +70,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * Make the directory writable again, remove it and everything in it, and
-     * put the entries table back.
+     * Make the directory writable, remove it, and put the entries table back.
      *
      * @return void
      */
@@ -112,12 +99,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * A directory made read-only once the journal is stored fails the
-     * publication: nothing is published, neither the file nor its bundle, the
-     * failure is recorded as `audit_log.export_publish_failed` naming the
-     * journal, and the export is refused naming the class that failed. The one
-     * temporary file the directory then holds, which nothing can remove until
-     * the directory is writable again, stays private to its owner.
+     * A read-only directory fails the publication, records it and refuses.
      *
      * @return void
      */
@@ -144,8 +126,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * Rows of `[what appears once the journal is stored]`: the target, and its
-     * bundle.
+     * Rows of `[suffix]`: the target and its bundle.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -158,11 +139,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * A file written at the target, or at its bundle's place, once the journal
-     * is stored, is never replaced without `force`: it is left exactly as
-     * written, nothing of the export is published, no temporary file is left,
-     * and the failure is recorded as `audit_log.export_publish_failed` naming
-     * the journal.
+     * A target or bundle appearing after the journal needs `force` to replace.
      *
      * @param  string  $suffix
      * @return void
@@ -186,8 +163,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * With `force`, a target written once the journal is stored is replaced by
-     * the export, which is published whole and journalled once.
+     * With `force`, a target appearing after the journal is replaced.
      *
      * @return void
      */
@@ -206,9 +182,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * A journal that cannot be written, once the snapshot has ended and the
-     * file holds every line, refuses the export as unrecorded and leaves no
-     * file, no bundle and no temporary file.
+     * A journal that cannot be written refuses the export and leaves no file.
      *
      * @return void
      */
@@ -242,10 +216,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * Under a umask that would let anyone read a new file, the temporary file
-     * and its bundle are created private to their owner, stay so while the
-     * journal is written, and are published so: the published file and bundle
-     * are the temporary files themselves. The umask is restored.
+     * Export files stay private to their owner under a permissive umask.
      *
      * @return void
      */
@@ -275,9 +246,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * Skip the test, saying why, when this process writes into a directory
-     * whose mode forbids it, as one running as root does, since a read-only
-     * directory then fails nothing.
+     * Skip when this process can write a read-only directory, as root can.
      *
      * @return void
      */
@@ -300,8 +269,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * Export to the target and assert the export is refused as a failed
-     * publication, naming the class that failed and nothing it held.
+     * Assert exporting to the target is refused as a failed publication.
      *
      * @return void
      */
@@ -319,9 +287,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * Assert the export's journal is stored as a success and the failed
-     * publication is recorded once after it as a failure with `publish_failed`,
-     * naming the journal and nothing else.
+     * Assert the journal is a success and the failed publication follows once.
      *
      * @return void
      */
@@ -357,8 +323,7 @@ final class ExportPublicationTest extends TestCase
     }
 
     /**
-     * Run the callback once, when an export's journal is stored, before
-     * anything is published.
+     * Run the callback once when an export's journal is stored.
      *
      * @param  \Closure(): void  $callback
      * @return void

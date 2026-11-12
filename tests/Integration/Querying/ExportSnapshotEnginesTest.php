@@ -18,16 +18,8 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Integration tests for the snapshot an export is read in, on whichever engine
- * the suite runs against, racing a writer in another process: a row committed
- * once the snapshot has read is never read by it, the bound agrees with every
- * row read after it, the session issues nothing but its begin, its reads and
- * its commit, and a writer commits while the snapshot is open.
- *
- * SQLite runs on a file in WAL mode, set before any child starts, as the
- * operations guidance advises: in rollback-journal mode the snapshot's shared
- * lock would hold back the child's commit until the snapshot closed. The
- * processes meet on file gates, never on timing.
+ * Integration tests for an export's snapshot racing a writer in another
+ * process.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,9 +57,7 @@ final class ExportSnapshotEnginesTest extends TestCase
     }
 
     /**
-     * A row another process commits once the snapshot's first statement has run
-     * is not read by a second statement in the snapshot, and is there once the
-     * snapshot has closed.
+     * A row committed after the snapshot's first statement is not read in it.
      *
      * @return void
      */
@@ -98,11 +88,7 @@ final class ExportSnapshotEnginesTest extends TestCase
     }
 
     /**
-     * The bound, the greatest recorded time and id, selected as the snapshot's
-     * first statement, is the last of the rows read after it in the snapshot,
-     * whichever moment the engine takes its snapshot at, though another process
-     * commits a row between the snapshot's begin and its bound, and another
-     * once the bound is read.
+     * The bound selected first in the snapshot is the last row read after it.
      *
      * @return void
      */
@@ -142,9 +128,7 @@ final class ExportSnapshotEnginesTest extends TestCase
     }
 
     /**
-     * The session runs nothing but its engine's begin, `select`s and its
-     * `COMMIT`, so it never writes, and a SQLite reader never takes a writer's
-     * lock.
+     * The snapshot session issues only its begin, its selects and `COMMIT`.
      *
      * @return void
      */
@@ -182,10 +166,8 @@ final class ExportSnapshotEnginesTest extends TestCase
     }
 
     /**
-     * While the snapshot is open, having read, a writer on another connection
-     * commits at once: MySQL and PostgreSQL never block a writer on a reader,
-     * and SQLite in WAL mode does not either. The snapshot still reads the rows
-     * it began with.
+     * A writer commits at once while the snapshot is open, and the snapshot
+     * still reads its rows.
      *
      * @return void
      */
@@ -206,8 +188,8 @@ final class ExportSnapshotEnginesTest extends TestCase
     }
 
     /**
-     * Put the database on a file SQLite can share across a fork, in WAL mode,
-     * before any child starts.
+     * Put SQLite on a WAL file shared across the fork, since a rollback journal
+     * would block the child's commit.
      *
      * @param  mixed  $app
      * @return void
@@ -230,8 +212,7 @@ final class ExportSnapshotEnginesTest extends TestCase
     }
 
     /**
-     * The ids of every entry the connection reads, ascending by recorded time
-     * and then id, as an export reads them.
+     * The ids the connection reads, by recorded time then id, as exported.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<string>
@@ -243,8 +224,7 @@ final class ExportSnapshotEnginesTest extends TestCase
     }
 
     /**
-     * The id of the greatest entry by recorded time and then id the connection
-     * reads: the bound of an export.
+     * The id of the greatest entry by recorded time then id: an export's bound.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return string

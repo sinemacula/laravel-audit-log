@@ -28,12 +28,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Integration tests for erasure on the engine the suite runs against, on the
- * provider's own bindings: a record about two owners keeps the other owner's
- * fragment revealed once one owner is erased, with the erased key tombstoned
- * under its journal row, the owner marked at its floor and the entries counted;
- * an erased owner's new field is dropped and no key is made for it; and the
- * log, sealed before and after the erasure, verifies with its key store.
+ * Integration tests for erasing one owner of a two-owner record.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,8 +51,7 @@ final class PrivacyEnginesTest extends TestCase
     private const string IBAN = 'GB29NWBK60161331926819';
 
     /**
-     * Freeze the clock, report to a recording handler, and define the charge on
-     * a recorder of the test's own, behind the facade.
+     * Freeze the clock, record reports, and define the charge on the facade.
      *
      * @return void
      */
@@ -96,11 +90,7 @@ final class PrivacyEnginesTest extends TestCase
     }
 
     /**
-     * Erasing the actor of a record about two owners destroys the actor's key
-     * alone: the key is erased, unwrapped and tombstoned under the erasure's
-     * journal row, the owner is marked erased at its floor, one entry is
-     * counted, and a revealing read shows the actor's card `[ERASED]` and the
-     * account's number, in that record and in one about the account alone.
+     * Erasing one owner tombstones its key alone; only its card shows erased.
      *
      * @return void
      */
@@ -134,9 +124,7 @@ final class PrivacyEnginesTest extends TestCase
     }
 
     /**
-     * Once the owner is erased a new card of theirs is dropped and counted, no
-     * key is made for the owner, and the account's number is still sealed
-     * beside it.
+     * An erased owner's new card is dropped and counted, and no key is made.
      *
      * @return void
      */
@@ -156,9 +144,7 @@ final class PrivacyEnginesTest extends TestCase
     }
 
     /**
-     * A log sealed before an erasure and after it verifies, its key store
-     * included: both owners' keys verified, the erased one counted, and no
-     * finding.
+     * A log sealed before and after an erasure verifies, key store included.
      *
      * @return void
      */
@@ -184,8 +170,7 @@ final class PrivacyEnginesTest extends TestCase
     }
 
     /**
-     * Capture a charge of a card by the customer on the account, and return its
-     * id; the clock moves on a second after it.
+     * Capture a card charge, return its id and move the clock on a second.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $customer
      * @return string
@@ -200,8 +185,7 @@ final class PrivacyEnginesTest extends TestCase
     }
 
     /**
-     * The entries with the ids, as one page of the trail shows them to the
-     * viewer, by id; the test fails without any of them.
+     * The entries with the ids, by id, as one page of the trail shows them.
      *
      * @param  list<string>  $ids
      * @return array<string, \SineMacula\Laravel\AuditLog\Querying\TrailEntry>

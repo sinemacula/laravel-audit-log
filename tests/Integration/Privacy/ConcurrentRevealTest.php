@@ -25,17 +25,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for reading an owner's fragments while the owner is erased,
- * in processes of their own, on whichever engine the suite runs against and on
- * a file database on SQLite in WAL mode. The erasure's commit is the point the
- * fragments change: a reader that read them before keeps nothing, so its first
- * read after the commit, through the trail or through one reader kept across
- * pages, shows them erased; and a read while the erasure holds its locks
- * uncommitted still reveals them, since what a read already returned cannot be
- * recalled and nothing is erased until the commit.
- *
- * The processes meet on file gates rather than on timing, and no assertion
- * measures time.
+ * Integration tests for reading an owner's fragments while another process
+ * erases the owner: a read changes at the erasure's commit, never before.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,9 +67,7 @@ final class ConcurrentRevealTest extends TestCase
     private array $envelope;
 
     /**
-     * Stop the clock, bind the package's key wrapper and reader, let every
-     * viewer see every entry revealed, and store an entry holding the owner's
-     * card under the owner's key.
+     * Freeze the clock, reveal every entry, and store the owner's sealed card.
      *
      * @return void
      */
@@ -105,8 +94,7 @@ final class ConcurrentRevealTest extends TestCase
     }
 
     /**
-     * Put the clock back, and remove what the children shared once the
-     * migrations have rolled back.
+     * Restore the clock, and remove the children's files after the rollback.
      *
      * @return void
      */
@@ -121,9 +109,7 @@ final class ConcurrentRevealTest extends TestCase
     }
 
     /**
-     * A reader that revealed the card before the erasure never reveals it after
-     * the erasure commits: its next page through the trail, and one reader kept
-     * across pages, both show it erased.
+     * A read after the erasure commits shows the card erased.
      *
      * @return void
      */
@@ -151,9 +137,7 @@ final class ConcurrentRevealTest extends TestCase
     }
 
     /**
-     * While an erasure holds its locks with the keys tombstoned but not yet
-     * committed, a read still reveals the card; the first read after its commit
-     * shows it erased.
+     * A read while the erasure is uncommitted still reveals the card.
      *
      * @return void
      */
@@ -179,9 +163,7 @@ final class ConcurrentRevealTest extends TestCase
     }
 
     /**
-     * Put the database on a file SQLite can share across a fork, in WAL mode,
-     * as the operations guidance advises, so a reader never waits for the
-     * erasure's write lock.
+     * Put SQLite on a WAL file shared across the fork, so reads never block.
      *
      * @param  mixed  $app
      * @return void
@@ -204,7 +186,7 @@ final class ConcurrentRevealTest extends TestCase
     }
 
     /**
-     * Erase the owner, all or nothing, with the eraser the container builds.
+     * Erase the owner with the eraser the container builds.
      *
      * @return void
      */
@@ -214,8 +196,7 @@ final class ConcurrentRevealTest extends TestCase
     }
 
     /**
-     * In a child: once the erasure's tombstone update has run, inside its
-     * transaction, open the tombstoned gate and wait for the commit gate.
+     * In a child, pause inside the erasure once it tombstoned the keys.
      *
      * @return void
      */
@@ -257,8 +238,7 @@ final class ConcurrentRevealTest extends TestCase
     }
 
     /**
-     * The card read through the reader given: its value when revealed, and
-     * otherwise its state's.
+     * The card through the reader: its value when revealed, else its state.
      *
      * @param  \SineMacula\Laravel\AuditLog\Privacy\SubjectKeyFieldReader  $reader
      * @return string

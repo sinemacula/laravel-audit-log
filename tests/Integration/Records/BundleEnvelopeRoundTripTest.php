@@ -22,22 +22,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * A bundle through the outbox's column on the engine the suite runs against:
- * the bundle a bulk record is kept as, encrypted into `payload`, comes back
- * with the same bytes and decodes to the same record and attachment; and the
- * largest bundle there can be, the greatest manifest the settings allow in an
- * envelope at its bound, fits the column and MySQL's default packet; on SQLite,
- * MySQL and PostgreSQL alike. Everything of this size is compared by length and
- * hash, because a failure must not try to print it.
- *
- * The memory limit is raised for the test, because it is often less than the
- * largest bundle needs, and the assertions should be what fails rather than the
- * engine's limit.
- *
- * It claims no coverage because its largest payload is among the slowest things
- * in the suite: a mutant whose covering tests included it would be skipped as
- * taking too long rather than run, so the classes it passes through would go
- * without a mutation check. Their behaviour is pinned by their own tests.
+ * Integration tests for bundles through the outbox's `payload` column; covers
+ * nothing, as its slowness would get covered mutants skipped.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,9 +72,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * Restore the memory limit, as far as what the process still holds allows:
-     * the pages a payload scattered may not all go back at once, and a limit
-     * below them is refused with a warning. An unlimited process stays so.
+     * Restore the memory limit, never below what is held: PHP refuses that.
      *
      * @return void
      */
@@ -105,10 +89,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * A bulk record's bundle, encrypted into the outbox's `payload` as the
-     * outbox write path encrypts it, is read back with the same bytes, and
-     * decrypts and decodes to the same record, which encodes to the same
-     * bundle, with the same attachment, whose members open to its manifest.
+     * A bundle encrypted into `payload` reads back and decodes byte for byte.
      *
      * @return void
      */
@@ -146,12 +127,8 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * The largest bundle, the greatest manifest the settings allow sealed under
-     * the application's encrypter, in an envelope padded to its bound, is
-     * sealed within 15 MiB, and once encrypted fits MySQL's default packet with
-     * the rest of the statement beside it; the engine returns its payload with
-     * the same bytes, which decode to the same record and attachment, and the
-     * server configured here takes it.
+     * The largest bundle seals within 15 MiB and, encrypted, fits the column
+     * and MySQL's default packet.
      *
      * @return void
      */
@@ -195,10 +172,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * The manifest at the greatest size the settings allow: references of the
-     * longest id, and two shorter ones that make its canonical form exactly the
-     * greatest number of bytes, read through the settings at their greatest,
-     * which take no more.
+     * The manifest at the greatest canonical size the settings allow.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\Manifest
      */
@@ -225,10 +199,8 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * References whose manifest's canonical form is exactly the bytes given: as
-     * many of the longest id as fit, then two that make up the rest. Each
-     * pair encodes to its id's length and 14 bytes more, and its comma to one;
-     * the brackets add two, less the comma the last pair has not.
+     * References whose manifest's canonical form is exactly the bytes given; a
+     * pair is its id's length plus 14 bytes and a comma.
      *
      * @param  int  $bytes
      * @return \Generator<int, \SineMacula\Laravel\AuditLog\Records\Reference, void, void>
@@ -249,9 +221,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * The bulk record of the manifest, sealed under the application's encrypter
-     * and described by its properties, with a pad in them that makes its bundle
-     * exactly the envelope's bound, finalised once.
+     * The bulk record of the manifest, padded to exactly the envelope's bound.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
@@ -266,8 +236,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * The bulk record with the manifest's descriptor and attachment in place of
-     * its own, and a property of the length given.
+     * The bulk record with the manifest's descriptor and attachment, padded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $base
      * @param  \SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
@@ -283,8 +252,7 @@ final class BundleEnvelopeRoundTripTest extends TestCase
     }
 
     /**
-     * On MySQL, the server configured here takes a payload of the length
-     * given; other engines keep no packet size.
+     * On MySQL, assert the server takes a payload of the length.
      *
      * @param  int  $length
      * @return void

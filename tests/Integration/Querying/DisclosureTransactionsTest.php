@@ -22,12 +22,7 @@ use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
 /**
- * Integration tests for the transaction rule of the read gate on the engine the
- * suite runs against: a real page or count inside the application's own
- * transaction is refused before the policy is asked or any statement runs, the
- * base transaction Laravel's testing manager wraps a test in counts as
- * committed as the framework counts it, and an outbox on a connection of its
- * own is judged by that connection's transaction.
+ * Integration tests for the read gate's transaction rule on the suite's engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,11 +68,7 @@ final class DisclosureTransactionsTest extends TestCase
     }
 
     /**
-     * A real read of a trail that has entries, by a viewer the policy lets see
-     * all of them, entered inside `DB::transaction()` is refused, naming the
-     * storage connection, before the policy is asked, and no statement runs on
-     * any connection, then or after the refusal, so nothing the transaction
-     * could still roll back is ever read.
+     * A read inside `DB::transaction()` is refused before anything runs.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): (int|\SineMacula\Laravel\AuditLog\Querying\TrailPage)  $terminal
      * @return void
@@ -129,10 +120,7 @@ final class DisclosureTransactionsTest extends TestCase
     }
 
     /**
-     * Under the manager Laravel's `DatabaseTransactions` trait installs, wired
-     * as that trait wires it, the gate lets a read in inside the test's base
-     * transaction, and refuses one inside a transaction the test opens within
-     * it.
+     * Under the testing manager the gate admits reads in the base transaction.
      *
      * @return void
      */
@@ -158,10 +146,7 @@ final class DisclosureTransactionsTest extends TestCase
     }
 
     /**
-     * In outbox mode with the outbox on a connection of its own, a transaction
-     * open there refuses the read, naming that connection, and once it commits
-     * the read enters; in sync mode the same transaction refuses nothing, since
-     * the outbox acknowledges nothing then.
+     * An outbox connection of its own is judged by its own transaction.
      *
      * @return void
      */
@@ -196,8 +181,7 @@ final class DisclosureTransactionsTest extends TestCase
     }
 
     /**
-     * Put the outbox on a connection of its own, a copy of the storage
-     * connection on the engine under test.
+     * Put the outbox on a copy of the storage connection.
      *
      * @param  mixed  $app
      * @return void
@@ -224,9 +208,7 @@ final class DisclosureTransactionsTest extends TestCase
     }
 
     /**
-     * Run the test inside the base transaction the testing manager wraps a test
-     * in, on the storage connection, wired as Laravel's `DatabaseTransactions`
-     * trait wires it, and roll it back after.
+     * Run the test inside the testing manager's base transaction.
      *
      * @param  \Closure(\Illuminate\Database\Connection): void  $test
      * @return void

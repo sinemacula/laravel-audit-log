@@ -33,21 +33,8 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Integration tests for owners' keys under the grants the storage note
- * documents, the key block's included, run exactly as written by the tables'
- * owner, on MySQL and PostgreSQL: the writer, granted exactly its privileges,
- * seals a field under a key it creates on its own session, writes the key uses
- * with the entry and reads the field back through the grant; the maintenance
- * user erases, reinstates and rewraps, rotation included; the verifier verifies
- * the key store with `SELECT` alone; and with the documented triggers
- * installed, the key tables' among them, every privacy operation still runs.
- *
- * Each worker creates logins of its own, `audit_writer_<token>`,
- * `audit_maintenance_<token>` and `audit_verifier_<token>`, which the
- * documented grants and triggers name; the writer's login is the storage
- * connection and the maintenance user's the maintenance connection. Every
- * operation goes through the facade or a command, on the provider's default
- * bindings. SQLite has no privileges, so these tests are skipped there.
+ * Integration tests for owners' keys under the documented grants and triggers,
+ * each role on a login of its own; skipped on SQLite, which has no privileges.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,12 +78,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     private bool $triggers = false;
 
     /**
-     * Create this worker's logins, run the documented grants for them, the key
-     * block after the others, as the tables' owner, make the writer's login the
-     * storage connection and the maintenance user's the maintenance connection,
-     * wrap every key under a wrapping key of the test's own, freeze the clock,
-     * report to a recording handler and define the charge, on MySQL and
-     * PostgreSQL only.
+     * Create this worker's logins under the documented grants and use them.
      *
      * @return void
      */
@@ -140,9 +122,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * Close the logins' connections, rolling back what any left open, drop the
-     * documented triggers when this test installed them, drop the logins and
-     * put the clock back.
+     * Drop the logins and any triggers this test installed; restore the clock.
      *
      * @return void
      */
@@ -159,10 +139,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * The writer, granted exactly its documented privileges, seals a card under
-     * a key it creates, writes the key use with the entry, and reads the card
-     * back through the grant, the key and its erasure rows read on its own
-     * credentials.
+     * The writer seals, records and reveals a card on its documented grants.
      *
      * @return void
      */
@@ -180,11 +157,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * The maintenance user, granted exactly its documented privileges, erases
-     * an owner, reinstates it, rewraps every key onto a new wrapping key and
-     * rotates them; each is recorded through the writer, the erased card reads
-     * `[ERASED]`, and the card sealed after the reinstatement, in the next
-     * generation, reads.
+     * The maintenance user erases, reinstates and rewraps on its grants.
      *
      * @return void
      */
@@ -215,10 +188,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * After the writer seals and the maintenance user erases, the verifier,
-     * which only reads the entries, the seals, the journal and the key tables
-     * and writes only the progress of verification, verifies the whole log, its
-     * key store included, with no finding.
+     * The verifier verifies the log, key store included, on its grants.
      *
      * @return void
      */
@@ -241,10 +211,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * With the engine's documented triggers installed, the key tables' among
-     * them, every privacy operation still runs on the users' own credentials:
-     * sealing a field, an erasure, a reinstatement, a rotating rewrap and a
-     * verification.
+     * With the documented triggers installed every privacy operation runs.
      *
      * @return void
      */
@@ -293,8 +260,8 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * Capture a charge of a card by the customer with the id, through the
-     * writer, and return its id; the clock moves on a second after it.
+     * Capture a card charge by the customer through the writer, return its id
+     * and move the clock on a second.
      *
      * @param  string  $customerId
      * @return string
@@ -309,8 +276,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * The states of the customer's keys, read as the tables' owner, by
-     * generation.
+     * The customer's key states by generation, read as the tables' owner.
      *
      * @param  string  $customerId
      * @return list<string>
@@ -328,8 +294,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * The entry with the id, as a page of the trail shows it to the viewer,
-     * which the test fails without.
+     * The entry with the id as a page of the trail shows it to the viewer.
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
@@ -346,8 +311,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * Seal every entry recorded so far through `audit-log:seal --sweep`, on the
-     * storage connection's credentials.
+     * Seal every entry recorded so far on the storage connection's login.
      *
      * @return void
      */
@@ -357,8 +321,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * Run `audit-log:verify` on the storage connection's credentials and return
-     * its exit code and what it printed.
+     * Run `audit-log:verify` as the storage connection; its code and output.
      *
      * @return array{0: int, 1: string}
      */
@@ -370,8 +333,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * Install the engine's documented triggers and the key tables' triggers,
-     * for this worker's logins, as the tables' owner.
+     * Install the documented and key-table triggers as the tables' owner.
      *
      * @return void
      */
@@ -383,9 +345,7 @@ final class LeastPrivilegePrivacyTest extends TestCase
     }
 
     /**
-     * Roll back and close the logins' connections, drop the documented triggers
-     * when this test installed them, the key tables' included, then drop the
-     * logins.
+     * Close the logins, drop this test's triggers, then drop the logins.
      *
      * @return void
      */

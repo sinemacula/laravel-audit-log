@@ -16,14 +16,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for duplicates that race, each stored in a process and on a
- * connection of its own against a shared database server: the second insert
- * waits on the first's uncommitted row, then resolves against it once it is
- * committed, to a success when the content is the same and a conflict when it
- * differs; on MySQL inside a REPEATABLE READ snapshot that predates the first's
- * commit, through the shared locking read; a lock wait that times out inside a
- * host transaction propagates as Laravel's `DeadlockException`; and two writers
- * of one bundle leave one entry and one artifact.
+ * Integration tests for duplicates raced from separate processes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,8 +47,7 @@ final class ConcurrentDuplicatesTest extends TestCase
     private string $outcomes;
 
     /**
-     * Prepare the outcomes directory, on a shared database server with `pcntl`
-     * only.
+     * Prepare the outcomes directory; needs a shared server and `pcntl`.
      *
      * @return void
      *
@@ -95,8 +87,7 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * The second store of one record waits on the first's uncommitted row and,
-     * once it is committed, finds it the same record: one row, and a success.
+     * A racing duplicate of the same content waits, then succeeds with one row.
      *
      * @return void
      */
@@ -111,9 +102,7 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * The second store of other content under the same id waits on the first's
-     * uncommitted row and, once it is committed, is a conflict; the first row
-     * is the only one.
+     * A racing duplicate with different content waits, then is a conflict.
      *
      * @return void
      */
@@ -132,10 +121,8 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * On MySQL, a second side whose REPEATABLE READ snapshot was taken before
-     * the first committed, so a plain read would miss the first's row, still
-     * resolves its duplicate to a success, because the store's shared locking
-     * read is a current read.
+     * On MySQL, a duplicate inside an older REPEATABLE READ snapshot resolves
+     * through the locking read.
      *
      * @return void
      */
@@ -170,9 +157,7 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * On MySQL, a second side whose insert waits on the first's row longer than
-     * its lock wait timeout, inside a host transaction, fails with Laravel's
-     * `DeadlockException`, which the store lets propagate.
+     * On MySQL, a lock wait timeout in a host transaction propagates.
      *
      * @return void
      */
@@ -202,10 +187,7 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * Two writers of one bundle race: the second's artifact insert waits on the
-     * first's uncommitted artifact and, once both of the first's rows are
-     * committed, finds the bundle stored already, so it succeeds and leaves one
-     * entry and one artifact.
+     * Two writers of one bundle leave one entry and one artifact.
      *
      * @return void
      */
@@ -222,10 +204,8 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * Run the first side inside a transaction in this process and the second in
-     * a forked one, started once the first has written, then hold the first's
-     * transaction open and commit it: the second's outcome and how long it
-     * waited.
+     * Race the first side, in a transaction here, against the second in a fork;
+     * the second's outcome and wait.
      *
      * @param  \Closure(): void  $first
      * @param  \Closure(): void  $second
@@ -264,10 +244,8 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * In the forked process: wait to be started, run the second side on a
-     * connection of its own, report its outcome (stored, or the exception it
-     * threw) and how long it took, or that it was never started, and end
-     * without running the parent's shutdown.
+     * In the fork, run the second side on its own connection, report its
+     * outcome and wait, and exit without the parent's shutdown.
      *
      * @param  \Closure(): void  $second
      * @return never
@@ -302,8 +280,7 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
-     * The captured record under the shared id with the amount given, finalised
-     * on the frozen clock.
+     * The captured record under the shared id with the amount, finalised.
      *
      * @param  string  $amount
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
