@@ -14,11 +14,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for how the seal and verify commands raise an integrity alarm:
- * the event dispatched, then the exception reported; a listener that fails is
- * reported as it threw and hides nothing; a reporter that fails stops nothing;
- * a stopped run reports the exception given; and a first bad id that is no
- * lower-case UUID never reaches a listener.
+ * Feature tests for how the seal and verify commands raise an integrity alarm.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +28,7 @@ final class IntegrityAlarmTest extends TestCase
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
     /**
-     * The event is dispatched as it is, and the exception it gives is reported
-     * after it.
+     * The event is dispatched, then its exception is reported.
      *
      * @return void
      */
@@ -66,8 +61,7 @@ final class IntegrityAlarmTest extends TestCase
     }
 
     /**
-     * A listener that fails is reported as it threw, as a listener of any of
-     * the package's events is, and the alarm is still reported after it.
+     * A failing listener is reported and the alarm is still reported.
      *
      * @return void
      */
@@ -90,8 +84,7 @@ final class IntegrityAlarmTest extends TestCase
     }
 
     /**
-     * A reporter that fails stops nothing: the event is still dispatched, and
-     * nothing is thrown.
+     * A failing reporter stops nothing and throws nothing.
      *
      * @return void
      */
@@ -105,8 +98,7 @@ final class IntegrityAlarmTest extends TestCase
     }
 
     /**
-     * Reporting on its own reports the exception given, as it is, and a
-     * reporter that fails is ignored.
+     * Reporting alone reports the exception and ignores a broken reporter.
      *
      * @return void
      */
@@ -122,8 +114,7 @@ final class IntegrityAlarmTest extends TestCase
     }
 
     /**
-     * Rows of `[first bad id]`: ids read from an altered table that are no
-     * lower-case UUID.
+     * Rows of `[first bad id]`: ids that are no lower-case UUID.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -138,8 +129,7 @@ final class IntegrityAlarmTest extends TestCase
     }
 
     /**
-     * A first bad id that is no lower-case UUID never reaches a listener: the
-     * event is dispatched without it, everything else as it was.
+     * A first bad id that is no lower-case UUID never reaches a listener.
      *
      * @param  string  $id
      * @return void
@@ -178,8 +168,7 @@ final class IntegrityAlarmTest extends TestCase
     }
 
     /**
-     * An event of a failed verification whose first finding was found at the id
-     * given.
+     * A failed verification event whose first finding has the id given.
      *
      * @param  ?string  $firstBadId
      * @return \SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed

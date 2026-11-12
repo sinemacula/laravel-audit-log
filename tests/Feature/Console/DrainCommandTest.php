@@ -34,11 +34,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:drain`: it passes its limit and `--until-empty`
- * on, refuses a limit outside 1 to 10000 as invalid, prints the drain's tally,
- * a row completed as pruned among it, and exits non-zero only when a row
- * failed, names whatever stops the run by its class alone, prints no payload or
- * message, and is neither scheduled nor run through a job by the package.
+ * Feature tests for `audit-log:drain`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +47,7 @@ final class DrainCommandTest extends TestCase
     use InteractsWithAuditStore, InteractsWithOutbox, PrunesByHand, SealsEntries, SearchesForSecrets, SeedsTheOutbox;
 
     /**
-     * Stop the clock and register the command with the console kernel, which
-     * keeps the test independent of the provider.
+     * Freeze the clock and register the command without the provider.
      *
      * @return void
      */
@@ -119,8 +114,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * A run in which a row is only retried exits zero: the retry is still to
-     * come.
+     * A run in which a row is only retried exits zero.
      *
      * @return void
      */
@@ -134,8 +128,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * A row whose record retention pruned is printed as pruned, and exits zero:
-     * a pruned row is complete.
+     * A row retention pruned is printed as pruned and the run exits zero.
      *
      * @return void
      */
@@ -158,8 +151,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[limit given]`: below one, above 10000, not a number, and not an
-     * integer.
+     * Rows of `[limit given]` outside 1 to 10000 or not an integer.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -177,8 +169,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * A limit outside 1 to 10000 is refused as invalid before anything is
-     * drained, naming the range and not the value.
+     * A limit outside 1 to 10000 is refused, naming the range, not the value.
      *
      * @param  string  $limit
      * @return void
@@ -258,8 +249,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * With `--until-empty` a run drains batch after batch until no due row is
-     * left.
+     * With `--until-empty` a run drains until no due row is left.
      *
      * @return void
      */
@@ -276,8 +266,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * Nothing of a record or of a failure's message reaches the console, the
-     * secret planted in both.
+     * Nothing of a record or a failure's message is printed.
      *
      * @return void
      */
@@ -307,8 +296,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * A missing outbox table stops the run, printing only the class of what was
-     * thrown and never its statement.
+     * A missing outbox table prints only the exception's class.
      *
      * @return void
      */
@@ -321,9 +309,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * Whatever stops the run is reported as well as printed, payload-free and
-     * naming no record, because a scheduled run's output is discarded by
-     * default.
+     * What stops the run is also reported, since scheduled output is discarded.
      *
      * @return void
      */
@@ -349,8 +335,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * A reporter that fails too stops nothing: the class and the tally are
-     * still printed, and the run still exits non-zero.
+     * A failing reporter still prints the tally and exits non-zero.
      *
      * @return void
      */
@@ -416,8 +401,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * An application writing records synchronously can still drain what its
-     * outbox holds, from a time it used the outbox.
+     * A sync-mode application can still drain what its outbox holds.
      *
      * @return void
      */
@@ -461,8 +445,7 @@ final class DrainCommandTest extends TestCase
     }
 
     /**
-     * Bind a store that is neither durable nor joins a transaction and throws
-     * the failure from every call.
+     * Bind a non-durable, non-transactional store that throws on every call.
      *
      * @param  \Throwable  $failure
      * @return void

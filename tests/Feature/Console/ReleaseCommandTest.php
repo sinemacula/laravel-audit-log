@@ -25,12 +25,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:release`: it releases an active hold, prints it
- * and exits 0; exits 1 for a hold that is not active, recorded `denied`, and
- * for any other refusal, named by its class; refuses a hold id that is not a
- * lower-case UUID v7, and every malformed option, with exit 2 before any
- * statement; warns when the record could not be written; and prints no value of
- * the hold's scope.
+ * Feature tests for `audit-log:release`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,9 +47,7 @@ final class ReleaseCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, report to a recording handler, and register the command
-     * with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, record reports, and register the command.
      *
      * @return void
      */
@@ -137,8 +130,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * A release refused at run time for any other reason, here on a journal
-     * that fails verification, exits 1, named by the class of the refusal.
+     * A release refused at run time for another reason exits 1, named by class.
      *
      * @return void
      */
@@ -153,8 +145,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[hold, options, message]`: a hold id that is not a lower-case
-     * UUID v7, and each malformed option, with the refusal it prints.
+     * Rows of `[hold, options, message]`: each malformed input.
      *
      * @return iterable<string, array{0: string, 1: array<string, string>, 2: string}>
      */
@@ -192,8 +183,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * A release whose record could not be written still releases, says so, and
-     * exits 0.
+     * A release whose record could not be written still releases and warns.
      *
      * @return void
      */
@@ -261,8 +251,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * Run the command on the hold, with the options given over the authority's,
-     * keep what it printed, and return its exit code.
+     * Run the command on the hold and return its exit code.
      *
      * @param  string  $holdId
      * @param  array<string, string>  $options

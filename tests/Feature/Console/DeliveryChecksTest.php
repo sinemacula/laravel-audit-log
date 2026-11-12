@@ -32,11 +32,7 @@ use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the delivery checks of `audit-log:check`: the spill channel
- * is configured and does not write to the storage connection, however deeply a
- * stack nests it, a thrown failure needs a store that says it is durable in
- * sync mode, the outbox and deliveries tables are checked in outbox mode only,
- * and the note on the spill channel says whether it is the documented one.
+ * Feature tests for the delivery checks of `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,8 +64,7 @@ final class DeliveryChecksTest extends TestCase
     private array $files = [];
 
     /**
-     * Put the outbox back if a test moved it, and remove the files a test
-     * created.
+     * Put the outbox back if a test moved it and remove the test's files.
      *
      * @return void
      */
@@ -91,8 +86,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A sync install with the default channel and the default store has no
-     * delivery problem.
+     * A sync install with the defaults has no delivery problem.
      *
      * @return void
      */
@@ -102,9 +96,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A spill channel the setting names that `logging.channels` does not
-     * configure is a problem naming the channel, and nothing else of it is
-     * checked.
+     * A spill channel `logging.channels` does not configure is a problem.
      *
      * @return void
      */
@@ -116,8 +108,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the connection the channel names]`: the storage connection by
-     * its name, and by leaving the connection to the default one.
+     * Rows of `[the connection the channel names]`: by name and by default.
      *
      * @return iterable<string, array{0: ?string}>
      */
@@ -130,9 +121,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A spill channel with the `database` driver on the storage connection is a
-     * problem, since a spill there fails together with the store; a channel
-     * that names no connection writes to the default one.
+     * A `database` spill channel on the storage connection fails with it.
      *
      * @param  ?string  $connection
      * @return void
@@ -146,8 +135,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A spill channel with the `database` driver on another connection than the
-     * storage connection is no problem.
+     * A `database` spill channel on another connection is no problem.
      *
      * @return void
      */
@@ -159,8 +147,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * When the setting names no channel, the default channel is the spill
-     * channel, and is checked the same way.
+     * With no channel set, the default channel is checked as the spill channel.
      *
      * @return void
      */
@@ -177,8 +164,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A member of a stack, however deeply nested, with the `database` driver on
-     * the storage connection is a problem naming the member.
+     * A nested stack member writing to the storage connection is a problem.
      *
      * @return void
      */
@@ -195,8 +181,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A stack's members given as one string separated by commas, as the log
-     * manager reads them, are followed too.
+     * A stack's comma-separated string of members is followed too.
      *
      * @return void
      */
@@ -210,9 +195,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Every channel a stack reaches with the `database` driver on the storage
-     * connection is listed, in the order the stack names them, past one that
-     * writes elsewhere.
+     * Every storage-connection channel a stack reaches is listed, in order.
      *
      * @return void
      */
@@ -230,8 +213,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A stack member given as a number names the channel of its digits, as the
-     * log manager reads it.
+     * A numeric stack member names the channel of its digits.
      *
      * @return void
      */
@@ -245,8 +227,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Stacks that name each other are followed once each, so the walk ends, and
-     * a channel two stacks share is reported once.
+     * Stacks that name each other are followed once each.
      *
      * @return void
      */
@@ -263,9 +244,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A stack whose members are not a list or a string, a member that names no
-     * channel, such as a logger given as itself, and a member that is not
-     * configured give nothing to follow and no problem.
+     * A stack with nothing to follow is no problem.
      *
      * @return void
      */
@@ -281,8 +260,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A member that names no channel stops the walk at nothing: the members
-     * after it are still followed.
+     * A member that names no channel does not stop the walk.
      *
      * @return void
      */
@@ -296,8 +274,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[a factory of the store, its class]`: stores that do not say a
-     * return is durable.
+     * Rows of `[a factory of the store, its class]`: stores not marked durable.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Contracts\AuditStore, 1: class-string}>
      */
@@ -317,9 +294,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Failures thrown in sync mode with a store that does not say it is durable
-     * is a problem naming the store's class, since a return could not mean a
-     * record is kept.
+     * Throw mode with a store not marked durable is a problem naming its class.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
      * @param  class-string  $class
@@ -336,8 +311,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Failures thrown with the default store, or a stack whose first
-     * destination is durable, are no problem.
+     * Throw mode with the default store or a durable-first stack is no problem.
      *
      * @return void
      */
@@ -353,8 +327,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A store that does not say it is durable is no problem while failures are
-     * only reported.
+     * Report mode needs no durable store.
      *
      * @return void
      */
@@ -366,8 +339,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * In outbox mode the outbox acknowledges a record, so failures thrown with
-     * a store that is not durable are no problem.
+     * Outbox mode needs no durable store: the outbox acknowledges the record.
      *
      * @return void
      */
@@ -381,9 +353,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * While the integrity settings are malformed the store is not resolved,
-     * since that builds the key ring, so a store that is not durable is not
-     * reported then.
+     * The store is not resolved while the integrity settings are malformed.
      *
      * @return void
      */
@@ -397,9 +367,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A store that cannot be resolved while failures are thrown is a problem
-     * named by the class of what was thrown, never by its message, which names
-     * what could not be built.
+     * An unresolvable store is named by its exception class, never its message.
      *
      * @return void
      */
@@ -416,8 +384,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * In sync mode the outbox and deliveries tables are not checked, so their
-     * absence is no problem.
+     * Sync mode does not check the outbox tables.
      *
      * @return void
      */
@@ -460,8 +427,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * In outbox mode a missing deliveries table is a problem naming the
-     * deliveries table, on the storage connection.
+     * In outbox mode a missing deliveries table is a problem naming it.
      *
      * @return void
      */
@@ -492,9 +458,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * An outbox on a connection of its own, created there by the shipped
-     * migration, has no problem, and the deliveries table is still read on the
-     * storage connection.
+     * An outbox on its own connection is checked on that connection.
      *
      * @return void
      */
@@ -514,8 +478,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * An outbox connection `database.connections` does not configure is a
-     * problem naming it, and the deliveries table is still checked.
+     * An unconfigured outbox connection is a problem naming it.
      *
      * @return void
      */
@@ -531,9 +494,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the outbox connection's configuration, the problem]`: an outbox
-     * connection that cannot be checked, described as the storage connection's
-     * would be, under the outbox's name.
+     * Rows of `[the outbox connection's configuration, the problem]`.
      *
      * @return iterable<string, array{0: array<string, string>, 1: string}>
      */
@@ -554,8 +515,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * An outbox connection of its own that cannot be checked is the one problem
-     * of the outbox, and no table is read on it.
+     * An outbox connection that cannot be checked is the outbox's one problem.
      *
      * @param  array<string, string>  $connection
      * @param  string  $problem
@@ -572,9 +532,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * An outbox connection to a MySQL server the package does not support is a
-     * problem in the engine checks' own words, which name no connection, and no
-     * table is read on it.
+     * An unsupported MySQL outbox server is a problem and no table is read.
      *
      * @return void
      */
@@ -594,9 +552,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * An outbox connection whose tables cannot be read is a problem named by
-     * the class of what was thrown, never by the statement or the path it
-     * binds.
+     * An unreadable outbox table is named by its exception class alone.
      *
      * @return void
      */
@@ -619,8 +575,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A failure reading a table is named as `get_debug_type()` names it, so an
-     * anonymous class of a custom driver prints no file path or NUL byte.
+     * An anonymous failure class prints no file path or NUL byte.
      *
      * @return void
      */
@@ -647,9 +602,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * In outbox mode a `database` spill channel on a dedicated outbox
-     * connection fails together with the insert it stands in for, so it is a
-     * problem naming that connection.
+     * A `database` spill channel on the outbox connection is a problem.
      *
      * @return void
      */
@@ -666,8 +619,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * In sync mode there is no outbox write for a channel to fail with,
-     * whatever the setting still names.
+     * In sync mode the outbox connection setting is ignored.
      *
      * @return void
      */
@@ -682,8 +634,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A database channel on the connection the outbox shares with the store is
-     * named once, as the storage connection's.
+     * A channel on a connection shared by outbox and store is named once.
      *
      * @return void
      */
@@ -696,9 +647,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A channel in the documented format with no `permission` takes the umask,
-     * and says so, since the permission is what guards a file of plaintext
-     * records.
+     * A documented channel with no `permission` takes the umask and is noted.
      *
      * @return void
      */
@@ -733,8 +682,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A channel's `permission` must keep out group and others, and the note
-     * names the permission it found.
+     * A `permission` open to group or others is noted, naming it.
      *
      * @param  int  $permission
      * @param  bool  $noted
@@ -753,8 +701,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Monolog applies a permission only when it creates a file, so a file that
-     * exists is read too, whatever the setting says.
+     * Monolog sets a permission only on create, so existing files are read too.
      *
      * @return void
      */
@@ -779,8 +726,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the dated file's suffix]`: a `daily` channel's path with an
-     * extension and without one.
+     * Rows of `[the dated file's suffix]`, with an extension and without.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -837,8 +783,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Only files with the channel's own extension are its dated files, so a
-     * compressed archive or another log beside them is not read.
+     * A compressed archive or another log beside the dated files is not read.
      *
      * @return void
      */
@@ -859,8 +804,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * In outbox mode a storage connection that is not configured is left to the
-     * connections subject, which names it.
+     * In outbox mode an unconfigured storage connection is left to its subject.
      *
      * @return void
      */
@@ -884,8 +828,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A `daily` channel otherwise as documented has no note, and neither has
-     * one that leaves inline line breaks unset, which is off.
+     * A `daily` channel otherwise as documented has no note.
      *
      * @return void
      */
@@ -901,8 +844,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the channel's configuration]`: every way a channel can differ
-     * from the documented one.
+     * Rows of `[the channel's configuration]`: each way to differ from docs.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -926,8 +868,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * Each channel other than the documented one is noted, by its name, as
-     * unverified for replay.
+     * Each undocumented channel is noted by name as unverified for replay.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -943,8 +884,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * A channel that is not configured is noted too, by the name the setting
-     * gives it.
+     * An unconfigured channel is noted by the name the setting gives it.
      *
      * @return void
      */
@@ -956,8 +896,7 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
-     * With no channel set the default channel is described, which in a default
-     * install is a stack and so not the documented one.
+     * With no channel set, the default stack is noted as undocumented.
      *
      * @return void
      */

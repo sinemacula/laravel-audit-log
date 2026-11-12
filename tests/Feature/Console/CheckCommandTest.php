@@ -42,15 +42,8 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:check`: it reads the settings, the connections
- * and guards they name, the entries and artifacts tables, the integrity keys,
- * the delivery, the lifecycle and privacy, lists every problem it finds as
- * `[<subject>] <message>` and every subject without one as `[<subject>] OK`,
- * ends with a `[spill]` note that is never a problem, exits `1` when there is a
- * problem and `0` when there is none, covers every leaf of the shipped
- * configuration and of the failure, delivery and owners' key settings, lists
- * `app.key` once whichever settings read it, and prints no secret, setting's
- * value, statement or binding.
+ * Feature tests for `audit-log:check`: each subject's problems, the exit code,
+ * and that no secret or setting value is printed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,7 +64,7 @@ final class CheckCommandTest extends TestCase
         '[config] OK', '[connections] OK', '[schema] OK', '[integrity] OK', '[delivery] OK', '[lifecycle] OK', '[privacy] OK', self::SPILL_NOTE,
     ];
 
-    /** @var list<string> Absolute paths to the shipped migration files of the tables the schema subject checks, in the order they run. */
+    /** @var list<string> Absolute paths to the shipped migrations the schema subject checks, in run order. */
     private const array MIGRATION_PATHS = [
         __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php',
         __DIR__ . '/../../../database/migrations/2026_11_02_000600_create_audit_log_artifacts_table.php',
@@ -80,7 +73,7 @@ final class CheckCommandTest extends TestCase
     /** @var string The table a test migrates under a name of its own. */
     private const string CUSTOM_TABLE = 'audit_custom_entries';
 
-    /** @var string The artifacts table a test migrates under a name of its own; PostgreSQL's index names would clash with the default's. */
+    /** @var string The artifacts table a test migrates; its own name avoids PostgreSQL index name clashes. */
     private const string CUSTOM_ARTIFACTS_TABLE = 'audit_custom_artifacts';
 
     /** @var string A secret one byte short of the 32 an integrity key needs. */
@@ -93,7 +86,7 @@ final class CheckCommandTest extends TestCase
         __DIR__ . '/../../../database/migrations/2026_11_02_000500_create_audit_log_integrity_state_table.php',
     ];
 
-    /** @var array<string, string> The integrity tables a test migrates under names of their own, by the setting that names each; PostgreSQL's index names would clash with the defaults'. */
+    /** @var array<string, string> The integrity tables a test migrates under names of their own, by setting; own names avoid PostgreSQL index name clashes. */
     private const array CUSTOM_INTEGRITY_TABLES = [
         'audit-log.integrity.checkpoints_table' => 'audit_custom_checkpoints',
         'audit-log.integrity.members_table'     => 'audit_custom_members',
@@ -108,7 +101,7 @@ final class CheckCommandTest extends TestCase
         __DIR__ . '/../../../database/migrations/2026_11_02_001000_create_audit_log_import_batches_table.php',
     ];
 
-    /** @var array<string, string> The lifecycle tables a test migrates under names of their own, by the setting that names each; PostgreSQL's index names would clash with the defaults'. */
+    /** @var array<string, string> The lifecycle tables a test migrates under names of their own, by setting; own names avoid PostgreSQL index name clashes. */
     private const array CUSTOM_LIFECYCLE_TABLES = [
         'audit-log.lifecycle.journal_table' => 'audit_custom_journal',
         'audit-log.lifecycle.holds_table'   => 'audit_custom_holds',
@@ -123,7 +116,7 @@ final class CheckCommandTest extends TestCase
         __DIR__ . '/../../../database/migrations/2026_11_02_001300_create_audit_log_key_uses_table.php',
     ];
 
-    /** @var array<string, string> The owners' key tables a test migrates under names of their own, by the setting that names each; PostgreSQL's index names would clash with the defaults'. */
+    /** @var array<string, string> The owners' key tables a test migrates under names of their own, by setting; own names avoid PostgreSQL index name clashes. */
     private const array CUSTOM_KEY_TABLES = [
         'audit-log.privacy.subject_keys_table'   => 'audit_custom_subject_keys',
         'audit-log.privacy.owner_erasures_table' => 'audit_custom_owner_erasures',
@@ -159,7 +152,7 @@ final class CheckCommandTest extends TestCase
     /** @var string The configured artifacts table no test migrates. */
     private const string ABSENT_ARTIFACTS_TABLE = 'audit_absent_artifacts';
 
-    /** @var array<string, int|string> A value the check refuses for each leaf of the package's configuration, by its path under `audit-log`. */
+    /** @var array<string, int|string> A refused value for each configuration leaf, by its path under `audit-log`. */
     private const array BAD_LEAVES = [
         'storage.connection'                        => 123,
         'storage.maintenance_connection'            => 123,
@@ -326,9 +319,7 @@ final class CheckCommandTest extends TestCase
     private array $files = [];
 
     /**
-     * Register the command with the console kernel, which keeps the tests
-     * independent of the provider, whose registration
-     * `AuditLogServiceProviderTest::testTheCheckCommandIsRegistered` pins.
+     * Register the command directly so the tests do not depend on the provider.
      *
      * @return void
      */
@@ -343,19 +334,16 @@ final class CheckCommandTest extends TestCase
 
         $kernel->registerCommand(new CheckCommand);
 
-        // The default channel of a default install, whatever the environment
-        // says, so the note on it is the same in every run
+        // Pin a default install's channel so the spill note never varies
         app(ConfigRepository::class)->set('logging.default', 'stack');
 
-        // The policy and the key wrapper the package binds by default, whether
-        // or not the provider has bound them yet
+        // The package's default bindings, whether or not the provider has run
         app()->bindIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
         app()->bindIf(KeyWrapper::class, LocalKeyWrapper::class);
     }
 
     /**
-     * Drop the tables a test migrated under names of their own and remove the
-     * files it created.
+     * Drop the tables a test migrated under its own names and remove its files.
      *
      * @return void
      */
@@ -388,8 +376,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An install the shipped migration created, with the derived integrity key,
-     * passes, saying so for each subject in order.
+     * An install the shipped migration created passes, each subject in order.
      *
      * @return void
      */
@@ -402,9 +389,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A table of another name on a connection of its own, with a table prefix
-     * and an explicit key ring, passes once the migrations have run there, the
-     * integrity, lifecycle and owners' key tables' included.
+     * A custom prefixed table and connection with a key ring pass.
      *
      * @return void
      */
@@ -443,8 +428,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the settings changed, the one problem the change causes]`, one
-     * for each setting and each way of getting it wrong a run reports.
+     * Rows of `[the settings changed, the one problem the change causes]`.
      *
      * @return iterable<string, array{0: array<string, array<array-key, int|string>|int|string|null>, 1: string}>
      */
@@ -619,8 +603,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Each bad setting is the one problem of its run, named by its full path,
-     * and the run fails.
+     * Each bad setting is the one problem of its run, named by its full path.
      *
      * @param  array<string, array<array-key, int|string>|int|string|null>  $settings
      * @param  string  $problem
@@ -638,9 +621,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed setting leaves out the subjects that depend on it, so a
-     * malformed storage connection is reported once, by `config`, and neither
-     * the connections nor the schema are checked.
+     * A malformed setting leaves out the subjects that depend on it.
      *
      * @return void
      */
@@ -658,9 +639,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed storage connection is listed once, in its place among the
-     * settings, though the outbox connection, which falls back to it, reads it
-     * too.
+     * A malformed storage connection is listed once, among the settings.
      *
      * @return void
      */
@@ -675,8 +654,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed maintenance connection leaves the connections out, but the
-     * schema, which lives on the storage connection, is still checked.
+     * A malformed maintenance connection still leaves the schema checked.
      *
      * @return void
      */
@@ -698,8 +676,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A storage connection that is not configured is reported once, by
-     * `connections`, and neither the schema nor the lifecycle is checked on it.
+     * An unconfigured storage connection is one problem; its schema is skipped.
      *
      * @return void
      */
@@ -719,8 +696,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An empty storage setting means the default connection, which is checked
-     * the same way when it is not configured.
+     * An empty storage setting checks the default connection the same way.
      *
      * @return void
      */
@@ -743,9 +719,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A maintenance connection of its own that is configured with the storage
-     * connection's driver, and reaches the storage connection's database, so
-     * the installation id it reads is the same, passes.
+     * A maintenance connection reaching the storage database passes.
      *
      * @return void
      */
@@ -756,8 +730,7 @@ final class CheckCommandTest extends TestCase
         $config->set('database.connections.maintenance', $config->array('database.connections.' . self::CONNECTION));
         $config->set('audit-log.storage.maintenance_connection', 'maintenance');
 
-        // On SQLite a second in-memory connection is another database, so it
-        // shares the worker's
+        // A second SQLite in-memory connection is another database: share it
         if (DB::connection(self::CONNECTION)->getDriverName() === 'sqlite') {
             DB::connection('maintenance')->setPdo(DB::connection(self::CONNECTION)->getPdo());
         }
@@ -769,10 +742,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The engine's problems are listed with the tables': here a MySQL session
-     * that is not strict, on a connection that answers as MySQL would and holds
-     * no table, so the artifacts, integrity and lifecycle tables are missing
-     * too.
+     * The engine's problems are listed with the tables'.
      *
      * @return void
      */
@@ -816,8 +786,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A missing entries table is one problem, not one for each column and index
-     * it lacks.
+     * A missing entries table is one problem, not one per column and index.
      *
      * @return void
      */
@@ -842,8 +811,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A missing artifacts table fails the schema subject, after the entries
-     * table's checks and as one problem, and every other subject passes.
+     * A missing artifacts table is one schema problem after the entries'.
      *
      * @return void
      */
@@ -868,8 +836,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Missing entries and artifacts tables are each a schema problem, the
-     * entries table's first.
+     * Missing entries and artifacts tables are each a problem, entries first.
      *
      * @return void
      */
@@ -884,8 +851,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An artifacts table that lacks a column the package writes and holds one
-     * it does not is a schema problem for each, named as the artifacts table's.
+     * Each missing and extra artifacts column is a schema problem.
      *
      * @return void
      */
@@ -909,9 +875,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed artifacts table's name is reported once, by `config`, and
-     * leaves the entries table's checks to run, so a missing entries table is
-     * still listed under the schema subject.
+     * A malformed artifacts table name still leaves the entries table checked.
      *
      * @return void
      */
@@ -927,9 +891,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every check runs, so bad settings in two subjects and a table missing a
-     * column and holding another are all listed by one run, each subject's in
-     * order.
+     * Every problem across subjects is listed by one run, in subject order.
      *
      * @return void
      */
@@ -959,9 +921,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Neither a short secret, nor its `base64:` form, nor the application key,
-     * nor the statement a broken database fails, nor the path it binds, is ever
-     * printed.
+     * No secret, application key, statement or binding is ever printed.
      *
      * @return void
      */
@@ -996,9 +956,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A storage connection that cannot be opened is a problem named by the
-     * class of what was thrown, never by its message, and the other subjects
-     * are still checked.
+     * An unreachable connection is a problem named by its exception class.
      *
      * @return void
      */
@@ -1027,9 +985,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every name in the list must be configured, so one that is not is the one
-     * problem of its run, named because a guard's name is no secret, and the
-     * run fails.
+     * A guard not in `auth.guards` is the one problem of its run.
      *
      * @return void
      */
@@ -1053,8 +1009,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Each guard the list names and `auth.guards` does not is listed, in the
-     * list's order and once, however many times the list names it.
+     * Each missing guard is listed once, in the list's order.
      *
      * @return void
      */
@@ -1072,8 +1027,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * With no list the actor is read from the default guard, so a default guard
-     * `auth.guards` does not configure is a problem.
+     * With no guard list, a default guard `auth.guards` lacks is a problem.
      *
      * @return void
      */
@@ -1097,9 +1051,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the settings changed, how the default guard is named]`: a
-     * default guard `AuthManager` would refuse, each named by its type when it
-     * is not a name.
+     * Rows of `[the settings changed, how the default guard is named]`.
      *
      * @return iterable<string, array{0: array<string, array<array-key, array<string, string>|string>|string|null>, 1: string}>
      */
@@ -1116,9 +1068,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A default guard that cannot be resolved is the one problem of its run,
-     * looked up the way `AuthManager` looks it up: protects against a mutation
-     * that reads the guard's key as a literal or accepts anything set.
+     * An unresolvable default guard is the one problem of its run.
      *
      * @param  array<string, array<array-key, array<string, string>|string>|string|null>  $settings
      * @param  string  $name
@@ -1136,8 +1086,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A list whose every guard is configured passes, and the default guard,
-     * which a list stops the actor being read from, is then not checked.
+     * A configured guard list passes and the default guard is not checked.
      *
      * @return void
      */
@@ -1156,9 +1105,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed list is reported once, by the context settings: the guard
-     * check neither repeats it nor falls back to the default guard, which is
-     * not the guard the application asked for.
+     * A malformed guard list is reported once, without the default guard.
      *
      * @return void
      */
@@ -1176,12 +1123,8 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every value at the edge of what a new setting accepts passes: a real
-     * boolean either way, the longest guard, header, source id and region,
-     * counted in characters, an id and a region left empty, and a redaction key
-     * of exactly 32 bytes in either form, each mode, and each budget at its
-     * minimum and its ceiling, as an integer or the digits `env()` returns. A
-     * source id that is no log id needs a log id of its own.
+     * Every value at the edge of what a new setting accepts passes. A source id
+     * that is no log id needs a log id of its own.
      *
      * @return void
      */
@@ -1232,10 +1175,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The values the configuration ships pass: no list of guards, neither
-     * header trusted, the usual header name, no source of its own, which
-     * `app.name` then gives, and no redaction key names or key, identifiers
-     * hashed, the IP address kept in full and the default budgets.
+     * The shipped defaults of the new settings pass.
      *
      * @return void
      */
@@ -1261,9 +1201,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Each group of new settings reports in one run, after the settings before
-     * them and ahead of the guards, and none of them leaves out a later
-     * subject, since none of those reads it.
+     * Each new settings group reports in one run, leaving out no later subject.
      *
      * @return void
      */
@@ -1297,11 +1235,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every malformed setting a settings group holds is listed by the one run,
-     * by its full path and in the order the settings are read, so a deploy
-     * pipeline never has to fix them one run at a time. The source id is read
-     * first, by the integrity settings, since with no log id it is the log id,
-     * and is listed once.
+     * Every malformed new setting is listed by one run, in read order.
      *
      * @return void
      */
@@ -1329,8 +1263,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed current key id and a malformed explicit ring are each listed
-     * by the one run, and an explicit ring reads no application key.
+     * A malformed key id and ring are each listed; a ring reads no `app.key`.
      *
      * @return void
      */
@@ -1350,8 +1283,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * With no ring set the application's keys are what the ring is derived
-     * from, so a malformed one is listed with a malformed current key id.
+     * Without a ring, a malformed `app.key` is listed with a malformed key id.
      *
      * @return void
      */
@@ -1366,9 +1298,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Without a ring the integrity settings read `app.key`, so a missing or a
-     * malformed one is the one line they give, whatever the redaction settings
-     * would say of it. An empty ring is no ring.
+     * Without a ring, a bad `app.key` is one line from the integrity settings.
      *
      * @return void
      */
@@ -1390,9 +1320,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * With an explicit ring nothing of the integrity settings reads `app.key`,
-     * so an empty redaction key, which falls to it, is what names it: one line
-     * naming the redaction key, and the integrity subject still passes.
+     * With a ring, an empty redaction key names `app.key` and integrity passes.
      *
      * @return void
      */
@@ -1407,9 +1335,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An explicit ring and an empty redaction key beside a good `app.key` pass,
-     * in either of the forms a key is given in, so the application key is
-     * judged and not merely refused.
+     * A ring beside a good `app.key` in either key form passes.
      *
      * @return void
      */
@@ -1427,10 +1353,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An explicit redaction key is the root secret, so beside a ring only the
-     * wrapping keys derived from `app.key` read it: a bad one is their one
-     * line, and passes beside a wrapping ring of its own; without a ring only
-     * the integrity settings read it, and it is theirs to report.
+     * An explicit redaction key is the root secret, so it needs no `app.key`.
      *
      * @return void
      */
@@ -1453,11 +1376,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed explicit redaction key never falls back to `app.key`, so
-     * beside a ring and a bad application key the redaction line names the
-     * redaction key, though two checks read it, and the wrapping keys derived
-     * from `app.key` name it; beside a wrapping ring of its own, only the
-     * redaction key is named.
+     * A malformed explicit redaction key never falls back to `app.key`.
      *
      * @return void
      */
@@ -1475,9 +1394,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the settings changed, the one problem the change causes]`: a
-     * ring that cannot be read is the ring's own problem, listed once though
-     * the redaction check reads it too, and it reads no `app.key` beside it.
+     * Rows of `[the settings changed, the one problem]`: unreadable rings.
      *
      * @return iterable<string, array{0: array<string, array<string, string>|string>, 1: string}>
      */
@@ -1496,8 +1413,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed ring is listed once and `app.key`, which nothing then needs
-     * to read, not at all.
+     * A malformed ring is listed once and `app.key` is not read.
      *
      * @param  array<string, array<string, string>|string>  $settings
      * @param  string  $problem
@@ -1512,10 +1428,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every malformed redaction setting is listed by the one run, by its full
-     * path and in the order the settings are read, and the application key
-     * after them when the redaction key falls to it, so a deploy pipeline never
-     * has to fix them one run at a time.
+     * Every malformed redaction setting is listed by one run, in read order.
      *
      * @return void
      */
@@ -1546,9 +1459,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The redaction settings report after every setting already checked and
-     * after the guards, whose order is unchanged, and a malformed one leaves
-     * out no later subject, since none of those reads it.
+     * A malformed redaction setting reports after the guards, skipping nothing.
      *
      * @return void
      */
@@ -1578,8 +1489,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A missing integrity table is an integrity problem, named by its label,
-     * and every other subject still passes.
+     * A missing integrity table is an integrity problem; other subjects pass.
      *
      * @return void
      */
@@ -1603,10 +1513,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * With the `disk` driver an anchor disk that is not configured is an
-     * integrity problem, and the disk is never resolved, not even for the
-     * anchor's head; once the disk is configured the problem is gone, and the
-     * privacy subject reads the anchor's head from it.
+     * An unconfigured anchor disk is a problem and is never resolved.
      *
      * @return void
      */
@@ -1628,8 +1535,7 @@ final class CheckCommandTest extends TestCase
 
         self::assertSame([1, $unconfigured], $this->check());
 
-        // A root of its own, which no other run anchors to, so the head read is
-        // no other log's
+        // A root no other run anchors to, so the head read is this log's
         $root = sys_get_temp_dir() . '/audit-log-anchors-' . getmypid() . '-' . hrtime(true);
 
         $config->set('filesystems.disks.anchors', ['driver' => 'local', 'root' => $root]);
@@ -1647,8 +1553,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * With no anchor configured no disk is needed: a disk setting naming
-     * nothing configured passes.
+     * With no anchor configured, an unconfigured disk setting passes.
      *
      * @return void
      */
@@ -1660,9 +1565,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed sealing, anchor or integrity table setting is listed under
-     * `config`, and the integrity tables and the disk are then not checked: the
-     * subject still says its key signs.
+     * A malformed seal setting skips the integrity tables and the disk.
      *
      * @return void
      */
@@ -1691,8 +1594,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed storage connection leaves the integrity tables unchecked,
-     * though the subject is listed, since its key settings pass.
+     * A malformed storage connection leaves the integrity tables unchecked.
      *
      * @return void
      */
@@ -1707,8 +1609,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed integrity key setting leaves the subject out altogether, so
-     * neither the tables nor the disk are checked.
+     * A malformed integrity key setting leaves the subject out altogether.
      *
      * @return void
      */
@@ -1726,9 +1627,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every malformed log id, table, sealing, verification and anchor setting
-     * is listed by the one run, by its full path and in the order they are
-     * read.
+     * Every malformed integrity setting is listed by one run, in read order.
      *
      * @return void
      */
@@ -1771,8 +1670,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, the bad value, the text in it]`: an integrity
-     * setting in each shape it is refused in.
+     * Rows of `[the setting, the bad value, the text in it]` for integrity.
      *
      * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
      */
@@ -1805,8 +1703,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bad integrity setting fails the run and never appears in its output,
-     * which names the setting by its key.
+     * A bad integrity setting fails the run and its value is never printed.
      *
      * @param  string  $setting
      * @param  array<array-key, string>|string  $value
@@ -1826,10 +1723,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Walks the leaves of the merged configuration, which must each have a bad
-     * value here, then plants each value in turn and asserts a `[config]` line
-     * naming that leaf, so a leaf added without a check fails this test instead
-     * of being missed silently.
+     * Every configuration leaf has a check; a new leaf without one fails here.
      *
      * @return void
      */
@@ -1861,8 +1755,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The walk finds a leaf at any depth, and takes an empty map, a list and
-     * `null` for leaves, so the test above cannot pass by finding nothing.
+     * The walk finds leaves at any depth, so the coverage test is not vacuous.
      *
      * @return void
      */
@@ -1875,8 +1768,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, the bad value, the text in it]`, with the value in
-     * each shape a setting refuses it in.
+     * Rows of `[the setting, the bad value, the text in it]`.
      *
      * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
      */
@@ -1914,9 +1806,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bad value fails the run and never appears in its output: the setting is
-     * named by its key, or, for a default guard that is not a name, by its
-     * type.
+     * A bad setting value fails the run and is never printed.
      *
      * @param  string  $setting
      * @param  array<array-key, string>|string  $value
@@ -1936,8 +1826,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the settings beside the application key]`: without a ring the
-     * integrity settings report it, and beside one the redaction settings do.
+     * Rows of `[settings beside the application key]`: with and without a ring.
      *
      * @return iterable<string, array{0: array<string, array<string, string>|string>}>
      */
@@ -1950,8 +1839,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An application key too short to use fails the run and never appears in
-     * its output, whichever settings read it, and neither does a ring's secret.
+     * A short `app.key` or a ring's secret fails the run and is never printed.
      *
      * @param  array<string, array<string, string>|string>  $settings
      * @return void
@@ -1970,9 +1858,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The check writes nothing: the entries, the lifecycle tables, the lock's
-     * row and the integrity state, with the installation id the migrations
-     * seed, are as they were after two runs.
+     * Two runs write nothing to the entries, lifecycle or integrity state.
      *
      * @return void
      */
@@ -2001,8 +1887,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A missing installation id fails the run under `[lifecycle]`, and the
-     * check leaves it missing rather than writing one.
+     * A missing installation id fails the run and is not written.
      *
      * @return void
      */
@@ -2020,9 +1905,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The lifecycle subject is listed after `delivery`, `[lifecycle] OK` on a
-     * good install, and a lifecycle problem fails the run under it: here the
-     * lock's one row is missing.
+     * The lifecycle subject follows `delivery`; a problem there fails the run.
      *
      * @return void
      */
@@ -2043,9 +1926,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed lifecycle table's name leaves the lifecycle subject out,
-     * since it reads the tables, while a malformed retention or import setting
-     * leaves it in.
+     * Only a malformed lifecycle table name leaves the lifecycle subject out.
      *
      * @return void
      */
@@ -2071,10 +1952,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The privacy subject is listed after `lifecycle`, `[privacy] OK` on a good
-     * install, and a privacy problem fails the run under it: here the key uses
-     * table it names is missing. A malformed owners' key setting is a `config`
-     * problem and leaves the subject out, since it reads the tables by it.
+     * The privacy subject follows `lifecycle`; a problem there fails the run.
      *
      * @return void
      */
@@ -2106,9 +1984,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A database that does not hold the seal its anchor holds at the head's
-     * sequence was restored behind it: a `[privacy]` problem that fails the
-     * run, until a verified reconciliation naming that head is journalled.
+     * A database restored behind its anchor fails the run until reconciled.
      *
      * @return void
      */
@@ -2139,8 +2015,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bound field encrypter that is not the package's is a `[privacy] note:`
-     * after the spill note, naming its class, and the run still exits `0`.
+     * A custom field encrypter is a `[privacy] note:` and the run exits 0.
      *
      * @return void
      */
@@ -2159,10 +2034,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Notes are no problems: a hold past its review date and an import batch
-     * still running that has not moved for over an hour are each a
-     * `[lifecycle] note:` line after the spill note, and the run still exits
-     * `0`.
+     * Lifecycle notes leave the exit code at 0.
      *
      * @return void
      */
@@ -2194,8 +2066,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A category kept for less than it must be preserved is refused before any
-     * prune runs: a `config` problem naming both settings, which fails the run.
+     * A retention shorter than its preservation is a `config` problem.
      *
      * @return void
      */
@@ -2220,8 +2091,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every malformed lifecycle, retention and import setting is listed by the
-     * one run, by its full path and in the order the settings are read.
+     * Every malformed lifecycle setting is listed by one run, in read order.
      *
      * @return void
      */
@@ -2259,8 +2129,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, the bad value, the text in it]`: a lifecycle,
-     * retention or import setting in each shape it is refused in.
+     * Rows of `[the setting, the bad value, the text in it]` for lifecycle.
      *
      * @return iterable<string, array{0: string, 1: array<array-key, int|string>|string, 2: string}>
      */
@@ -2281,8 +2150,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bad lifecycle, retention or import setting fails the run and never
-     * appears in its output, which names the setting by its key.
+     * A bad lifecycle setting fails the run and its value is never printed.
      *
      * @param  string  $setting
      * @param  array<array-key, int|string>|string  $value
@@ -2303,8 +2171,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, the bad value, the text in it]` for the owners'
-     * key settings, with the value in each shape a setting refuses it in.
+     * Rows of `[the setting, the bad value, the text in it]` for owners' keys.
      *
      * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
      */
@@ -2323,8 +2190,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bad owners' key setting fails the run with one problem and never
-     * appears in its output, which names the setting by its key in backticks.
+     * A bad owners' key setting fails the run and its value is never printed.
      *
      * @param  string  $setting
      * @param  array<array-key, string>|string  $value
@@ -2345,11 +2211,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Beside an integrity ring the wrapping keys are what read the application
-     * keys when no wrapping ring is set: malformed previous keys, which nothing
-     * else reads there, are their one line, as is an empty `app.key` beside an
-     * explicit redaction key; an empty `app.key` the redaction key falls back
-     * to is the redaction settings' line alone.
+     * With an integrity ring, the wrapping keys check the application keys.
      *
      * @return void
      */
@@ -2375,8 +2237,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A delivery problem fails the run, listed under `delivery` after every
-     * other subject and before the note on the spill channel.
+     * A delivery problem fails the run, listed after every other subject.
      *
      * @return void
      */
@@ -2401,8 +2262,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * In outbox mode the outbox and deliveries tables are checked, so a missing
-     * outbox table is a delivery problem that fails the run.
+     * Outbox mode checks the outbox tables, so a missing one fails the run.
      *
      * @return void
      */
@@ -2435,8 +2295,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The note on a spill channel that is not the documented one is printed
-     * after every subject and leaves a clean run passing.
+     * A spill note on an undocumented channel leaves a clean run passing.
      *
      * @return void
      */
@@ -2467,9 +2326,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed failure or delivery setting leaves the delivery subject out,
-     * since it reads them, and a malformed channel setting the note too, while
-     * the other subjects are still checked.
+     * A malformed delivery setting leaves only the delivery subject out.
      *
      * @return void
      */
@@ -2490,9 +2347,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every malformed failure and delivery setting is listed by the one run, by
-     * its full path and in the order the settings are read, after those already
-     * checked.
+     * Every malformed delivery setting is listed by one run, in read order.
      *
      * @return void
      */
@@ -2526,8 +2381,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, the bad value, the text in it]`: a failure or
-     * delivery setting in each shape it is refused in.
+     * Rows of `[the setting, the bad value, the text in it]` for delivery.
      *
      * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
      */
@@ -2550,8 +2404,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bad failure or delivery setting fails the run and never appears in its
-     * output, which names the setting by its key.
+     * A bad delivery setting fails the run and its value is never printed.
      *
      * @param  string  $setting
      * @param  array<array-key, string>|string  $value
@@ -2572,9 +2425,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * An excepted guard `auth.guards` does not configure is the one problem of
-     * its run, listed under `[config]` once however often the list names it,
-     * and leaves out no later subject, since none of them reads it.
+     * An unconfigured excepted guard is one `[config]` problem, listed once.
      *
      * @return void
      */
@@ -2598,8 +2449,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every excepted guard `auth.guards` configures passes, as does the
-     * wildcard, which names no guard, even with no guard configured.
+     * Configured excepted guards and the wildcard pass.
      *
      * @return void
      */
@@ -2619,9 +2469,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A malformed list of excepted guards is reported once, by its reader: the
-     * guard check names none of its guards, even one `auth.guards` does not
-     * configure.
+     * A malformed excepted guard list is reported once, by its reader.
      *
      * @return void
      */
@@ -2638,11 +2486,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every value at the edge of what a capture setting accepts passes: a guard
-     * of 64 characters, the longest credential key, Gate capture on with both
-     * ability lists, the longest ability and reason code, each bulk bound at
-     * either end of its range, as an integer or the digits `env()` returns, and
-     * the longest artifacts table's name, once the migration has created it.
+     * Every value at the edge of what a capture setting accepts passes.
      *
      * @return void
      */
@@ -2675,10 +2519,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every malformed capture setting and the artifacts table's name are listed
-     * by the one run, by their full paths and in the order the settings are
-     * read, after the delivery settings, and none of them leaves out a later
-     * subject, since none of those reads them.
+     * Every malformed capture setting is listed by one run, in read order.
      *
      * @return void
      */
@@ -2723,8 +2564,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, the bad value, the text in it]`: a capture
-     * setting, or the artifacts table's name, in each shape it is refused in.
+     * Rows of `[the setting, the bad value, the text in it]` for capture.
      *
      * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
      */
@@ -2750,8 +2590,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bad capture setting fails the run with one problem and never appears in
-     * its output, which names the setting by its key.
+     * A bad capture setting fails the run and its value is never printed.
      *
      * @param  string  $setting
      * @param  array<array-key, string>|string  $value
@@ -2772,10 +2611,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every malformed read and export setting is listed by the one run, by its
-     * full path and in the order the settings are read, after the capture
-     * settings, and none of them leaves out a later subject, since none of
-     * those reads them.
+     * Every malformed read setting is listed by one run, in read order.
      *
      * @return void
      */
@@ -2810,9 +2646,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Every value at the edge of what a read or export setting accepts passes:
-     * each at either end of its range, as an integer or the digits `env()`
-     * returns.
+     * Every value at the edge of what a read setting accepts passes.
      *
      * @return void
      */
@@ -2830,8 +2664,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, the bad value, the text in it]`: a read or export
-     * setting in each shape it is refused in.
+     * Rows of `[the setting, the bad value, the text in it]` for reads.
      *
      * @return iterable<string, array{0: string, 1: array<array-key, string>|string, 2: string}>
      */
@@ -2848,8 +2681,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * A bad read or export setting fails the run with one problem and never
-     * appears in its output, which names the setting by its key.
+     * A bad read setting fails the run and its value is never printed.
      *
      * @param  string  $setting
      * @param  array<array-key, string>|string  $value
@@ -2870,8 +2702,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the settings changed, the one problem the change causes]` for
-     * the log id, the integrity tables, sealing, verification and the anchor.
+     * Rows of `[the settings changed, the one problem]` for integrity settings.
      *
      * @return array<string, array{0: array<string, array<array-key, int|string>|int|string|null>, 1: string}>
      */
@@ -2934,8 +2765,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The lines of the output that are not a subject's `OK` or the note on the
-     * spill channel, which is not a problem.
+     * The output lines other than a subject's `OK` and the spill note.
      *
      * @param  list<string>  $output
      * @return list<string>
@@ -2946,8 +2776,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * The paths of the leaves under the settings: a value that is not a map, or
-     * is empty or a list, is a leaf.
+     * The leaf paths under the settings; an empty map or a list is a leaf.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -2969,8 +2798,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Run the shipped entries and artifacts migrations with the settings as the
-     * test has them.
+     * Run the shipped entries and artifacts migrations.
      *
      * @return void
      *
@@ -2992,8 +2820,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Run the shipped artifacts migration with the settings as the test has
-     * them.
+     * Run the shipped artifacts migration.
      *
      * @return void
      *
@@ -3012,8 +2839,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Run the shipped integrity migrations with the settings as the test has
-     * them.
+     * Run the shipped integrity migrations.
      *
      * @return void
      *
@@ -3035,8 +2861,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Run the shipped lifecycle migrations with the settings as the test has
-     * them.
+     * Run the shipped lifecycle migrations.
      *
      * @return void
      *
@@ -3058,8 +2883,7 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Run the shipped owners' key migrations with the settings as the test has
-     * them.
+     * Run the shipped owners' key migrations.
      *
      * @return void
      *

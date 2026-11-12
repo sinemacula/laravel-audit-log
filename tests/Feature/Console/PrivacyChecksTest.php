@@ -28,15 +28,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * Feature tests for the privacy checks of `audit-log:check`, with owners erased
- * by hand as an erasure commits them and restores made by putting rows back: a
- * reader for every owners' key setting; a malformed wrapping ring and each key
- * table's shape as problems; a restored key and a key destroyed without a
- * journalled erasure as problems until the erasures are re-applied; a database
- * behind its anchor's head as a problem until a verified reconciliation names
- * that head, and no restore claimed without an anchor that discovers; a custom
- * encrypter as a note; and nothing written, nothing unwrapped and no value
- * printed.
+ * Feature tests for the privacy checks of `audit-log:check`, with erasures and
+ * restores made by hand.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,8 +65,7 @@ final class PrivacyChecksTest extends TestCase
     private const string SENTINEL = 'sentinel-7f3a9c';
 
     /**
-     * Bind the package's own key wrapper, whether or not the provider has bound
-     * it yet.
+     * Bind the package's key wrapper, whether or not the provider has.
      *
      * @return void
      */
@@ -86,8 +78,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the leaf under audit-log, a value it refuses]`: every owners'
-     * key setting the readers read.
+     * Rows of `[the leaf under audit-log, a value it refuses]`.
      *
      * @return iterable<string, array{0: string, 1: array<string, string>|int|string}>
      */
@@ -105,9 +96,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Each owners' key setting is read by a reader that refuses it, naming it
-     * in backticks, when it is malformed; with the defaults no reader refuses
-     * anything.
+     * Each owners' key setting has a reader that refuses it when malformed.
      *
      * @param  string  $leaf
      * @param  array<string, string>|int|string  $bad
@@ -131,8 +120,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * An install the shipped migrations created, with an owner's keys made and
-     * another owner erased, has no problem and no note.
+     * A healthy install with an owner keyed and another erased has no problem.
      *
      * @return void
      */
@@ -147,9 +135,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the settings changed, the one problem they cause]`: a wrapping
-     * ring that is malformed, its current key out of step with it, and the
-     * application keys it is derived from when none is set.
+     * Rows of `[the settings changed, the one problem they cause]`.
      *
      * @return iterable<string, array{0: array<string, array<array-key, string>|int|string|null>, 1: string}>
      */
@@ -185,8 +171,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A malformed wrapping ring is the one problem, and stops the rest: a
-     * restored key is not looked for while the ring cannot be read.
+     * A malformed wrapping ring is the one problem and stops the rest.
      *
      * @param  array<string, array<array-key, string>|int|string|null>  $settings
      * @param  string  $problem
@@ -203,8 +188,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A well-formed explicit wrapping ring reads no application key, so a
-     * missing one is no privacy problem beside it.
+     * An explicit wrapping ring needs no application key.
      *
      * @return void
      */
@@ -236,9 +220,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Each key table that does not exist is a problem named by its label, and
-     * nothing that reads the tables is checked while one is missing: a restored
-     * key is not looked for, and the anchor is not asked.
+     * A missing key table is named by its label and skips what reads it.
      *
      * @param  string  $setting
      * @param  string  $table
@@ -260,8 +242,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A key table of the wrong shape is a problem naming what is wrong: here
-     * the key uses table lost its entry index and gained a column.
+     * A key table of the wrong shape is a problem naming what is wrong.
      *
      * @return void
      */
@@ -282,9 +263,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A key an erasure destroyed whose row a restore put back holds a key again
-     * while its owner's latest transition is that erasure: a problem naming the
-     * key, until the erasure is re-applied and destroys it again.
+     * A restored key of an erased owner is a problem until reapplied.
      *
      * @return void
      */
@@ -320,9 +299,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A key whose wrapped key was nulled with no erasure journalled is a
-     * problem naming it, listed after a restored key; the restored key's own
-     * problem goes once the erasures are re-applied.
+     * A key destroyed without a journalled erasure is a problem.
      *
      * @return void
      */
@@ -349,10 +326,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A live or superseded key wrapped under a wrapping key the ring does not
-     * hold is a problem, counted and named by its first id, found without
-     * unwrapping anything; an erased key names no wrapping key, and with a
-     * wrapper that is not the package's the ids are not the ring's to judge.
+     * A key wrapped outside the ring is a problem, found without unwrapping.
      *
      * @return void
      */
@@ -387,10 +361,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A key wrapped under the key derived from `app.key` is still held once an
-     * explicit ring is set, so moving to `audit-log.privacy.keys` is no problem
-     * until `audit-log:rewrap` moves the key; a derived key whose application
-     * key is gone is.
+     * An explicit ring still holds keys wrapped under the derived ring.
      *
      * @return void
      */
@@ -414,10 +385,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A database that holds no seal at the sequence its anchor's head names is
-     * behind it: a problem, which a reconciliation naming another head, or this
-     * head under another digest, or one that fails its digest, leaves in place,
-     * and which a verified reconciliation naming the head resolves.
+     * A database behind its anchor is a problem until verifiably reconciled.
      *
      * @return void
      */
@@ -444,8 +412,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A reconciliation naming the head is found however many newer ones name
-     * other heads: the rows are read newest first, a page at a time.
+     * A reconciliation naming the head is found behind newer ones.
      *
      * @return void
      */
@@ -470,9 +437,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A database whose seal at the anchor's head has the head's digest is not
-     * behind it, and one whose seal there has another digest contradicts it:
-     * restored from a backup, then sealed again.
+     * A seal at the anchor's head with another digest is a restore.
      *
      * @return void
      */
@@ -500,10 +465,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Without an anchor that can report its head no restore is claimed, and the
-     * anchor is never asked: neither with the null anchor nor with one that
-     * cannot discover, whatever it holds. An anchor that holds nothing claims
-     * none either.
+     * Without an anchor that discovers its head no restore is claimed.
      *
      * @return void
      */
@@ -527,9 +489,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * An anchor whose head cannot be read is a problem named by the class of
-     * what was thrown, never its message, since a restore behind it cannot be
-     * ruled out.
+     * An unreadable anchor is a problem, since a restore cannot be ruled out.
      *
      * @return void
      */
@@ -541,8 +501,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A key store that cannot be read is a problem named by the class of what
-     * was thrown, never its message.
+     * An unreadable key store is named by its exception class alone.
      *
      * @return void
      *
@@ -556,10 +515,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * A bound field encrypter that is not the package's is a note naming its
-     * class, and the key store, which is not its, is not checked: a restored
-     * key is no problem then. The package's encrypter or none leaves no note,
-     * and the restored key is a problem again.
+     * A custom encrypter is a note and its key store is not checked.
      *
      * @return void
      */
@@ -582,8 +538,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * An encrypter that cannot be resolved is a problem, named by its class,
-     * and no note.
+     * An unresolvable encrypter is a problem named by its class, not a note.
      *
      * @return void
      *
@@ -598,10 +553,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * The checks write nothing and unwrap nothing: with restored and erased
-     * keys, a key use and a reconciled restore behind the anchor, every
-     * statement they run reads, every key table is as it was, and the wrapper
-     * is never asked to unwrap.
+     * The checks write nothing and unwrap nothing.
      *
      * @return void
      */
@@ -637,8 +589,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * No problem prints an owner, only key ids and sequences: the owner's id is
-     * never in what a restored key's problem says.
+     * No problem prints an owner, only key ids and sequences.
      *
      * @return void
      */
@@ -664,9 +615,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Make the owner a key, erase the owner by hand, then put the key's row
-     * back as it was before the erasure, as a restore from a backup would, and
-     * return the key's id.
+     * Key the owner, erase it, restore the key's row, and return its id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return string
@@ -686,9 +635,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Journal a reconciliation of a restore behind the anchored head of the
-     * sequence and digest given, as `audit-log:erase --reapply` journals one,
-     * and return it as it was stored.
+     * Journal a reconciliation of the head given, as `--reapply` would.
      *
      * @param  int  $sequence
      * @param  string  $digest
@@ -727,8 +674,7 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
-     * Record every statement the storage connection runs from now on, lower
-     * cased.
+     * Record every storage statement from now on, lower-cased.
      *
      * @return \ArrayObject<int, string>
      */

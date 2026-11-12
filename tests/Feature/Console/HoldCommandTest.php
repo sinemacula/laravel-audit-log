@@ -24,13 +24,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:hold`: it starts the scope from exactly one of
- * `--all`, `--tenant` or `--tenantless`, `--tenant` taking `--tenantless` too,
- * narrows it by every other dimension, requires a basis and the authority,
- * places the hold, prints its id and exits 0; refuses every malformed option
- * with exit 2 before any statement; exits 1 when the hold is refused, naming
- * the class; warns when the record could not be written; and prints no value of
- * the scope.
+ * Feature tests for `audit-log:hold`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,9 +46,7 @@ final class HoldCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, report to a recording handler, and register the command
-     * with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, record reports, and register the command.
      *
      * @return void
      */
@@ -88,8 +80,7 @@ final class HoldCommandTest extends TestCase
     }
 
     /**
-     * A hold of every entry is placed, its id printed, and it is recorded,
-     * exiting 0.
+     * A hold of every entry is placed, its id printed and recorded.
      *
      * @return void
      */
@@ -109,9 +100,7 @@ final class HoldCommandTest extends TestCase
     }
 
     /**
-     * Every dimension is taken: the tenants with the entries of no tenant, the
-     * references, the categories, the window, the import batch, the review date
-     * and the external reference.
+     * Every scope dimension is taken.
      *
      * @return void
      */
@@ -148,8 +137,7 @@ final class HoldCommandTest extends TestCase
     }
 
     /**
-     * `--tenantless` alone keeps only the entries of no tenant, and `--tenant`
-     * alone only the tenants' entries.
+     * `--tenantless` and `--tenant` each start the scope alone.
      *
      * @return void
      */
@@ -165,8 +153,7 @@ final class HoldCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[options, message]`: every malformed option, and the refusal it
-     * prints.
+     * Rows of `[options, message]`: every malformed option.
      *
      * @return iterable<string, array{0: array<string, bool|list<string>|string>, 1: string}>
      */
@@ -212,8 +199,7 @@ final class HoldCommandTest extends TestCase
     }
 
     /**
-     * A hold refused at run time, here on a journal that fails verification,
-     * exits 1, named by the class of the refusal alone.
+     * A hold refused at run time exits 1, named by its class alone.
      *
      * @return void
      */
@@ -227,8 +213,7 @@ final class HoldCommandTest extends TestCase
     }
 
     /**
-     * A hold whose record could not be written is still placed, says so, and
-     * exits 0.
+     * A hold whose record could not be written is still placed and warns.
      *
      * @return void
      */
@@ -283,8 +268,7 @@ final class HoldCommandTest extends TestCase
     }
 
     /**
-     * Run the command with the options given over the authority's, keep what it
-     * printed, and return its exit code.
+     * Run the command over the authority's options and return its exit code.
      *
      * @param  array<string, bool|list<string>|string>  $options
      * @return int

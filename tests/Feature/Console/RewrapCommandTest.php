@@ -24,11 +24,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:rewrap`: it rewraps the keys, with `--rotate`
- * supersedes the live ones, prints the run's counts and the keys it skipped,
- * never an owner, and exits 0 whether it ended complete or partial; with
- * `--dry-run` it writes nothing; a failure exits 1 printing its class and never
- * its message; and every malformed option exits 2 before any statement.
+ * Feature tests for `audit-log:rewrap`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,9 +43,7 @@ final class RewrapCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, report to a recording handler, bind the package's key
-     * wrapper, and register the command with the console kernel, which keeps
-     * the test independent of the provider.
+     * Freeze the clock, record reports, bind the wrapper, register the command.
      *
      * @return void
      */
@@ -85,8 +79,7 @@ final class RewrapCommandTest extends TestCase
     }
 
     /**
-     * With `--rotate` every live key is superseded, the run printed and
-     * recorded, and it exits 0; nothing printed names an owner.
+     * `--rotate` supersedes every live key, naming no owner, and exits 0.
      *
      * @return void
      */
@@ -107,8 +100,7 @@ final class RewrapCommandTest extends TestCase
     }
 
     /**
-     * A key whose row fails its signature is skipped and named by its id, the
-     * run ends `partial`, and it still exits 0.
+     * A key failing its signature is skipped by id and the partial run exits 0.
      *
      * @return void
      */
@@ -124,8 +116,7 @@ final class RewrapCommandTest extends TestCase
     }
 
     /**
-     * A tampered key row whose id is not a UUID is counted as skipped and never
-     * printed, so an escape sequence it holds never reaches the console.
+     * A tampered key id that is no UUID is counted, never printed.
      *
      * @return void
      */
@@ -152,8 +143,7 @@ final class RewrapCommandTest extends TestCase
     }
 
     /**
-     * A dry run counts what a run would do, writes nothing and records nothing,
-     * and exits 0.
+     * A dry run counts what it would do, writes nothing and exits 0.
      *
      * @return void
      */
@@ -188,8 +178,7 @@ final class RewrapCommandTest extends TestCase
     }
 
     /**
-     * A rewrap whose record could not be written still rewraps, says so, and
-     * exits 0.
+     * A rewrap whose record could not be written still rewraps and warns.
      *
      * @return void
      */
@@ -202,8 +191,7 @@ final class RewrapCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[options, message]`: each malformed option, and the refusal it
-     * prints.
+     * Rows of `[options, message]`: each malformed option.
      *
      * @return iterable<string, array{0: array<string, string>, 1: string}>
      */
@@ -252,8 +240,7 @@ final class RewrapCommandTest extends TestCase
     }
 
     /**
-     * Run the command with the options given over the authority's, keep what it
-     * printed, and return its exit code.
+     * Run the command over the authority's options and return its exit code.
      *
      * @param  array<string, bool|string>  $given
      * @return int

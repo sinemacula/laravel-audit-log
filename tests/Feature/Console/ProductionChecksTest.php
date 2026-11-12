@@ -22,11 +22,7 @@ use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the production checks of `audit-log:check`: in production
- * the testing fake store bound as the store, or as a destination of a stack, is
- * a problem, and each disabled seal, sweep or verification schedule is a note
- * that leaves the exit code as it is; in any other environment neither is
- * checked.
+ * Feature tests for the production checks of `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +41,7 @@ final class ProductionChecksTest extends TestCase
         . ' `audit-log:check --freshness`.';
 
     /**
-     * Register the command with the console kernel, with the default channel,
-     * policy and key wrapper of a default install, so a good install passes.
+     * Register the command with a default install's bindings, so it passes.
      *
      * @return void
      */
@@ -68,8 +63,7 @@ final class ProductionChecksTest extends TestCase
     }
 
     /**
-     * Put the application back in the testing environment, so the migrations
-     * roll back without asking for confirmation.
+     * Return to testing so the migrations roll back without confirmation.
      *
      * @return void
      */
@@ -82,8 +76,7 @@ final class ProductionChecksTest extends TestCase
     }
 
     /**
-     * A good install in production passes, with a `production` subject that is
-     * OK and no note.
+     * A good install in production passes with `production` OK and no note.
      *
      * @return void
      */
@@ -99,8 +92,7 @@ final class ProductionChecksTest extends TestCase
     }
 
     /**
-     * The fake bound as the store in production is a problem that fails the
-     * run.
+     * The fake store bound in production fails the run.
      *
      * @return void
      */
@@ -117,8 +109,7 @@ final class ProductionChecksTest extends TestCase
     }
 
     /**
-     * Each destination of a stack that is the fake is a problem, named by its
-     * id, and a real destination is not.
+     * Each fake destination of a stack is a problem named by its id.
      *
      * @return void
      */
@@ -136,8 +127,7 @@ final class ProductionChecksTest extends TestCase
     }
 
     /**
-     * A store that cannot be resolved is a problem, named by the class of what
-     * was thrown and never its message.
+     * An unresolvable store is named by its exception class alone.
      *
      * @return void
      *
@@ -151,8 +141,7 @@ final class ProductionChecksTest extends TestCase
     }
 
     /**
-     * Outside production the fake is no problem and the subject is not listed,
-     * so tests and staging are free to bind it.
+     * Outside production the fake is no problem and the subject is not listed.
      *
      * @return void
      */
@@ -171,9 +160,7 @@ final class ProductionChecksTest extends TestCase
     }
 
     /**
-     * Each disabled seal, sweep or verification schedule is a note in
-     * production, in that order, which leaves the exit code as it is, and a
-     * malformed one is left to `config`.
+     * Disabled seal, sweep or verification schedules are notes in production.
      *
      * @return void
      */

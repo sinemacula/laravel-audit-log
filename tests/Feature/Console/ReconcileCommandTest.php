@@ -25,12 +25,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:reconcile`: it writes the records the journal
- * says are missing and prints the counts, once, within the days `--since` looks
- * back, 7 by default and from 1 to 3650; refuses any other `--since`
- * with exit 2 before any statement; writes one JSON object with `--json`;
- * exits 1 when an operation could not be verified or the run stopped, naming
- * the class; and prints no value of an operation.
+ * Feature tests for `audit-log:reconcile`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,9 +44,7 @@ final class ReconcileCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, report to a recording handler, and register the command
-     * with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, record reports, and register the command.
      *
      * @return void
      */
@@ -96,8 +89,7 @@ final class ReconcileCommandTest extends TestCase
     }
 
     /**
-     * A record the journal says is missing is written, once: a second run finds
-     * it recorded already.
+     * A missing record is written once; a second run finds it recorded.
      *
      * @return void
      */
@@ -114,8 +106,7 @@ final class ReconcileCommandTest extends TestCase
     }
 
     /**
-     * Only the operations journalled within the days `--since` looks back are
-     * reconciled, seven unless it says otherwise.
+     * Only the days `--since` looks back are reconciled, seven by default.
      *
      * @return void
      */
@@ -146,8 +137,7 @@ final class ReconcileCommandTest extends TestCase
     }
 
     /**
-     * An operation whose journal row does not verify is never recorded, and
-     * leaves the reconciliation incomplete, so it exits 1.
+     * An unverifiable operation is never recorded and the run exits 1.
      *
      * @return void
      */
@@ -203,8 +193,7 @@ final class ReconcileCommandTest extends TestCase
     }
 
     /**
-     * Days out of range, or not a number, are refused with exit 2 before any
-     * statement runs.
+     * Days out of range or not a number exit 2 before any statement.
      *
      * @param  string  $value
      * @return void
@@ -265,8 +254,7 @@ final class ReconcileCommandTest extends TestCase
     }
 
     /**
-     * Run the command with the options given, keep what it printed, and return
-     * its exit code.
+     * Run the command, keep what it printed, and return its exit code.
      *
      * @param  array<string, bool|string>  $options
      * @return int

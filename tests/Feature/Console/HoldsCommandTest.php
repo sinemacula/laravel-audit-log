@@ -24,12 +24,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:holds`: it lists the active holds replayed from
- * the verified journal, each by its id, basis, placement, review date, scope
- * digest and dimensions, says when none is active, writes one JSON object with
- * `--json`, rebuilds the projection with `--rebuild` and says how many holds it
- * holds, exits 1 when the journal fails verification, and never prints a tenant
- * or a reference a scope names.
+ * Feature tests for `audit-log:holds`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,9 +46,7 @@ final class HoldsCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, report to a recording handler, and register the command
-     * with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, record reports, and register the command.
      *
      * @return void
      */
@@ -98,9 +91,7 @@ final class HoldsCommandTest extends TestCase
     }
 
     /**
-     * Each active hold is listed by its id, basis, placement, review date and
-     * scope digest, then its scope's dimensions, counting tenants and
-     * references.
+     * Each active hold is listed with its fields and scope dimensions.
      *
      * @return void
      */
@@ -121,8 +112,7 @@ final class HoldsCommandTest extends TestCase
     }
 
     /**
-     * The holds are read from the verified journal: a projection emptied by
-     * hand changes nothing the listing shows.
+     * The holds are read from the verified journal, not the projection.
      *
      * @return void
      */
@@ -178,8 +168,7 @@ final class HoldsCommandTest extends TestCase
     }
 
     /**
-     * `--rebuild` rebuilds the projection from the journal and says how many
-     * holds it holds, as a line or, with `--json`, one JSON object.
+     * `--rebuild` rebuilds the projection and says how many holds it has.
      *
      * @return void
      */
@@ -201,8 +190,7 @@ final class HoldsCommandTest extends TestCase
     }
 
     /**
-     * A journal that fails verification exits 1, named by the class of the
-     * failure, for a listing and a rebuild alike.
+     * A journal failing verification exits 1, named by the failure's class.
      *
      * @return void
      */
@@ -220,8 +208,7 @@ final class HoldsCommandTest extends TestCase
     }
 
     /**
-     * Nothing printed, as lines or as JSON, holds a tenant or a reference a
-     * scope names.
+     * Nothing printed holds a tenant or reference a scope names.
      *
      * @return void
      */
@@ -269,8 +256,7 @@ final class HoldsCommandTest extends TestCase
     }
 
     /**
-     * Run the command with the options given, keep what it printed, and return
-     * its exit code.
+     * Run the command, keep what it printed, and return its exit code.
      *
      * @param  array<string, bool>  $options
      * @return int

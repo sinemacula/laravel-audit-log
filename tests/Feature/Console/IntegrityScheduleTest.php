@@ -23,12 +23,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use Tests\TestCase;
 
 /**
- * Feature tests for the runs the package schedules: sealing every five minutes,
- * the sweep, the strict verification and the prune daily by default, each at
- * the expression its setting gives or not at all, the prune only when it can
- * delete something, each kept from overlapping itself, on one server only when
- * the cache store is shared, and a malformed schedule left out and reported
- * without stopping the others or the schedule.
+ * Feature tests for the runs the package schedules.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,8 +51,7 @@ final class IntegrityScheduleTest extends TestCase
     private array $reported = [];
 
     /**
-     * Each run is scheduled by default, at its default expression: sealing
-     * every five minutes, the sweep and the strict verification daily.
+     * Seal, sweep and strict verification are scheduled at their defaults.
      *
      * @return void
      */
@@ -72,8 +66,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Rows of `[the schedule setting, the run it schedules, the value]`: each
-     * setting set to `null`, and to the empty string an empty env line gives.
+     * Rows of `[the schedule setting, the run it schedules, the value]`.
      *
      * @return iterable<string, array{0: string, 1: string, 2: ?string}>
      */
@@ -90,8 +83,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A run whose setting is `null` or empty is not scheduled, nothing is
-     * reported, and the other two still are.
+     * A run whose setting is `null` or empty is not scheduled.
      *
      * @param  string  $setting
      * @param  string  $command
@@ -131,8 +123,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Each run is kept from overlapping itself: sealing for a quarter of an
-     * hour, the sweep and the verification for a day.
+     * Each run is kept from overlapping itself.
      *
      * @return void
      */
@@ -147,8 +138,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Rows of `[the default cache store's driver, whether a run is kept to one
-     * server]`: only a store every server shares can hold that lock.
+     * Rows of `[the default cache store's driver, whether kept to one server]`.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -165,8 +155,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Each run is kept to one server exactly when the default cache store's
-     * driver is one every server shares, read from configuration alone.
+     * Each run is kept to one server only on a shared cache driver.
      *
      * @param  string  $driver
      * @param  bool  $shared
@@ -187,8 +176,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Every run starts in the background, so a long sweep or verification never
-     * holds up the application's tasks due in the same minute.
+     * Every run starts in the background so it never holds up other tasks.
      *
      * @return void
      */
@@ -204,9 +192,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Rows of `[default store's driver, the scheduler's store's driver, kept to
-     * one server]`: the store the scheduler takes its locks in decides, never
-     * the default store.
+     * Rows of `[default store's driver, scheduler store's driver, one server]`.
      *
      * @return iterable<string, array{0: string, 1: string, 2: bool}>
      */
@@ -219,9 +205,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Each run is kept to one server exactly when the store the scheduler's
-     * locks are taken in, as `Schedule::useCache()` set it, is shared, whatever
-     * the default store is.
+     * The store `Schedule::useCache()` set decides one server, not the default.
      *
      * @param  string  $default
      * @param  string  $scheduler
@@ -247,8 +231,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A scheduler whose locks the cache does not back says nothing of a shared
-     * store, so no run is kept to one server, even on a shared default store.
+     * A mutex the cache does not back keeps no run to one server.
      *
      * @return void
      */
@@ -267,8 +250,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A default cache store that is not named, or names no configured store,
-     * keeps no run to one server.
+     * An unnamed or unconfigured default cache store is not shared.
      *
      * @return void
      */
@@ -288,9 +270,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A default cache store that is not a string is not read as a name, even
-     * one that would print as the name of a shared store, since the cache
-     * manager would not resolve it.
+     * A non-string default cache store is not shared: it cannot be resolved.
      *
      * @return void
      */
@@ -332,8 +312,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A malformed schedule schedules nothing for its run and is reported, by
-     * its key and never its value, and registering throws nothing.
+     * A malformed schedule schedules nothing and is reported by its key.
      *
      * @return void
      */
@@ -349,8 +328,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * The runs whose settings are well formed are registered beside a malformed
-     * one, and a schedule that is not a string is refused as well.
+     * Well-formed runs are registered beside a malformed one.
      *
      * @return void
      */
@@ -366,8 +344,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Every schedule malformed registers nothing and reports each, in the order
-     * the runs are registered.
+     * Every malformed schedule is reported, in registration order.
      *
      * @return void
      */
@@ -408,8 +385,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * `schedule:list` lists the three runs and exits 0, so the application's
-     * own schedule resolves with them.
+     * `schedule:list` lists the three runs and exits 0.
      *
      * @return void
      */
@@ -425,8 +401,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * `schedule:list` still exits 0 beside a malformed schedule, listing the
-     * runs that are well formed.
+     * `schedule:list` still exits 0 beside a malformed schedule.
      *
      * @return void
      */
@@ -446,9 +421,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Rows of `[the retention settings, whether the prune is scheduled]`: the
-     * configured policy is pruned only when the default retention, or a
-     * category's, is a number of days.
+     * Rows of `[the retention settings, whether the prune is scheduled]`.
      *
      * @return iterable<string, array{0: array<string, array<string, int>|int>, 1: bool}>
      */
@@ -465,8 +438,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * The configured policy's prune is scheduled, at its default expression,
-     * exactly when something is retained for less than forever.
+     * The prune is scheduled only when something is kept for less than forever.
      *
      * @param  array<string, array<string, int>|int>  $retention
      * @param  bool  $scheduled
@@ -489,9 +461,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Whether the prune can delete something is read whatever its schedule:
-     * with the configured policy, exactly when something is retained for less
-     * than forever, even with no prune scheduled.
+     * Whether the prune can delete is read whatever its schedule.
      *
      * @param  array<string, array<string, int>|int>  $retention
      * @param  bool  $scheduled
@@ -511,8 +481,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Whether the prune can delete something reports nothing: what resolving a
-     * bound policy throws is thrown, for the caller to name.
+     * Checking whether the prune can delete throws, unreported, for the caller.
      *
      * @return void
      *
@@ -534,8 +503,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A policy left unbound counts as the configured one: it is scheduled
-     * exactly when the configuration keeps something for less than forever.
+     * An unbound policy counts as the configured one.
      *
      * @return void
      */
@@ -552,9 +520,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A custom policy's prune is always scheduled, whatever the configuration
-     * keeps, since its answers cannot be known ahead; the policy is resolved
-     * but never asked.
+     * A custom policy's prune is always scheduled; the policy is never asked.
      *
      * @return void
      */
@@ -572,9 +538,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A bound policy that cannot be resolved is reported and the prune is still
-     * scheduled, so the run refuses the policy and records it; the other runs
-     * are registered and nothing is thrown.
+     * An unresolvable policy is reported and the prune is still scheduled.
      *
      * @return void
      *
@@ -592,9 +556,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Rows of `[the policy bound, the schedule setting]`: `null` and the empty
-     * string an empty env line gives, under the configured policy keeping
-     * something for less and under a custom one.
+     * Rows of `[the policy bound, the schedule setting]`: `null` and empty.
      *
      * @return iterable<string, array{0: bool, 1: ?string}>
      */
@@ -609,8 +571,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A prune schedule of `null` or empty registers no prune, whatever the
-     * policy, reports nothing and leaves the other runs registered.
+     * A `null` or empty prune schedule registers no prune.
      *
      * @param  bool  $custom
      * @param  ?string  $value
@@ -631,9 +592,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Rows of `[the setting, its malformed value, the message reported]`: the
-     * schedule itself, and a retention the configured policy's decision reads
-     * with every other retention kept forever.
+     * Rows of `[the setting, its malformed value, the message reported]`.
      *
      * @return iterable<string, array{0: string, 1: int|list<int|string>|string, 2: string}>
      */
@@ -649,8 +608,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * A malformed prune setting registers no prune and is reported, by its key
-     * and never its value; the other runs are registered and nothing is thrown.
+     * A malformed prune setting registers no prune and is reported by its key.
      *
      * @param  string  $setting
      * @param  int|list<int|string>|string  $value
@@ -675,9 +633,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * The prune starts in the background, is kept from overlapping itself for
-     * 23 hours, inside the day between runs, and on a shared cache runs on one
-     * server only.
+     * The prune runs in the background, 23-hour overlap lock, on one server.
      *
      * @return void
      */
@@ -707,8 +663,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Registering the prune, under the configured policy or a custom one,
-     * issues no query.
+     * Registering the prune issues no query.
      *
      * @return void
      */
@@ -736,8 +691,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * `schedule:list` lists the prune beside the other runs once something is
-     * kept for less than forever.
+     * `schedule:list` lists the prune once something is kept for less.
      *
      * @return void
      */
@@ -755,8 +709,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * Register the package's runs on a schedule of their own, with a handler
-     * that keeps what it is given to report.
+     * Register the package's runs on a fresh schedule with a recording handler.
      *
      * @return \Illuminate\Console\Scheduling\Schedule
      */
@@ -770,8 +723,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * The package's schedule over the application's configuration and
-     * container, with a handler that keeps what it is given to report.
+     * The package's schedule with a recording handler.
      *
      * @return \SineMacula\Laravel\AuditLog\Console\IntegritySchedule
      */
@@ -799,8 +751,7 @@ final class IntegrityScheduleTest extends TestCase
     }
 
     /**
-     * The runs on the schedule, each command after `artisan` with its cron
-     * expression.
+     * The runs on the schedule: each command after `artisan` with its cron.
      *
      * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
      * @return array<string, string>

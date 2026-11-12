@@ -29,13 +29,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:check --freshness`: each signal is ok within its
- * limit, stale past it, failed when its run says so and never run without
- * progress, which is a problem only when its run is scheduled and the log's
- * oldest entry is past the limit; a disabled schedule is still judged; the
- * outbox is judged only in outbox mode; `--json` writes the closed list of
- * fields; a malformed setting fails the run under `[config]`; the ordinary
- * check runs no freshness check; and nothing is written.
+ * Feature tests for `audit-log:check --freshness`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,8 +66,7 @@ final class FreshnessChecksTest extends TestCase
     ];
 
     /**
-     * Register the command with the console kernel, freeze the clock, and bind
-     * the retention policy the package binds by default.
+     * Register the command, freeze the clock, and bind the default policy.
      *
      * @return void
      */
@@ -94,8 +87,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A fresh install has recorded nothing and holds no entry, so nothing is
-     * stale and the run passes.
+     * A fresh install has nothing stale and passes.
      *
      * @return void
      */
@@ -105,8 +97,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Every signal within its limit is ok, with its age and its limit, and the
-     * run passes.
+     * Every signal within its limit is ok, with its age and limit.
      *
      * @return void
      */
@@ -127,8 +118,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the progress name, its other fields, the signal, its limit]`:
-     * each signal judged by its age against a limit.
+     * Rows of `[the progress name, its other fields, the signal, its limit]`.
      *
      * @return iterable<string, array{0: string, 1: array<string, bool|string>, 2: string, 3: int}>
      */
@@ -143,8 +133,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Each signal is ok at its limit and stale one second past it, which fails
-     * the run.
+     * Each signal is ok at its limit and stale one second past it.
      *
      * @param  string  $name
      * @param  array<string, bool|string>  $fields
@@ -173,8 +162,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A verification that did not pass is failed, however recent, and fails the
-     * run.
+     * A verification that did not pass fails, however recent.
      *
      * @return void
      */
@@ -190,8 +178,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A prune run that failed is failed, however recent, and a partial one is
-     * ok.
+     * A failed prune fails, however recent; a partial one is ok.
      *
      * @return void
      */
@@ -212,8 +199,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Retention applies only once something is kept for less than forever, or a
-     * policy of the application's own is bound.
+     * Retention applies only when something is kept for less than forever.
      *
      * @return void
      */
@@ -230,9 +216,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Anchoring fails while the last failure to anchor is newer than the last
-     * seal anchored, or there is a failure and no seal anchored, and is ok once
-     * a seal is anchored after it; it has no limit.
+     * Anchoring fails while its last failure is newer than its last success.
      *
      * @return void
      */
@@ -276,10 +260,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A bound retention policy that cannot be resolved makes retention failed,
-     * named by the class of what was thrown and never its message, and nothing
-     * is reported, since a report writes to the log; registering the schedule
-     * still reports it.
+     * An unresolvable retention policy fails by class and reports nothing.
      *
      * @return void
      *
@@ -307,9 +288,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A run that never ran is a problem once its run is scheduled and the log's
-     * oldest entry is older than its limit, and not while the entry is within
-     * it.
+     * A never-run signal is a problem once the log is older than its limit.
      *
      * @return void
      */
@@ -328,8 +307,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A run whose package schedule is disabled is no problem for never having
-     * run, but is still judged by what it recorded, since it runs elsewhere.
+     * A disabled schedule is still judged by what its run recorded.
      *
      * @return void
      */
@@ -354,9 +332,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * In outbox mode the oldest row that has not failed is judged by when it
-     * fell due; a failed row is not waiting for a drain, and an empty outbox is
-     * ok.
+     * In outbox mode the oldest unfailed row is judged by when it fell due.
      *
      * @return void
      */
@@ -380,9 +356,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * The backlog is aged by when its oldest row was queued, which a retry
-     * never moves: a row queued two hours ago and retried a minute ago, so due
-     * again only now, is stale.
+     * The backlog is aged by queue time, which a retry never moves.
      *
      * @return void
      */
@@ -450,8 +424,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A malformed setting fails the run, named under `config` by its key and
-     * never its value, and no signal is printed.
+     * A malformed setting fails the run, named by key, with no signal printed.
      *
      * @param  string  $setting
      * @param  int|string  $value
@@ -468,8 +441,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Progress that cannot be read fails the run, named by the class of what
-     * was thrown and never the statement.
+     * Unreadable progress fails the run, named by its exception class.
      *
      * @return void
      */
@@ -481,9 +453,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * With `--json` each signal is one JSON object of exactly its name, its
-     * status, its age and its limit in seconds, `null` where it has none, and
-     * the exit code is the same.
+     * `--json` writes each signal as exactly its name, status, age and limit.
      *
      * @return void
      */
@@ -507,8 +477,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * The ordinary check runs no freshness check, so stale progress never fails
-     * a deploy, and `--json` without `--freshness` is refused.
+     * The ordinary check runs no freshness check and refuses `--json`.
      *
      * @return void
      */
@@ -546,8 +515,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Make every optional signal apply: entries are kept for a finite time, an
-     * anchor is bound and records go through the outbox.
+     * Make every optional signal apply.
      *
      * @return void
      */
@@ -559,8 +527,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Record every run the signals read as having ended the seconds given ago,
-     * passing.
+     * Record every run the signals read as passing, the seconds given ago.
      *
      * @param  int  $ago
      * @return void
@@ -575,8 +542,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Record progress under the name, its time the seconds given ago under the
-     * field given, with the other fields given.
+     * Record progress under the name, timed the seconds given ago.
      *
      * @param  string  $name
      * @param  int  $ago
@@ -592,9 +558,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Put a row in the outbox that fell due the seconds given ago, failed the
-     * seconds given ago when given, and queued the seconds given ago, or when
-     * it fell due when not given.
+     * Put an outbox row due the seconds given ago; queued defaults to due.
      *
      * @param  string  $id
      * @param  int  $dueAgo
@@ -615,8 +579,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Put an entry in the log recorded the seconds given ago; only its time is
-     * read.
+     * Put an entry in the log recorded the seconds given ago.
      *
      * @param  int  $ago
      * @return void
@@ -643,8 +606,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * Run `audit-log:check --freshness` with the options given and return its
-     * exit code and its non-empty lines.
+     * Run the freshness check and return its exit code and non-empty lines.
      *
      * @param  array<string, bool>  $options
      * @return array{0: int, 1: list<string>}
@@ -682,8 +644,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * The time the seconds given before the frozen time, as the database stores
-     * it.
+     * The time the seconds given before now, as the database stores it.
      *
      * @param  int  $ago
      * @return string
