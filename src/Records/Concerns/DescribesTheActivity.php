@@ -274,7 +274,9 @@ trait DescribesTheActivity
     {
         $this->assertUsable();
 
-        self::checkCorrelationId($correlationId);
+        if (!CorrelationId::isValid($correlationId)) {
+            throw new \InvalidArgumentException('A correlation id must be namespaced, as `<namespace>:<value>`, and from 1 to 191 characters with no control characters.');
+        }
 
         $this->correlationId = $correlationId;
 
@@ -362,23 +364,6 @@ trait DescribesTheActivity
     private static function reference(Model|Reference|null $value): ?Reference
     {
         return $value instanceof Model ? Reference::to($value) : $value;
-    }
-
-    /**
-     * Refuse a malformed correlation id.
-     *
-     * @param  string  $correlationId
-     * @return void
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function checkCorrelationId(string $correlationId): void
-    {
-        if (CorrelationId::isValid($correlationId)) {
-            return;
-        }
-
-        throw new \InvalidArgumentException('A correlation id must be namespaced, as `<namespace>:<value>`, and from 1 to 191 characters with no control characters.');
     }
 
     /**

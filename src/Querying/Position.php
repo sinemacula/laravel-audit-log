@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Querying;
 
+use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
@@ -17,9 +18,6 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class Position
 {
-    /** @var string Pattern of an entry id: a lower-case UUID. */
-    private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
-
     /**
      * Constructor.
      *
@@ -36,7 +34,7 @@ final readonly class Position
         /** The id of an entry at that time, a lower-case UUID. */
         public string $id,
     ) {
-        if (!StoredTime::isInstant($time) || preg_match(self::UUID_PATTERN, $id) !== 1) {
+        if (!StoredTime::isInstant($time) || preg_match(SealEnvelope::UUID_PATTERN, $id) !== 1) {
             throw new \InvalidArgumentException('A position must be an instant in the package\'s form, such as 2026-11-01T12:00:00.123456Z, and a lower-case UUID.');
         }
     }

@@ -64,7 +64,7 @@ final readonly class StoredEntry
      */
     public function id(): string
     {
-        return $this->text('id');
+        return EntryColumns::text($this->envelope, 'id');
     }
 
     /**
@@ -74,7 +74,7 @@ final readonly class StoredEntry
      */
     public function hmac(): string
     {
-        return $this->text('hmac');
+        return EntryColumns::text($this->envelope, 'hmac');
     }
 
     /**
@@ -84,7 +84,7 @@ final readonly class StoredEntry
      */
     public function keyId(): string
     {
-        return $this->text('key_id');
+        return EntryColumns::text($this->envelope, 'key_id');
     }
 
     /**
@@ -94,7 +94,7 @@ final readonly class StoredEntry
      */
     public function occurredAt(): string
     {
-        return $this->text('occurred_at');
+        return EntryColumns::text($this->envelope, 'occurred_at');
     }
 
     /**
@@ -104,7 +104,7 @@ final readonly class StoredEntry
      */
     public function recordedAt(): string
     {
-        return $this->text('recorded_at');
+        return EntryColumns::text($this->envelope, 'recorded_at');
     }
 
     /**
@@ -180,10 +180,11 @@ final readonly class StoredEntry
         $properties = $this->json('properties');
         $descriptor = $this->descriptor();
 
-        $fields = ['context' => self::associative($context), 'properties' => self::associative($properties)] + $this->envelope;
-        $record = AuditRecord::fromEnvelope($fields, $descriptor === null ? null : Attachment::described($descriptor));
+        $fields  = ['context' => self::associative($context), 'properties' => self::associative($properties)] + $this->envelope;
+        $record  = AuditRecord::fromEnvelope($fields, $descriptor === null ? null : Attachment::described($descriptor));
+        $version = EntryColumns::integer($this->envelope, 'integrity_version');
 
-        return FinalisedRecord::decoded($record, $this->recordedAt(), $this->integer('integrity_version'), $this->keyId(), $this->hmac(), $context, $properties);
+        return FinalisedRecord::decoded($record, $this->recordedAt(), $version, $this->keyId(), $this->hmac(), $context, $properties);
     }
 
     /**
@@ -222,37 +223,5 @@ final readonly class StoredEntry
         }
 
         throw new \UnexpectedValueException(sprintf('A stored entry\'s `%s` is not an object, a list or null.', $column));
-    }
-
-    /**
-     * The column the row codec read as a string.
-     *
-     * @param  'hmac'|'id'|'key_id'|'occurred_at'|'recorded_at'  $column
-     * @return string
-     */
-    private function text(string $column): string
-    {
-        $value = $this->envelope[$column];
-
-        // The codec reads these columns as a string or refuses the row
-        assert(is_string($value));
-
-        return $value;
-    }
-
-    /**
-     * The column the row codec read as an integer.
-     *
-     * @param  'integrity_version'  $column
-     * @return int
-     */
-    private function integer(string $column): int
-    {
-        $value = $this->envelope[$column];
-
-        // The codec reads these columns as an integer or refuses the row
-        assert(is_int($value));
-
-        return $value;
     }
 }

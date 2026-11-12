@@ -20,6 +20,7 @@ use SineMacula\Laravel\AuditLog\Integrity\ArtifactInspector;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
@@ -52,9 +53,6 @@ final readonly class ExportVerifier
 
     /** @var string The reason of a verification whose statement failed. */
     private const string QUERY_FAILED = 'query_failed';
-
-    /** @var string A lower-case UUID, as an entry's id. */
-    private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
     /** @var string A CEF line's id: its extension's first field, after an unescaped pipe. */
     private const string CEF_ID_PATTERN = '/(?<!\\\)\|externalId=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?: |\z)/';
@@ -199,7 +197,7 @@ final readonly class ExportVerifier
         }
 
         $id     = $bundle['entry']['id'] ?? null;
-        $id     = is_string($id) && preg_match(self::UUID_PATTERN, $id) === 1 ? $id : null;
+        $id     = is_string($id) && preg_match(SealEnvelope::UUID_PATTERN, $id) === 1 ? $id : null;
         $lookup = fn (string $id, AccessScope $scope): ?array => $this->row(EntrySettings::table(), array_keys(RowCodec::COLUMNS), $id, $scope);
         $row    = $scope === null || $id === null ? null : $this->attempt(static fn (): ?array => $lookup($id, $scope), $recordFailure);
 

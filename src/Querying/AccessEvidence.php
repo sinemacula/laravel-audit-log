@@ -41,12 +41,6 @@ final readonly class AccessEvidence
     /** @var string A page after a position, under a scope of not exactly one tenant. */
     private const string NEXT_PAGE = 'next';
 
-    /** @var string The verdict of a verification with no findings. */
-    private const string VERIFIED = 'verified';
-
-    /** @var string The verdict of a verification with findings. */
-    private const string NOT_VERIFIED = 'not_verified';
-
     /**
      * Constructor.
      *
@@ -185,7 +179,7 @@ final readonly class AccessEvidence
         return new self([
             ...$read,
             'export_entry' => $exportEntry[0] ?? null,
-            'verdict'      => $findings === [] ? self::VERIFIED : self::NOT_VERIFIED,
+            'verdict'      => $findings === [] ? 'verified' : 'not_verified',
             'findings'     => $findings,
             'outcome'      => $outcome->value,
         ], self::disclosure($terms, $members));

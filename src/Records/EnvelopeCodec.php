@@ -140,7 +140,7 @@ final readonly class EnvelopeCodec
         }
 
         $fields = self::fieldsOf($json);
-        $bundle = self::isBundle($fields);
+        $bundle = array_key_exists('bundle_version', $fields);
         $id     = self::idOf($fields, $bundle);
 
         if (($fields['unsigned'] ?? null) === true) {
@@ -205,19 +205,6 @@ final readonly class EnvelopeCodec
         }
 
         return get_object_vars($decoded);
-    }
-
-    /**
-     * Whether the envelope names a bundle version at its top.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  array<array-key, mixed>  $fields
-     * @return bool
-     */
-    private static function isBundle(#[\SensitiveParameter] array $fields): bool
-    {
-        return array_key_exists('bundle_version', $fields);
     }
 
     /**

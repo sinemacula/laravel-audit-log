@@ -15,9 +15,6 @@ namespace SineMacula\Laravel\AuditLog\Querying;
  */
 final class InvalidCursorException extends \InvalidArgumentException
 {
-    /** @var string The one message, whatever the cause. */
-    private const string MESSAGE = 'The cursor was refused.';
-
     /**
      * The refusal of a cursor, whatever the cause.
      *
@@ -25,6 +22,6 @@ final class InvalidCursorException extends \InvalidArgumentException
      */
     public static function refused(): self
     {
-        return new self(self::MESSAGE);
+        return new self('The cursor was refused.');
     }
 }
