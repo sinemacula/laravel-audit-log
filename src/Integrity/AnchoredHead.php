@@ -5,12 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * The newest seal an anchor holds for the log: its sequence and its digest.
- *
- * Verification fetches it independently of the receipts stored beside the
- * seals, and compares the digest with the local seal at that sequence, so a
- * local log truncated below it, or rewritten at it, is found even when every
- * local receipt has been cleared.
+ * The newest seal an anchor holds for the log, checked against the local seal
+ * at its sequence to find a truncated or rewritten log.
  *
  * @api
  *

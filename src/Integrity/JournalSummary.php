@@ -5,13 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * What one verification run read of the lifecycle journal: how many rows, the
- * sequence of the chain's head, its last good row, and the sequence the latest
- * seal commits to. Either sequence is `null` when there is none: an empty
- * journal, or a log with no seal or whose latest seal was made before the
- * journal had a row.
- *
- * It names counts and sequences, never a value of a row.
+ * What one verification run read of the lifecycle journal: its rows, its head
+ * and the sequence the latest seal commits to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

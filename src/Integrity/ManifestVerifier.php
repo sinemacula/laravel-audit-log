@@ -14,36 +14,10 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * Checks the artifact each verified entry's signed manifest names: that it is
- * stored, under the manifest's artifact id and for that entry, of the kind the
- * manifest signed, counting the members the manifest signed, with its digest,
- * and that its members decrypt to exactly the canonical form of that kind the
- * manifest describes, as many as signed and giving the signed digest. A bulk
- * operation's subjects are read by the manifest, a disclosure's evidence and an
- * export's manifest by their own versioned readers, none of which reads the
- * catalogue.
- *
- * Each difference is its own finding, classified by the artifact inspector:
- * `manifest_missing` for an artifact that is not stored, `manifest_swapped` for
- * one under another id or naming another entry, `manifest_wrong_kind` for one
- * stored as another kind, `manifest_mismatch` for another count or digest,
- * `manifest_malformed` for members that are no canonical form of the signed
- * kind, `manifest_tampered` for a canonical form other than the one signed, and
- * `manifest_unreadable` for members that do not decrypt.
- *
- * The descriptor is trusted only because its entry verified: a signed
- * descriptor cannot be malformed without the key, so one that is not exactly an
- * artifact id, a known kind, a digest and a count that kind allows is
- * `manifest_malformed`. Entries are checked in batches of `ENTRY_BATCH`, one
- * statement reading the artifacts' columns and the length of their members, and
- * the members of those that match are then read in sub-batches of at most
- * `MEMBERS_BATCH_BYTES` stored bytes, so no statement is made per entry and no
- * read holds more than a bound of members. An artifact the application's keys
- * cannot decrypt cannot be checked; any other difference shows the log was
- * altered. An artifact missing with its entry, both deleted by a prune that
- * committed after the segment was read, is no finding: the run reports the
- * segment as it read it. Every statement reads the writer. Nothing here writes
- * or repairs.
+ * Checks the artifact each verified entry's signed manifest names: stored,
+ * matching its columns, and decrypting to the canonical form signed. An
+ * artifact missing with its entry, pruned since the segment was read, is no
+ * finding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,11 +52,9 @@ final readonly class ManifestVerifier
     ) {}
 
     /**
-     * The manifest descriptor of a verified entry row, read from its raw
-     * `properties` at `_audit.manifest` as it is stored, or `null` when it
-     * holds none. A stored value that is not a JSON object or list is given as
-     * an empty one, which is no descriptor, so it is checked and found
-     * malformed rather than skipped.
+     * The manifest descriptor at `_audit.manifest` of a verified entry's raw
+     * `properties`, or `null` when it holds none; a value that is not an array
+     * reads as empty, so it is found malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -138,11 +110,8 @@ final readonly class ManifestVerifier
     }
 
     /**
-     * The finding of each entry of one batch that has one, by entry id: a
-     * malformed descriptor or an entry id that is not a lower-case UUID is
-     * malformed before any statement, the artifact's columns are classified
-     * against the descriptor, and the members of every artifact whose columns
-     * are the signed ones are opened and read.
+     * The finding of each entry of one batch that has one, by entry id,
+     * malformed descriptors found before any statement.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -179,11 +148,8 @@ final readonly class ManifestVerifier
     }
 
     /**
-     * The findings, less each missing artifact whose entry is gone too: the
-     * segment read the entry before a prune that has since deleted both
-     * committed, so the run reports the segment as it read it, and the next run
-     * reads it pruned. An artifact missing beside its entry is missing. Only a
-     * missing artifact costs this statement.
+     * The findings, less each missing artifact whose entry a prune has since
+     * deleted too; the next run reads it pruned.
      *
      * @param  array<array-key, \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding>  $findings
      * @return array<array-key, \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding>
@@ -209,10 +175,9 @@ final readonly class ManifestVerifier
     }
 
     /**
-     * The stored artifacts of the batch's entries, or of the artifact ids their
-     * descriptors name, in one statement on the writer: each one's columns and
-     * the length of its members, never the members themselves, by the entry it
-     * names and by its own id.
+     * The stored artifacts of the batch's entries or descriptors' ids, by entry
+     * and by id, in one statement: their columns and members' length, never the
+     * members.
      *
      * @formatter:off
      *
@@ -252,10 +217,8 @@ final readonly class ManifestVerifier
     }
 
     /**
-     * The finding of each entry whose artifact's members do not open or are not
-     * the canonical form its descriptor describes, by entry id, the members
-     * read a sub-batch at a time: as many artifacts as fit the byte bound, and
-     * one alone when it is larger than the bound.
+     * The finding of each entry whose artifact's members are not the signed
+     * canonical form, by entry id, read a sub-batch at a time.
      *
      * @param  array<string, array{artifact_id: string, count: int, digest: string, kind: string}>  $descriptors
      * @param  array<string, int>  $lengths
@@ -338,11 +301,8 @@ final readonly class ManifestVerifier
     }
 
     /**
-     * The finding of an artifact's stored members, or `null` when they open
-     * under the application's keys to exactly a canonical form of the
-     * descriptor's count and digest: an artifact gone since its columns were
-     * read is missing, members that do not open are unreadable, and the
-     * plaintext of any other is classified against the descriptor.
+     * The finding of an artifact's stored members, or `null` when they open to
+     * the canonical form the descriptor signed.
      *
      * @param  scalar|null  $members
      * @param  array{artifact_id: string, count: int, digest: string, kind: string}  $descriptor

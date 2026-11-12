@@ -17,47 +17,12 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Writes one seal: one attempt, in one transaction on the storage connection,
- * that reads the last seal afresh, selects the entries to seal, and inserts the
- * seal's checkpoint and then every one of its members, or writes nothing.
+ * Writes one seal in one transaction on the storage connection: reads the last
+ * seal, selects the entries, and inserts the checkpoint then its members, or
+ * writes nothing.
  *
- * The last seal is read whole and its digest recomputed from its fields. A
- * stored digest that disagrees, or a seal of another log id, is refused with a
- * `SealChainException`, so a seal is never chained onto one that has been
- * altered and one chain never mixes two logs. Its signature is not checked
- * here: a seal signed under a key since retired is extended, and verification
- * reports any seal whose signature fails.
- *
- * Every seal commits to the lifecycle journal's head, so the journal is
- * anchored exactly as the entries are. The head, the sequence and HMAC of the
- * journal's last row, is read after the last seal inside the seal's own
- * transaction, so a seal that wins its sequence sees every row committed before
- * the seal it extends. A head whose sequence or HMAC cannot be read is refused
- * with a `SealChainException`, so a seal never commits to a row it cannot
- * name; an empty journal is committed to as none. A head behind the last
- * seal's commitment, a lower sequence, none after a commitment to a row, or
- * another HMAC at the committed sequence, is refused the same way, so
- * commitments never run backwards and a journal whose tail was removed or
- * replaced is never sealed over.
- *
- * The selection is a plain `SELECT`, never a locking read, of the entries
- * recorded no later than the bound, after the position given, in `(recorded_at,
- * id)` order so batches are deterministic: membership, not the order, is what
- * is sealed. The recent pass reads entries that are no seal's member; the sweep
- * reads a window of entries whether sealed or not, so one statement never reads
- * more than its limit of rows, and seals those of them that are no seal's
- * member. A candidate whose id is not a lower-case UUID, whose HMAC is not 64
- * lower-case hex, or whose time cannot be read is left out and counted, never
- * sealed and never fatal; the position still moves past it, from its time and
- * id exactly as stored, however long or malformed, so a malformed row at the
- * end of a batch never stops the batch's seal or sealing after it.
- *
- * Every row is written with a parameterised `INSERT … VALUES`, never one from a
- * `SELECT` and never one that ignores a conflict: the checkpoint first, then
- * the members in chunks small enough for every engine's placeholder limit. A
- * concurrent sealer's seal of the same sequence or of the same entry makes the
- * attempt fail as a whole, and Laravel's one-attempt transaction rolls it back
- * with no savepoint; the caller decides whether to try again.
+ * A concurrent sealer's conflicting insert fails the whole attempt; the caller
+ * decides whether to retry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,9 +58,8 @@ final readonly class CheckpointWriter
     ) {}
 
     /**
-     * Seal, in one attempt, at most the limit of entries that are no seal's
-     * member, recorded no later than the bound and after the position: the
-     * recent pass.
+     * Seal at most the limit of unsealed entries recorded no later than the
+     * bound and after the position: the recent pass.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SealCursor  $after
      * @param  string  $until
@@ -126,9 +90,9 @@ final readonly class CheckpointWriter
     }
 
     /**
-     * Seal, in one attempt, the entries of a window that are no seal's member:
-     * the window is at most the limit of entries recorded no later than the
-     * bound and after the position, sealed or not: the sweep.
+     * Seal the unsealed entries of a window of at most the limit of entries,
+     * sealed or not, recorded no later than the bound and after the position:
+     * the sweep.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SealCursor  $after
      * @param  string  $until
@@ -164,9 +128,8 @@ final readonly class CheckpointWriter
     }
 
     /**
-     * Make one attempt in one transaction on the storage connection, with no
-     * retry and so no savepoint: read the last seal, select the rows, and seal
-     * the candidates among them, if any can be sealed.
+     * Make one attempt in one transaction, with no retry and so no savepoint:
+     * read the last seal, select the rows and seal what can be sealed.
      *
      * @param  \Closure(\Illuminate\Database\Connection): array{0: array<int, \stdClass>, 1: array<int, \stdClass>}  $select
      * @param  int  $limit
@@ -201,9 +164,7 @@ final readonly class CheckpointWriter
 
     /**
      * The last seal in the chain and its recomputed digest, or `null` when
-     * there is none; a row stored at a sequence below 1 is outside the chain
-     * and never extended. One whose stored digest disagrees with its fields, or
-     * that belongs to another log, is refused.
+     * there is none; one whose digest disagrees or of another log is refused.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return ?array{0: \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope, 1: string}
@@ -292,10 +253,8 @@ final readonly class CheckpointWriter
     }
 
     /**
-     * The envelope of the next seal: one more than the last seal's sequence,
-     * chained onto its recomputed digest, holding the members, between the
-     * earliest and latest of their times, made now under the signing key, and
-     * committing to the journal's head, if it has one.
+     * The envelope of the next seal, chained onto the last one, made under the
+     * signing key and committing to the journal's head, if any.
      *
      * @param  ?array{0: \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope, 1: string}  $head
      * @param  non-empty-list<array{0: string, 1: string}>  $members
@@ -354,12 +313,10 @@ final readonly class CheckpointWriter
     }
 
     /**
-     * The query bounded to the rows recorded no later than the bound and after
-     * the position: later than its time, or at its time with a greater id, or
-     * at its time or later when it starts at its time. The columns are named
-     * with the prefix given. The position's time is always a lower bound of its
-     * own, so that an engine reads the index of the time and id from there, in
-     * order, rather than gathering every later row and sorting them first.
+     * The query bounded to rows recorded no later than the bound and after the
+     * position, columns named with the prefix. The position's time is always
+     * its own lower bound so an engine reads the time and id index in order
+     * instead of sorting.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $prefix
@@ -394,10 +351,8 @@ final readonly class CheckpointWriter
     }
 
     /**
-     * The member each candidate makes, an entry id and its HMAC, with its time
-     * in the package's form, leaving out each candidate whose id is not a
-     * lower-case UUID, whose HMAC is not 64 lower-case hex, or whose time
-     * cannot be read.
+     * Each candidate's member, its entry id and HMAC, with its time, leaving
+     * out any whose id, HMAC or time is malformed.
      *
      * @param  array<int, \stdClass>  $rows
      * @return list<array{0: array{0: string, 1: string}, 1: string}>

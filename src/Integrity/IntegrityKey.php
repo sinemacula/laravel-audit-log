@@ -5,16 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * A key of the integrity ring: the id a row's `key_id` stores, 1 to 32
- * column-safe characters starting with a letter or a digit, and the secret that
- * is the HMAC key itself, at least 32 bytes.
- *
- * The secret is no part of the key's visible state: it is kept wrapped in a
- * `\SensitiveParameterValue`, private, and read through `secret()` alone. A
- * stack trace never shows it, since the constructor marks it sensitive, and
- * neither does a dump (`var_dump()`, `print_r()`, Symfony's dumper behind
- * `dump()` and `dd()`), `json_encode()` or `var_export()`, which show the id
- * and, at most, the empty wrapper.
+ * A key of the integrity ring: its id and its HMAC secret, which no trace,
+ * dump, encoding or export of the key shows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

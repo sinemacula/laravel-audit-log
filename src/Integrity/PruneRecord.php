@@ -7,23 +7,9 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The signed evidence that some of a seal's entries were pruned on purpose: the
- * log, the seal's id and digest, how many members it holds, which of them this
- * prune deleted and how many, the id of the prune operation and when it ran,
- * and the signature that binds them.
- *
- * `pruned` is the bitmap of the members deleted, in member order, held as
- * `PruneBitmap` writes it, and `pruned_count` is how many bits it sets, at
- * least one. A seal pruned by several transactions has several records, one
- * each, whose bitmaps share no member.
- *
- * The signature is HMAC-SHA256 under the seal key of the ring key it names,
- * over a label distinct from a seal's and the digest of every other field, so a
- * record proves one prune of exactly the members it sets of exactly one seal,
- * and is never mistaken for a seal's signature. Verification checks the
- * signature and every bound field against the seal, and a missing entry counts
- * as pruned only when a record that holds both sets it; a record never excuses
- * a seal that fails on its own.
+ * Signed evidence that some of a seal's entries were pruned on purpose. Its
+ * HMAC is over a label distinct from a seal's, and a record never excuses a
+ * seal that fails on its own.
  *
  * @api
  *
@@ -158,9 +144,7 @@ final readonly class PruneRecord
     }
 
     /**
-     * The fields the signature covers, each under its canonical key: every
-     * field but the signature. The order is irrelevant: the canonical encoding
-     * sorts the keys.
+     * The fields the signature covers: every field but the signature.
      *
      * @formatter:off
      *

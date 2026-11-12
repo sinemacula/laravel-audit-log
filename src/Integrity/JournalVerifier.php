@@ -13,27 +13,10 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * Verifies the whole lifecycle journal on every verification run, whatever
- * range of seals the run checks, and each seal's commitment to it.
- *
- * The seals are read first, in sequence order from 1, and each one's commitment
- * checked on its own: its journal sequence and head both set or both `null`,
- * never running backwards, and never `null` after a seal that committed to a
- * row. Then every row of the journal is read with its payload, in sequence
- * order, a page at a time, and given to one `JournalChain`, which finds a gap,
- * a signature that fails, a key the ring does not hold and a transition the
- * chain does not allow, its runs and batches paired. A row whose sequence a
- * seal committed to must carry the head that seal names, and a commitment to a
- * sequence no row has, past the last row of a truncated or restored journal
- * among them, names no row of the chain. A row that cannot be read is
- * malformed.
- *
- * Each finding is added to the run as one `RunFinding` with the first id it was
- * found at, a row's or a seal's, and how many times it was found. The
- * commitments are kept per seal and a page of rows at a time, so memory grows
- * with the seals, never with the journal. Every statement reads the storage
- * connection's writer, so a replica's lag never reads as a missing row, and
- * verification never needs the maintenance connection's credentials.
+ * Verifies the whole lifecycle journal and each seal's commitment to it on
+ * every verification run, whatever seals the run checks. Memory grows with the
+ * seals, never with the journal, and every read is on the writer so replica lag
+ * never reads as a missing row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -98,10 +81,9 @@ final readonly class JournalVerifier
     }
 
     /**
-     * Check each seal's commitment, from the first in sequence order, noting
-     * every one that is malformed, unpaired, runs backwards or is dropped after
-     * one was made: the heads the others commit to, by the sequence of the row
-     * each names, and the sequence the latest seal commits to.
+     * Check each seal's commitment in sequence order, noting each malformed,
+     * backwards or dropped one; returns the heads committed to, by sequence,
+     * and the latest seal's commitment.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  array<string, array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string, 2: int}>  $found
@@ -146,10 +128,8 @@ final readonly class JournalVerifier
     }
 
     /**
-     * Read the stored row into the chain, noting what it finds, and, when a
-     * seal committed to the row's sequence, each such seal whose head is not
-     * the row's HMAC; a row that cannot be read is malformed, by its id when it
-     * has one.
+     * Read the stored row into the chain, noting its findings and each seal
+     * that committed to its sequence under another HMAC.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -195,9 +175,8 @@ final readonly class JournalVerifier
     }
 
     /**
-     * Every row of the journal, by sequence, as its stored columns: read a page
-     * at a time, each page after the last sequence the one before read, and
-     * only one page held at a time.
+     * Every journal row's stored columns, by sequence, a page at a time with
+     * only one page held.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

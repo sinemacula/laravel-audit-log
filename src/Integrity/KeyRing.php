@@ -5,17 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * The integrity keys rows are signed and verified with, rebuilt from the
- * settings on every call and never cached.
- *
- * With an explicit ring (`audit-log.integrity.keys`), the ring is exactly those
- * keys and `audit-log.integrity.current` signs; `app.key` and
- * `app.previous_keys` are then never read, so a malformed explicit ring fails
- * closed and never falls back to them. Without one, `app.key` and each of
- * `app.previous_keys` are derived by HKDF-SHA256 under one info string: the key
- * derived from `app.key` signs, and the others verify only. A derived key's id
- * is `d` and the first 16 hex characters of a fingerprint of its secret, so a
- * rotated `app.key` gets a new id and the older rows keep theirs.
+ * The integrity keys, rebuilt from the settings on every call. An explicit ring
+ * is exactly its keys and never falls back to `app.key`; otherwise each key is
+ * derived by HKDF from `app.key`, which signs, or `app.previous_keys`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,9 +63,8 @@ final readonly class KeyRing
     }
 
     /**
-     * The key of the ring with the id, signing or verifying only. Malformed
-     * settings fail closed with the settings' `InvalidArgumentException` before
-     * any key is looked up.
+     * The ring's key with the id, signing or verifying only; malformed settings
+     * fail closed before any lookup.
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\AuditLog\Integrity\IntegrityKey

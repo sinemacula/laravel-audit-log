@@ -5,11 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * What a seal's prune records say of its members: the findings of the records
- * and of the missing members they leave uncovered, the missing members a valid
- * record covers, and the present members a valid record covers, which must be
- * read again to tell a prune that committed since from a member restored or
- * inserted again.
+ * What a seal's prune records say of its members.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

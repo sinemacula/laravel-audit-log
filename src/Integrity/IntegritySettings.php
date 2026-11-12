@@ -8,18 +8,9 @@ use Illuminate\Contracts\Config\Repository;
 use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 
 /**
- * The integrity settings, read from configuration on every call and validated
- * as they are read: the explicit ring (`audit-log.integrity.keys`, a map of key
- * ids to secrets), the key that signs (`audit-log.integrity.current`), and the
- * application keys (`app.key`, then `app.previous_keys`) the default ring is
- * derived from when no explicit ring is set.
- *
- * Every secret and application key is its own bytes, or the strict decoding of
- * what follows a `base64:` prefix, and must be at least 32 bytes. Every
- * malformed value fails closed with an `InvalidArgumentException` naming the
- * setting and never the secret, so a malformed explicit ring is never replaced
- * by the derived one. An empty `current`, which an empty environment line
- * gives, reads as none.
+ * The integrity settings, read from configuration and validated on every call;
+ * a malformed value fails closed naming the setting, never the secret, and
+ * never falls back to the derived ring.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,9 +49,8 @@ final readonly class IntegritySettings
     ) {}
 
     /**
-     * The explicit ring: each key id with its decoded secret, or an empty array
-     * when `audit-log.integrity.keys` is not set or is empty. A numeric id is
-     * the integer key PHP makes of it, so a caller reads every id as a string.
+     * The explicit ring of key ids to decoded secrets, empty when unset; PHP
+     * makes a numeric id an integer key, so read every id as a string.
      *
      * @return array<int|string, string>
      *
@@ -148,10 +138,8 @@ final readonly class IntegritySettings
     }
 
     /**
-     * Read every integrity setting, failing on the first malformed one: the
-     * explicit ring and the current key id when a ring is set, otherwise the
-     * current key id, `app.key` and `app.previous_keys`. An explicit ring never
-     * reads the application keys.
+     * Read every integrity setting, failing on the first malformed one; an
+     * explicit ring never reads the application keys.
      *
      * @return void
      *

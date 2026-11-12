@@ -5,20 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * The one canonical encoding of integrity version 1, over decoded stored
- * values: `null`, booleans and integers as JSON writes them, strings through
- * `json_encode()` with fixed flags, a list as its members in their order, and
- * any other array or a `stdClass` as a map whose keys are sorted bytewise. A
- * `stdClass` is one of exactly that class, as `json_decode()` builds it; a
- * subclass is another object.
- *
- * A map is written by hand, never through `json_encode()` of the array, so
- * sorting its keys can never turn it into a list, and an empty `stdClass` stays
- * `{}` beside the empty list `[]`. A float has no canonical form (the package
- * stores decimals as strings), and nor has any other object or a resource: each
- * is refused, as is a string that is not valid UTF-8. The encoder never
- * normalises, sanitises, truncates or repairs what it is given, so evidence is
- * encoded exactly as it was stored.
+ * The canonical encoding of integrity version 1. A map, or an object of exactly
+ * `stdClass`, is written by hand with its keys sorted bytewise so it never
+ * becomes a list; a float, any other object, a resource and invalid UTF-8 are
+ * refused.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -113,8 +103,8 @@ final class CanonicalEncoder
     }
 
     /**
-     * The scalar as JSON writes it, or a refusal for a float and for a value of
-     * any other type.
+     * The scalar as JSON writes it; a float or a value of any other type is
+     * refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

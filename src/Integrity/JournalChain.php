@@ -8,35 +8,13 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 
 /**
- * The rules of the lifecycle journal's chain, applied to its rows one at a time
- * in sequence order: the one place they live, for verification and for the
- * replay a destructive operation decides from.
+ * The lifecycle journal's chain rules, applied a row at a time in sequence
+ * order, for verification and for the replay a destructive operation decides
+ * from.
  *
- * Each row must follow the one before it: its sequence one more, 1 first, its
- * previous HMAC the HMAC of the row before, none first, and its log the
- * configured one, else it is a gap; one that does not move the sequence
- * forward, repeated or out of order, is never applied. Its HMAC must verify
- * under the key it names, and a payload it was read with must be the text its
- * digest was taken of, else it is a signature finding, or an unverifiable one
- * when the ring does not hold its key. A row that fails its signature is never
- * applied, so the head stays the last good row; the next row is still linked to
- * it as it is stored, so one bad row is one finding. A row that cannot be read
- * at all is malformed, and the row after it is held only to a later sequence,
- * since there is nothing to link it to.
- *
- * A good row is then a transition the chain must allow. A hold names a hold id
- * never placed before, active or released, since hold ids are never reused; a
- * release names an active hold; a prune names a seal, and, read with its
- * payload, the seal its record covers. Where payloads are read, every prune
- * chunk and every prune run's finish names a run that started and has not
- * finished, and every import's finish a batch that started and has not
- * finished, so a second finish is refused too, as is a second start of one
- * still open. Only the ids are kept: of the holds ever placed and still active,
- * and of the runs and batches still open, each dropped at its finish, so what
- * the chain holds grows with holds and open operations, never with the journal.
- *
- * The chain holds no resource, so a clone of it is independent of it, which a
- * replay kept as a value relies on.
+ * Only the ids of placed and active holds and of open runs and batches are
+ * kept, so memory grows with those, never with the journal. It holds no
+ * resource, so a replay can keep a clone as an independent value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,7 +44,7 @@ final class JournalChain
     /** @var array<string, true> The ids of the active holds, in the order they were placed. */
     private array $active = [];
 
-    /** @var array<string, array<string, true>> The ids of the runs and the batches started and not yet finished, by the payload key that names them. */
+    /** @var array<string, array<string, true>> The open run and batch ids, by the payload key that names them. */
     private array $open = [self::RUN_ID => [], self::BATCH_ID => []];
 
     /** @var bool Whether any row so far gave a finding. */
@@ -91,9 +69,8 @@ final class JournalChain
     ) {}
 
     /**
-     * Read the next row: its link to the row before, its signature and, when it
-     * is good, the transition it makes. The findings it gives are returned,
-     * each with the row's id, in that order.
+     * Read the next row: its link, its signature and, when good, its
+     * transition; returns its findings, each with the row's id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $journalRow
      * @return list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>
@@ -228,9 +205,7 @@ final class JournalChain
 
     /**
      * The finding the row's signature gives, or `null` when its HMAC verifies
-     * and its payload, if it was read, is the text of its digest: a key the
-     * ring does not hold is unverifiable, and an HMAC no key could have made is
-     * malformed.
+     * and any payload read is the text of its digest.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $journalRow
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
