@@ -16,12 +16,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for the spill reader: it takes exactly one JSON object after
- * the marker whatever a channel's format put around it, keeps strings and
- * escapes out of the structure, numbers every line and yields only the marked
- * ones, calls an unclosed object truncated and never repairs it, and costs
- * memory for each line's own length, up to the bound, past which nothing is
- * kept.
+ * Feature tests for the spill reader, which takes one JSON object after each
+ * marker and bounds the memory each line costs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -257,10 +253,8 @@ final class SpillReaderTest extends TestCase
     }
 
     /**
-     * A line ten times the bound holding the marker is truncated, the reader
-     * goes on to the next line, and the peak stays far below what holding the
-     * line would cost: protects against a reader that accumulates the remainder
-     * or reads the whole line before it checks the bound.
+     * A marked line ten times the bound is truncated without being held, and
+     * the next line is still read.
      *
      * @return void
      */
@@ -288,8 +282,7 @@ final class SpillReaderTest extends TestCase
 
     /**
      * A line past the bound with no marker in what is held is ignored, and the
-     * next line is still read and numbered: protects against a marker search
-     * made on the remainder, which is not kept.
+     * next line is still read and numbered.
      *
      * @return void
      */
@@ -302,9 +295,8 @@ final class SpillReaderTest extends TestCase
     }
 
     /**
-     * Rows of `[the line's length, whether it is past the bound]`: one byte
-     * short of the bound and exactly at it, each without a newline. The bound
-     * is the test's plus the framing allowance.
+     * Rows of `[the line's length, whether it is past the bound]`, each without
+     * a newline; the bound includes the framing allowance.
      *
      * @return iterable<string, array{0: int, 1: bool}>
      */
@@ -341,9 +333,8 @@ final class SpillReaderTest extends TestCase
     }
 
     /**
-     * The reading stops as soon as a line reaches the bound, so a line that
-     * reaches it on a chunk's last byte is past it even though its newline is
-     * in the next chunk: protects against one chunk more being held.
+     * A line reaching the bound on a chunk's last byte is past it, so no
+     * further chunk is held.
      *
      * @return void
      */
@@ -361,9 +352,8 @@ final class SpillReaderTest extends TestCase
     }
 
     /**
-     * Under the real bound, reading many short lines costs memory for those
-     * lines: protects against giving `fgets()` the bound, which allocates about
-     * 200 MB for each line whatever its length.
+     * Under the real bound, short lines cost memory for their own length;
+     * `fgets()` given the bound would allocate about 200 MB per line.
      *
      * @return void
      */
@@ -410,10 +400,8 @@ final class SpillReaderTest extends TestCase
     }
 
     /**
-     * A bundle's line, framed by a channel's prefix and suffix and longer than
-     * several chunks, is taken whole: the bundle's one object, its attachment
-     * and its record together, which the codec decodes to the record and its
-     * attachment, and the next line is read as its own.
+     * A framed bundle line longer than several chunks is taken whole and
+     * decodes to the record and its attachment.
      *
      * @return void
      */
@@ -508,9 +496,8 @@ final class SpillReaderTest extends TestCase
     }
 
     /**
-     * A file whose first line starts with the head and runs to ten times the
-     * test's bound, written in pieces so the test holds none of it, and whose
-     * second line is a marked one.
+     * A file whose first line runs to ten times the test's bound, written in
+     * pieces so the test holds none of it, then a marked line.
      *
      * @param  string  $head
      * @return string

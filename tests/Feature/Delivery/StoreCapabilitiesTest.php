@@ -20,11 +20,7 @@ use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for what the delivery reads of the bound store: durability and
- * participation as the store says them, neither for a store without the
- * contract, whether it keeps attachments by the one rule a given store is
- * judged by too, the refusal naming its class, its class without a path, and
- * always the store bound now.
+ * Feature tests for what the delivery reads of the bound store's capabilities.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -178,9 +174,8 @@ final class StoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * Each destination the bound store delivers to is named by its class: a
-     * stack's by their ids, in order, and any other store as itself under
-     * `store`.
+     * Each destination of the bound store is named by its class: a stack's by
+     * their ids in order, any other store as `store`.
      *
      * @return void
      */
@@ -214,9 +209,8 @@ final class StoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * A store that implements the store contract alone keeps no attachment, and
-     * neither does one that is durable and joins every transaction but says
-     * nothing of attachments.
+     * A store implementing only the store contract keeps no attachments, and
+     * neither does a durable participating one that says nothing.
      *
      * @return void
      */
@@ -269,9 +263,8 @@ final class StoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * The refusal names the class of the store bound, a named one by its name
-     * and an anonymous one without the file path its class name holds, and
-     * holds no previous exception.
+     * The refusal names the bound store's class, an anonymous one without its
+     * file path, and has no previous exception.
      *
      * @return void
      */
@@ -333,8 +326,7 @@ final class StoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * A store given to the rule is judged as the bound one is, whatever the
-     * container binds, and its refusal names that store's class, so a drain can
+     * A store given to the rule is judged as the bound one is, so a drain can
      * refuse one destination of a stack.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store

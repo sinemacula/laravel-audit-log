@@ -29,10 +29,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for what waits on a transaction's commit: one flush per
- * outermost transaction, nested work joining it only when its own transaction
- * commits, one record's failure costing no other, and an application callback
- * registered after the first audit use unable to stop any of it.
+ * Feature tests for the work that waits on a transaction's commit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -367,9 +364,8 @@ final class CommitQueueTest extends TestCase
     }
 
     /**
-     * Work left by a rollback without the event waits through a rollback on
-     * another connection and one inside a transaction still open, and runs on
-     * the next rollback back to its level.
+     * Work left by a rollback without the event waits until a rollback on its
+     * own connection reaches its level.
      *
      * @return void
      */
@@ -448,9 +444,8 @@ final class CommitQueueTest extends TestCase
     }
 
     /**
-     * Two records under `throw` in one transaction: the first failure costs the
-     * second nothing, both are spilled and attempted, and only the first leaves
-     * the commit, with the second reported instead of lost.
+     * Under `throw`, two failed records in one transaction are both spilled and
+     * attempted; the first leaves the commit and the second is reported.
      *
      * @return void
      *
@@ -518,9 +513,8 @@ final class CommitQueueTest extends TestCase
     }
 
     /**
-     * In outbox mode the same holds of a bound spill: a failed insert, a
-     * throwing application callback, then another failed insert leaves both
-     * spills, not just the first.
+     * In outbox mode, two failed inserts around a throwing application callback
+     * leave both bound spills.
      *
      * @return void
      */

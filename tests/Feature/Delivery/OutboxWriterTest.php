@@ -51,13 +51,8 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the outbox write path: where a record goes by its timing
- * and the selected transaction, what the row holds, and what a failed write
- * does under each rule, a spill bound to the commit it depends on above all,
- * with the write guard around the insert; and a capture's signal, carried into
- * the insert, marked when the insert waits for another connection's commit,
- * with nothing let out of that commit; and a package write, handed its
- * finalised record once the insert has returned and never when it failed.
+ * Feature tests for the outbox write path: where a record goes, what the row
+ * holds and what a failed insert does under each rule.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -192,8 +187,7 @@ final class OutboxWriterTest extends TestCase
 
     /**
      * An after-commit record whose selected transaction is on the outbox
-     * connection is inserted at once, inside it: no callback waits for the
-     * commit, and the rollback takes the row.
+     * connection is inserted at once inside it, and goes with its rollback.
      *
      * @return void
      */
@@ -309,10 +303,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * An outbox whose setting names a selector is a second instance under the
-     * host's connection name, and cannot join the host's transaction, so it
-     * waits for that commit rather than writing a row the host's rollback would
-     * leave behind.
+     * An outbox set to a selector is a separate connection instance that cannot
+     * join the host's transaction, so it waits for the commit.
      *
      * @return void
      */
@@ -535,9 +527,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * Under the `REPORT` rule a failed insert with no transaction open is
-     * spilled, reported and said at once, naming the outbox and its connection,
-     * and the code goes on.
+     * Under `REPORT`, a failed insert with no transaction open is spilled,
+     * reported and said at once, and the code goes on.
      *
      * @return void
      */
@@ -726,9 +717,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * With no application key the encrypter cannot be resolved, which happens
-     * inside the attempt, so a record signed under an explicit ring follows the
-     * rule, and is spilled with its signature.
+     * With no application key the encrypter fails inside the attempt, so a
+     * record signed under an explicit ring follows the rule.
      *
      * @return void
      */
@@ -767,9 +757,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * A rule that throws does so before the commit, with the sanitised
-     * exception, and leaves the host able to commit; only a rule that spills
-     * then spills, at that commit.
+     * A throwing rule throws the sanitised exception before the commit and
+     * leaves the host able to commit; only a spilling rule spills there.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  int  $spills
@@ -913,9 +902,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * An insert at another connection's commit, with an outbox transaction open
-     * at that moment, is held by that transaction, so its spill waits for that
-     * transaction's commit; the transaction is read when the insert runs.
+     * An insert at another connection's commit is held by any outbox
+     * transaction open when it runs, so its spill waits for that commit.
      *
      * @return void
      */
@@ -961,9 +949,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * An after-commit record pinned to a connection with no transaction open is
-     * written now, and a transaction open on the outbox connection holds the
-     * row, so it holds the spill too.
+     * An after-commit record pinned to a connection with no transaction is
+     * written now, and an open outbox transaction holds its spill.
      *
      * @return void
      */
@@ -1160,9 +1147,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * An outbox connection that cannot be resolved cannot hold the insert, so a
-     * record with a transaction selected waits for its commit, and fails there
-     * without stopping the commit.
+     * An unresolvable outbox connection cannot hold the insert, so the record
+     * waits for its selected commit and fails there without stopping it.
      *
      * @return void
      */
@@ -1184,9 +1170,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * An outbox connection that cannot be resolved holds no transaction, so a
-     * spill written now binds to nothing, though another connection is
-     * transacting.
+     * An unresolvable outbox connection holds no transaction, so a spill
+     * written now binds to nothing.
      *
      * @return void
      */
@@ -1404,10 +1389,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * Nothing leaves a deferred capture's commit callback: a failure outside
-     * the failure path's attempt, here the connection resolver the insert reads
-     * the open transactions from, is reported once, by its class alone, and
-     * signalled, and the commit succeeds.
+     * A failure outside the attempt in a deferred capture's commit callback is
+     * reported once by class, signalled, and the commit succeeds.
      *
      * @return void
      */
@@ -1469,9 +1452,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * A synchronous capture's insert inside the host's transaction that
-     * deadlocks is thrown sanitised, and its signal is told it is fatal, with
-     * the class Laravel raised it as inside the transaction.
+     * A synchronous capture's insert that deadlocks inside the host's
+     * transaction is thrown sanitised and signalled as fatal.
      *
      * @return void
      */
@@ -1491,10 +1473,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * A deferred capture's insert that deadlocks inside a transaction open on
-     * the outbox connection when the other connection commits is spilled at
-     * once, since the work it records has committed, reported, sanitised, never
-     * thrown from that commit, and signalled.
+     * A deferred capture's insert that deadlocks at another connection's commit
+     * is spilled at once, reported sanitised and signalled, never thrown.
      *
      * @return void
      */
@@ -1805,9 +1785,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * Bind a clock that must be read once, giving the stand-in instant. A
-     * writer made before this keeps the real clock for its outbox, so only
-     * finalising reads it.
+     * Bind a clock read once, giving the stand-in instant; a writer made
+     * earlier keeps the real clock for its outbox.
      *
      * @return void
      */
@@ -1836,9 +1815,8 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
-     * Make an insert on the outbox connection throw a query failure with the
-     * SQLSTATE and driver code, whose message and bindings hold the secret, as
-     * Laravel throws it; once, when told to, and always otherwise.
+     * Make an outbox insert throw a query failure holding the secret, with the
+     * SQLSTATE and driver code; once when told to, else always.
      *
      * @param  string  $message
      * @param  string  $state

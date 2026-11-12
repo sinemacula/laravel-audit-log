@@ -41,14 +41,8 @@ use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the replayer. From a spill file: a line that verifies gives
- * one row equal to what was spilled, signed and finalised once, and a second
- * replay adds nothing; every other line is counted apart and left; a store's
- * failure is counted by id and class and stops no other line. From the outbox:
- * failed rows are requeued and drained, delivered receipts are kept, and only
- * the failed destination is called again. A bundle is replayed whole, from
- * either, and one the store keeps no attachments of is counted failed and kept.
- * A dry run changes nothing.
+ * Feature tests for replaying records from a spill file or the outbox; a dry
+ * run changes nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -368,9 +362,8 @@ final class ReplayerTest extends TestCase
     }
 
     /**
-     * A store's failure is counted by the record's id and the class of the
-     * failure, never its message, stops no other line, and says nothing was
-     * written.
+     * A store's failure is counted by record id and failure class, never its
+     * message, and stops no other line.
      *
      * @return void
      */
@@ -678,9 +671,8 @@ final class ReplayerTest extends TestCase
     }
 
     /**
-     * A spilled bundle is replayed whole: its entry, which verifies and is the
-     * bytes of the line's record, and its artifact, equal to the attachment the
-     * line held, and `AuditRecorded` follows.
+     * A spilled bundle is replayed whole, entry and artifact, and
+     * `AuditRecorded` follows.
      *
      * @return void
      */
@@ -713,10 +705,8 @@ final class ReplayerTest extends TestCase
     }
 
     /**
-     * A spilled bundle the bound store keeps no attachments of is counted
-     * failed by its id and the refusal's class, and the store is never handed
-     * it; the line stays in the file, and a plain record beside it is still
-     * replayed.
+     * A spilled bundle the store keeps no attachments of is counted failed and
+     * left in the file; a plain line beside it is replayed.
      *
      * @return void
      */
@@ -745,9 +735,8 @@ final class ReplayerTest extends TestCase
     }
 
     /**
-     * A stack with one destination that keeps no attachments keeps none as a
-     * whole, so a spilled bundle is refused before any destination is handed
-     * it, the one that keeps attachments included.
+     * A stack with one destination keeping no attachments keeps none, so a
+     * spilled bundle is refused before any destination.
      *
      * @return void
      */
@@ -764,9 +753,7 @@ final class ReplayerTest extends TestCase
     }
 
     /**
-     * A spilled bundle the store holds already, entry and artifact alike, is a
-     * no-op: counted replayed, with one entry and one artifact left as they
-     * were.
+     * A spilled bundle the store already holds is a no-op, counted replayed.
      *
      * @return void
      */

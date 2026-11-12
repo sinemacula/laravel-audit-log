@@ -24,9 +24,8 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for a record written after the transaction: held until the
- * outermost transaction on its connection ends, written whether it commits or
- * rolls back, once, and never letting a failure out of the host's rollback.
+ * Feature tests for a record written once the outermost transaction on its
+ * connection ends, whether it commits or rolls back.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

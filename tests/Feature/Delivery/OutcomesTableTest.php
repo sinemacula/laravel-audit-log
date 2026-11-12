@@ -64,15 +64,7 @@ use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the guarantee table of the outcomes note, one per row: each
- * forces the row's failure through the public API and asserts its columns, by
- * the rows it leaves, the spill lines, the reports, the events and what escaped
- * to the caller. A last test holds the rows of the note to the tests here, each
- * way, so neither can move without the other.
- *
- * A failed write is a real one on every engine, an insert into a table with a
- * `NOT NULL` column the write never fills, and a failure fatal to a host is one
- * Laravel recognises as such, raised as its statement would be. Nothing but the
+ * Feature tests for the outcomes note's guarantee table, one per row. Only the
  * aborted PostgreSQL host depends on the engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -231,9 +223,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `after-commit-sync-report`: dropped on the host's rollback and written at
-     * its commit, in memory until then; a failed write spills, reports and says
-     * it, and the commit stands.
+     * `after-commit-sync-report`: written at the commit, dropped on rollback; a
+     * failed write spills, reports and says it, and the commit stands.
      *
      * @return void
      */
@@ -257,9 +248,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `after-commit-sync-throw`: as the row above until the write fails, when
-     * it spills and says it, reports nothing and throws from the commit, whose
-     * work has already committed.
+     * `after-commit-sync-throw`: as above, but a failed write reports nothing
+     * and throws from the commit, whose work has committed.
      *
      * @return void
      */
@@ -306,10 +296,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `after-commit-outbox-same`: the row is inserted now, inside the selected
-     * transaction, and goes with its rollback; a failed insert is reported and
-     * said at once, and its spill waits for the commit and goes with a
-     * rollback.
+     * `after-commit-outbox-same`: inserted now inside the selected transaction;
+     * a failed insert is reported at once and its spill waits for the commit.
      *
      * @return void
      */
@@ -343,9 +331,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `after-commit-outbox-same-throw`: the row is written as in the row above;
-     * a failed insert is said and thrown now, reports nothing, and its spill
-     * waits for the commit and goes with a rollback.
+     * `after-commit-outbox-same-throw`: written as above; a failed insert is
+     * thrown now and its spill waits for the commit.
      *
      * @return void
      */
@@ -382,10 +369,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `after-commit-outbox-other`: with the selected transaction on another
-     * connection the row waits for that commit and is dropped by its rollback,
-     * in memory until then; a failed insert spills, reports and says it, and
-     * the commit stands.
+     * `after-commit-outbox-other`: waits in memory for the other connection's
+     * commit; a failed insert spills, reports and says it.
      *
      * @return void
      */
@@ -414,9 +399,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `immediately-sync-report`: stored now, and rolled back with the host on
-     * the shared connection; a failed write spills, reports and says it at
-     * once, and the host stays usable.
+     * `immediately-sync-report`: stored now; a failed write spills, reports and
+     * says it at once, and the host stays usable.
      *
      * @return void
      */
@@ -440,8 +424,7 @@ final class OutcomesTableTest extends TestCase
 
     /**
      * `immediately-sync-throw`: a return means stored; a failed write spills,
-     * says it and throws at the call, reporting nothing, and the host stays
-     * usable.
+     * says it and throws, reporting nothing.
      *
      * @return void
      */
@@ -500,9 +483,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `transactional-sync`: stored inside the transaction under either failure
-     * mode, and rolled back with it; a failed write says it, throws and leaves
-     * no spill, and left uncaught it rolls the business change back.
+     * `transactional-sync`: stored inside the transaction; a failed write
+     * throws with no spill and, uncaught, rolls the change back.
      *
      * @param  string  $mode
      * @return void
@@ -521,9 +503,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `transactional-outbox`: a row inside the transaction under either failure
-     * mode, and rolled back with it; a failed insert says it, throws and leaves
-     * no spill, and left uncaught it rolls the business change back.
+     * `transactional-outbox`: a row inside the transaction; a failed insert
+     * throws with no spill and, uncaught, rolls the change back.
      *
      * @param  string  $mode
      * @return void
@@ -543,9 +524,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `fail-closed-sync`: under either failure mode a return means stored, now,
-     * rolled back with the host on the shared connection; a failed write
-     * spills, says it and throws at the call, reporting nothing.
+     * `fail-closed-sync`: a return means stored now; a failed write spills,
+     * says it and throws, reporting nothing.
      *
      * @param  string  $mode
      * @return void
@@ -565,9 +545,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `fail-closed-outbox`: under either failure mode a return means a row,
-     * written now and rolled back with the host on the shared connection; a
-     * failed insert spills, says it and throws at the call, reporting nothing.
+     * `fail-closed-outbox`: a return means a row written now; a failed insert
+     * spills, says it and throws, reporting nothing.
      *
      * @param  string  $mode
      * @return void
@@ -603,9 +582,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `fail-closed-transactional`: it stays transactional in either delivery
-     * mode and under either failure mode, so a failed write says it, throws and
-     * leaves no spill, and failing closed brings no spill back.
+     * `fail-closed-transactional`: stays transactional in every mode, so a
+     * failed write throws and leaves no spill.
      *
      * @param  string  $delivery
      * @param  string  $mode
@@ -653,10 +631,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `host-deadlock`: a deadlock while the host's transaction is open is said
-     * but neither spilled nor reported, and escapes as a sanitised
-     * `DeadlockException` whatever the policy, on which the host's own
-     * transaction rolls back.
+     * `host-deadlock`: a deadlock inside the host's transaction is said, never
+     * spilled or reported, and escapes as `DeadlockException`.
      *
      * @param  string  $how
      * @param  string  $delivery
@@ -676,10 +652,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `host-connection-lost`: a lost connection while the host's transaction is
-     * open is said but neither spilled nor reported, and escapes as the
-     * sanitised exception whatever the policy, on which the host's own
-     * transaction rolls back.
+     * `host-connection-lost`: a lost connection inside the host's transaction
+     * is said, never spilled or reported, and escapes sanitised.
      *
      * @param  string  $how
      * @param  string  $delivery
@@ -698,9 +672,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `aborted-postgres-host`: a host PostgreSQL has already aborted refuses
-     * the write without a fatal error, and the record is in the spill, with a
-     * report and an event, once the host has rolled back.
+     * `aborted-postgres-host`: an aborted PostgreSQL host refuses the write
+     * without a fatal error; spill, report and event follow its rollback.
      *
      * @return void
      */
@@ -727,9 +700,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `failed-finalise`: a key ring that cannot sign leaves nothing written, an
-     * unsigned spill, a report and an event, and a replay of that line skips it
-     * and adds nothing.
+     * `failed-finalise`: a key ring that cannot sign leaves an unsigned spill,
+     * a report and an event, and a replay skips that line.
      *
      * @return void
      */
@@ -781,9 +753,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `inside-a-store`: an ordinary record made inside a store comes back as
-     * captured, unwritten, however many are made, with one report of a
-     * `\LogicException`, and the write around it goes on.
+     * `inside-a-store`: a record made inside a store comes back unwritten, with
+     * one `\LogicException` report, and the outer write goes on.
      *
      * @param  string  $how
      * @param  string  $delivery
@@ -859,9 +830,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `drain-transient`: a failed attempt keeps its error class on the receipt
-     * and the row, which waits out its backoff, with nothing reported or said,
-     * and a later attempt writes the record.
+     * `drain-transient`: a failed attempt keeps its error class and waits out
+     * its backoff unreported, and a later attempt writes the record.
      *
      * @return void
      */
@@ -933,9 +903,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `drain-undecryptable`: a row whose key is gone is failed and kept, as it
-     * was found, and reported by its id alone, since the code is in the payload
-     * it cannot read; no later drain deletes it.
+     * `drain-undecryptable`: a row whose key is gone is failed, kept as found
+     * and reported by id alone; no later drain deletes it.
      *
      * @return void
      */
@@ -968,11 +937,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `captured-report`: a mapped event's record is written now, inside the
-     * host's transaction, and goes with its rollback on the shared connection;
-     * a failed write under the `throw` mode, which a capture never reads,
-     * spills, reports and says it, dispatches `AuditCaptureFailed` once, and
-     * nothing escapes: `capture()` returns `null`.
+     * `captured-report`: written now inside the host; a failed write, even
+     * under `throw`, is spilled, reported and said, and nothing escapes.
      *
      * @return void
      */
@@ -1001,8 +967,7 @@ final class OutcomesTableTest extends TestCase
 
     /**
      * Rows of `[failure message, SQLSTATE, driver code, what is thrown, failure
-     * mode]`: each failure fatal to a host, under each failure mode, which a
-     * capture never reads.
+     * mode]`: each host-fatal failure under each mode.
      *
      * @return iterable<string, array{0: string, 1: string, 2: int, 3: class-string<\Throwable>, 4: string}>
      */
@@ -1017,11 +982,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `captured-host-fatal`: a deadlock or a lost connection of a capture
-     * written now inside the host's transaction is the one failure a capture
-     * lets out: said, as `AuditWriteFailed` and `AuditCaptureFailed`, neither
-     * spilled nor reported, and the sanitised exception reaches the caller, on
-     * which the host's own transaction rolls back.
+     * `captured-host-fatal`: a capture's host-fatal failure is said, never
+     * spilled or reported, and reaches the caller sanitised.
      *
      * @param  string  $message
      * @param  string  $state
@@ -1050,10 +1012,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `captured-model-after-commit`: a watched model's change is written at the
-     * commit of its connection's transaction, never before it and never after
-     * its rollback; a failed write at the commit, under the `throw` mode too,
-     * is spilled, reported and said, and never thrown: the commit stands.
+     * `captured-model-after-commit`: a watched model's change is written at its
+     * connection's commit; a failed write there is never thrown.
      *
      * @return void
      */
@@ -1095,9 +1055,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `read-sync`: under either failure mode the page is returned once the
-     * read's record is stored, its own row and its `AuditRecorded` already
-     * there when the read returns, and the entry it found is the page's.
+     * `read-sync`: the page is returned once the read's record is stored and
+     * its `AuditRecorded` said.
      *
      * @param  string  $mode
      * @return void
@@ -1116,9 +1075,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `read-outbox`: under either failure mode the page is returned once the
-     * read's record is a committed outbox row, accepted and not yet delivered:
-     * the store holds it, and it is said, only once a drain has run.
+     * `read-outbox`: the page is returned once the read's record is a committed
+     * outbox row, said only once a drain runs.
      *
      * @param  string  $mode
      * @return void
@@ -1159,11 +1117,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `read-open-transaction`: in any mode a read inside a transaction open on
-     * the storage connection, which the outbox shares here, is refused naming
-     * it, before the policy is asked or anything is queried, and leaves
-     * nothing; one on another connection refuses nothing, and once the
-     * transaction ends the same read is answered.
+     * `read-open-transaction`: a read inside a transaction on the storage
+     * connection is refused before anything is queried.
      *
      * @param  string  $delivery
      * @param  string  $mode
@@ -1203,10 +1158,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * `read-failed-write`: in any mode a read whose record cannot be written is
-     * spilled once, said once and reported once, and is refused as unrecorded,
-     * with nothing behind it; in outbox mode the entry it found is never
-     * returned.
+     * `read-failed-write`: a read whose record cannot be written is spilled,
+     * said and reported once, and refused as unrecorded.
      *
      * @param  string  $delivery
      * @param  string  $mode
@@ -1239,8 +1192,7 @@ final class OutcomesTableTest extends TestCase
 
     /**
      * Every row of the note's guarantee table has its test here, and every row
-     * test here has its row, so a row added, renamed or dropped on either side
-     * fails.
+     * test has its row.
      *
      * @return void
      */
@@ -1282,9 +1234,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * A deadlock at the commit of the host, with nothing left open, ended no
-     * transaction, so it is no host failure and follows the policy, and the
-     * commit stands.
+     * A deadlock at the host's commit, with nothing left open, ended no
+     * transaction, so it follows the policy.
      *
      * @return void
      */
@@ -1302,9 +1253,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * An after-commit write running at another connection's commit, while the
-     * host's transaction is still open on the storage connection, is inside
-     * that host, so a deadlock is the host's and escapes from that commit.
+     * An after-commit write at another connection's commit is inside a host
+     * still open on the storage connection, so its deadlock escapes.
      *
      * @return void
      */
@@ -1337,9 +1287,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * An after-commit record's spill waits for any transaction still open on
-     * the connection it was written to: reported and said at once, spilled with
-     * that transaction's commit and never after its rollback.
+     * An after-commit record's spill waits for any transaction open on its
+     * connection, written at its commit and never after its rollback.
      *
      * @param  bool  $commits
      * @param  int  $spills
@@ -1381,8 +1330,7 @@ final class OutcomesTableTest extends TestCase
 
     /**
      * An immediate or fail-closed record's spill is written at once, so it
-     * outlives an enclosing rollback: the line is evidence of an attempt, not
-     * of a committed change.
+     * outlives an enclosing rollback as evidence of an attempt.
      *
      * @param  string  $how
      * @param  string  $mode
@@ -1426,9 +1374,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * A store that does not say it is durable refuses a fail-closed record in
-     * sync mode, and in outbox mode the row is the acknowledgement instead, so
-     * the same record is accepted.
+     * A store not saying it is durable refuses a fail-closed record in sync
+     * mode, while in outbox mode the row is the acknowledgement.
      *
      * @return void
      */
@@ -1524,9 +1471,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * Assert what the write has left so far: the rows in the entries table and
-     * the outbox, the spill lines, the reports, the failed writes said, the
-     * written records said and the failed captures said.
+     * Assert what the write has left: entries and outbox rows, spill lines,
+     * reports, and the failed, written and captured events.
      *
      * @param  int  $entries
      * @param  int  $outbox
@@ -1554,9 +1500,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * Assert an after-commit record waits in memory for the commit on the
-     * connection: dropped with nothing left by its rollback, and written with
-     * what is given once it commits.
+     * Assert an after-commit record waits in memory for the commit: dropped by
+     * a rollback, written once it commits.
      *
      * @param  \Illuminate\Database\Connection  $host
      * @param  int  $entries
@@ -1586,9 +1531,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * Assert the record is written before `record()` returns, whether or not a
-     * transaction is open, and goes with the host's rollback on the shared
-     * connection.
+     * Assert the record is written before `record()` returns and goes with the
+     * host's rollback on the shared connection.
      *
      * @param  string  $how
      * @param  int  $entries
@@ -1645,9 +1589,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * Assert a failed write inside the host's own `transaction()` is said and
-     * thrown sanitised, spills nothing, reports nothing, and that left uncaught
-     * it rolls the business change back.
+     * Assert a failed write inside the host's `transaction()` is thrown
+     * sanitised with no spill or report, and rolls the change back.
      *
      * @param  string  $how
      * @return void
@@ -1680,9 +1623,8 @@ final class OutcomesTableTest extends TestCase
     }
 
     /**
-     * What escapes the host's own `transaction()` around a business change and
-     * a record whose write raises the failure, under the delivery and failure
-     * modes.
+     * What escapes the host's `transaction()` around a business change and a
+     * failing record, under the delivery and failure modes.
      *
      * @param  string  $how
      * @param  string  $delivery
@@ -1817,8 +1759,7 @@ final class OutcomesTableTest extends TestCase
 
     /**
      * Make an insert into the entries table or the outbox throw a query failure
-     * with the SQLSTATE and driver code, as Laravel throws it, leaving every
-     * other statement alone.
+     * with the SQLSTATE and driver code.
      *
      * @param  string  $message
      * @param  string  $state

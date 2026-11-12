@@ -21,12 +21,8 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the notifier that says a record was written: it dispatches
- * `AuditRecorded`, contains a listener's failure and a broken reporter, reports
- * through the latch so a reporter that records cannot loop, and throws a
- * listener's deadlock or lost connection inside a host transaction, sanitised,
- * instead of containing it; and runs the listeners of a package record, and
- * only those, inside the read guard, which closes however they end.
+ * Feature tests for the notifier that dispatches `AuditRecorded` and contains
+ * or rethrows its listeners' failures.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -108,10 +104,8 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
-     * A reporter that records an audit event whose listener fails again is
-     * reported to once: the report it would make of the second failure is
-     * dropped by the latch, rather than reporting, recording and failing in a
-     * loop until the stack runs out.
+     * A reporter that records an event whose listener fails again is reported
+     * to once, the latch dropping the second report.
      *
      * @return void
      */
@@ -177,8 +171,7 @@ final class RecordedNotifierTest extends TestCase
 
     /**
      * Rows of `[driver's message, class thrown]`: a deadlock and a lost
-     * connection, each raised as a query exception holding the secret in its
-     * SQL and bindings.
+     * connection, each holding the secret in its SQL and bindings.
      *
      * @return iterable<string, array{0: string, 1: class-string<\RuntimeException>}>
      */
@@ -191,10 +184,8 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
-     * With a host transaction open, a listener's deadlock or lost connection is
-     * not contained: it is thrown in its sanitised form, never the original,
-     * with no previous exception, and is not reported by the notifier, since
-     * whoever catches it reports it.
+     * Inside a host transaction a listener's deadlock or lost connection is
+     * thrown sanitised, with no previous, and not reported.
      *
      * @param  string  $message
      * @param  class-string<\RuntimeException>  $thrown
@@ -244,8 +235,7 @@ final class RecordedNotifierTest extends TestCase
 
     /**
      * A listener's lost connection is thrown as a failed notification naming
-     * the record, its code and the operation, and the listener's class of
-     * failure, and nothing else.
+     * only the record, its code, the operation and the failure's class.
      *
      * @return void
      */
@@ -376,9 +366,8 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
-     * A listener's deadlock that names no connection, as one from the driver
-     * itself, may have ended any transaction open, so with one open it
-     * propagates.
+     * A listener's deadlock naming no connection may have ended any open
+     * transaction, so with one open it propagates.
      *
      * @return void
      */
@@ -427,9 +416,8 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
-     * A reporter that deadlocks over a listener's ordinary failure while a host
-     * is open has ended that host, so the sanitised deadlock propagates rather
-     * than being swallowed as a broken reporter.
+     * A reporter that deadlocks while a host is open has ended that host, so
+     * the sanitised deadlock propagates.
      *
      * @return void
      */
@@ -466,9 +454,8 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
-     * The listeners of a package record run inside the read guard, so one that
-     * reads the trail is refused, and the guard is closed again once they have
-     * run.
+     * A package record's listeners run inside the read guard, which is closed
+     * again once they have run.
      *
      * @return void
      */
@@ -484,8 +471,7 @@ final class RecordedNotifierTest extends TestCase
 
     /**
      * The listeners of the application's own records run outside the read
-     * guard, so they may read the trail, a code that only resembles the
-     * reserved prefix included.
+     * guard, a code resembling the reserved prefix included.
      *
      * @return void
      */
@@ -501,9 +487,8 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
-     * A listener of a package record that throws is reported and contained as
-     * any other, and the read guard is closed once it has, so a later read is
-     * not refused; its refusal is forgotten with it.
+     * A throwing package-record listener is reported and contained, and the
+     * read guard closes, forgetting its refusal.
      *
      * @return void
      */
@@ -528,9 +513,8 @@ final class RecordedNotifierTest extends TestCase
     }
 
     /**
-     * A package record's listener that ends the host's transaction is thrown,
-     * sanitised, as any listener's is, and the read guard is closed once it
-     * has.
+     * A package record's listener that ends the host's transaction is thrown
+     * sanitised, and the read guard is closed.
      *
      * @return void
      */

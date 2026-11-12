@@ -40,11 +40,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for what happens once a record could not be written: the spill,
- * the report and `AuditWriteFailed` each rule asks for, in that order and each
- * on its own; what is thrown and that it is sanitised; a spill bound to a
- * commit; the failures fatal to an open transaction, the write's and a step's;
- * the write guard around all of it; and a capture's signal, told once after
- * every step, with a deferred capture's fatal failure reported, never thrown.
+ * report and event each rule asks for, and what is thrown.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -222,9 +218,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * The spill goes first, before the report and the event, because it is the
-     * only lasting trace of the record and a reporter may block or end the
-     * process.
+     * The spill goes before the report and the event, since it is the record's
+     * only lasting trace and a reporter may end the process.
      *
      * @return void
      */
@@ -236,9 +231,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * The event carries the record's id and code, the store's class and the
-     * failure's class, and none of the record's properties or the failure's
-     * text.
+     * The event carries the record's id and code and the store's and failure's
+     * classes, and nothing of the record or the failure's text.
      *
      * @return void
      */
@@ -383,9 +377,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A spill that fails is reported as a sanitised exception of its own,
-     * naming the spill and the class it failed with, and holding nothing of its
-     * message, the record or the failed write.
+     * A failed spill is reported as a sanitised exception naming the spill and
+     * its failure's class, holding nothing else.
      *
      * @return void
      */
@@ -412,9 +405,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A listener that throws is reported as a sanitised exception of its own,
-     * naming the notification and the class it failed with, and holding nothing
-     * of its message or the record.
+     * A throwing listener is reported as a sanitised exception naming the
+     * notification and its failure's class, holding nothing else.
      *
      * @return void
      */
@@ -451,9 +443,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * Under a rule that throws, the sanitised exception of the write's own
-     * failure escapes, even when the spill, the reporter and a listener all
-     * fail.
+     * Under a rule that throws, the write's own sanitised exception escapes
+     * even when the spill, the reporter and a listener all fail.
      *
      * @return void
      */
@@ -559,9 +550,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A bound spill that fails at the commit, even with a failure Laravel reads
-     * as a deadlock, throws nothing from the commit: its failure is reported,
-     * sanitised.
+     * A bound spill that fails at the commit, even with a deadlock, throws
+     * nothing from the commit and is reported sanitised.
      *
      * @return void
      */
@@ -585,8 +575,7 @@ final class FailureHandlerTest extends TestCase
 
     /**
      * The callback a bound spill leaves on the transaction holds the failed
-     * write sealed, so neither the transaction nor a trace that reaches it
-     * shows the record.
+     * write sealed, so no trace shows the record.
      *
      * @return void
      */
@@ -644,9 +633,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A failure that shows the transaction was already aborted drops the bound
-     * spill, since PostgreSQL ends such a transaction with a rollback while
-     * reporting the commit a success; the report and the event still go out.
+     * An aborted-transaction failure drops the bound spill, since PostgreSQL
+     * rolls such a transaction back while reporting the commit a success.
      *
      * @return void
      */
@@ -753,9 +741,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A lost connection while a transaction was open has ended that
-     * transaction, so the sanitised exception propagates whatever the rule
-     * says.
+     * A lost connection inside an open transaction ended it, so the sanitised
+     * exception propagates whatever the rule.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @return void
@@ -871,8 +858,7 @@ final class FailureHandlerTest extends TestCase
 
     /**
      * With no transaction open a deadlock ended nothing, so it follows the
-     * rule: spilled and reported under `REPORT`, spilled and thrown sanitised
-     * under `SPILL_AND_THROW`.
+     * rule.
      *
      * @return void
      */
@@ -925,9 +911,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A step that deadlocks while a transaction is open has ended that
-     * transaction, so its sanitised deadlock propagates even under the `REPORT`
-     * rule, and is not also reported.
+     * A step that deadlocks inside an open transaction propagates its sanitised
+     * deadlock even under `REPORT`, and is not also reported.
      *
      * @param  string  $step
      * @return void
@@ -1016,8 +1001,7 @@ final class FailureHandlerTest extends TestCase
 
     /**
      * A step's failure fatal to an open transaction is thrown in place of the
-     * write's own sanitised exception, which a rule that throws would otherwise
-     * throw.
+     * write's own sanitised exception.
      *
      * @return void
      */
@@ -1113,9 +1097,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * Every parameter of the handler that holds the record, a failure, an
-     * exception or a closure capturing either is marked sensitive, so no frame
-     * of the handler shows it.
+     * Every handler parameter holding the record, a failure, an exception or a
+     * closure capturing either is marked sensitive.
      *
      * @return void
      */
@@ -1182,9 +1165,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A stack that hides an aborted host still discards the spill bound to its
-     * commit: PostgreSQL ends that transaction with a rollback, so a replayable
-     * line would bring back undone work.
+     * A stack hiding an aborted host still discards the bound spill, since
+     * replaying it would bring back work PostgreSQL rolled back.
      *
      * @return void
      */
@@ -1236,9 +1218,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A listener's deadlock on a host's connection ended that host's
-     * transaction though the write itself was on another connection, so it
-     * propagates.
+     * A listener's deadlock on the host's connection ended the host's
+     * transaction, so it propagates though the write was on another connection.
      *
      * @return void
      */
@@ -1287,9 +1268,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A spill channel or an `AuditWriteFailed` listener that raises one of
-     * Laravel's phrases and is no database failure ended no transaction, so the
-     * step is reported and nothing is thrown.
+     * A spill channel or listener raising one of Laravel's phrases without a
+     * database failure ended no transaction, so it is only reported.
      *
      * @return void
      */
@@ -1319,9 +1299,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A reporter asked to report a step's failure that itself deadlocks while a
-     * host is open has ended that host, so it propagates once the rest have
-     * run, rather than being swallowed as a broken reporter.
+     * A reporter that deadlocks while a host is open has ended that host, so it
+     * propagates once the other steps have run.
      *
      * @return void
      */
@@ -1379,9 +1358,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A deferred write dropped because its commit proved a rollback writes
-     * nothing, spills nothing and dispatches nothing, as any rollback does, and
-     * is reported by its id with the SQLSTATE that showed it.
+     * A deferred write dropped because its commit proved a rollback writes,
+     * spills and dispatches nothing, and is reported with its SQLSTATE.
      *
      * @return void
      */
@@ -1422,9 +1400,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A capture's failed write is spilled once, reported once and said once, as
-     * any record's under the `REPORT` rule, and only then is its signal told,
-     * once, of the failure's class, not as fatal.
+     * A capture's failed write is spilled, reported and said once under
+     * `REPORT`, then its signal is told, not as fatal.
      *
      * @return void
      */
@@ -1459,8 +1436,7 @@ final class FailureHandlerTest extends TestCase
 
     /**
      * A synchronous capture's failure fatal to the open transaction is thrown
-     * sanitised, as any record's is, never spilled or reported, and its signal
-     * is told it is fatal.
+     * sanitised, never spilled or reported, and signalled as fatal.
      *
      * @return void
      */
@@ -1482,11 +1458,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A deferred capture's failure fatal to an open transaction runs inside a
-     * commit callback, long after the capture returned, so it is never thrown:
-     * the record of the work that committed is spilled first, at once and
-     * inside the write guard, the sanitised exception is reported once, inside
-     * the write guard, and the signal is told, not as fatal.
+     * A deferred capture's fatal failure runs after the capture returned, so it
+     * is spilled and reported inside the write guard, never thrown.
      *
      * @return void
      */
@@ -1516,10 +1489,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * A deferred capture's spill that fails, even with a failure fatal to an
-     * open transaction, is reported and goes no further, since nothing may
-     * leave the commit callback: the write's own failure is still reported and
-     * the signal still told.
+     * A deferred capture's failed spill is reported and goes no further, since
+     * nothing may leave the commit callback.
      *
      * @return void
      */
@@ -1673,9 +1644,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * What a deferred capture's write let out beyond the failure path is
-     * reported once, by the record's id and the failure's class, holding
-     * nothing of either, and its signal is told; nothing is spilled or said.
+     * What a deferred capture's write lets out beyond the failure path is
+     * reported once, payload-free, and signalled; nothing is spilled or said.
      *
      * @return void
      */
@@ -1749,9 +1719,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * Assert the failure, with no transaction open, follows each rule: spilled
-     * and reported under `REPORT`, spilled and thrown as the sanitised
-     * exception under `SPILL_AND_THROW`.
+     * Assert the failure, with no transaction open, is spilled and reported
+     * under `REPORT` and spilled and thrown under `SPILL_AND_THROW`.
      *
      * @param  \Illuminate\Database\QueryException  $failure
      * @return void
@@ -1974,9 +1943,8 @@ final class FailureHandlerTest extends TestCase
     }
 
     /**
-     * Make the step fail with the message: the spill through a broken channel,
-     * the reporter once it has kept what it was asked to report, or a listener
-     * once it has kept the event.
+     * Make the step fail with the message: the spill, the reporter or a
+     * listener.
      *
      * @param  string  $step
      * @param  string  $message
