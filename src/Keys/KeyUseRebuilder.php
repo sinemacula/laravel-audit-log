@@ -16,24 +16,8 @@ use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * Rebuilds the key uses from the entries they describe, adding the rows that
- * are missing and never removing one.
- *
- * The entries are read on the storage connection's writer in pages of 1,000, by
- * id, each page after the last id of the one before, so a page seeks the
- * primary key and the rebuild holds one page at a time. Each entry's signature
- * is verified first, and only a verified entry is trusted: one whose signature
- * does not match, whose signing key the ring does not hold, or that cannot be
- * read is skipped and adds nothing. The keys a verified entry's envelopes name
- * are found exactly as the store finds them when it writes the entry, and the
- * key uses of the page already stored are read through the entry index, so a
- * row is added only when it is missing; the missing rows are inserted many to a
- * statement, and a dry run counts them and writes nothing.
- *
- * Key uses are an append-only index, and the rebuild keeps them so: a key use
- * no verified entry names, of an entry pruned or tampered with, is left where
- * it is, since removing evidence is never a repair. Its rows are written by the
- * storage connection's own role, which inserts key uses as every write does.
+ * Adds the key uses that verified entries name and the table lacks, never
+ * removing one, since removing evidence is never a repair.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -102,8 +86,7 @@ final readonly class KeyUseRebuilder
     }
 
     /**
-     * How many of the page's entries verified, and the key uses they name, each
-     * entry's sorted by key.
+     * How many of the page's entries verified, and the key uses they name.
      *
      * @param  list<array<string, scalar|null>>  $page
      * @return array{0: int, 1: list<array{key_id: string, entry_id: string}>}
@@ -134,9 +117,8 @@ final readonly class KeyUseRebuilder
     }
 
     /**
-     * The decoded entry when its signature verifies under the key it names, and
-     * `null` when it does not, when the ring does not hold that key, or when
-     * the row cannot be read.
+     * The decoded entry when its signature verifies, or `null` when it does
+     * not, its key is unknown or the row is unreadable.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -150,15 +132,14 @@ final readonly class KeyUseRebuilder
 
             return $this->signer->verifies($envelope) ? $envelope : null;
         } catch (\UnexpectedValueException|UnknownKeyException) {
-            // An entry that cannot be judged says nothing that can be trusted,
-            // so it adds no key use
+            // An entry that cannot be verified adds no key use
             return null;
         }
     }
 
     /**
-     * Up to a page of entries after the id, or from the first, in id order, on
-     * the connection's writer, each as its stored row.
+     * Up to a page of stored entries after the id, or from the first, in id
+     * order.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  ?string  $after
@@ -179,8 +160,7 @@ final readonly class KeyUseRebuilder
     }
 
     /**
-     * The key uses that are not stored yet, read through the entry index a
-     * statement's worth of entries at a time.
+     * The key uses that are not stored yet.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<array{key_id: string, entry_id: string}>  $uses

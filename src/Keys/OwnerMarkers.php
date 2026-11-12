@@ -10,14 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The owner markers, on the connection the caller gives: the key session, for a
- * key creation, and the maintenance connection, for an erasure or a
- * reinstatement, each inside its owner's lock.
- *
- * Only an owner's latest marker, by journal sequence, is ever read, through the
- * writer and the owner's index, so a replica lagging an erasure never lets a
- * key be created for an erased owner; no reader pages through an owner's
- * markers. A marker is inserted, never changed.
+ * The owner markers, read through the writer so a replica lagging an erasure
+ * never lets a key be created for an erased owner.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,8 +21,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 final readonly class OwnerMarkers
 {
     /**
-     * The owner's latest marker on the connection's writer, by journal
-     * sequence, or `null` when the owner has none.
+     * The owner's latest marker by journal sequence, or `null` when it has
+     * none.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -50,7 +44,7 @@ final readonly class OwnerMarkers
     }
 
     /**
-     * Insert the marker on the connection.
+     * Insert the marker.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Keys\OwnerMarker  $marker

@@ -11,20 +11,9 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * The one way a value reaches the field encrypter during a capture, with the
- * context it is sealed for. It accepts only an envelope of exactly `v`, `k` and
- * `c`, returned in that order, and contains every failure, so a broken
- * encrypter costs a field and never the record.
- *
- * A failure is an encrypter that throws or returns anything else. It is
- * reported once, as a `FieldEncryptionFailedException` that names only the
- * encrypter's class, and what was thrown is discarded, because its message
- * could hold the plaintext. The sealer then calls the encrypter no more, so a
- * wildcard over thousands of elements cannot flood a reporter or keep sending
- * plaintext to a broken encrypter.
- *
- * It holds that state for one capture, so it is built per capture and is never
- * a singleton.
+ * The one way a value reaches the field encrypter in a capture; a failure costs
+ * the field, never the record, and stops the encrypter for the rest of the
+ * capture.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,11 +44,8 @@ final class EnvelopeSealer
     ) {}
 
     /**
-     * The plaintext sealed under the owner's key for the context, as `v`, `k`
-     * and `c` in that order, or `null` when the owner has no key, when the
-     * encrypter fails, or when it has already failed during this capture. Only
-     * a failure is reported; an owner with no key is not one, and later calls
-     * go on.
+     * The plaintext sealed as `v`, `k` and `c`, or `null` when the owner has no
+     * key or the encrypter fails or has already failed.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  string  $plaintext
@@ -75,8 +61,7 @@ final class EnvelopeSealer
         try {
             $envelope = $this->encrypter->encrypt($owner, $plaintext, $context);
         } catch (\Throwable) {
-            // What was thrown could hold the plaintext in its message, so it is
-            // never kept, logged or chained: all it leaves is an empty envelope
+            // Its message could hold the plaintext, so it is never kept
             $envelope = [];
         }
 
@@ -94,9 +79,7 @@ final class EnvelopeSealer
     }
 
     /**
-     * Stop calling the encrypter for this capture and report the failure. A
-     * reporter that fails too is ignored: the field is already dropped, and
-     * there is nowhere left to say so.
+     * Stop calling the encrypter for this capture and report the failure once.
      *
      * @return void
      */
@@ -107,15 +90,13 @@ final class EnvelopeSealer
         try {
             $this->handler->report(FieldEncryptionFailedException::for($this->encrypter));
         } catch (\Throwable) {
-            // The record is still being written; a broken reporter must not
-            // undo the containment of the failure it was told about
+            // A broken reporter must not fail the record
         }
     }
 
     /**
-     * The envelope in its fixed order, or `null` when it is anything but
-     * exactly a valid `v`, `k` and `c`, in any order. The contract promises
-     * this shape, but nothing enforces a promise made in a docblock.
+     * The envelope in its fixed order, or `null` unless it is exactly a valid
+     * `v`, `k` and `c`; the contract's shape is only a docblock promise.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

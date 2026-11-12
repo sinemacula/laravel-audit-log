@@ -11,19 +11,8 @@ use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
 
 /**
- * The redaction settings, read from configuration on every call and validated
- * as they are read: the sensitive key names added to the built-ins
- * (`audit-log.redaction.keys`), the key the hashes derive from
- * (`audit-log.redaction.key`, else `app.key`), what is kept of an identifier
- * (`audit-log.redaction.identifiers`) and of an IP address
- * (`audit-log.redaction.ip`), and the two byte budgets
- * (`audit-log.redaction.max_bytes`, `audit-log.redaction.max_context_bytes`).
- *
- * Every malformed value fails closed with an `InvalidArgumentException` naming
- * the setting and never the value, so a malformed explicit key is never
- * replaced by the application key. A missing setting takes its default; a
- * `null` set explicitly is malformed, except for the explicit key, where `null`
- * and an empty value, which an empty environment line gives, read as none.
+ * The redaction settings, read and validated on every call; a malformed value
+ * fails closed naming the setting, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,7 +53,7 @@ final readonly class RedactionSettings
 
     /**
      * The key names configured as sensitive beside the built-ins, each as its
-     * tokens, or none when the setting is not set or is empty.
+     * tokens.
      *
      * @return list<non-empty-list<string>>
      *
@@ -94,8 +83,7 @@ final readonly class RedactionSettings
     }
 
     /**
-     * The decoded `audit-log.redaction.key`, or `null` when it is not set or is
-     * empty.
+     * The decoded `audit-log.redaction.key`, or `null` when unset or empty.
      *
      * @return ?string
      *
@@ -113,9 +101,8 @@ final readonly class RedactionSettings
     }
 
     /**
-     * The root secret every hash derives from: the explicit key, or the decoded
-     * `app.key` when none is set. A malformed explicit key is refused here too,
-     * and never falls back to `app.key`.
+     * The root secret every hash derives from: the explicit key, else
+     * `app.key`; a malformed explicit key never falls back.
      *
      * @return string
      *
@@ -183,8 +170,8 @@ final readonly class RedactionSettings
     }
 
     /**
-     * Read every redaction setting, failing on the first malformed one. It does
-     * not read `app.key`, which is needed only once a hash is.
+     * Read every setting, failing on the first malformed one; `app.key` is read
+     * only once a hash needs it.
      *
      * @return void
      *

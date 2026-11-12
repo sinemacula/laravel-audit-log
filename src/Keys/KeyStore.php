@@ -19,23 +19,8 @@ use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Where the owners' keys are read: always through a writer, so a replica
- * lagging an erasure never hands back a key the erasure revoked.
- *
- * A record's keys are looked up at once, every unit it encrypts for in one
- * statement on the storage connection's writer, and only live keys whose
- * signature verifies are ever handed to encrypt with: a live key that does not
- * verify, or names a signing key the ring does not hold, is an
- * `UnexpectedValueException`. A page's keys are read by id in one statement,
- * and the journal rows of its erased keys' erasures in one more, both left
- * unverified for the reader to decide, a row too malformed to read left out; on
- * SQLite each binds at most 400 ids, so a page past 400 distinct keys takes a
- * statement for each 400. An owner's keys, a unit's live key and largest
- * generation, and a page of every key are read on the connection the caller
- * gives: the key session, the maintenance connection, or verification's.
- *
- * Nothing is kept between calls: no key row, wrapped key or data key outlives
- * the call that read it.
+ * Reads the owners' keys through a writer, so a replica lagging an erasure
+ * never hands back a revoked key; nothing is cached between calls.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,7 +29,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  */
 final readonly class KeyStore
 {
-    /** @var string Why a live key is refused for encryption; it names nothing of the key or its owner. */
+    /** @var string Refusal for an unverified live key; names neither the key nor its owner. */
     private const string UNVERIFIED = 'A live subject key does not verify under its signing key.';
 
     /**
@@ -63,8 +48,7 @@ final readonly class KeyStore
     ) {}
 
     /**
-     * The live key of each unit that has one, by the unit's digest, read in one
-     * statement on the storage connection's writer, each verified.
+     * The verified live key of each unit that has one, by unit digest.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Keys\KeyUnit>  $units
      * @return array<string, \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow>
@@ -92,11 +76,8 @@ final readonly class KeyStore
     }
 
     /**
-     * The keys with the ids, by id, read in one statement on the storage
-     * connection's writer, or one for each 400 on SQLite, in any state and
-     * unverified, so the reader decides what each is. An id that is not a
-     * canonical lower-case UUID names no key, and a row too malformed to read
-     * is left out.
+     * The keys with the ids, by id, in any state and unverified; a non-UUID id
+     * names no key and an unreadable row is left out.
      *
      * @param  list<string>  $ids
      * @return array<string, \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow>
@@ -130,9 +111,7 @@ final readonly class KeyStore
     }
 
     /**
-     * Every key of the owner, in every unit and state, through the owner's
-     * index on the connection's writer, by id; unverified, for the caller
-     * verifies them.
+     * Every key of the owner, in every unit and state, by id and unverified.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -153,9 +132,7 @@ final readonly class KeyStore
     }
 
     /**
-     * The unit's live key on the connection's writer, verified as a record's
-     * are, or `null` when the unit has none: the key creator's read once it
-     * holds the owner's lock.
+     * The unit's verified live key, or `null` when it has none.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Keys\KeyUnit  $unit
@@ -172,11 +149,8 @@ final readonly class KeyStore
     }
 
     /**
-     * The journal rows with the ids, by id, read in one statement on the
-     * storage connection's writer, or one for each 400 on SQLite, with their
-     * payloads and left unverified, so the reader verifies each before it
-     * believes an erasure. An id that is not a canonical lower-case UUID names
-     * no row, and a row too malformed to read is left out.
+     * The journal rows with the ids, by id and unverified; a non-UUID id names
+     * no row and an unreadable row is left out.
      *
      * @param  list<string>  $ids
      * @return array<string, \SineMacula\Laravel\AuditLog\Integrity\JournalRow>
@@ -199,8 +173,7 @@ final readonly class KeyStore
                 try {
                     $row = JournalRow::fromRow((array) $stored, true);
                 } catch (\UnexpectedValueException) {
-                    // A row that cannot be read cannot be verified, so it
-                    // proves no erasure, as a missing one proves none
+                    // An unreadable row proves no erasure
                     continue;
                 }
 
@@ -212,8 +185,7 @@ final readonly class KeyStore
     }
 
     /**
-     * The unit's largest generation in any state on the connection's writer, or
-     * 0 when the unit has no key.
+     * The unit's largest generation in any state, or 0 when it has no key.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $unit
@@ -234,9 +206,8 @@ final readonly class KeyStore
     }
 
     /**
-     * Up to the limit of keys after the id, or from the first, in id order,
-     * each as its stored row, read on the connection's writer: a page of every
-     * key, for verification and the check.
+     * Up to the limit of stored key rows after the id, or from the first, in id
+     * order.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -263,9 +234,8 @@ final readonly class KeyStore
     }
 
     /**
-     * The row, verified under the signing key it names: one that does not
-     * verify, or names a key the ring does not hold, is refused without naming
-     * the key or its owner.
+     * The row, verified under the signing key it names; a refusal names neither
+     * the key nor its owner.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -344,9 +314,8 @@ final readonly class KeyStore
     }
 
     /**
-     * The distinct ids that are canonical lower-case UUIDs, the only form a key
-     * or a journal row's id takes, so no engine is asked to compare a UUID
-     * column with anything else.
+     * The distinct canonical lower-case UUIDs among the ids, so no engine
+     * compares a UUID column with anything else.
      *
      * @param  list<string>  $ids
      * @return list<string>
@@ -357,10 +326,8 @@ final readonly class KeyStore
     }
 
     /**
-     * The ids in the lists one statement each binds: all of them in one on
-     * MySQL and PostgreSQL, and at most 400 a statement on SQLite, whose oldest
-     * builds allow 999 placeholders, so a page past 400 distinct keys adds a
-     * statement rather than fail.
+     * The ids split into one list per statement: at most 400 on SQLite, whose
+     * oldest builds allow 999 placeholders.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  non-empty-list<string>  $ids

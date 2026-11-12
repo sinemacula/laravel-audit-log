@@ -5,23 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Privacy;
 
 /**
- * The one key matcher: which keys of a record hold a secret, and the record's
- * values with the whole value of each such key replaced by the marker.
- *
- * A key longer than `KeyCeiling::MAX_BYTES` is sensitive and is never split, so
- * no key can cost more memory than that bound allows, whatever chose it. Any
- * other key is judged on its tokens, in this order. A key with no tokens is not
- * sensitive. A key that is exactly a survivor is not sensitive. A key whose
- * final token is `id`, `ids` or `at` is not sensitive. A key in which a
- * built-in or configured unit occurs as adjacent tokens is sensitive, and any
- * other key is not. Plurals are units of their own, never stemmed, and
- * `audit-log.redaction.keys` adds units only, so a configured unit passes
- * through the first steps like a built-in and nothing can remove a built-in.
- *
- * This is a heuristic. It cannot find a secret in free text or under an
- * innocuous key, an exemption assumes the key holds non-secret metadata, and an
- * exempt container's scalar values are kept. The remedy for each is an explicit
- * rule on the event's definition.
+ * The one key matcher, replacing the whole value of each secret-named key with
+ * the marker; a heuristic, so an explicit rule covers what it misses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -144,15 +129,9 @@ final readonly class Redactor
     ) {}
 
     /**
-     * The values with the whole value of every sensitive key, map or list
-     * included, replaced by the marker, at any depth and with their order kept.
-     * A list's indexes are not keys, so only its elements are walked. A kept
-     * key's array is walked and its scalar is kept.
-     *
-     * The configured units are read first, even for an empty array, so a
-     * malformed list fails whatever the record holds. This is a heuristic: an
-     * exemption assumes non-secret metadata, an exempt container's scalar
-     * values are kept, and the remedy is an explicit rule.
+     * The values with every sensitive key's whole value replaced by the marker,
+     * at any depth; configured units are read first so a malformed list fails
+     * any record.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -228,8 +207,8 @@ final readonly class Redactor
     }
 
     /**
-     * Whether the key is sensitive: past the ceiling without being split, and
-     * otherwise as the matcher judges its tokens.
+     * Whether the key is sensitive: past the ceiling, unsplit, or as its tokens
+     * match.
      *
      * @param  string  $key
      * @param  array<array-key, non-empty-list<non-empty-list<string>>>  $index

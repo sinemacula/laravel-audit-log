@@ -14,41 +14,8 @@ use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Turns a pending record's raw values into what its record stores, at capture,
- * so nothing raw rests in a deferred callback, an event or a row.
- *
- * Every setting it depends on is read first, so a malformed one fails the write
- * whatever the record holds, apart from the key, read only once a hash is
- * needed, and the log id, read only once the record has an owner to seal for. A
- * key past the ceiling leaves with its branch before the context or the
- * properties are redacted, so nothing after reads it. A value of the context or
- * the properties that is exactly an encryption envelope, at any depth, is
- * removed and logged under its masked path before anything is sealed: only the
- * record's own sealer makes the envelopes it stores, so its key uses never name
- * a key one of them was copied from. The context is redacted, capped and
- * budgeted, and no field rule touches it. The collisions the builder carried
- * are masked and the properties redacted.
- *
- * Every value is sealed for the entry the record will be stored as, whose id
- * the caller mints before minimising, so an envelope opens only in its own
- * entry and at its own path. The record's owners are gathered before anything
- * is sealed: the owners of the definition's encrypted fields, the note's owner
- * and, under the `encrypt` IP mode, the actor, so the first value sealed can
- * fetch every key the record needs. They are sealed for the record's tenant and
- * its definition's category, which are the stored entry's.
- *
- * The address is minimised, an owned note is sealed under its owner at
- * `["properties","_audit","note"]` and the identifier is hashed. The properties
- * are put through the event definition's rules and budgeted last, so the one
- * omission log, which everything above added to, lands in
- * `properties._audit.omitted`. An artifact's manifest descriptor, its artifact
- * id, kind, digest and count, is the package's own: it lands in
- * `properties._audit.manifest`, outside every field rule, and is never omitted.
- *
- * Nothing is caught: an encrypter's failure is contained by its sealer, and any
- * other failure fails the write, with a message that names keys and types and
- * never a value. It holds a sealer, which remembers a failure for one capture,
- * so it is built per capture and never bound as a singleton.
+ * Turns a pending record's raw values into what it stores, at capture, so
+ * nothing raw rests in a deferred callback, an event or a row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,13 +57,13 @@ final readonly class RecordMinimiser
         /** What seals the note and encrypted fields, for this one capture. */
         private EnvelopeSealer $sealer,
 
-        /** Where the id of the log every entry is signed into is read from on every capture. */
+        /** Where the log id is read from on every capture. */
         private SealSettings $seals,
     ) {}
 
     /**
-     * What the record of the snapshot stores under its event's definition, as
-     * the entry of the id given, a lower-case UUID the caller minted.
+     * What the snapshot's record stores as the entry the caller minted;
+     * settings are read first so a malformed one fails any record.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
@@ -140,9 +107,8 @@ final readonly class RecordMinimiser
     }
 
     /**
-     * Every owner the record encrypts for: the owners of the definition's
-     * encrypted fields among the redacted properties, the note's owner when the
-     * note has one, and the actor when the address is encrypted.
+     * Every owner the record encrypts for: encrypted fields' owners, the note's
+     * owner, and the actor when the address is encrypted.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -170,10 +136,8 @@ final readonly class RecordMinimiser
     }
 
     /**
-     * The values with every member that is exactly an encryption envelope
-     * removed, at any depth, each removal given to the callback at its path as
-     * given; values that are themselves an envelope lose all three members. A
-     * list stays a list, reindexed.
+     * The values with every exact envelope member removed and reported, so only
+     * the record's sealer makes the envelopes it stores.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -213,8 +177,8 @@ final readonly class RecordMinimiser
     }
 
     /**
-     * Log each collision the builder carried under its masked path, and count
-     * those past the ones it carried, whose paths it no longer has.
+     * Log each collision the builder carried, and count those past what it
+     * carried.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
@@ -239,10 +203,8 @@ final readonly class RecordMinimiser
     }
 
     /**
-     * What the record stores of the note: nothing without one, the plaintext
-     * without an owner, and otherwise its envelope under that owner. An owned
-     * note with no owner present, or that cannot be sealed, is dropped and
-     * diagnosed, never stored in plaintext.
+     * What the record stores of the note: the plaintext without an owner,
+     * otherwise its envelope; an owned note that cannot be sealed is dropped.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Privacy\OmissionLog  $omissions
@@ -271,9 +233,8 @@ final readonly class RecordMinimiser
     }
 
     /**
-     * The party whose key the note is sealed under: the record's actor or
-     * subject, which may be absent, the reference it was given, or none for a
-     * note without an owner.
+     * The party whose key the note is sealed under, or `null` when absent or
+     * the note has no owner.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @return ?\SineMacula\Laravel\AuditLog\Records\Reference

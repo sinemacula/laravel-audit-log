@@ -5,11 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Keys;
 
 /**
- * Thrown when a key row names a wrapping key the ring does not hold, so its
- * data key can be neither unwrapped nor its wrapping confirmed: the fields
- * sealed under it read as unreadable, and verification reports the key as
- * unverifiable, never as substituted, until the wrapping key is configured
- * again. The message names the key's id and nothing else.
+ * Thrown when a key row names a wrapping key the ring does not hold; its fields
+ * read as unreadable until that key is configured again.
  *
  * @api
  *

@@ -8,22 +8,8 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 
 /**
- * Keeps a record's encoded properties and context within their byte budgets,
- * measured on the complete JSON as it is stored, by omitting whole top-level
- * keys and never descending into one. The row is always kept.
- *
- * Each key's cost is computed once and the keys are sorted once, so the pass is
- * linear in the payload. Keys go by tier, then largest first, then bytewise on
- * the key, so the result depends on neither the order of the input nor anything
- * outside it. In the properties, keys no rule governs go first, then keys a
- * rule governs, itself or beneath it, and the note last of all. The identifier
- * hash, an artifact's manifest descriptor and the list of what was omitted are
- * never omitted, because all three are bounded: `METADATA_RESERVE_BYTES` holds
- * a hash, the largest descriptor and 32 paths of 128 bytes under the largest
- * count, so omitting until the rest fits beside that reserve brings the final
- * encoding within the budget, whatever the omissions themselves add. In the
- * context, which has no metadata and no reserve, application keys go before the
- * fixed names the package fills, and `_audit` is an ordinary key.
+ * Keeps a record's encoded properties and context within their byte budgets by
+ * omitting whole top-level keys; the row is always kept.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,7 +18,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
  */
 final class ByteBudget
 {
-    /** @var int Bytes kept for the identifier hash, the manifest descriptor and the omitted list at their largest, with their braces and a comma: 4535 measured with a `disclosure` descriptor, rounded up. */
+    /** @var int Bytes kept for the bounded metadata at its largest: 4535 measured with a `disclosure` descriptor, rounded up. */
     public const int METADATA_RESERVE_BYTES = 4600;
 
     /** @var int How far the context's costs must stay under its budget: its two braces, less the last key's comma. */
@@ -65,11 +51,8 @@ final class ByteBudget
     private function __construct() {}
 
     /**
-     * The properties as they are stored, with `_audit` last, holding the note,
-     * the identifier hash, the manifest descriptor and what was omitted, as
-     * present, with top-level keys and then the note omitted until the final
-     * encoding fits; `null` when nothing is left. The descriptor is the
-     * package's own and is never omitted.
+     * The properties as stored, `_audit` last, with top-level keys and then the
+     * note omitted until the encoding fits; `null` when nothing is left.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -126,8 +109,8 @@ final class ByteBudget
     }
 
     /**
-     * The context as it is stored, with top-level keys omitted until its
-     * encoding fits; `null` when nothing is left.
+     * The context as stored, with top-level keys omitted until it fits; `null`
+     * when nothing is left.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -157,10 +140,8 @@ final class ByteBudget
     }
 
     /**
-     * The values with the metadata after them, under `_audit`, in its fixed
-     * order (the note, the identifier hash, the manifest descriptor, what was
-     * omitted) and with only the parts present; the values alone when none is.
-     * An integer key keeps its value: this assigns rather than merges.
+     * The values with the metadata parts present under `_audit`, assigned
+     * rather than merged so an integer key keeps its value.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -208,8 +189,7 @@ final class ByteBudget
     }
 
     /**
-     * One candidate for omission per key of the values, each with its tier and
-     * its cost.
+     * One omission candidate per key, with its tier and cost.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -255,8 +235,8 @@ final class ByteBudget
     }
 
     /**
-     * The candidates to omit: in order, those it takes for what remains to cost
-     * no more than the limit.
+     * The candidates to omit, in order, until what remains costs no more than
+     * the limit.
      *
      * @param  list<array{key: int|string, tier: int, cost: int}>  $candidates
      * @param  int  $limit
@@ -282,9 +262,8 @@ final class ByteBudget
     }
 
     /**
-     * Which of two candidates goes first: the lower tier, then the greater
-     * cost, then the bytewise lesser key. Keys are unique within a tier, so the
-     * order is total and does not depend on the input's.
+     * Which of two candidates goes first: lower tier, then greater cost, then
+     * bytewise lesser key, so the order never depends on the input's.
      *
      * @param  array{key: int|string, tier: int, cost: int}  $a
      * @param  array{key: int|string, tier: int, cost: int}  $b
@@ -298,9 +277,8 @@ final class ByteBudget
     }
 
     /**
-     * What a key and its value add to the encoding: the encoded key, a colon,
-     * the encoded value and a comma. The comma the last key does not have is
-     * what makes this an upper bound.
+     * What a key and its value add to the encoding, an upper bound since the
+     * last key has no comma.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -316,9 +294,8 @@ final class ByteBudget
     }
 
     /**
-     * How many bytes the value encodes to, with the flags it is stored with. A
-     * failure is thrown anew, because the original's stack trace holds the
-     * value as the argument of `json_encode()`, which cannot mark it sensitive.
+     * How many bytes the value encodes to; a failure is thrown anew, since the
+     * original's trace holds the value unmarked.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

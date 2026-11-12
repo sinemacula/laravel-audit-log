@@ -8,26 +8,8 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Where a value an encrypter seals will be stored, and for whom: the entry it
- * belongs to, its path within the entry, the log the entry is signed into, the
- * record's tenant and category, and every owner the record encrypts for.
- *
- * The entry, the path and the log are what an envelope is bound to: a sealed
- * value authenticates only at the place it was sealed for, so an envelope
- * copied to another entry, another path or another log does not open. The
- * tenant and the category, with an owner, name the key a value is sealed under,
- * so materially different obligations never share a key. The owners list every
- * owner the record encrypts for, each once, sorted by type and then id, so an
- * encrypter can fetch every key the record needs at once, on its first value.
- *
- * A path is the column, `properties`, `context` or `ip`, then each list index
- * as an integer at the element's stored index, and each map key as PHP keys it,
- * an integer from 0 as that integer and any other key as a string, so a
- * member's path is the same whether its container is stored as a map or a list:
- * `["properties","card","last4"]`, `["properties","items",0,"iban"]`, or
- * `["ip"]` alone. Every part is checked as the context is built, and anything
- * else is refused with an `InvalidArgumentException` that never names the path
- * or an owner.
+ * Where a sealed value will be stored and for whom; an envelope is bound to its
+ * entry, path and log, and opens nowhere else.
  *
  * @api
  *
@@ -45,14 +27,14 @@ final readonly class FieldContext
     /** @var string A log id: 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or a digit. */
     private const string LOG_ID_PATTERN = '/\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z/';
 
-    /** @var string Why a path is refused; it names nothing of the path. */
+    /** @var string Refusal for a malformed path; names nothing of it. */
     private const string MALFORMED_PATH = 'A field context\'s path must be a list of `properties`, `context` or `ip`, then map keys and list'
         . ' indexes, each a string or an integer from 0; `ip` stands alone.';
 
     /** @var non-empty-list<int|string> Where in the entry the value sits: the column, then each map key and list index. */
     public array $path;
 
-    /** @var list<\SineMacula\Laravel\AuditLog\Records\Reference> Every owner the record encrypts for, each once, sorted by type and then id. */
+    /** @var list<\SineMacula\Laravel\AuditLog\Records\Reference> Every owner the record encrypts for, each once, sorted by type then id, so every key is fetched at once. */
     public array $owners;
 
     /**
@@ -72,7 +54,7 @@ final readonly class FieldContext
         /** The id of the entry the value belongs to, a lower-case UUID. */
         public string $entryId,
 
-        // Where in the entry the value sits; checked, never repaired.
+        // Checked into `$this->path`, never repaired
         #[\SensitiveParameter]
         array $path,
 
@@ -85,8 +67,7 @@ final readonly class FieldContext
         /** The category of the record's definition. */
         public string $category,
 
-        // Every owner the record encrypts for, in any order and repeated
-        // freely; kept each once, sorted.
+        // In any order and repeated freely; deduplicated into `$this->owners`
         #[\SensitiveParameter]
         array $owners,
     ) {
@@ -138,8 +119,8 @@ final readonly class FieldContext
     }
 
     /**
-     * The owners, each once, sorted bytewise by type and then by id; anything
-     * that is not a reference is refused.
+     * The owners, each once, sorted bytewise by type then id; a non-reference
+     * is refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -157,8 +138,7 @@ final readonly class FieldContext
                 throw new \InvalidArgumentException('A field context\'s owners must each be a reference.');
             }
 
-            // A reference holds no control character, so a NUL between its
-            // parts keys it unambiguously
+            // No reference holds a NUL, so it separates the parts unambiguously
             $distinct[$owner->type . "\0" . $owner->id] = $owner;
         }
 

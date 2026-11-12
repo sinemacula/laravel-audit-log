@@ -8,26 +8,9 @@ use Random\RandomException;
 use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 
 /**
- * The key wrapper the package binds: AES-256-GCM under a key of the wrapping
- * ring, with a fresh 96-bit nonce drawn inside each wrap and a 128-bit tag,
- * stored as `base64url(nonce ‖ ciphertext ‖ tag)` with no padding, 80
- * characters for a 32-byte data key.
- *
- * The AES key is HKDF-SHA256 of the wrapping key's secret under an info string
- * of its own, so a secret of any length from 32 bytes gives a 256-bit key and
- * the wrapping secret itself is never another algorithm's key. The context the
- * package gives is the additional data, so a wrapped key unwraps only beside
- * its own row, unit, generation and wrapping key id.
- *
- * Unwrapping refuses a text that is not strict base64url of a nonce, a 32-byte
- * key and a tag, and a failed authentication, with an
- * `UnexpectedValueException`, and a wrapping key the ring does not hold with an
- * `UnknownWrappingKeyException`; none names the text, the key or the context.
- * The ring is read on every call and nothing is kept between calls. The
- * wrapping keys live in the application's configuration, beside the database,
- * so restoring a backup of both restores the keys an erasure destroyed; a
- * wrapper over an external key service whose keys are destroyed outside the
- * backups is what reaches them.
+ * The package's key wrapper: AES-256-GCM under a key of the wrapping ring, with
+ * the context as additional data so a wrapped key unwraps only beside its own
+ * row.
  *
  * @api
  *
@@ -54,7 +37,7 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     /** @var string A wrapped key's alphabet: base64url, with no padding. */
     private const string BASE64URL_PATTERN = '/\A[A-Za-z0-9_-]+\z/';
 
-    /** @var string Why a wrapped key does not unwrap; it names nothing of the text, the key or the context. */
+    /** @var string Refusal for a key that does not unwrap; names nothing of the text, key or context. */
     private const string UNWRAPPED = 'The wrapped key does not unwrap under its wrapping key and context.';
 
     /**
@@ -82,8 +65,8 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     }
 
     /**
-     * The 32-byte data key wrapped under the ring key with the id, bound to the
-     * context, under a nonce drawn here and nowhere else.
+     * The 32-byte data key wrapped under the ring key with the id and a fresh
+     * nonce, bound to the context.
      *
      * @param  string  $dataKey
      * @param  string  $wrapKeyId
@@ -101,8 +84,7 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     }
 
     /**
-     * The data key the wrapped text holds, unwrapped under the ring key with
-     * the id and authenticated against the context.
+     * The data key the wrapped text holds, authenticated against the context.
      *
      * @param  string  $wrapped
      * @param  string  $wrapKeyId
@@ -121,9 +103,8 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     }
 
     /**
-     * The data key encrypted under the wrapping key's AES key with a fresh
-     * nonce, bound to the context, as base64url of the nonce, the ciphertext
-     * and the tag.
+     * The data key encrypted with a fresh nonce, as base64url of the nonce,
+     * ciphertext and tag.
      *
      * @param  string  $dataKey
      * @param  \SineMacula\Laravel\AuditLog\Keys\WrappingKey  $key
@@ -152,8 +133,7 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     }
 
     /**
-     * The data key the decoded text holds, authenticated under the wrapping
-     * key's AES key against the context.
+     * The data key the decoded text holds, authenticated against the context.
      *
      * @param  string  $sealed
      * @param  \SineMacula\Laravel\AuditLog\Keys\WrappingKey  $key
@@ -177,8 +157,8 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     }
 
     /**
-     * The AES key a wrapping key gives: HKDF-SHA256 of its secret under the AES
-     * key's info, with an empty salt.
+     * The AES key derived from the wrapping secret, so the secret itself is
+     * never another algorithm's key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Keys\WrappingKey  $key
      * @return string
@@ -189,10 +169,8 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     }
 
     /**
-     * The bytes a wrapped text encodes, refused unless it is base64url, with no
-     * padding, of a nonce, a 32-byte key and a tag: 60 bytes, which have no
-     * spare bits, so 80 characters of the alphabet are the one form they encode
-     * to.
+     * The bytes a wrapped text encodes, refused unless it is unpadded base64url
+     * of exactly a nonce, a 32-byte key and a tag.
      *
      * @param  string  $wrapped
      * @return string
@@ -211,8 +189,7 @@ final readonly class LocalKeyWrapper implements KeyWrapper
     }
 
     /**
-     * A fresh nonce from the system's random source. A system that cannot give
-     * random bytes wraps nothing.
+     * A fresh nonce from the system's random source.
      *
      * @return string
      *

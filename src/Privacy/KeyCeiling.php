@@ -7,19 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Privacy;
 use SineMacula\Laravel\AuditLog\Definitions\FieldPath;
 
 /**
- * The longest map key a record keeps, and the values with every longer key's
- * whole branch removed, at every depth, before anything else reads a key.
- *
- * A key can come from whatever filled the map, so a client can choose one. One
- * of a few megabytes would exhaust memory while it is split into tokens,
- * killing the request with a fatal error no failure mode can contain, and one
- * of more than 65,535 bytes that fits a raised budget would be refused by MySQL
- * alone, losing the record on one engine. A key of any length also takes room
- * in a row that only values were meant to take. So nothing past this ceiling is
- * split, stored or measured, and each removal is counted under a path masked
- * whole, `*` in the properties and `context.*` in the context, because a path
- * through such a key says nothing a reader could use. A container left empty
- * stays.
+ * Removes every map key longer than a record keeps before anything reads a key;
+ * a client-chosen huge key would exhaust memory or fail on MySQL alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,8 +72,7 @@ final class KeyCeiling
 
     /**
      * The values with every longer key's branch removed, at every depth, each
-     * removal counted under the masked path. A list's indexes are never longer,
-     * so a list only has its elements walked.
+     * counted under the masked path.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

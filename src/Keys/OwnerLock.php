@@ -11,28 +11,9 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The lock that makes a key creation and an erasure or a reinstatement of the
- * same owner exclude each other, so a key is never created for an owner while
- * that owner is being erased: an advisory lock, never a row lock, since an
- * owner's first key has no row to lock and a row lock would need privileges the
- * writer never holds.
- *
- * PostgreSQL takes `pg_advisory_xact_lock()` inside a transaction, which holds
- * it until the transaction ends; asking outside one is refused. Its wait is
- * bounded only when asked, by `set local lock_timeout` before it, since that
- * setting bounds every later lock of the transaction too: the key creator's few
- * statements are bounded, and an erasure's are not. MySQL takes `get_lock()` on
- * the session, waiting at most its wait whoever asks, and releases it with
- * `release_lock()` once the transaction has committed or rolled back. SQLite
- * takes nothing: its one writer already serialises the transactions, which is
- * why a key creation reads and inserts in one. A lock not granted within its
- * wait is an `OwnerLockTimeoutException`, which names neither the owner nor the
- * lock.
- *
- * Order is always the lifecycle lock first, then the owner's. The lock's key is
- * the signed 64-bit integer of the first 8 bytes of the SHA-256 of the owner's
- * canonical encoding, and its name `audit_log_owner_` and the first 32 hex
- * characters of the same digest, 48 characters, within MySQL's 64.
+ * Keeps a key creation apart from an erasure or reinstatement of the same owner
+ * with an advisory lock, as a first key has no row; always taken after the
+ * lifecycle lock.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,8 +59,7 @@ final readonly class OwnerLock
     }
 
     /**
-     * The key of an owner's lock: the signed 64-bit integer of the first 8
-     * bytes of the SHA-256 of the owner's canonical encoding.
+     * The key of an owner's lock, a signed 64-bit integer.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return int
@@ -98,8 +78,7 @@ final readonly class OwnerLock
     }
 
     /**
-     * The name of an owner's lock: `audit_log_owner_` and the first 32 hex
-     * characters of the SHA-256 of the owner's canonical encoding.
+     * The name of an owner's lock, within MySQL's 64 characters.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return string
@@ -112,9 +91,9 @@ final readonly class OwnerLock
     }
 
     /**
-     * Take the owner's lock on the connection, waiting for whoever holds it:
-     * inside the connection's transaction on PostgreSQL, bounded only when
-     * asked; on the session on MySQL, bounded always; and not at all on SQLite.
+     * Take the owner's lock: in the transaction on PostgreSQL, bounded only
+     * when asked; on the session on MySQL, always bounded; not at all on
+     * SQLite, whose one writer serialises.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -135,9 +114,8 @@ final readonly class OwnerLock
     }
 
     /**
-     * Release the owner's lock on MySQL, once the transaction that took it has
-     * ended, as often as the session holds it, so every attempt of a retried
-     * transaction is released; elsewhere the transaction's end released it.
+     * Release the owner's lock on MySQL as often as the session holds it, so
+     * every attempt of a retried transaction is released.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -161,10 +139,8 @@ final readonly class OwnerLock
     }
 
     /**
-     * Take the advisory lock of the transaction, its wait bounded by a local
-     * lock timeout when asked; a wait past the timeout is refused naming
-     * neither the owner nor the lock, and any other failure is thrown without
-     * its bindings.
+     * Take the transaction's advisory lock; `set local lock_timeout` bounds
+     * every later lock of the transaction too, so it is set only when asked.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -191,8 +167,7 @@ final readonly class OwnerLock
     }
 
     /**
-     * Refuse a failed wait for PostgreSQL's lock: past its timeout, naming
-     * neither the owner nor the lock, and otherwise as the failure was, without
+     * Refuse a failed PostgreSQL lock wait as a timeout, or rethrow it without
      * its bindings.
      *
      * @param  \Illuminate\Database\QueryException  $failure
@@ -210,8 +185,7 @@ final readonly class OwnerLock
     }
 
     /**
-     * Take the session's named lock, refusing an answer other than granted: `0`
-     * when the wait ran out and `null` when the server could not take it.
+     * Take the session's named lock, refusing any answer but granted.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -254,8 +228,8 @@ final readonly class OwnerLock
     }
 
     /**
-     * The integer a lock function answered in the row, as an integer or its
-     * decimal string, or `null` for anything else, such as SQL's `NULL`.
+     * The integer a lock function answered, or `null` for anything else, such
+     * as SQL's `NULL`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

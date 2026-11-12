@@ -17,33 +17,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SubjectKeySigner;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Creates a unit's key when a record first needs one, on the key session, so it
- * commits on its own and never rolls back with a host transaction.
- *
- * On MySQL the owner's lock is taken on the session before the transaction
- * begins, and released once it has ended. Then, in one transaction on every
- * engine, PostgreSQL's transaction is set to `read committed` as its first
- * statement, whatever the connection or the database is configured with, so no
- * snapshot taken before the lock is granted hides an erasure that committed
- * while it waited; a creation inside a transaction it did not begin, whose
- * isolation it cannot set, is refused unless it is already `read committed`.
- * PostgreSQL's advisory lock is taken next, its wait bounded, the owner's
- * latest marker is read, and the unit's live key, and the key is inserted: on
- * SQLite that one transaction is what serialises a creation with an erasure,
- * whose commit either comes before the reads or fails the insert as busy, which
- * fails the field closed. No key is made while the owner's latest marker
- * records an erasure. A live key of the unit that landed while this creation
- * waited for the lock is returned, verified and unwrapped, rather than a second
- * live generation made.
- *
- * Otherwise the key's generation is one above the larger of the owner's floor
- * and the unit's largest generation; its data key is 32 random bytes, wrapped
- * under the wrapper's current key and bound to the row, the unit, the
- * generation and the wrapping key; and its row is signed and inserted. Two
- * creations racing past every lock are settled by the unit's unique index: the
- * loser re-reads the unit's live key, verified, and returns it with its data
- * key, or `null` when the winner is no longer live. The session is closed and
- * the owner released however the creation ends.
+ * Creates a unit's key on the key session, so it commits on its own and never
+ * rolls back with a host transaction.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -94,9 +69,8 @@ final readonly class KeyCreator
     ) {}
 
     /**
-     * The unit's live key and its data key: one created now, or one that landed
-     * while this creation waited; `null` when the owner is erased, or the key
-     * that won a race is no longer live.
+     * The unit's live key and its data key, or `null` when the owner is erased
+     * or a racing winner is no longer live.
      *
      * @param  \SineMacula\Laravel\AuditLog\Keys\KeyUnit  $unit
      * @return ?array{0: \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow, 1: string}
@@ -124,9 +98,8 @@ final readonly class KeyCreator
     }
 
     /**
-     * Create the key on the session: MySQL's lock first, then the one
-     * transaction, and a re-read of the unit's live key when the unique index
-     * refuses the insert.
+     * Create the key, taking MySQL's lock outside the transaction and
+     * re-reading the winner when the unique index refuses the insert.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Keys\KeyUnit  $unit
@@ -143,8 +116,7 @@ final readonly class KeyCreator
         try {
             $made = $connection->transaction(fn (Connection $connection): ?array => $this->createWithin($connection, $unit), 1);
         } catch (UniqueConstraintViolationException) {
-            // A creation that raced past every lock committed this generation
-            // first: its key, if still live, is the unit's
+            // A creation that raced past every lock committed first
             $winner = $this->store->liveOf($connection, $unit);
 
             return $winner === null ? null : [$winner, $this->unwrapped($winner)];
@@ -160,10 +132,9 @@ final readonly class KeyCreator
     }
 
     /**
-     * Inside the creation's transaction: set PostgreSQL's isolation, take its
-     * lock, read the owner's latest marker and the unit's live key, and insert
-     * a new key when neither stops it. A live key found is returned without its
-     * data key, which is unwrapped once the transaction has ended.
+     * Insert a new key unless the owner is erased or the unit already has a
+     * live key, which is returned without its data key so it is unwrapped after
+     * the transaction.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Keys\KeyUnit  $unit
@@ -202,10 +173,8 @@ final readonly class KeyCreator
     }
 
     /**
-     * Make the generation's key, sign its row and insert it. The wrapped key is
-     * unwrapped again before anything is stored, and must give back the data
-     * key: a wrapper that cannot open what it wrapped stores nothing, so no
-     * field is ever sealed under a key that could not be recovered.
+     * Make, sign and insert the generation's key, storing nothing when the
+     * wrapper cannot unwrap what it wrapped.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Keys\KeyUnit  $unit
@@ -235,7 +204,7 @@ final readonly class KeyCreator
     }
 
     /**
-     * The data key the row wraps, unwrapped under its own wrap context.
+     * The data key the row wraps.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $row
      * @return string
@@ -245,14 +214,12 @@ final readonly class KeyCreator
      */
     private function unwrapped(#[\SensitiveParameter] SubjectKeyRow $row): string
     {
-        // A live row holds its wrapped key and its wrapping key's id, as its
-        // state requires
+        // A live row always holds its wrapped key and wrapping key id
         return $this->wrapper->unwrap((string) $row->wrappedKey, (string) $row->wrapKeyId, $row->wrapContext());
     }
 
     /**
-     * Confirm the wrapped key unwraps, under its wrapping key and context, to
-     * the data key it was made from, before anything is stored under it.
+     * Confirm the wrapped key unwraps to the data key it was made from.
      *
      * @param  string  $dataKey
      * @param  string  $wrapped
@@ -272,12 +239,9 @@ final readonly class KeyCreator
     }
 
     /**
-     * On PostgreSQL, make the creation's transaction `read committed` before
-     * any statement takes a snapshot: set it when the creation began the
-     * transaction, and otherwise refuse anything else, since an isolation can
-     * be set only before a transaction's first statement. Any other engine
-     * needs nothing: MySQL takes the owner's lock before it begins, and
-     * SQLite's single writer serialises a creation with an erasure.
+     * On PostgreSQL, run the creation at `read committed` so no snapshot taken
+     * before the lock hides an erasure; a transaction begun elsewhere at
+     * another level is refused.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -305,8 +269,8 @@ final readonly class KeyCreator
     }
 
     /**
-     * Whether the owner's lock is the session's, taken before the transaction
-     * and released after it: MySQL's is.
+     * Whether the owner's lock is held on the session around the transaction,
+     * as on MySQL.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return bool
@@ -317,8 +281,7 @@ final readonly class KeyCreator
     }
 
     /**
-     * A fresh data key from the system's random source. A system that cannot
-     * give random bytes makes no key.
+     * A fresh data key from the system's random source.
      *
      * @return string
      *

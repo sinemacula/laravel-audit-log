@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Privacy\Enums;
 
 /**
- * How a record keeps the client's IP address, under `audit-log.redaction.ip`:
- * in full, truncated, as a keyed hash, not at all, or encrypted under the
- * actor's key. An address that is not valid is stored in no mode.
+ * How a record keeps the client's IP address, under `audit-log.redaction.ip`;
+ * an invalid address is stored in no mode.
  *
  * @api
  *

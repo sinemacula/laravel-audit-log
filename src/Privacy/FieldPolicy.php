@@ -13,40 +13,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * Applies an event definition's field rules to a record's properties, after key
- * redaction and before the byte budget.
- *
- * The rule is selected first and the value transformed after, so an explicit
- * terminal rule decides its whole subtree, a retained branch keeps walking so
- * that a deeper rule still applies, and the unlisted default gives way wherever
- * a rule names something beneath it. A structural ancestor left empty is
- * removed and not counted, since its removed children were, while a retained
- * container left empty stays, because it was retained. A list reindexes what
- * survives, and a map keeps its keys and their order.
- *
- * Only a retained string is cut, at 1024 bytes. A sealed value's plaintext is
- * typed, the canonical JSON of the value whatever its type, and its limit of
- * 1024 bytes is measured after encoding: a string is cut to the longest prefix
- * whose encoding fits, and anything else whose encoding passes the limit, which
- * cutting would leave undecodable, is removed without reaching the encrypter. A
- * pseudonym covers the complete value, and no marker, pseudonym or envelope is
- * ever cut. A value key redaction replaced stays the marker under every
- * handling but `DROP`, because hashing or encrypting the marker would look like
- * evidence of a value.
- *
- * Each value is sealed for its place in the stored entry: its context's path is
- * `properties`, then each map key as `EncryptedField::segment()` names it, an
- * integer from 0 as an integer and any other key as a string, and each list
- * index at the index the element is stored at once the removed elements before
- * it are gone, so an envelope in a list opens after the list reindexes, and one
- * in a map opens whether the map is stored as a map or, once only the keys 0 to
- * n - 1 are left, as a list.
- *
- * The owners of encrypted fields are read before any field is handled, once per
- * rule, so a rule on the owner's own path cannot hide it. An encrypted field
- * with no owner, too long to seal, or that cannot be sealed, is removed and
- * never stored in plaintext. Every removal is logged under its masked path,
- * never a value or a dynamic key.
+ * Applies an event definition's field rules to a record's properties; an
+ * encrypted field that cannot be sealed is removed, never stored in plaintext.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,12 +38,8 @@ final class FieldPolicy
     private function __construct() {}
 
     /**
-     * The values with the definition's rules applied, each sealed value sealed
-     * for its place in the scope's entry, and each removal logged.
-     *
-     * Its parameters are the record's parts and the collaborators of one
-     * capture, each from its own stage of the minimiser, so none groups
-     * naturally with another.
+     * The values with the rules applied and each removal logged; owners are
+     * read first so a rule on an owner's own path cannot hide it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -136,9 +100,8 @@ final class FieldPolicy
     }
 
     /**
-     * Every owner the definition's encrypted fields name among the values, the
-     * record's actor and its subject, each once, in the order their rules are
-     * defined; a rule whose owner is absent names none.
+     * Every distinct owner the definition's encrypted fields name, in rule
+     * order; an absent owner names none.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -159,8 +122,7 @@ final class FieldPolicy
                 continue;
             }
 
-            // A reference holds no control character, so a NUL between its
-            // parts keys it unambiguously
+            // No reference holds a NUL, so it separates the parts unambiguously
             $distinct[$owner->type . "\0" . $owner->id] = $owner;
         }
 
@@ -168,8 +130,7 @@ final class FieldPolicy
     }
 
     /**
-     * The values with every plain string cut to 1024 bytes, at every depth,
-     * with their keys and order kept.
+     * The values with every plain string cut to 1024 bytes, at every depth.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -265,10 +226,8 @@ final class FieldPolicy
     }
 
     /**
-     * The reference a map holds: exactly the keys `type` and `id`, in any
-     * order, a string and a string or integer that `Reference` accepts. Either
-     * part holding the marker is no owner, since a field is never keyed on a
-     * redacted value.
+     * The reference a map of exactly `type` and `id` holds; a redacted part is
+     * no owner, since a field is never keyed on a redacted value.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -287,18 +246,14 @@ final class FieldPolicy
         try {
             return Reference::of($type, $id);
         } catch (\InvalidArgumentException) {
-            // A map that holds no valid reference is simply no owner, so the
-            // field it would have keyed is dropped and diagnosed
+            // An invalid reference is no owner, so its field is dropped
             return null;
         }
     }
 
     /**
-     * The node's survivors: a list reindexed, and a map with its keys and their
-     * order kept. Each element is walked at its path as given, which the rules
-     * and the omission log read, and at the path it is stored at, which is the
-     * map key as `EncryptedField::segment()` names it or, in a list, the count
-     * of the survivors before it.
+     * The node's survivors, a list reindexed and a map's keys kept; each
+     * element is walked at its given path and at the path it is stored at.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -341,11 +296,9 @@ final class FieldPolicy
     }
 
     /**
-     * What is kept of the value at the path, wrapped so that a kept `null` can
-     * be told from a removal, which is `null`: an explicit terminal rule
-     * handles the whole value, a retaining rule retains it, a non-empty
-     * container with a rule beneath it is walked and removed when nothing
-     * survives, and anything else takes the unlisted default.
+     * What is kept of the value, wrapped so a kept `null` differs from a
+     * removal; its own rule decides first, then a rule beneath it, then the
+     * unlisted default.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -416,9 +369,9 @@ final class FieldPolicy
     }
 
     /**
-     * The value with a terminal handling applied, wrapped, or `null` when it is
-     * removed. A value already the marker stays the marker unless it is
-     * dropped.
+     * The value with a terminal handling applied, wrapped, or `null` when
+     * removed; a marker stays the marker, since hashing or sealing it would
+     * look like evidence.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -475,9 +428,8 @@ final class FieldPolicy
     }
 
     /**
-     * The value, when it can be hashed. A normalised value is never a float or
-     * an object, so one here is a programming error and fails the write, naming
-     * only its type.
+     * The value, when it can be hashed; a float or object here is a programming
+     * error.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -499,11 +451,8 @@ final class FieldPolicy
     }
 
     /**
-     * The value's envelope, wrapped, or `null` when it has no owner or cannot
-     * be sealed. Its plaintext is typed and within 1024 bytes once encoded: a
-     * string cut so its encoding fits, and anything else whose encoding passes
-     * the limit never reaches the encrypter, since a cut one could not be
-     * decoded. It is sealed for its stored path under `properties`.
+     * The value's envelope, wrapped, or `null` when it has no owner, is too
+     * long to encode or cannot be sealed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

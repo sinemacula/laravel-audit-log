@@ -8,18 +8,9 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The keyed hashes a record keeps in place of a value, in three separate
- * domains: a sign-in identifier, a pseudonymised field and an IP address. Each
- * domain's key is HKDF-SHA256 of the root secret under its own info, so a hash
- * in one domain can never be compared with a hash in another, even under one
- * configured key.
- *
- * A hash is the first 16 hex characters of the domain key's fingerprint, a
- * colon, and the 64 hex characters of the HMAC-SHA256 of the value, 81 bytes in
- * all, so a change of key is visible rather than silently breaking correlation.
- * The key is rebuilt on every call and kept nowhere. A value that can be
- * guessed falls to brute force once the key leaks, so a hash is a pseudonym and
- * not an anonymisation.
+ * Keyed hashes a record keeps in place of a value, under one key per domain so
+ * hashes never compare across domains; a hash is a pseudonym, not an
+ * anonymisation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,9 +52,8 @@ final readonly class IdentifierHasher
     ) {}
 
     /**
-     * The hash of a sign-in identifier, once normalised, or `null` when nothing
-     * is left of it. A sign-in form can post a blank identifier, so that is not
-     * an error.
+     * The hash of a normalised sign-in identifier, or `null` when nothing is
+     * left, since a form can post a blank one.
      *
      * @param  string  $identifier
      * @return ?string
@@ -78,8 +68,8 @@ final readonly class IdentifierHasher
     }
 
     /**
-     * The hash of a pseudonymised field's complete value, which is never cut: a
-     * string once normalised, and anything else as its canonical encoding.
+     * The hash of a pseudonymised field's complete value: a string normalised,
+     * anything else canonically encoded.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -124,7 +114,8 @@ final readonly class IdentifierHasher
     }
 
     /**
-     * The fingerprint of the domain's key and the HMAC of the message under it.
+     * The domain key's fingerprint and the HMAC of the message, so a change of
+     * key is visible.
      *
      * @param  string  $info
      * @param  string  $message

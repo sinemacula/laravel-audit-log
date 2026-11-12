@@ -5,28 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Keys;
 
 /**
- * The wrapping keys owners' data keys are wrapped and unwrapped with, rebuilt
- * from the settings on every call and never cached.
- *
- * Without an explicit ring, `app.key` and each of `app.previous_keys` are
- * derived by HKDF-SHA256 under an info string of their own, never the integrity
- * ring's: the key derived from `app.key` wraps, and the others only unwrap what
- * they wrapped before a rotation. A derived key's id is `d-` and the first 16
- * hex characters of a fingerprint of its secret, so a rotated `app.key` gets a
- * new id and the keys wrapped before it keep theirs.
- *
- * With an explicit ring (`audit-log.privacy.keys`), `audit-log.privacy.current`
- * wraps, and nothing is ever wrapped under a derived key again; a malformed
- * explicit ring fails closed and never falls back to them. The keys derived
- * from `app.key` and `app.previous_keys` stay in the ring to unwrap only, so
- * the keys wrapped before the explicit ring was set still unwrap and
- * `audit-log:rewrap` moves them onto the current key; an application key that
- * is missing or malformed then adds no derived key and refuses nothing. An
- * explicit key whose id a derived key also has is the one the ring holds.
- *
- * The derivation separates the wrapping keys from every other key the
- * application key gives; it does not make them independent of it, and anyone
- * holding `app.key` holds the derived wrapping keys too.
+ * The wrapping keys, rebuilt on every call: an explicit ring when set, plus the
+ * keys derived from the application keys, which then only unwrap.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,9 +57,8 @@ final readonly class WrappingRing
     }
 
     /**
-     * The key of the ring with the id, wrapping or unwrapping only. Malformed
-     * settings fail closed with the settings' `InvalidArgumentException` before
-     * any key is looked up.
+     * The ring key with the id; malformed settings fail closed before any
+     * lookup.
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\AuditLog\Keys\WrappingKey
@@ -106,10 +85,8 @@ final readonly class WrappingRing
     }
 
     /**
-     * The id of the key that wraps, and every key of the ring by its id: the
-     * explicit ring with its current key, then the keys derived from the
-     * application keys to unwrap only; or the keys derived from `app.key` and
-     * each of `app.previous_keys`, the first wrapping.
+     * The id of the key that wraps, and every ring key by id; an explicit key
+     * wins over a derived key with the same id.
      *
      * @return array{0: int|string, 1: non-empty-array<int|string, \SineMacula\Laravel\AuditLog\Keys\WrappingKey>}
      *
@@ -143,9 +120,8 @@ final readonly class WrappingRing
     }
 
     /**
-     * The keys derived from `app.key` and each of `app.previous_keys`, which an
-     * explicit ring keeps to unwrap only; none when the application keys are
-     * missing or malformed, since an explicit ring needs none of them.
+     * The keys derived from the application keys, or none when they are missing
+     * or malformed, since an explicit ring needs none.
      *
      * @return list<\SineMacula\Laravel\AuditLog\Keys\WrappingKey>
      */
@@ -159,9 +135,8 @@ final readonly class WrappingRing
     }
 
     /**
-     * The key derived from an application key: its secret is HKDF-SHA256 of the
-     * key's bytes under the derivation info, and its id the fingerprint of that
-     * secret.
+     * The key derived from an application key, its id a fingerprint of its
+     * secret so a rotated `app.key` gets a new id.
      *
      * @param  string  $applicationKey
      * @return \SineMacula\Laravel\AuditLog\Keys\WrappingKey

@@ -11,27 +11,8 @@ use SineMacula\Laravel\AuditLog\Database\DedicatedSession;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * The session a key is created on: a connection of its own to the storage
- * connection's writer, a second PDO that commits on its own, so a key never
- * disappears with a host transaction that rolls back while a spill, the outbox
- * or an in-flight write already holds ciphertext under it.
- *
- * The session is made from the storage connection's own configuration, which
- * the framework has already resolved from its `url` and made from its `write`
- * settings over the base, with `read` and `write` gone, so it reaches exactly
- * the writer the storage connection writes through and never a replica; only
- * the name is dropped, so the session takes its own,
- * `audit_log_keys_<uuid hex>`. It is connected through the database manager,
- * never the configuration, and purged when the session closes; closing again
- * does nothing.
- *
- * Where a second PDO could not see or write what the storage connection does,
- * the storage connection itself is the session: in-memory SQLite, a storage
- * connection holding the testing manager's base transaction, and SQLite
- * whenever the storage connection is inside a transaction, since a second
- * SQLite writer would wait for the host's own lock. There a key created inside
- * a host transaction rolls back with it. An engine other than MySQL, PostgreSQL
- * and SQLite is refused before anything.
+ * A second PDO to the storage writer that keys are created on, so a key never
+ * rolls back with a host transaction after ciphertext is sealed under it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,14 +45,13 @@ final class KeySession
         /** The connection keys are created on. */
         private readonly Connection $session,
 
-        /** The name of the dedicated session, or `null` when the storage connection is the session. */
+        /** The dedicated connection's name, or `null` when the storage connection is used. */
         private readonly ?string $dedicated,
     ) {}
 
     /**
-     * Open the session: refuse an engine a key is not created on, then use the
-     * storage connection itself where a second PDO could not see or write what
-     * it does, and a dedicated session on its writer otherwise.
+     * Open the session: the storage connection itself where a second PDO could
+     * not see its writes, and a dedicated connection to its writer otherwise.
      *
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @return self
@@ -110,8 +90,7 @@ final class KeySession
     }
 
     /**
-     * Whether the session is a connection of its own, rather than the storage
-     * connection itself.
+     * Whether the session is a connection of its own.
      *
      * @return bool
      */
@@ -121,9 +100,8 @@ final class KeySession
     }
 
     /**
-     * Close the session: purge a dedicated one, which disconnects it and
-     * releases whatever it held; the storage connection is left as it is.
-     * Closing again does nothing.
+     * Close the session, purging a dedicated connection; closing again does
+     * nothing.
      *
      * @return void
      */
@@ -143,9 +121,9 @@ final class KeySession
     }
 
     /**
-     * Whether a second PDO could not see or write what the storage connection
-     * does: in-memory SQLite, the testing manager's base transaction, and
-     * SQLite inside any transaction.
+     * Whether the storage connection must be the session: a second PDO cannot
+     * see in-memory SQLite or the testing transaction, and a second SQLite
+     * writer would wait on the host's lock.
      *
      * @param  \Illuminate\Database\Connection  $storage
      * @param  string  $driver
@@ -164,12 +142,9 @@ final class KeySession
     }
 
     /**
-     * The dedicated session's configuration: the storage connection's own,
-     * which is its write configuration, as the framework made its writer from
-     * it, with its name and its isolation level removed and a handle of its own
-     * forced, never a persistent one the storage connection shares. The
-     * isolation of a creation is the key creator's to set, never the storage
-     * connection's.
+     * The storage connection's write configuration without its name or
+     * isolation level, on a handle of its own; the key creator sets the
+     * isolation.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -8,13 +8,8 @@ use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The field encrypter that never encrypts: it holds no key for any owner, so
- * every encrypted field, owned note and encrypted address is dropped and
- * diagnosed rather than stored in plaintext.
- *
- * Binding it is the way to choose never to encrypt. It creates no key, so the
- * package's key store gains nothing while it is bound, and the keys made before
- * it was bound can still be erased.
+ * The field encrypter that never encrypts, so every encrypted field is dropped,
+ * never stored in plaintext; earlier keys can still be erased.
  *
  * @api
  *

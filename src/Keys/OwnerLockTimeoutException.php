@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Keys;
 
 /**
- * Thrown when an owner's lock was not granted within its wait: another key
- * creation, an erasure or a reinstatement of the same owner held it throughout.
- * Whatever asked for the lock was rolled back whole, so a key creation made no
- * key and the field it was asked for is dropped, failing closed, and may be
- * recorded again.
- *
- * Its message names the wait alone, never the owner or the lock's key, and the
- * package never gives it another exception, whose message could quote them.
+ * Thrown when an owner's lock was not granted within its wait; whatever waited
+ * rolled back, and the message names the wait alone, never the owner.
  *
  * @api
  *
