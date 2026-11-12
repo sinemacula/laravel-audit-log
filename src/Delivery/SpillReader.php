@@ -9,21 +9,11 @@ use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
 
 /**
- * Reads a spill file line by line, and takes from each line that holds the
- * spill marker the one JSON object after it, whatever a channel's format put
- * around it.
+ * Reads a spill file line by line, taking the one JSON object after each spill
+ * marker, whatever a channel's format put around it.
  *
- * A line is read in chunks, so memory follows each line's own length, up to the
- * bound: PHP allocates the whole length given to `fgets()` before it reads, so
- * asking for the bound at once would claim about 200 MB for every line, a short
- * one included. A line that reaches the bound without a newline is truncated
- * when the bytes held hold the marker and ignored otherwise, and its remainder
- * is skipped without being kept.
- *
- * A line without the marker is ignored and not counted, since a shared channel
- * holds other lines, but every line has its number. The reader never parses and
- * never repairs: an object left unclosed is truncated, and what the object
- * holds is the codec's to judge.
+ * Lines are read in chunks because PHP allocates the whole length given to
+ * `fgets()` up front, which at the bound would claim about 200 MB per line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,7 +22,7 @@ use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
  */
 final readonly class SpillReader
 {
-    /** @var int Bytes read at a time, and what a channel's format may add to a line beyond its envelope. */
+    /** @var int Bytes read at a time, and what a channel's format may add around an envelope. */
     public const int FRAMING_BYTES = 4096;
 
     /**
@@ -42,14 +32,13 @@ final readonly class SpillReader
      */
     public function __construct(
 
-        /** The longest envelope a line may hold as it is encoded there, in bytes. */
+        /** The longest encoded envelope a line may hold, in bytes. */
         private int $maxEncodedBytes = EnvelopeCodec::MAX_ENCODED_BYTES,
     ) {}
 
     /**
-     * The file's lines that hold the marker, in order, with what the reader
-     * took from each; refused at once when the path cannot be read. The file
-     * closes with the last reference to the reading, so however it ends.
+     * The lines holding the marker, in order, with what was taken from each;
+     * refused at once when the path cannot be read.
      *
      * @param  string  $path
      * @return \Generator<int, \SineMacula\Laravel\AuditLog\Delivery\SpillLine, void, void>
@@ -68,10 +57,8 @@ final readonly class SpillReader
     }
 
     /**
-     * The one JSON object after the first marker in the line, ignoring whatever
-     * follows it: `null` when there is no marker, when what follows the marker
-     * does not start `{`, and when the object is never closed. Strings, escapes
-     * and depth are tracked and nothing is parsed.
+     * The JSON object after the first marker, or `null` when there is no
+     * marker, no `{` after it, or no closing brace; nothing is parsed.
      *
      * @param  string  $line
      * @return ?string
@@ -114,8 +101,8 @@ final readonly class SpillReader
     }
 
     /**
-     * What the reader takes from the line the chunk starts: `null` when the
-     * line holds no marker.
+     * What the reader takes from the line the chunk starts, or `null` when it
+     * holds no marker.
      *
      * @param  \Closure(): (false|string)  $next
      * @param  string  $chunk
@@ -170,8 +157,7 @@ final readonly class SpillReader
     }
 
     /**
-     * Skip the rest of a line past the bound, a chunk at a time, keeping none
-     * of it.
+     * Skip the rest of a line past the bound without keeping it.
      *
      * @param  \Closure(): (false|string)  $next
      * @return void
@@ -186,9 +172,8 @@ final readonly class SpillReader
     }
 
     /**
-     * Why no object could be taken after the marker: malformed when something
-     * other than an object follows it, and truncated when an object is left
-     * unclosed or the line ends at the marker.
+     * Why no object followed the marker: truncated when left unclosed or the
+     * line ends there, malformed otherwise.
      *
      * @param  string  $line
      * @param  int  $start
@@ -214,9 +199,8 @@ final readonly class SpillReader
     }
 
     /**
-     * The offset of the brace that closes the object opening at the offset
-     * given, hopping over everything that is not structure, or `null` when it
-     * is never closed.
+     * The offset of the brace closing the object opened at the offset, skipping
+     * strings, or `null` when never closed.
      *
      * @param  string  $line
      * @param  int  $offset
@@ -244,9 +228,8 @@ final readonly class SpillReader
     }
 
     /**
-     * The offset of the quote that closes the string whose content starts at
-     * the offset given, stepping over each escape, or `null` when it is never
-     * closed.
+     * The offset of the quote closing the string starting at the offset,
+     * stepping over escapes, or `null` when never closed.
      *
      * @param  string  $line
      * @param  int  $offset

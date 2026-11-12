@@ -17,34 +17,11 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 
 /**
- * Dispatches `AuditRecorded` once a record's store has it.
+ * Dispatches `AuditRecorded` once a record's store has it, containing a
+ * listener's failure since the record is already stored.
  *
- * The record is already stored, so a listener's failure must not look like a
- * failed write: it is reported and goes no further, and a reporter that fails
- * too is ignored. The report runs through the report latch, so a reporter that
- * records an audit event whose listener fails again is not reported into a
- * loop.
- *
- * The exception is a deadlock, serialisation failure or lost connection raised
- * by a listener or the reporter on a connection with a transaction open, any
- * connection the application holds and not only the storage connection: that
- * has ended the transaction without Laravel knowing, so containing it would let
- * the host go on and commit the rest. It is thrown instead, never the original:
- * a concurrency error as the sanitised deadlock Laravel still retries, and a
- * lost connection as an `AuditWriteFailedException` naming the notification. It
- * is not reported as well, since what is thrown is reported by whoever catches
- * it. A failure on a connection with no transaction open ended nothing, so it
- * is contained whatever else is open.
- *
- * A record of the package's own, under the reserved `audit_log.` prefix, is
- * dispatched inside the read guard, wherever it is delivered: synchronously, at
- * a drain or at a replay. A listener of a read record cannot read the trail
- * again, so a read never records a read whose listeners read once more. Every
- * other code is dispatched outside it, so a listener of the application's own
- * records may read. One limit no guard can reach: a queued listener runs later
- * in a worker, outside every window, so a queued listener of an `audit_log.`
- * code that reads the trail makes one more read record, and one more job, each
- * time it runs. A listener that reads the trail ignores `audit_log.` codes.
+ * A package record, under `audit_log.`, is dispatched inside the read guard so
+ * its listener cannot record another read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,16 +37,13 @@ final readonly class RecordedNotifier
      */
     public function __construct(
 
-        /** The container the dispatcher, the reporter and the latch are resolved from on every call. */
+        /** Resolves the dispatcher, the reporter and the latch on every call. */
         private Container $container,
     ) {}
 
     /**
-     * Dispatch `AuditRecorded` for the record, inside the read guard for a
-     * package code, containing a listener's failure unless it ended a
-     * transaction on one of the connections named as open, which were read
-     * before the write, since Laravel forgets an open transaction when its
-     * connection is lost.
+     * Dispatch `AuditRecorded`, containing a listener's failure unless it ended
+     * a transaction on one of the connections open before the write.
      *
      * @param  string  $id
      * @param  string  $code
@@ -94,8 +68,7 @@ final readonly class RecordedNotifier
     }
 
     /**
-     * Dispatch the event, inside the read guard when it names a package code,
-     * so the guard closes however a listener ends.
+     * Dispatch the event, inside the read guard for a package code.
      *
      * @param  \SineMacula\Laravel\AuditLog\Events\AuditRecorded  $event
      * @return void
@@ -119,9 +92,9 @@ final readonly class RecordedNotifier
     }
 
     /**
-     * What a failure is thrown as when it ended a transaction that was open:
-     * the sanitised deadlock for a concurrency error, a failed notification for
-     * a lost connection, and `null` for anything else, which is contained.
+     * What a failure is thrown as when it ended an open transaction: the
+     * sanitised deadlock for a concurrency error, a failed notification for a
+     * lost connection, and `null` otherwise.
      *
      * @param  \Throwable  $exception
      * @param  string  $id
@@ -144,10 +117,9 @@ final readonly class RecordedNotifier
     }
 
     /**
-     * Report a listener's failure, unless a report is already running further
-     * up the stack. A reporter that fails too is ignored, since the record is
-     * stored, unless its failure ended a transaction that was open, which is
-     * returned to be thrown.
+     * Report a listener's failure through the report latch; a reporter's own
+     * failure is ignored unless it ended an open transaction, which is
+     * returned.
      *
      * @param  \Throwable  $exception
      * @param  string  $id
@@ -164,9 +136,8 @@ final readonly class RecordedNotifier
                 $container->make(ExceptionHandler::class)->report($exception);
             });
         } catch (\Throwable $failure) {
-            // The record is stored; a broken reporter must not undo that for
-            // the caller, or stop a later after-commit callback, unless it has
-            // ended a transaction the caller is still inside
+            // The record is stored, so a broken reporter must not fail the
+            // caller unless it ended a transaction the caller is inside
             return self::fatalOf($failure, $id, $code, $openTransactions);
         }
 

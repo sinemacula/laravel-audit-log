@@ -18,41 +18,7 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 
 /**
  * Delivers a claimed outbox row's record to each destination of the store,
- * keeping a receipt for each: a stack's destinations, in order and under their
- * ids, or a single store as the one destination `store`.
- *
- * A destination whose receipt says it has the record is not called again, so a
- * retry reaches only the destinations still without it. For each other, the
- * claim is renewed, the attempt is counted on its receipt, then the destination
- * is called, inside the write guard. A destination that joins a transaction on
- * the storage connection shares one with its receipt, so the record and the
- * receipt saying it was delivered commit or roll back together; any other is
- * called on its own, and its receipt follows. A destination that fails keeps
- * its failure's class on its receipt, never its message, and the others are
- * still tried.
- *
- * A bundle, a record with its attachment, is handed whole to each destination
- * that keeps attachments, and its receipt is marked delivered only once that
- * destination returned, so a bundle is never marked delivered without its entry
- * and its artifact. A destination that keeps none is asked before it is called
- * and refused, its attempt counted: that destination's failure alone, so the
- * others are still tried and the row is retried, then failed and kept, never
- * deleted. A record without an attachment asks no destination.
- *
- * The claim is renewed before every call and every receipt, and once the drain
- * finds it no longer owns the row it stops and writes nothing further, not even
- * the receipt of a call that succeeded: the new owner repeats the call, which
- * at-least-once delivery allows. A shared transaction is rolled back for it.
- *
- * Reading or writing a receipt is part of delivering: when the deliveries table
- * cannot be reached, as in an outage of the storage connection, the delivery is
- * incomplete, so the row retries after its backoff like any other failure.
- *
- * The store is resolved from the current container for each row, so a
- * destination removed from a stack stops blocking its rows at once; a receipt
- * it left undelivered is reported, once, as the row completes. A delivery ends
- * in a `DeliveryResult`, which holds what the last destination to fail failed
- * with, as payload-free diagnostics, when it is incomplete.
+ * keeping a receipt per destination so a retry reaches only those without it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,10 +39,10 @@ final readonly class DeliveryCoordinator
      */
     public function __construct(
 
-        /** The container the store, the guard and the reporter are resolved from for each row. */
+        /** Resolves the store, the guard and the reporter for each row. */
         private Container $container,
 
-        /** The outbox the claim is renewed on. */
+        /** Where the claim is renewed. */
         private Outbox $outbox,
 
         /** The receipts of each destination. */
@@ -84,9 +50,8 @@ final readonly class DeliveryCoordinator
     ) {}
 
     /**
-     * Deliver the record to every destination that does not have it yet:
-     * complete once each has it, incomplete when one failed or its receipts
-     * could not be read, and stale as soon as the claim no longer owns the row.
+     * Deliver the record to every destination still without it: complete,
+     * incomplete, or stale once the claim is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -118,10 +83,8 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Deliver the record to each destination in order, skipping one whose
-     * receipt says it has the record, and renewing the claim before each call:
-     * stale at once when the claim no longer owns the row, and otherwise
-     * incomplete, with what the last failed with, when any failed.
+     * Deliver to each destination in order, skipping one already delivered and
+     * stopping once the claim is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -166,8 +129,7 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Renew the claim, then attempt the destination: stale when the claim no
-     * longer owns the row.
+     * Renew the claim and attempt the destination; stale if the claim is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -195,12 +157,9 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Count the attempt on the destination's receipt, then call the destination
-     * and mark its receipt delivered: complete when it has the record,
-     * incomplete when it failed, keeps no attachment the record carries or a
-     * receipt could not be written, and stale when the claim no longer owns the
-     * row. A destination that joins a transaction on the storage connection is
-     * called inside one it shares with its receipt.
+     * Count the attempt on the receipt, then call the destination and mark it
+     * delivered, sharing a transaction with the receipt when the destination
+     * joins the storage connection's.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -242,10 +201,9 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Call the destination and mark its receipt delivered inside one
-     * transaction on the storage connection, rolled back whole when the claim
-     * no longer owns the row once the call returns. Returns `true`, since a
-     * lost claim is thrown to roll the transaction back.
+     * Call the destination and mark its receipt delivered in one transaction on
+     * the storage connection; a lost claim throws to roll it back, so this
+     * returns `true`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -273,9 +231,8 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Call the destination, then mark its receipt delivered once the claim is
-     * renewed. Returns whether the claim still owned the row; when it did not,
-     * no receipt is written.
+     * Call the destination, then mark its receipt delivered if the claim still
+     * owns the row, which is returned.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -303,10 +260,8 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Keep the class of the destination's failure on its receipt and in the
-     * result, once the claim is renewed: incomplete, or stale when the claim no
-     * longer owns the row. A receipt that cannot be written does not change
-     * that, since the row keeps the class and a retry writes the receipt.
+     * Keep the failure's class on the receipt and in the result, or return
+     * stale when the claim is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -339,8 +294,7 @@ final readonly class DeliveryCoordinator
         try {
             $this->receipts->failed($id, $name, get_debug_type($failure));
         } catch (\Throwable) {
-            // The deliveries table is out of reach, which a retry will find out
-            // again; the row keeps what the destination failed with
+            // The row keeps the failure, and a retry writes the receipt
         }
 
         $diagnostics = WriteDiagnostics::of($failure, $id, $record->record->event, FailedOperation::DRAIN, get_debug_type($destination), null, $stacked ? $name : null);
@@ -349,8 +303,8 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Hand the record to the destination inside the write guard, so a record
-     * made by the destination is refused rather than written.
+     * Hand the record to the destination inside the write guard, so a record it
+     * makes is refused.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $destination
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
@@ -366,9 +320,7 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Report each receipt left undelivered by a destination the store no longer
-     * has, inside the write guard. A reporter that fails is ignored: the record
-     * is delivered, and there is nowhere left to say so.
+     * Report each undelivered receipt of a destination the store no longer has.
      *
      * @param  string  $id
      * @param  array<string, \SineMacula\Laravel\AuditLog\Delivery\Receipt>  $receipts
@@ -391,8 +343,7 @@ final readonly class DeliveryCoordinator
     }
 
     /**
-     * Report the exception inside the write guard, ignoring a reporter that
-     * fails.
+     * Report the exception inside the write guard, ignoring a failing reporter.
      *
      * @param  \LogicException  $exception
      * @return void
@@ -406,15 +357,13 @@ final readonly class DeliveryCoordinator
                 $container->make(ExceptionHandler::class)->report($exception);
             });
         } catch (\Throwable) {
-            // The record is delivered; a broken reporter must not stop the
-            // drain, and there is nowhere left to say so
+            // A delivered record's broken reporter must not stop the drain
         }
     }
 
     /**
-     * Refuse the record's attachment to a destination that keeps none, before
-     * it is called, so a bundle is never handed to a store that would lose its
-     * members. A record without an attachment asks the destination nothing.
+     * Refuse a record with an attachment before calling a destination that
+     * keeps none, so a bundle never loses its members.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $destination
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record

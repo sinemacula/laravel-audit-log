@@ -11,20 +11,11 @@ use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 
 /**
- * What the bound audit store says of itself: whether a return is durable,
- * whether a write joins a transaction on a connection, whether it keeps a
- * record's attachment, its class, and the class of each destination it delivers
- * to.
+ * What the bound audit store says of itself, resolved on every call so a later
+ * binding is the one read.
  *
- * The store is resolved from the container on every call, so a store bound
- * later is the one read, and nothing is kept between calls. A store that does
- * not implement `Contracts\DurableAuditStore` is neither durable nor joins any
- * transaction, and one that does not implement `Contracts\AcceptsAttachments`
- * keeps no attachment. Whether a store keeps attachments is one rule, which
- * judges a store given as it judges the bound one, so a drain that calls each
- * destination of a stack in turn can refuse the one that keeps none. Reading
- * through this class is the only way the package outside the delivery reaches
- * the store, so only the delivery writes to it.
+ * The package outside the delivery reaches the store only through this class,
+ * so only the delivery writes to it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,7 +24,7 @@ use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
  */
 final readonly class StoreCapabilities
 {
-    /** @var string The refusal of an attachment, by the class of the store that keeps none. */
+    /** @var string The refusal of an attachment, by the store's class. */
     private const string NO_ATTACHMENTS = 'The store %s does not keep attachments, so a bulk operation cannot be stored there. Bind one that does, such as the database store.';
 
     /**
@@ -121,9 +112,8 @@ final readonly class StoreCapabilities
     }
 
     /**
-     * The class of each destination the bound store delivers to, as
-     * `get_debug_type()` names it, by id: each of a stack's destinations, or
-     * the store itself under `store`.
+     * The class of each destination by id: a stack's destinations, or the store
+     * under `store`.
      *
      * @return non-empty-array<string, string>
      *
@@ -138,8 +128,8 @@ final readonly class StoreCapabilities
     }
 
     /**
-     * Whether the store keeps a record's attachment with its entry: only when
-     * it implements `Contracts\AcceptsAttachments` and says so.
+     * Whether the store implements `Contracts\AcceptsAttachments` and says it
+     * keeps attachments.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
      * @return bool
@@ -150,9 +140,8 @@ final readonly class StoreCapabilities
     }
 
     /**
-     * The refusal of an attachment to the store, which keeps none, naming its
-     * class as `get_debug_type()` names it, so an anonymous store names no file
-     * path.
+     * The refusal of an attachment to a store that keeps none, naming its debug
+     * type so an anonymous store names no file path.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
      * @return \LogicException

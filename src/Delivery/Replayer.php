@@ -18,42 +18,9 @@ use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
  * Replays what a failed write left behind: the signed records in a spill file,
  * and the failed rows of the outbox.
  *
- * A spill line is replayed only when it verifies. A record is never signed,
- * finalised or minimised again, so it reaches the store as it was first signed,
- * with its id, its times and its provenance. A line that was altered, one whose
- * key was removed, one in a version this release does not read, a malformed or
- * truncated one and an unsigned one are each skipped and counted apart, and
- * stay in the file: a removed key means the record cannot be verified, so
- * restore the key or leave it quarantined. A record the store refuses is
- * counted by its id and the class of the failure, never its message, and stops
- * no other line.
- *
- * A pruned record is never resurrected: a line that verifies is checked against
- * the tombstones first, and a record retention has already pruned is counted
- * pruned and never handed to the store, on a dry run too, and the line stays in
- * the file. A failure reading the tombstones is counted as the line's failure.
- * Outside a dry run the check and the store run in one lifecycle transaction,
- * behind the lifecycle lock every prune takes first, so no prune can delete the
- * record between its check and its insert and the insert never brings back an
- * entry pruned a moment before; the installation is confirmed once, before the
- * first line. The outbox replay drains, and the drain checks every row it reads
- * the same way.
- *
- * A spilled bundle, a record with its attachment, is replayed whole: the store
- * keeps its entry and its artifact together, and a bundle it holds already is a
- * no-op. The bound store is asked whether it keeps attachments before it is
- * called; one that keeps none is never handed the bundle, which is counted
- * failed and stays in the file. A failed outbox row holding a bundle is drained
- * as any other, so each destination is asked in turn.
- *
- * An outbox replay resets the receipts of the destinations that do not have a
- * record first, then requeues its row, then drains, so a crash between the two
- * leaves the row failed and a rerun is safe, and a destination that has the
- * record keeps its receipt and is not called again. The drain takes every row
- * due, not only those the replay requeued, and its tally is mapped across.
- *
- * A dry run changes nothing and dispatches nothing: it writes no row, no
- * receipt and no entry, and dispatches no event.
+ * A record is never re-signed, and a pruned record never resurrected: each is
+ * checked against the tombstones behind the lifecycle lock, in the transaction
+ * that stores it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -82,28 +49,28 @@ final readonly class Replayer
      */
     public function __construct(
 
-        /** The container the store and the guard are resolved from on every call. */
+        /** Resolves the store and the guard on every call. */
         private Container $container,
 
-        /** The reader that takes each envelope from a spill file. */
+        /** Takes each envelope from a spill file. */
         private SpillReader $reader,
 
-        /** The codec that verifies and rebuilds each envelope. */
+        /** Verifies and rebuilds each envelope. */
         private EnvelopeCodec $codec,
 
         /** The outbox whose failed rows are requeued. */
         private Outbox $outbox,
 
-        /** The receipts of the destinations that do not have a record. */
+        /** The receipts reset for a replay. */
         private Receipts $receipts,
 
-        /** The drainer that delivers the requeued rows. */
+        /** Delivers the requeued rows. */
         private OutboxDrainer $drainer,
 
-        /** The notifier that dispatches `AuditRecorded` for a replayed record. */
+        /** Dispatches `AuditRecorded` for a replayed record. */
         private RecordedNotifier $notifier,
 
-        /** The tombstones that say whether retention has already pruned a record. */
+        /** Say whether retention has already pruned a record. */
         private PruneTombstones $tombstones,
     ) {}
 
@@ -135,8 +102,9 @@ final readonly class Replayer
     }
 
     /**
-     * Requeue every failed row of the outbox and drain, or, on a dry run, count
-     * and list the failed rows and change nothing.
+     * Reset undelivered receipts, requeue every failed row, then drain, so a
+     * crash in between leaves the row failed and a rerun safe; a dry run only
+     * lists the failed rows.
      *
      * @param  bool  $dryRun
      * @return \SineMacula\Laravel\AuditLog\Delivery\ReplayResult
@@ -197,9 +165,8 @@ final readonly class Replayer
     }
 
     /**
-     * Count the record retention has already pruned; otherwise count it on a
-     * dry run, and give it to the store on any other, the check made again
-     * behind the lifecycle lock.
+     * On a dry run, count the record pruned or would-replay; otherwise store
+     * it, which checks the tombstones behind the lifecycle lock.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  string  $where
@@ -223,10 +190,8 @@ final readonly class Replayer
     }
 
     /**
-     * Whether the record goes no further than the tombstones: retention has
-     * already pruned it, and it is counted pruned, or the tombstones could not
-     * be read, and it is counted failed by its id and the class of the failure
-     * alone.
+     * Whether the record stops at the tombstones: counted pruned, or failed
+     * when they could not be read.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  string  $where
@@ -253,12 +218,9 @@ final readonly class Replayer
     }
 
     /**
-     * In one lifecycle transaction, behind the lock, check the record against
-     * the tombstones and, unless retention has pruned it, give it to the store
-     * inside the write guard; then count it pruned, or dispatch `AuditRecorded`
-     * and count it replayed. A failure, of the tombstones' read or of the
-     * store, a bundle refused by a store that keeps no attachments included, is
-     * counted by the record's id and its class alone.
+     * Check the tombstones and store the record in one lifecycle transaction
+     * behind the lock, then count it pruned, or dispatch `AuditRecorded` and
+     * count it replayed; a failure counts by id and class alone.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  string  $where
@@ -301,8 +263,8 @@ final readonly class Replayer
     }
 
     /**
-     * Give the record to the bound store, once a bundle's store is known to
-     * keep attachments.
+     * Give the record to the bound store, refusing a bundle a store without
+     * attachments would lose.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record

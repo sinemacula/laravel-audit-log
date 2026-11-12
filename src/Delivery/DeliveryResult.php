@@ -8,9 +8,8 @@ use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryOutcome;
 use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 
 /**
- * How the delivery of one claimed row's record ended, with what the last
- * destination to fail failed with when one did: an incomplete delivery always
- * says, and no other holds a failure.
+ * How the delivery of one claimed row's record ended; only an incomplete
+ * delivery holds a failure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,7 +65,7 @@ final readonly class DeliveryResult
     }
 
     /**
-     * What an incomplete delivery failed with; asking any other is a mistake.
+     * What an incomplete delivery failed with.
      *
      * @return \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics
      *

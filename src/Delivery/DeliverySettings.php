@@ -10,19 +10,9 @@ use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 
 /**
- * The delivery settings, read from configuration on every call and validated as
- * they are read: how a record reaches its store (`audit-log.delivery.mode`) and
- * how the drain works the outbox, by how long a claim on a row lasts
- * (`audit-log.delivery.outbox.lease_seconds`), how many attempts a row gets
- * (`audit-log.delivery.outbox.max_attempts`) and how long the first retry waits
- * (`audit-log.delivery.outbox.backoff_seconds`).
- *
- * A missing setting takes its default; a `null` set explicitly is malformed. A
- * number is an integer, or the canonical digit string an environment line
- * gives, within its range. Every malformed value fails closed with an
- * `InvalidArgumentException` naming the key and never the value. The delivery
- * tables and the outbox connection are read by `DeliveryTables`, which the
- * migrations can reach, and validated here with the rest.
+ * The settings under `audit-log.delivery.`, read and validated on every call. A
+ * missing setting takes its default; a malformed one, an explicit `null`
+ * included, throws naming the key, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,7 +24,7 @@ final readonly class DeliverySettings
     /** @var string Prefix of every delivery setting's key. */
     private const string PREFIX = 'audit-log.delivery.';
 
-    /** @var array<string, array{0: int, 1: int, 2: int}> Default, least and greatest value of each numeric setting, by its key under the prefix. */
+    /** @var array<string, array{0: int, 1: int, 2: int}> Default, least and greatest value of each numeric setting, by key. */
     private const array NUMBERS = [
         'outbox.lease_seconds'   => [300, 30, 86400],
         'outbox.max_attempts'    => [10, 1, 1000],
@@ -94,8 +84,7 @@ final readonly class DeliverySettings
 
     /**
      * How long the first retry of an outbox row waits, in seconds, from 1 to
-     * 3600; each later retry waits twice as long as the one before, up to an
-     * hour.
+     * 3600; each later retry doubles it, up to an hour.
      *
      * @return int
      *

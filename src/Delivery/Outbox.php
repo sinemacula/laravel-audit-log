@@ -17,25 +17,12 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The outbox table, on the outbox connection's writer: where a record waits,
- * its envelope encrypted, until a drain delivers it.
+ * The outbox table on the outbox connection's writer, where a record waits
+ * encrypted until a drain delivers it.
  *
- * A drain reads the ids of the rows that are due, unfailed and unclaimed, then
- * claims each with one conditional update that holds only while the row is
- * still all three, so of two drains racing for a row exactly one wins, on every
- * engine and without `SKIP LOCKED`. A claim counts an attempt, so an attempt
- * that kills its worker still counts, writes a lease that ends
- * `delivery.outbox.lease_seconds` from now, and writes a token of its own.
- * Every later change to the row (a renewal, a retry, a failure, the delete)
- * requires that token, so once the lease has passed and another drain owns the
- * row, the first changes nothing and is told so.
- *
- * An insert runs alone outside a transaction and in a savepoint inside one, so
- * a failed insert leaves the transaction as it was. Every read is on the
- * writer, so a lagging replica never answers. A failed row is kept, with the
- * class of its last error and never a message, until a replay requeues it.
- * Times are written in UTC by the package's clock, so leases are judged by each
- * worker's clock.
+ * A claim is one conditional update writing a token every later change
+ * requires, so two racing drains never both own a row, on any engine and
+ * without `SKIP LOCKED`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,7 +31,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class Outbox
 {
-    /** @var int Ids requeued by one statement, so a long list never exceeds what an engine binds. */
+    /** @var int Ids requeued per statement, below what an engine binds. */
     private const int REQUEUE_CHUNK = 500;
 
     /**
@@ -56,10 +43,10 @@ final readonly class Outbox
      */
     public function __construct(
 
-        /** The connections the outbox connection is resolved from on every call. */
+        /** Resolves the outbox connection on every call. */
         private ConnectionResolverInterface $connections,
 
-        /** The clock every time the outbox writes or compares is read from. */
+        /** The clock every stored or compared time is read from. */
         private Clock $clock,
 
         /** The delivery settings the lease is read from. */
@@ -86,8 +73,8 @@ final readonly class Outbox
     }
 
     /**
-     * The outbox connection's name as the connection gives it, so a name that
-     * selects a connection's reader or writer is compared as the connection.
+     * The outbox connection's name as the connection gives it, so a read or
+     * write selector compares as the connection.
      *
      * @return string
      *
@@ -113,10 +100,8 @@ final readonly class Outbox
     }
 
     /**
-     * Insert a row for the record under the id, holding the payload, due now
-     * and with no attempt yet: alone outside a transaction, and in a savepoint
-     * of one attempt inside one, so a failed insert rolls back to it and leaves
-     * the transaction as it was.
+     * Insert a due row with no attempts, in a savepoint when a transaction is
+     * open, so a failed insert leaves the transaction as it was.
      *
      * @param  string  $id
      * @param  string  $payload
@@ -156,9 +141,8 @@ final readonly class Outbox
     }
 
     /**
-     * The ids of at most the limit of rows a drain may claim: not failed, due
-     * by the instant given, and with no lease or one that has passed, oldest
-     * due first and then by id. No payload is read.
+     * The ids of at most the limit of claimable rows, oldest due first, without
+     * reading a payload.
      *
      * @param  int  $limit
      * @param  \Carbon\CarbonImmutable  $due
@@ -180,12 +164,9 @@ final readonly class Outbox
     }
 
     /**
-     * Claim the row under the id, while it is still not failed, due by the
-     * instant given and unleased or past its lease: one conditional update that
-     * writes a new token and a lease and counts an attempt, then a read of the
-     * payload by that token. `null` when the update changed no row, because
-     * another drain claimed it first or it changed since it was a candidate,
-     * and then nothing is read.
+     * Claim the row with one conditional update that writes a token and a lease
+     * and counts an attempt, then read its payload by the token; `null` when
+     * another drain got there first.
      *
      * @param  string  $id
      * @param  \Carbon\CarbonImmutable  $due
@@ -205,8 +186,7 @@ final readonly class Outbox
             return null;
         }
 
-        // A text column reads back as a string and an integer column as an
-        // integer, on every engine
+        // Text reads back as a string and integer as an integer on every engine
         /** @var (object{payload: string, attempts: int}&\stdClass)|null $row */
         $row = $this->table()->where('id', $id)->where('claimed_by', $token)->first(['payload', 'attempts']);
 
@@ -214,12 +194,9 @@ final readonly class Outbox
     }
 
     /**
-     * Extend the claim's lease to `delivery.outbox.lease_seconds` from now, and
-     * say whether the claim still owns the row. A renewal that changes no row
-     * is followed by a read by the token, because MySQL counts the rows an
-     * update changed rather than those it matched, and a renewal within the
-     * same microsecond changes nothing; only when that read finds no row has
-     * the claim lost it.
+     * Extend the claim's lease and say whether it still owns the row. MySQL
+     * counts changed rather than matched rows, so a renewal that changes
+     * nothing is checked with a read by the token.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @return bool
@@ -236,9 +213,8 @@ final readonly class Outbox
     }
 
     /**
-     * Release the claim's row for another attempt once the instant given has
-     * come, naming the class of the error that stopped this one. Returns
-     * whether the claim still owned the row.
+     * Release the row for another attempt at the instant given, naming the
+     * error's class; returns whether the claim still owned it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \Carbon\CarbonImmutable  $availableAt
@@ -261,10 +237,8 @@ final readonly class Outbox
     }
 
     /**
-     * Fail the claim's row now, naming the class of the error that stopped it
-     * or the fixed word for why, and release it: the row is kept, and no drain
-     * claims it again until a replay requeues it. Returns whether the claim
-     * still owned the row.
+     * Fail and release the row, naming the error's class or why, until a replay
+     * requeues it; returns whether the claim still owned it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  string  $errorClass
@@ -286,8 +260,8 @@ final readonly class Outbox
     }
 
     /**
-     * Delete the claim's row, once every destination has the record. Returns
-     * whether a row went, which it does only while the claim owns it.
+     * Delete the row once every destination has the record; returns whether the
+     * claim still owned it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @return bool
@@ -316,10 +290,8 @@ final readonly class Outbox
     }
 
     /**
-     * Requeue the failed rows among the ids: each is unfailed, its attempts
-     * reset, due now and unclaimed, and the class of its last error is kept. A
-     * row that is not failed is left as it is. Returns how many rows were
-     * requeued.
+     * Requeue the failed rows among the ids as fresh and due now, keeping their
+     * last error class; returns how many were requeued.
      *
      * @param  list<string>  $ids
      * @return int
@@ -359,8 +331,8 @@ final readonly class Outbox
     }
 
     /**
-     * The query narrowed to the rows a drain may claim: not failed, due by the
-     * instant given, and with no lease or one that has passed.
+     * The query narrowed to rows a drain may claim: not failed, due, and
+     * unleased or past the lease.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  \Carbon\CarbonImmutable  $due
