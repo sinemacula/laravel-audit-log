@@ -8,10 +8,8 @@ use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * Who started a piece of work, as references and the guard that gave them:
- * never a model, and never turned back into one, so it says who started the
- * work rather than who is authenticated now, and it stays valid after the actor
- * is deleted.
+ * Who started a piece of work, as references and the guard that gave them,
+ * never a model, so it outlives the actor's deletion.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -5,21 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Contracts;
 
 /**
- * Durable audit store contract: an audit store that says what a return from
- * `store()` means, so the delivery can tell a guarantee it may give from one it
- * must refuse.
+ * Durable audit store contract: what a return from `store()` means, so delivery
+ * can refuse a guarantee it cannot give.
  *
- * Durability means that a return is a durable acknowledgement: the record is
- * kept once `store()` returns, and a process that dies a moment later loses
- * nothing. Participation means that the write commits and rolls back with a
- * transaction open on the connection named, so the record exists exactly when
- * the business change it describes does. The two are separate: a durable remote
- * store cannot be atomic with local data, and a store that joins a transaction
- * is durable only once that transaction commits. A fail-closed record needs a
- * durable store, and a transactional record a store that participates on its
- * connection, unless the outbox acknowledges for them. A store without this
- * contract counts as neither. An implementation must answer from its own
- * configuration, never from the record, and must keep no state between calls.
+ * A fail-closed record needs a durable store and a transactional one a store
+ * participating on its connection, unless the outbox acknowledges for them. An
+ * implementation answers from its own configuration and keeps no state.
  *
  * @api
  *

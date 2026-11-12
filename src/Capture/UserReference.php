@@ -9,14 +9,8 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The reference of the user an event carries, read from the user alone: a model
- * by its reference, any other authenticatable user by its class and its
- * identifier, and anything else as no one.
- *
- * A user that cannot be referred to, such as a model with no key or an
- * identifier a reference refuses, is no one rather than a failure, so the
- * activity is still recorded with no actor. No guard is ever asked: the user is
- * the one the event names, never the one a guard holds now.
+ * The reference of the user an event names, read from the user alone and never
+ * from a guard; one that cannot be referred to is no one, never a failure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,10 +25,8 @@ final class UserReference
     private function __construct() {}
 
     /**
-     * The reference of the user, or `null` when it is no user or cannot be
-     * referred to: a model through its reference, and any other authenticatable
-     * user by its class and its identifier when that is a string or an integer
-     * the reference accepts.
+     * The user's reference, or `null` when it is no user or cannot be referred
+     * to.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -50,14 +42,13 @@ final class UserReference
                 default                          => null,
             };
         } catch (\InvalidArgumentException) {
-            // A user the reference refuses is no one, never a failure
             return null;
         }
     }
 
     /**
-     * The reference of an authenticatable user by its class and identifier, or
-     * `null` when the identifier is neither a string nor an integer.
+     * An authenticatable user's reference by class and identifier, or `null`
+     * when the identifier is not a string or an integer.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
      * @return ?\SineMacula\Laravel\AuditLog\Records\Reference

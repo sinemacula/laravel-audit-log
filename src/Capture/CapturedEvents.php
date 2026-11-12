@@ -5,31 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Capture;
 
 /**
- * The event objects captured so far, and the window in which a mapper runs.
+ * The event objects claimed or being described, so one object gives one record,
+ * and the mapping window in which explicit writes are refused.
  *
- * An event object is claimed by the first source that returns a builder for it,
- * just before that builder is written, so a class and its interface mapped
- * together, an event dispatched twice, or a mapping and a package listener of
- * the same event give one record; a source that skips the event leaves it for
- * another. A claim is held weakly, so it goes with its event and keeps nothing
- * of it alive.
- *
- * While a mapper, or a package source's description, runs, the mapping window
- * is open and no record is written by the application: a mapper returns its
- * builder and the capture writes it. A capture of another event that the
- * description sets off, a watched model it saves or a Gate check it denies, is
- * still written by its own capture. Windows nest, and each closes however its
- * work ends.
- *
- * The event object being described is marked for as long as its description
- * runs, so a description that captures or dispatches the same object again is
- * not described a second time inside the first: the inner capture writes
- * nothing, and the outer one goes on. The mark is held weakly and removed
- * however the description ends, so a source that skips the event leaves it free
- * for another.
- *
- * It is scoped, so nothing outlives the request or job it was made in, and only
- * a shared instance claims or guards anything.
+ * Scoped, and holds every event weakly, so nothing outlives its request or job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,8 +47,8 @@ final class CapturedEvents
     }
 
     /**
-     * Whether this call claims the event object for the source about to write
-     * it: `true` the first time, and `false` once it has been claimed.
+     * Whether this call claims the event object; `false` once it has been
+     * claimed.
      *
      * @param  object  $event
      * @return bool
@@ -86,8 +65,7 @@ final class CapturedEvents
     }
 
     /**
-     * Run the work inside a mapping window and return what it returns, closing
-     * the window however the work ends.
+     * Run the work inside a mapping window, closing it however the work ends.
      *
      * @template TResult
      *
@@ -108,9 +86,8 @@ final class CapturedEvents
     }
 
     /**
-     * Run the description of the event object inside a mapping window, with the
-     * object marked as being described, and return what it returns, removing
-     * the mark and closing the window however the description ends.
+     * Run the description inside a mapping window with the event object marked
+     * as being described, unmarking it however it ends.
      *
      * @template TResult
      *
@@ -132,8 +109,7 @@ final class CapturedEvents
     }
 
     /**
-     * Whether the event object's description is running now, so capturing it
-     * again would describe it inside its own description.
+     * Whether the event object's description is running now.
      *
      * @param  object  $event
      * @return bool

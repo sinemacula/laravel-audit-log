@@ -8,16 +8,9 @@ use Illuminate\Contracts\Auth\Guard;
 use SineMacula\Laravel\AuditLog\Records\HeldActor;
 
 /**
- * Held actor reader contract: reads who a guard that does not use Laravel's
- * `GuardHelpers` already holds, so its user can be the ambient actor.
- *
- * It is asked only for the first guard in the walk whose `hasUser()` is true,
- * and only when an integration binds it. It must read only what the guard has
- * bound: never `user()`, never authenticate, never read a request. `null`
- * leaves the guard to the `GuardHelpers` reading, and an
- * `\InvalidArgumentException` means no ambient actor. A guard it reads must not
- * keep its user from one queued job to the next on a worker, since only a
- * `GuardHelpers` guard's leftover user is recognised.
+ * Held actor reader contract: reads who a guard without `GuardHelpers` already
+ * holds, for the ambient actor. It reads only what the guard has bound: never
+ * `user()`, never authenticating or reading a request.
  *
  * @api
  *
@@ -27,7 +20,9 @@ use SineMacula\Laravel\AuditLog\Records\HeldActor;
 interface HeldActorReader
 {
     /**
-     * The actor the guard holds, or `null` when this reader does not read it.
+     * The actor the guard holds, or `null` to leave the guard to the
+     * `GuardHelpers` reading; an `\InvalidArgumentException` means no ambient
+     * actor.
      *
      * @param  string  $guard
      * @param  \Illuminate\Contracts\Auth\Guard  $instance

@@ -22,36 +22,8 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 
 /**
- * Captures an event as a record: the one way a mapped event, a core
- * authentication event, a Gate denial or a watched model's change is written.
- *
- * The source describes the event on a builder with no recorder, inside the
- * mapping window, so nothing it records explicitly is written, and returns that
- * builder or `null` to skip the event. A capture of another event its
- * description sets off is a capture of its own and is written; the same event
- * object captured or dispatched again while it is being described writes
- * nothing, so a mapper that does so never recurses. A builder returned is
- * claimed for its event object, so the object is written once whichever sources
- * see it, and is then written through the record pipeline with the capture's
- * signal: immediately unless the package's model source deferred it, never
- * fail-closed or transactional, and following the `REPORT` rule whatever the
- * failure mode.
- *
- * Nothing leaves a capture but one failure. A failure that ended a transaction
- * open on the connection it happened on (a concurrency error or a lost
- * connection) propagates sanitised from a capture that writes at once, judged
- * against the transactions open before the capture ran, because Laravel forgets
- * a transaction whose connection is lost; it is neither spilled nor reported,
- * and `AuditCaptureFailed` is still dispatched once. Any other failure is
- * reported once, by its class names alone (a failed write as the write's own
- * failure, anything else as a `CaptureFailedException`), `AuditCaptureFailed`
- * is dispatched once, and the capture returns `null`, so the code that
- * dispatched the event goes on. Reports and the event go out inside the write
- * guard, and a reporter or a listener that fails stops nothing.
- *
- * Inside the write guard nothing is captured and nothing is said: writing an
- * entry never produces a record. An event of the package's own is never
- * captured, before any mapping is resolved.
+ * Captures events as records, containing every failure but one fatal to a
+ * transaction open before the capture, which propagates sanitised.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,17 +46,13 @@ final readonly class CaptureCoordinator
      */
     public function __construct(
 
-        /** The container of the capture, which everything a capture uses is resolved from. */
+        /** The container everything a capture uses is resolved from. */
         private Container $container,
     ) {}
 
     /**
-     * Capture an event through the mapper registered for it, and return the
-     * record written, or `null` when nothing was: the event is the package's
-     * own, the write guard is active, no mapping applies, the event has been
-     * captured already or is being described now, the mapper skipped it, or the
-     * capture failed. Nothing is thrown but a failure fatal to an open
-     * transaction.
+     * Capture an event through its registered mapper; `null` when nothing was
+     * written. Only a failure fatal to an open transaction is thrown.
      *
      * @param  object  $event
      * @return ?\SineMacula\Laravel\AuditLog\Records\AuditRecord
@@ -118,12 +86,9 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * Capture an event through one of the package's own sources, which
-     * describes it, and return the record written, or `null` when nothing
-     * was. With `$once` the event object is captured once whichever sources
-     * see it; without, each call may write. An object whose description is
-     * running is never described again inside it. Only a source that may defer can
-     * choose a timing, and only immediately or after commit.
+     * Capture an event a package source describes; `null` when nothing was
+     * written. With `$once` the object is written once across sources, and only
+     * a source that may defer chooses a timing: immediately or after commit.
      *
      * @param  object  $event
      * @param  string  $source
@@ -154,10 +119,7 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * The mapper registered for the event, or `null` when the event is the
-     * package's own, the write guard is active, nothing is mapped, no mapping
-     * applies, or the event object has been captured already or is being
-     * described now. A class name alone: the container may make anything of it.
+     * The mapper class for the event, or `null` when it is not captured now.
      *
      * @param  object  $event
      * @return ?string
@@ -183,8 +145,8 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * Whether the event object is not to be described now: its description is
-     * running, or, when it is captured once, it has been claimed.
+     * Whether the event object is being described or, when captured once,
+     * already claimed.
      *
      * @param  object  $event
      * @param  bool  $once
@@ -200,9 +162,9 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * Describe the event, and write the builder its source returned with the
-     * capture's signal, containing any failure. The transactions open are read
-     * first, since Laravel forgets one whose connection is lost.
+     * Describe the event and write its builder, containing any failure. Open
+     * transactions are read first because Laravel forgets one whose connection
+     * is lost.
      *
      * @param  object  $event
      * @param  string  $source
@@ -238,10 +200,8 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * The builder to write: the event described on a builder with no recorder
-     * inside the mapping window, with its object marked as being described,
-     * checked, and its event object claimed, or `null` when the source skipped
-     * the event or the object was claimed meanwhile.
+     * The builder to write, described inside the mapping window and claimed, or
+     * `null` when the source skipped the event or it was claimed meanwhile.
      *
      * @param  object  $event
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): ?\SineMacula\Laravel\AuditLog\Records\PendingRecord  $describe
@@ -284,11 +244,9 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * Refuse what a source returned unless it is the builder it was given,
-     * still to be recorded, with no say in how it is written beyond writing it
-     * after the transaction: no other timing, unless the source may defer, and
-     * then only immediately or after commit, and neither fail-closed nor
-     * transactional.
+     * Refuse a return other than the given, unconsumed builder, or one that
+     * chose fail-closed, transactional or, unless the source may defer, any
+     * timing but after the transaction.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $returned
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $given
@@ -313,12 +271,9 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * Contain a capture's failure, and return `null`: a failure its write's
-     * signal says is fatal is thrown as it is, a failure the signal has been
-     * told of is already handled, and a failure fatal to a transaction open
-     * before the capture ran is thrown sanitised once the capture's failure is
-     * dispatched. Anything else is reported by class names alone and dispatched
-     * as `AuditCaptureFailed`.
+     * Contain a capture's failure: rethrow one the signal marks fatal, throw
+     * one fatal to an open transaction sanitised, and report anything else by
+     * class names alone.
      *
      * @param  \Throwable  $failure
      * @param  string  $eventClass
@@ -358,11 +313,9 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * What a failure is thrown as when it ended a transaction open before the
-     * capture ran: the sanitised deadlock for a concurrency error, and a
-     * capture failure naming its classes alone for a lost connection, on a
-     * connection with a transaction open, or on any when it names none and one
-     * was open; `null` for anything else.
+     * The sanitised exception for a concurrency error or lost connection that
+     * ended a transaction open before the capture, or `null` for any other
+     * failure.
      *
      * @param  \Throwable  $failure
      * @param  string  $eventClass
@@ -387,11 +340,9 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * What dispatches `AuditCaptureFailed` for the capture, given the class of
-     * its failure: it holds the three class names and the container alone,
-     * never the event or the builder, since a deferred write calls it when a
-     * commit runs. It dispatches inside the write guard, and nothing it meets
-     * goes further.
+     * What dispatches `AuditCaptureFailed` inside the write guard. It holds
+     * class names and the container alone, since a deferred write calls it at
+     * commit.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @param  string  $eventClass
@@ -406,16 +357,14 @@ final readonly class CaptureCoordinator
                     self::dispatchFailure($container, $eventClass, $mapperClass, $exceptionClass);
                 });
             } catch (\Throwable) {
-                // Saying that a capture failed must never fail the code that
-                // dispatched the event, and there is nowhere left to say so
+                // Announcing a failure must never fail the caller
             }
         };
     }
 
     /**
-     * Dispatch `AuditCaptureFailed` with the three class names. A listener's
-     * failure is reported by the capture's class names and its own class, and
-     * goes no further.
+     * Dispatch `AuditCaptureFailed`, reporting a listener's failure instead of
+     * throwing it.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @param  string  $eventClass
@@ -433,8 +382,8 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * Report a capture's failure inside the write guard. A reporter that fails
-     * is ignored.
+     * Report a capture's failure inside the write guard, ignoring a reporter
+     * that fails.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @param  \SineMacula\Laravel\AuditLog\Capture\CaptureFailedException  $exception
@@ -447,8 +396,7 @@ final readonly class CaptureCoordinator
                 $container->make(ExceptionHandler::class)->report($exception);
             });
         } catch (\Throwable) {
-            // A broken reporter has nowhere left to say so, and must not fail
-            // the code that dispatched the event
+            // A broken reporter must never fail the caller
         }
     }
 
@@ -465,8 +413,7 @@ final readonly class CaptureCoordinator
     }
 
     /**
-     * The connections with a transaction open, read before anything of the
-     * capture runs, or none when they cannot be read.
+     * Connections with a transaction open, or none when they cannot be read.
      *
      * @return list<string>
      */
@@ -475,8 +422,7 @@ final readonly class CaptureCoordinator
         try {
             return (new OpenTransactions($this->container->make(ConnectionResolverInterface::class)))->names();
         } catch (\Throwable) {
-            // With no connections to read none was open, so no failure of the
-            // capture can have ended a transaction
+            // No connection to read means no transaction was open
             return [];
         }
     }

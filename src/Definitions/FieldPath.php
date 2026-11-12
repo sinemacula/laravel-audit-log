@@ -7,17 +7,12 @@ namespace SineMacula\Laravel\AuditLog\Definitions;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The grammar and precedence of the paths an event definition's field rules
- * name: dot-separated map keys, at most eight of them, where `*` alone matches
- * exactly one key or list index.
+ * The grammar and precedence of field rule paths: up to eight dot-separated
+ * keys, where `*` alone matches exactly one key or list index.
  *
- * A path is clean text, with no empty segment, and no segment beginning
- * `_audit`, which belongs to the package's own metadata. A key containing `.`
- * or `*` cannot be written as a literal, so it is reachable only through `*`. A
- * literal matches a key or list index whose decimal string equals it, so
- * `items.0` names the list index `0` as well as the map key `0`, which PHP
- * cannot tell apart. The most specific path wins: more segments, then, at equal
- * length, compared left to right, a literal beats `*`.
+ * A literal matches by decimal string, so `items.0` names the index and the key
+ * `0`, which PHP cannot tell apart. More segments win, then a literal beats
+ * `*`, left to right.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,11 +87,8 @@ final class FieldPath
     }
 
     /**
-     * Whether the pattern matches the concrete path: both have the same length
-     * and, position by position, the pattern's segment is `*` or a literal
-     * equal to the decimal string of the key or list index. The comparison is
-     * of strings, never of numbers, so `00` matches the key `00` but not the
-     * list index `0`.
+     * Whether the pattern matches the path, comparing segments as strings, so
+     * `00` matches the key `00` but not the index `0`.
      *
      * @param  list<string>  $pattern
      * @param  list<int|string>  $path
@@ -118,10 +110,8 @@ final class FieldPath
     }
 
     /**
-     * Which of two paths is more specific: positive when the first is, negative
-     * when the second is, and `0` when they are equally specific. More segments
-     * is more specific; at equal length, the first position where one has a
-     * literal and the other `*` decides, the literal winning.
+     * Which path is more specific: positive for the first, negative for the
+     * second, `0` for neither.
      *
      * @param  list<string>  $a
      * @param  list<string>  $b
@@ -145,10 +135,8 @@ final class FieldPath
     }
 
     /**
-     * Whether a concrete path the first pattern matches may lie beneath one the
-     * ancestor matches: the ancestor has fewer segments and, position by
-     * position, the two are equal or either is `*`. A path of equal or greater
-     * length is never beneath.
+     * Whether a path the first pattern matches may lie beneath one the ancestor
+     * matches.
      *
      * @param  list<string>  $path
      * @param  list<string>  $ancestor
@@ -182,8 +170,7 @@ final class FieldPath
     }
 
     /**
-     * Whether two segments may match the same key: they are equal, or either is
-     * `*`.
+     * Whether two segments may match the same key.
      *
      * @param  string  $a
      * @param  string  $b

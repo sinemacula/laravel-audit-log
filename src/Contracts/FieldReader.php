@@ -5,23 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Contracts;
 
 /**
- * Field reader contract: the seam that reads the encrypted fragments of a page
- * of entries when the page is shown, whether a property holding an encryption
- * envelope, an owned note or an IP address stored under the `encrypt` mode.
+ * Field reader contract: reads a page's encrypted fragments when it is shown,
+ * asked only under a scope granted `revealingEncryptedFields()`.
  *
- * It is reached only under a scope granted `revealingEncryptedFields()`, once
- * for each page, with every fragment of the page's entries whose rows verified
- * their signature; under any other scope every fragment is shown as `encrypted`
- * and no reader is asked. The package binds `Privacy\SubjectKeyFieldReader`,
- * which opens what `Privacy\SubjectKeyEncrypter` sealed and answers each
- * fragment's typed value, `erased` once the owner's keys are destroyed, or
- * `unreadable`. An application that never decrypts in PHP binds
- * `Privacy\SealedFieldReader`, which reads nothing and answers `encrypted`,
- * whatever a scope grants. A reader an application or an adapter binds in their
- * place answers in the same terms. An implementation must keep no state between
- * calls, hold no key beyond the call, must never answer with a ciphertext, and
- * should mark its own fields parameter `#[\SensitiveParameter]`, since an
- * attribute on this contract does not reach it.
+ * An implementation keeps no state, holds no key beyond the call, never answers
+ * with a ciphertext, and should mark its fields parameter
+ * `#[\SensitiveParameter]`.
  *
  * @api
  *
@@ -31,15 +20,11 @@ namespace SineMacula\Laravel\AuditLog\Contracts;
 interface FieldReader
 {
     /**
-     * The reading of each fragment, in the order given and as many:
-     * `FieldReading::revealed()` with its value, or `FieldReading::sealed()`
-     * with `encrypted`, `erased` or `unreadable`.
+     * The reading of each fragment, in order and as many: revealed with its
+     * value, or sealed as `encrypted`, `erased` or `unreadable`.
      *
-     * Anything thrown, and an answer of another count or holding anything but
-     * readings, costs every fragment of the page, each shown as `unreadable`:
-     * the failure is reported once for the page naming only this class, and
-     * what was thrown is discarded, because its message could hold the
-     * plaintext.
+     * A throw or a malformed answer shows the whole page `unreadable`, and what
+     * was thrown is discarded, since it could hold plaintext.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>  $fields
      * @return list<\SineMacula\Laravel\AuditLog\Privacy\FieldReading>

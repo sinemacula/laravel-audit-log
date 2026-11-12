@@ -9,17 +9,12 @@ use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * What the package keeps in hidden Context, so that it travels with a queued
- * job: the request id, the trace id and the actor's envelope.
+ * What the package keeps in hidden Context so it travels with a queued job: the
+ * request id, trace id and actor envelope.
  *
- * Only scalars travel: strings for the actor, its guard and any principal,
- * tenant and session reference, never a model. A job reads them back from a
- * payload, so nothing is trusted: a missing, partial or malformed envelope is
- * no actor, never an exception, and nothing is resolved. Every other key in
- * Context belongs to the application and is left alone.
- *
- * Hidden Context stays out of the logs, but it travels in the queue payload
- * unencrypted.
+ * Only strings travel, and a malformed envelope is no actor, since a job reads
+ * them back from its payload. Hidden Context stays out of logs but travels
+ * unencrypted in the queue payload.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -88,7 +83,6 @@ final class CarriedContext
 
             return new ActorSnapshot($held, self::stringIn($context, self::ACTOR_GUARD) ?? '');
         } catch (\InvalidArgumentException) {
-            // A malformed envelope is ignored, never trusted and never an error
             return null;
         }
     }

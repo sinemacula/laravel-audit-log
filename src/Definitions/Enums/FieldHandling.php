@@ -5,14 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Definitions\Enums;
 
 /**
- * How an event definition's field rule handles the value at its path before a
- * record is stored: kept as captured, redacted, pseudonymised, encrypted for an
- * owner, or dropped.
- *
- * Every handling but `retain` is terminal (`isTerminal()`): it decides the
- * whole branch beneath its path, so a rule beneath a terminal rule could never
- * apply and a definition refuses one. Applying a handling to a payload is the
- * redaction pipeline's work, not this enum's.
+ * How a field rule handles the value at its path before a record is stored.
  *
  * @api
  *
@@ -30,17 +23,15 @@ enum FieldHandling: string
     // The value is stored as a keyed, fingerprinted hash
     case PSEUDONYMISE = 'pseudonymise';
 
-    // The value is stored as an envelope under its owner's key, never in
-    // plaintext
+    // The value is stored encrypted under its owner's key
     case ENCRYPT = 'encrypt';
 
     // The value is not stored
     case DROP = 'drop';
 
     /**
-     * Whether a rule with this handling decides its whole branch: every
-     * handling but `retain` replaces or removes the value at its path, so a
-     * rule beneath it could never apply.
+     * Whether a rule with this handling decides its whole branch, so a rule
+     * beneath it could never apply.
      *
      * @return bool
      */

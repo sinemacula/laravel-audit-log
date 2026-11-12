@@ -5,12 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Capture\Enums;
 
 /**
- * What became of a watched model, as the last segment of the code its record is
- * stored under: the model's own segment, then the change.
- *
- * Four of the changes are Eloquent events the watch listens to. A restore is
- * none of them: it is told from the update that clears a soft-deleted model's
- * deleted-at column, so the restore event is never listened to.
+ * What became of a watched model, the last segment of its record's code. A
+ * restore is told from an update, so no Eloquent restore event is listened to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,8 +31,7 @@ enum ModelEvent: string
     case FORCE_DELETED = 'force_deleted';
 
     /**
-     * The code a change of the model watched as the segment is stored under:
-     * the segment, a dot, then this change.
+     * The code of this change for a model watched under the segment.
      *
      * @param  string  $as
      * @return string
@@ -47,8 +42,8 @@ enum ModelEvent: string
     }
 
     /**
-     * The Eloquent event the change is listened for by, as the model events
-     * name it, or `null` for a restore, which is told from an update.
+     * The Eloquent event this change is listened for by, or `null` for a
+     * restore.
      *
      * @return ?string
      */

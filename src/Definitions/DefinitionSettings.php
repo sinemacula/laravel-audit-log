@@ -7,14 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Definitions;
 use Illuminate\Contracts\Config\Repository;
 
 /**
- * The definition settings, read from configuration on every call and validated
- * as they are read: whether a code no definition registers is a programming
- * error (`audit-log.definitions.require_registered`).
- *
- * Only a real boolean passes, so a string or a number never turns the rule on
- * or off by being truthy. A missing key is the default, `false`; a `null` set
- * explicitly is malformed, and fails closed with an `InvalidArgumentException`
- * naming the key and never the value.
+ * The settings under `audit-log.definitions.`, validated on every read; a
+ * malformed value fails naming the key, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,8 +32,8 @@ final readonly class DefinitionSettings
     ) {}
 
     /**
-     * Whether a code no definition registers is a programming error, rather
-     * than taking the permissive default.
+     * Whether a code no definition registers is a programming error; off by
+     * default.
      *
      * @return bool
      *

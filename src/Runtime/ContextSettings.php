@@ -8,18 +8,8 @@ use Illuminate\Contracts\Config\Repository;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The context settings, read from configuration on every call and validated as
- * they are read: the guards the actor is read from (`audit-log.actor.guards`),
- * whether a trusted edge's request id is believed
- * (`audit-log.context.trust_request_id`) and under which header it comes
- * (`audit-log.context.request_id_header`), and whether its `traceparent` is
- * believed (`audit-log.context.trust_traceparent`).
- *
- * A missing key is the default: no list of guards, which is the default guard,
- * neither header trusted, and `X-Request-Id`. A value that is set must be of
- * the real type, so a truthy string never turns trust on, and a malformed one
- * fails closed with an `InvalidArgumentException` naming the key and never the
- * value.
+ * The settings under `audit-log.actor.` and `audit-log.context.`, validated on
+ * every read; a malformed value fails naming the key, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -170,8 +160,7 @@ final readonly class ContextSettings
     }
 
     /**
-     * The guard name, refused unless it is a string of 1 to 64 characters and
-     * already clean text.
+     * The guard name, refused unless it is clean text of 1 to 64 characters.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -12,21 +12,8 @@ use SineMacula\Laravel\AuditLog\Listeners\RecordModelChange;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * The model classes an application watches while it boots, each exactly, and
- * the listeners that record their changes.
- *
- * Watching a class registers the definitions of its five changes and listens
- * for its four Eloquent events by the names Eloquent dispatches them under,
- * which carry the model's own class: a subclass is never watched through its
- * parent, and no model is booted or built to listen. Every check runs before
- * anything is registered, so a watch refused for a definition already
- * registered differently registers none of its definitions and listens for
- * nothing.
- *
- * Watching a class again as it is watched changes nothing; watching it any
- * other way, or under a segment another class's changes are stored under, is
- * refused. Once the application has booted the watcher is frozen and refuses
- * any further watch, so a long-lived worker listens once.
+ * The model classes watched at boot, each exactly, and the listeners recording
+ * their changes. A watch is checked whole before anything is registered.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,9 +44,8 @@ final class ModelWatcher
     ) {}
 
     /**
-     * Watch the model class under the segment, keeping the fields: a name given
-     * alone is retained, and a name given as a key is handled as its value
-     * says.
+     * Watch the model class under the segment; a field given alone is retained,
+     * and one given as a key is handled as its value says.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -106,8 +92,7 @@ final class ModelWatcher
     }
 
     /**
-     * The watch of exactly the class, or `null` when the class is not watched,
-     * a parent of it included.
+     * The watch of exactly the class, or `null`; a parent's never applies.
      *
      * @param  string  $class
      * @return ?\SineMacula\Laravel\AuditLog\Capture\ModelWatch
@@ -118,8 +103,7 @@ final class ModelWatcher
     }
 
     /**
-     * Refuse any further watch: the application has booted. Freezing again
-     * changes nothing.
+     * Refuse any further watch; freezing again changes nothing.
      *
      * @return void
      */
@@ -178,8 +162,7 @@ final class ModelWatcher
     }
 
     /**
-     * Listen for each Eloquent event of exactly the class a change is recorded
-     * from.
+     * Listen for each Eloquent event of exactly the class.
      *
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @return void
