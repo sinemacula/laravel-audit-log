@@ -34,16 +34,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests that prove an import end to end through `audit-log:import` and
- * the commands around it, as the package ships them bound and registered: a dry
- * run writes nothing at all; an imported row holds, column by column, what its
- * line asserted, as this installation's acceptance of it, signed here; the
- * batch, its journal rows, its hold and its records say who imported what, from
- * which file, and how it ended; a repeated import finds duplicates and a line
- * asserting something else under a record id already imported a conflict;
- * another installation's export imports as foreign evidence that seals and
- * verifies here; and a spilled record replayed is the record itself, never an
- * import.
+ * Feature tests that prove an import end to end through the commands as
+ * shipped.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -88,7 +80,7 @@ final class ImportProofsTest extends TestCase
 
     /**
      * Freeze the clock, name this installation's source and report to a
-     * recording handler. Nothing is bound or registered by hand.
+     * recording handler.
      *
      * @return void
      */
@@ -125,9 +117,7 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * A dry run, even one asking for a hold, reads the file, classifies and
-     * counts its lines and issues no statement but reads: no entry, no batch,
-     * no journal row, no hold, no change to the installation id and no record.
+     * A dry run, even one asking for a hold, issues no statement but reads.
      *
      * @return void
      */
@@ -163,13 +153,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * An imported row holds what its line asserted, column by column: a fresh
-     * id of the import's time, its code in the category given, its outcome and
-     * reason, its references, correlation id, origin, address, context and
-     * properties; it is `imported`, of its source and region, under its record
-     * id there, in its batch, with the keyed digest of the assertion; it
-     * happened when the line says and was recorded at the import; nothing the
-     * line could not assert is set; and this installation's ring signs it.
+     * An imported row holds, column by column, what its line asserted, signed
+     * here.
      *
      * @return void
      */
@@ -252,11 +237,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * The batch records who imported, why and under which reference, from which
-     * source, region, format and file, that nothing outside verified it, its
-     * hold, its counts and times, and how it ended; the journal holds its
-     * start, its hold and its finish; the hold keeps its entries and is listed;
-     * and the hold and the import are each recorded once, by the importer.
+     * The batch, its journal rows, its hold and its records say who imported
+     * what and how it ended.
      *
      * @return void
      */
@@ -315,10 +297,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * Importing a file again stores nothing twice: every line is a duplicate
-     * and the batch is complete. A file asserting something else under a record
-     * id imported already is a conflict, kept out and listed, beside the new
-     * line it imports, and the batch is partial.
+     * A repeated import finds duplicates, and a changed assertion is a
+     * conflict.
      *
      * @return void
      */
@@ -351,10 +331,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * Another installation's export imports here: its lines become rows of this
-     * installation, `imported` from that installation under the ids it gave
-     * them, never the same rows, and they seal and verify in this
-     * installation's chain like any entry.
+     * Another installation's export imports as foreign evidence that seals and
+     * verifies here.
      *
      * @return void
      */
@@ -401,10 +379,7 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * A record spilled by a failed write and replayed with `audit-log:replay`
-     * is the record itself: it keeps its id and its `captured` provenance, is
-     * of this installation, belongs to no batch and carries no source record id
-     * or digest, and replaying it writes no batch and no journal row.
+     * A replayed spilled record is the record itself, never an import.
      *
      * @return void
      */
@@ -435,8 +410,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * Run `audit-log:import --json` with the parameters given as the operator,
-     * assert it succeeds, and return the result it wrote.
+     * Run `audit-log:import --json` as the operator, assert it succeeds and
+     * return its result.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -453,8 +428,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * Run the command with `--json` and the parameters given, assert it
-     * succeeds, and return the object it wrote.
+     * Run the command with `--json`, assert it succeeds and return the object
+     * it wrote.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -481,8 +456,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * Every stored entry but the package's own records, or but those of the
-     * prefix given, decoded through the row codec, by source record id and id.
+     * Every stored entry but those of the prefix given, decoded, by source
+     * record id and id.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -497,8 +472,7 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * A line of the import format, of the record id given and with the fields
-     * given over its own.
+     * A line of the import format, with the fields given over its own.
      *
      * @param  string  $recordId
      * @param  array<string, string>  $fields
@@ -521,8 +495,8 @@ final class ImportProofsTest extends TestCase
     }
 
     /**
-     * The source assertion of a decoded line of the import format, as the
-     * digest is computed over it.
+     * The source assertion of a decoded line, as the digest is computed over
+     * it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -69,20 +69,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * Feature tests for erasing an owner, on whichever engine the suite runs
- * against, end to end through captures under the package's encrypter and reads
- * under the package's reader: only the owner's keys are destroyed, so another
- * owner's fragment of the same record still reads; a hold of the verified chain
- * or a preservation blocking any unit refuses the whole erasure unless it goes
- * ahead in part, which destroys the rest and reports the kept keys; an outbox
- * older than the erasure refuses it unless accepted, and a record still in the
- * outbox is erased with its key however it is held; the journal row lists each
- * destroyed key before and after and each kept key's reasons, the keys are
- * tombstoned with its id and the owner marked; an owner already erased is a
- * no-op; a custom encrypter, a key that fails its signature, too many keys, a
- * broken journal and another installation are refused, writing nothing; a
- * tombstone that changes fewer keys than it names rolls the whole erasure back;
- * and the owner's lock is free once the erasure has ended, after retries.
+ * Feature tests for erasing an owner end to end through the package's encrypter
+ * and reader.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -119,8 +107,8 @@ final class EraserTest extends TestCase
     private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction';
 
     /**
-     * Freeze the clock, bind the package's key wrapper, encrypter and reader as
-     * the provider will, and define the codes every test captures.
+     * Freeze the clock, bind the package's key wrapper, encrypter and reader,
+     * and define the codes.
      *
      * @return void
      */
@@ -168,9 +156,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * An owner who never had a key is still marked and journalled: an `erasure`
-     * row destroying nothing at floor 0, and an `erased` marker under its id,
-     * so no key is ever created for the owner.
+     * An owner who never had a key is still marked and journalled, so no key is
+     * created for it.
      *
      * @return void
      */
@@ -190,9 +177,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A record holding fragments of two owners keeps the other owner's: the
-     * erased owner's card reads `[ERASED]`, the other owner's IBAN still reads,
-     * and only the erased owner's key is destroyed.
+     * Erasing one owner of a two-owner record leaves the other owner's fragment
+     * readable.
      *
      * @return void
      */
@@ -214,9 +200,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A hold of the verified chain matching one unit's entry refuses the whole
-     * erasure, naming the hold, and nothing is written: every key stays live
-     * and no row or marker is added.
+     * A hold matching one unit's entry refuses the whole erasure and nothing is
+     * written.
      *
      * @return void
      *
@@ -239,9 +224,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A unit whose entry is still within its category's preservation refuses
-     * the whole erasure, `preserved:<category>`, and nothing is written; once
-     * the entry is past it, the erasure goes ahead.
+     * A unit within its category's preservation refuses the whole erasure until
+     * the entry is past it.
      *
      * @return void
      *
@@ -267,8 +251,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A category preserved forever blocks every entry of its units, however
-     * old.
+     * A category preserved forever blocks every entry of its units.
      *
      * @return void
      *
@@ -288,10 +271,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Going ahead in part destroys the units nothing blocks and keeps the rest,
-     * reporting each kept key's reasons: the result is `partial`, the owner is
-     * marked erased, the kept unit's live key goes on encrypting, and no key is
-     * created for the destroyed unit.
+     * A partial erasure destroys the unblocked units and reports each kept
+     * key's reasons.
      *
      * @return void
      */
@@ -324,7 +305,7 @@ final class EraserTest extends TestCase
 
     /**
      * A hold of one category leaves the owner's unit of another category
-     * erasable: the units are what let unrelated data go.
+     * erasable.
      *
      * @return void
      */
@@ -342,9 +323,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * The blocks are decided from the holds of the verified chain, never from
-     * the projection: a hold whose projection row was deleted still refuses the
-     * erasure, and a projection row of a hold the chain released holds nothing.
+     * Blocks are decided from the verified chain's holds, never from the
+     * projection.
      *
      * @return void
      *
@@ -370,8 +350,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A hold committed after the erasure was asked for, but before its lock, is
-     * seen: the erasure reads the holds after its lock, and is refused.
+     * A hold committed before the erasure's lock is seen and refuses it.
      *
      * @return void
      *
@@ -402,9 +381,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * An outbox row created before the erasure started refuses it, failed or
-     * not, since the key's destruction erases whatever it holds; nothing is
-     * written.
+     * An outbox row older than the erasure refuses it, failed or not.
      *
      * @return void
      *
@@ -428,9 +405,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * An erasure that accepts the outbox goes ahead and says so; the record
-     * still in the outbox is delivered afterwards, its envelope under the
-     * destroyed key, so it reads `[ERASED]` once stored.
+     * An erasure that accepts the outbox goes ahead, and the record delivered
+     * later reads `[ERASED]`.
      *
      * @return void
      */
@@ -473,9 +449,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A hold protects a record only once it is stored: a record still in the
-     * outbox has no key use, so a hold that matches it blocks nothing, and it
-     * is erased with its key; the same hold over a stored record refuses.
+     * A hold protects a record only once it is stored.
      *
      * @return void
      *
@@ -507,10 +481,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * The journal row names the operation and the authority, and lists, by key
-     * id, every destroyed key with its unit, generation, state, HMAC, wrapped
-     * key digest and wrapping key before and its state after, the owner's
-     * fingerprint, the floor, the outbox accepted and the entries affected.
+     * The journal row lists every destroyed key's state before and after, with
+     * the erasure's details.
      *
      * @return void
      */
@@ -557,10 +529,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Every destroyed key, live or superseded, is tombstoned with the erasure
-     * row's id, erased with no wrapped key, its wrapping key and signed fields
-     * kept; the marker shares the row's id, sequence and time, at the floor; a
-     * key erased before is left as it was.
+     * Every destroyed key is tombstoned with the erasure row's id, and the
+     * marker shares it.
      *
      * @return void
      */
@@ -598,9 +568,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * The entries affected are distinct entries: an entry holding two fields
-     * under one key counts once, and the entries of each destroyed key are
-     * summed.
+     * The entries affected are counted as distinct entries.
      *
      * @return void
      */
@@ -619,8 +587,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * An erased owner gets no new key in any unit: a later capture drops the
-     * owner's fields, and the key creator makes none.
+     * An erased owner gets no new key in any unit.
      *
      * @return void
      */
@@ -639,8 +606,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * An owner already erased who holds no key is a no-op: the result is
-     * `already_erased`, names no row, and nothing is written.
+     * An owner already erased who holds no key is a no-op.
      *
      * @return void
      */
@@ -660,8 +626,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * An owner erased in part keeps its blocked keys, so it is not already
-     * erased: once the hold is released, erasing it again destroys them.
+     * A key kept by a hold is destroyed by a second erasure once the hold is
+     * released.
      *
      * @return void
      */
@@ -683,9 +649,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A custom encrypter is refused `unsupported_encrypter`, naming its class,
-     * before the installation is confirmed or the lock taken; the package's
-     * encrypter that never encrypts is supported.
+     * A custom encrypter is refused before the installation is confirmed or the
+     * lock taken.
      *
      * @return void
      *
@@ -712,8 +677,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Rows of `[how a key of the owner is made unverifiable]`: its signed
-     * fields changed, or signed under a key the ring does not hold.
+     * Rows of `[how a key of the owner is made unverifiable]`.
      *
      * @return iterable<string, array{0: array<string, string>}>
      */
@@ -727,8 +691,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A key of the owner that fails its signature, in any state, refuses the
-     * whole erasure `key_unverifiable`, naming the key, and nothing is written.
+     * A key of the owner that fails its signature refuses the erasure
+     * `key_unverifiable`.
      *
      * @param  array<string, string>  $columns
      * @return void
@@ -754,8 +718,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A key of the owner too malformed to read refuses the erasure
-     * `key_unverifiable`, naming no key.
+     * A key too malformed to read refuses the erasure `key_unverifiable`,
+     * naming no key.
      *
      * @return void
      *
@@ -774,9 +738,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * More than 10,000 live or superseded keys are refused `too_many_keys`
-     * before any key is read or any key use; 10,000 are not refused for their
-     * number.
+     * More than 10,000 keys are refused `too_many_keys` before any key is read.
      *
      * @return void
      *
@@ -797,8 +759,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A journal that fails verification refuses the erasure before anything is
-     * decided, naming the finding, and nothing is written.
+     * A journal that fails verification refuses the erasure and nothing is
+     * written.
      *
      * @return void
      *
@@ -826,9 +788,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Erasing changes no signed column: every entry still verifies under its
-     * HMAC, every key under its signature, and the journal with its erasure row
-     * verifies whole.
+     * Every entry, key and journal row still verifies after the erasure.
      *
      * @return void
      */
@@ -857,9 +817,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * An erasure lost to a concurrent operation is made again, its work run
-     * afresh after the owner's lock, and commits once; the owner's lock is free
-     * once it has ended, every attempt's released.
+     * An erasure lost to a concurrent operation is retried and the owner's lock
+     * is freed.
      *
      * @return void
      */
@@ -904,9 +863,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * The installation is confirmed before the lock is taken: a maintenance
-     * connection that reaches another database is refused, and neither the
-     * lock, the journal, the keys nor the markers are touched.
+     * An installation mismatch is refused before the lock is taken, touching
+     * nothing.
      *
      * @return void
      *
@@ -937,9 +895,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * A tombstone that changes fewer keys than it names, a key erased behind
-     * the erasure's back, rolls the whole erasure back: the journal row, the
-     * marker and every other key's tombstone with it.
+     * A tombstone that changes fewer keys than it names rolls the whole erasure
+     * back.
      *
      * @return void
      *
@@ -981,9 +938,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Going ahead in part when every key is blocked destroys nothing and still
-     * marks and journals the owner: the result is `partial`, every key kept
-     * with its reasons, and no new key is made for the owner.
+     * A partial erasure with every key blocked still marks and journals the
+     * owner.
      *
      * @return void
      */
@@ -1008,8 +964,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Erase the owner with the eraser the container builds, under the test's
-     * operation and authority.
+     * Erase the owner under the test's operation and authority.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  bool  $partial
@@ -1047,9 +1002,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Capture a charge of a card, with its expiry, the actor owns, encrypted
-     * under the actor's key, and, given a subject, an IBAN encrypted under the
-     * subject's.
+     * Capture a card charge under the actor's key and, given a subject, an IBAN
+     * under the subject's.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $actor
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $subject
@@ -1070,8 +1024,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Capture a support ticket the actor opened, its details encrypted under
-     * the actor's key.
+     * Capture a support ticket the actor opened, its details under the actor's
+     * key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $actor
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
@@ -1093,8 +1047,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * The properties of the entry with the id, as a page of the category shows
-     * them to the viewer.
+     * The properties of the entry as a page of the category shows them to the
+     * viewer.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1150,8 +1104,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * What an erasure writes: the journal's rows, the owner markers and the key
-     * rows, so a refusal can be shown to have written none of it.
+     * The journal rows, owner markers and key rows, so a refusal can be shown
+     * to have written none.
      *
      * @return array{0: list<array<string, scalar|null>>, 1: list<array<string, scalar|null>>, 2: list<array<string, scalar|null>>}
      */
@@ -1202,8 +1156,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Insert keys of the owner that sign nothing, each live in one unit at its
-     * own generation from the one given, at most 500 to a statement.
+     * Insert unsigned live keys of the owner, at most 500 to a statement.
      *
      * @param  int  $count
      * @param  int  $from
@@ -1264,10 +1217,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Whether the maintenance session holds the owner's lock no more: MySQL's
-     * named lock not held by this session, whoever else may hold one of the
-     * same name, and no advisory lock held by this session on PostgreSQL;
-     * SQLite takes none.
+     * Whether this session holds the owner's lock no more; SQLite takes none.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return bool
@@ -1287,8 +1237,8 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Configure `OTHER`, a connection to another database whose integrity state
-     * table holds no installation id.
+     * Configure `OTHER`, a connection to a database whose state table holds no
+     * installation id.
      *
      * @return void
      */
@@ -1333,8 +1283,7 @@ final class EraserTest extends TestCase
     }
 
     /**
-     * Make the definitions the only ones the facade's recorder and the
-     * container know, as an application registers them while it boots.
+     * Make the definitions the only ones the recorder and the container know.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  ...$definitions
      * @return void

@@ -18,11 +18,7 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\TestCase;
 
 /**
- * Feature tests for reading another installation's export lines: the fields
- * they map to, the identity a captured and an imported line keep, the lines of
- * another source or of this installation refused, reserved codes, foreign
- * envelopes and the exporter's metadata removed and counted, and its integrity
- * fields ignored.
+ * Feature tests for reading another installation's export lines.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,9 +79,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * Another installation's captured line maps field by field: its code, time,
-     * outcome and reason, its references from their flattened columns, its
-     * category, correlation id, properties, context, origin and IP.
+     * Another installation's captured line maps field by field.
      *
      * @return void
      */
@@ -113,9 +107,8 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * A line the exporter captured is asserted by the exporter, under its own
-     * id there, in the import's region, or the line's when the import names
-     * none.
+     * A captured line is asserted by the exporter under its own id, in the
+     * import's or line's region.
      *
      * @return void
      */
@@ -135,8 +128,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * A line the exporter had itself imported keeps its upstream source, its
-     * record id there and its region, never the exporter's own identity.
+     * A line the exporter had imported keeps its upstream identity.
      *
      * @return void
      */
@@ -163,8 +155,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * A line whose source, upstream or the exporter's own, is this installation
-     * is `OWN_SOURCE`: its own records come back through replay.
+     * A line whose source is this installation is `OWN_SOURCE`.
      *
      * @return void
      */
@@ -185,8 +176,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * A reserved code is `RESERVED_CODE`: this installation never imports
-     * another's own activity as its evidence.
+     * A reserved code is `RESERVED_CODE`.
      *
      * @return void
      */
@@ -196,8 +186,8 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * Every envelope the exporter sealed in the properties and the context is
-     * removed and counted, never kept as if it were this installation's.
+     * Every envelope the exporter sealed in the properties and context is
+     * removed and counted.
      *
      * @return void
      */
@@ -212,8 +202,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * An envelope nested deep in the properties, in maps and lists, is removed
-     * and counted.
+     * An envelope nested deep in the properties is removed and counted.
      *
      * @return void
      */
@@ -227,8 +216,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * An IP address the exporter encrypted, stored as its envelope's JSON, is
-     * removed and counted.
+     * An IP address the exporter encrypted is removed and counted.
      *
      * @return void
      */
@@ -242,9 +230,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * The exporter's `_audit` metadata, a manifest descriptor naming an
-     * artifact that is not imported among it, is removed whole and counted
-     * once, and the rest of the properties are kept.
+     * The exporter's `_audit` metadata is removed whole and counted once.
      *
      * @return void
      */
@@ -265,8 +251,7 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * The integrity fields and the exporter's own metadata are ignored: a line
-     * with other values in every one of them maps to the same line.
+     * A line's integrity fields and the exporter's metadata are ignored.
      *
      * @return void
      */
@@ -306,8 +291,8 @@ final class ExportLineAdapterTest extends TestCase
     }
 
     /**
-     * A record version this package does not read is `UNSUPPORTED_VERSION`, and
-     * one left out is `MISSING_FIELD`.
+     * An unreadable record version is `UNSUPPORTED_VERSION`, and a missing one
+     * `MISSING_FIELD`.
      *
      * @param  int|string  $version
      * @return void

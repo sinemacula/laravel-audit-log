@@ -21,11 +21,7 @@ use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\TestCase;
 
 /**
- * Feature tests for the import batches table, on whichever engine the suite
- * runs against: a batch started `running` at nothing, its counts written in a
- * chunk's transaction, its finish, its close of a running batch alone, the
- * stale batches listed, and every write and read on the storage connection's
- * writer.
+ * Feature tests for the import batches table.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,8 +56,7 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * Roll back a transaction a test left open, put the clock back and remove
-     * any split.
+     * Roll back any open transaction, restore the clock and remove any split.
      *
      * @return void
      */
@@ -82,9 +77,7 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * A started batch is inserted `running`, its counts at nothing, no conflict
-     * listed, started and last written now and not finished, with every column
-     * its import gave.
+     * A started batch is inserted `running` with its counts at nothing.
      *
      * @return void
      */
@@ -109,8 +102,7 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * A batch is started with exactly the columns its import gives: one left
-     * out, or one more, is refused.
+     * A batch is started with exactly the columns its import gives.
      *
      * @return void
      */
@@ -133,8 +125,8 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * A chunk writes the batch's counts inside its own transaction: they roll
-     * back with it, and commit with it; written outside one, they are refused.
+     * A chunk writes the batch's counts inside its own transaction, and outside
+     * one is refused.
      *
      * @return void
      */
@@ -172,8 +164,7 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * A chunk's first write claims the batch, writing only the time, inside its
-     * transaction; outside one it is refused.
+     * A chunk's claim writes only the time, inside its transaction.
      *
      * @return void
      */
@@ -199,9 +190,8 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * A finished batch takes its final status, its counts, and its finishing
-     * time, which is when it was last written; it is never written again, and a
-     * status that is not final is refused.
+     * A finished batch takes its final status, counts and time, and is never
+     * written again.
      *
      * @return void
      */
@@ -236,8 +226,7 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * A running batch is closed `interrupted`, its counts as they stood; a
-     * batch closed, finished or never started is refused.
+     * Only a running batch is closed, `interrupted`.
      *
      * @return void
      */
@@ -275,9 +264,7 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * Only running batches not written for more than an hour are stale, by when
-     * each was last written: a fresh running batch, and a finished one however
-     * old, are not.
+     * Only running batches not written for more than an hour are stale.
      *
      * @return void
      */
@@ -303,9 +290,7 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * Every write and read is on the storage connection's writer: a started
-     * batch lands on the primary alone, and is found, counted and finished
-     * though the lagging replica holds nothing.
+     * Every write and read is on the storage connection's writer.
      *
      * @return void
      */

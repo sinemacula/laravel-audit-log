@@ -17,14 +17,8 @@ use Tests\Concerns\InteractsWithOutbox;
 use Tests\TestCase;
 
 /**
- * Feature tests for the deliveries a prune must wait for, on whichever engine
- * the suite runs against: an outbox row, pending, claimed or failed, and a
- * receipt not yet delivered each keep their entry, a delivered receipt does
- * not; each id is named once, in the order given, at most 500 to a statement;
- * and the outbox is read inside the chunk's transaction when it lives on the
- * storage database, and through its own connection after the lock when it does
- * not. The outbox rows an erasure counts are every row created before its
- * start, failed and claimed ones included, read the same way.
+ * Feature tests for the outbox rows and receipts a prune or an erasure must
+ * wait for.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,8 +84,7 @@ final class PendingDeliveriesTest extends TestCase
     }
 
     /**
-     * A failed outbox row, and a claimed one, keep their entries too: the
-     * record has not reached its destinations until it is replayed.
+     * A failed or claimed outbox row keeps its entry until it is replayed.
      *
      * @return void
      */
@@ -130,8 +123,7 @@ final class PendingDeliveriesTest extends TestCase
     }
 
     /**
-     * Each id found is named once, in the order given, and at most 500 ids are
-     * named to a statement.
+     * Each id is named once, in the order given, at most 500 to a statement.
      *
      * @return void
      */
@@ -165,8 +157,8 @@ final class PendingDeliveriesTest extends TestCase
     }
 
     /**
-     * An outbox on the storage database is read through the maintenance
-     * connection, inside the chunk's transaction, after its lock.
+     * An outbox on the storage database is read inside the chunk's transaction,
+     * after its lock.
      *
      * @return void
      */
@@ -191,9 +183,8 @@ final class PendingDeliveriesTest extends TestCase
     }
 
     /**
-     * An outbox on another connection is read through that connection's writer,
-     * in a read of its own outside the transaction, after the chunk's lock
-     * statement.
+     * An outbox on another connection is read through its writer after the
+     * chunk's lock.
      *
      * @return void
      */
@@ -221,8 +212,7 @@ final class PendingDeliveriesTest extends TestCase
 
     /**
      * Every outbox row created before the instant is counted, failed and
-     * claimed ones included, whoever's record it holds; one created at the
-     * instant or after is not.
+     * claimed ones included.
      *
      * @return void
      */
@@ -253,8 +243,8 @@ final class PendingDeliveriesTest extends TestCase
     }
 
     /**
-     * An outbox on the storage database is counted through the maintenance
-     * connection, inside the erasure's transaction, after its lock.
+     * An outbox on the storage database is counted inside the erasure's
+     * transaction.
      *
      * @return void
      */
@@ -278,9 +268,8 @@ final class PendingDeliveriesTest extends TestCase
     }
 
     /**
-     * An outbox on another connection is counted through that connection's
-     * writer, in a read of its own outside the transaction, after the lock
-     * statement.
+     * An outbox on another connection is counted through its writer after the
+     * lock.
      *
      * @return void
      */
@@ -309,7 +298,7 @@ final class PendingDeliveriesTest extends TestCase
 
     /**
      * Seed a receipt of the entry for the destination, delivered at the time
-     * given, as the engine stores it, or not yet.
+     * given or not yet.
      *
      * @param  string  $entryId
      * @param  string  $destination
@@ -346,9 +335,8 @@ final class PendingDeliveriesTest extends TestCase
     }
 
     /**
-     * Log every statement from now: its connection, its SQL, whether it is the
-     * lock, an outbox read or anything else, and the transaction level of its
-     * connection.
+     * Log every statement from now with its connection, kind and transaction
+     * level.
      *
      * @return \ArrayObject<int, array{0: string, 1: string, 2: string, 3: int}>
      */

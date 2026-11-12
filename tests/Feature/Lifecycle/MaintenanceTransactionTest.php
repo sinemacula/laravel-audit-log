@@ -33,17 +33,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\MaintenanceTransaction;
 use Tests\TestCase;
 
 /**
- * Feature tests for the frame of every lifecycle transaction, on whichever
- * engine the suite runs against: the lock row's update is the first statement
- * of the framework's transaction, on the maintenance connection, with a token
- * naming the operation that changes on every attempt; an operation is refused
- * inside a transaction on either connection, and when the lock row is missing;
- * the installation is confirmed once, before any lock, writing nothing but its
- * id; a failure a concurrent operation causes is retried whole, the work run
- * afresh, after a jittered wait, up to three times, and only a committed result
- * is returned; a lost connection and any other failure propagate unchanged; and
- * MySQL's isolation is set before each transaction while PostgreSQL's is
- * asserted.
+ * Feature tests for the frame of every lifecycle transaction.
  *
  * A maintenance connection that reaches the same database is a second
  * connection to the worker's database, sharing the in-memory database's own
@@ -105,9 +95,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, put the clock and sleeping
-     * back, drop the other installation's state table and forget both
-     * connections.
+     * Roll back any open transaction, restore the clock and sleep, and drop the
+     * other state table.
      *
      * @return void
      */
@@ -143,9 +132,7 @@ final class MaintenanceTransactionTest extends TestCase
 
     /**
      * The lock row's update is the first statement inside the framework's
-     * transaction, the work's reads follow it, and the commit ends it: on MySQL
-     * the isolation is set just before the transaction begins, and on
-     * PostgreSQL it is read straight after the lock.
+     * transaction.
      *
      * @return void
      */
@@ -166,9 +153,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * The lock row keeps the token of the operation that last took it, its id,
-     * a colon and 16 random hex characters, and the clock's instant to the
-     * microsecond.
+     * The lock row keeps the last operation's token and the clock's instant to
+     * the microsecond.
      *
      * @return void
      */
@@ -184,8 +170,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Rows of `[maintenance connection]`: the storage connection itself, and a
-     * second connection to its database.
+     * Rows of `[maintenance connection]`.
      *
      * @return iterable<string, array{0: ?string}>
      */
@@ -198,9 +183,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * An operation asked for while the maintenance connection is in a
-     * transaction is refused before it takes the lock or runs any work: it
-     * would be a savepoint of that transaction and commit only with it.
+     * An operation is refused inside a maintenance transaction, which it would
+     * only be a savepoint of.
      *
      * @param  ?string  $maintenance
      * @return void
@@ -218,9 +202,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * An operation asked for while the storage connection is in a transaction
-     * is refused too, though the maintenance connection is another: the host's
-     * transaction may hold what the operation would decide on.
+     * An operation is refused inside a storage transaction, which may hold what
+     * it decides on.
      *
      * @return void
      */
@@ -234,8 +217,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * A work that asks for a lifecycle operation of its own is refused, and its
-     * own operation is rolled back and never retried.
+     * A nested lifecycle operation is refused and never retried.
      *
      * @return void
      *
@@ -262,8 +244,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * A maintenance connection that reaches another installation is refused by
-     * `confirm()` before anything reads or writes the lock.
+     * Another installation is refused by `confirm()` before the lock.
      *
      * @return void
      */
@@ -289,10 +270,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * `confirm()` reads the installation id the migrations seed and writes
-     * nothing; on an installation that lost it, it writes the id and nothing
-     * else: one insert into the state table, beside its reads. Neither takes
-     * the lock or begins a transaction.
+     * `confirm()` writes nothing but a missing installation id, without the
+     * lock or a transaction.
      *
      * @return void
      */
@@ -316,9 +295,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * With a maintenance connection of its own to the same database,
-     * `confirm()` reads the id the storage connection reads through it too, and
-     * passes.
+     * `confirm()` reads the installation id through a maintenance connection of
+     * its own.
      *
      * @return void
      */
@@ -338,8 +316,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * `run()` never confirms the installation: an operation confirms it once,
-     * so its transactions, chunk after chunk, read nothing of the state table.
+     * `run()` never confirms the installation.
      *
      * @return void
      */
@@ -355,8 +332,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * A missing lock row is refused inside the transaction, before any work
-     * runs, which is rolled back and never retried.
+     * A missing lock row is refused before any work runs, and never retried.
      *
      * @return void
      *
@@ -385,9 +361,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * With a maintenance connection of its own, the work runs on it, inside its
-     * one transaction, and the lock is taken there, while the storage
-     * connection holds no transaction.
+     * With a maintenance connection of its own, the work and the lock run on
+     * it.
      *
      * @return void
      */
@@ -413,8 +388,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Rows of `[failure]`: each failure a concurrent operation causes, as its
-     * driver or the framework raises it.
+     * Rows of `[failure]`: each failure a concurrent operation causes.
      *
      * @return iterable<string, array{0: \Closure(): \Throwable}>
      */
@@ -431,10 +405,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Each failure a concurrent operation causes rolls the attempt back whole
-     * and makes it again, three times; the fourth is contention, naming the
-     * four attempts and carrying none of the failures, and nothing any attempt
-     * wrote is committed.
+     * A concurrency failure is retried three times, then reported as contention
+     * with nothing committed.
      *
      * @param  \Closure(): \Throwable  $failure
      * @return void
@@ -469,9 +441,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * The lock's own update timing out on a lock wait is retried like any other
-     * loss, and an attempt that then takes the lock runs the work once and
-     * commits.
+     * A lock wait timeout on the lock is retried like any other loss.
      *
      * @return void
      */
@@ -494,9 +464,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Each retry waits a random time no longer than the bound of the attempt
-     * that was lost: 20 milliseconds after the first, 40 after the second and
-     * 80 after the third.
+     * Each retry waits a random time up to 20, 40 and then 80 milliseconds.
      *
      * @return void
      */
@@ -516,9 +484,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * The waits are random within their bound, not fixed at it: over many
-     * operations that each lose three attempts, they differ, and some exceed
-     * the first bound.
+     * The waits are random within their bound.
      *
      * @return void
      */
@@ -532,9 +498,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * A lost connection is never retried, since its commit may have happened:
-     * the failure propagates unchanged, after one attempt and no wait, whether
-     * the work or the lock met it.
+     * A lost connection is never retried, since its commit may have happened.
      *
      * @return void
      *
@@ -571,8 +535,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Rows of `[failure]`: failures no concurrent operation causes, a data
-     * failure whose driver message quotes a deadlock's phrase among them.
+     * Rows of `[failure]`: failures no concurrent operation causes.
      *
      * @return iterable<string, array{0: \Closure(): \Throwable}>
      */
@@ -588,8 +551,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Any other failure propagates unchanged after one attempt and no wait, and
-     * what the attempt wrote is rolled back.
+     * Any other failure propagates unchanged after one attempt.
      *
      * @param  \Closure(): \Throwable  $failure
      * @return void
@@ -620,10 +582,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * The token names the operation and changes on every attempt: two
-     * transactions of one operation under a frozen clock both take the lock,
-     * which an update writing the values already there would not on MySQL, and
-     * a retried attempt draws a token of its own.
+     * The token changes on every attempt, since MySQL skips an update that
+     * changes nothing.
      *
      * @return void
      */
@@ -660,10 +620,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * An attempt whose commit is lost to a concurrent operation is rolled back
-     * whole, though its work returned, and the next attempt runs the work
-     * afresh: only the committed attempt's result is returned, and only its
-     * writes remain, with no transaction left behind on the connection.
+     * A retried attempt runs the work afresh and returns only the committed
+     * result.
      *
      * @return void
      */
@@ -692,9 +650,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * A commit that fails for any other reason returns no result, leaves none
-     * of the attempt's writes and no transaction behind, and the next operation
-     * on the connection runs as any other.
+     * A failed commit leaves no writes and no transaction behind.
      *
      * @return void
      *
@@ -726,9 +682,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * An operation id is refused when it is empty, or longer than 47 bytes, so
-     * a token always fits the lock's 64 characters; one of 47 bytes takes the
-     * lock.
+     * An operation id that is empty or over 47 bytes is refused, so a token
+     * fits 64 characters.
      *
      * @return void
      *
@@ -753,8 +708,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * On MySQL the isolation is set to `read committed` immediately before
-     * every attempt's transaction begins, a retried one included.
+     * On MySQL the isolation is set to `read committed` before every attempt's
+     * transaction.
      *
      * @return void
      */
@@ -774,9 +729,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * On PostgreSQL the isolation is read straight after the lock, and a
-     * session whose transactions run at another level is refused, rolled back
-     * and never retried, before any work runs.
+     * On PostgreSQL a session at another isolation level is refused before any
+     * work runs.
      *
      * @return void
      *
@@ -818,8 +772,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Assert an operation is refused for the transaction already open, before
-     * it takes the lock or runs its work.
+     * Assert an operation is refused for the open transaction, before the lock
+     * or its work.
      *
      * @return void
      *
@@ -847,8 +801,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * The waits slept while the number of operations each lose three attempts
-     * to a locked database before they commit, in milliseconds.
+     * The waits slept, in milliseconds, while each operation loses three
+     * attempts.
      *
      * @param  int  $operations
      * @return list<int>
@@ -871,7 +825,7 @@ final class MaintenanceTransactionTest extends TestCase
 
     /**
      * Raise the failure in place of the lock's update, the number of times
-     * given, on whichever connection runs it.
+     * given.
      *
      * @param  \Throwable  $failure
      * @param  int  $times
@@ -893,8 +847,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Raise the failure as the first outermost commit is about to be made, as a
-     * commit lost to a concurrent operation fails, leaving the driver's
+     * Raise the failure at the first outermost commit, leaving the driver's
      * transaction open.
      *
      * @param  \Throwable  $failure
@@ -916,8 +869,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Record each statement and each transaction event from now on, in order,
-     * as its label.
+     * Record each statement and transaction event from now on, in order, as its
+     * label.
      *
      * @return \ArrayObject<int, string>
      */
@@ -976,9 +929,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Configure `MAINTENANCE`, a second connection to the worker's database, as
-     * the maintenance connection: on SQLite it shares the in-memory database's
-     * connection.
+     * Configure `MAINTENANCE` as a second connection to the worker's database.
      *
      * @return void
      */
@@ -1002,8 +953,7 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Configure `OTHER`, a connection to another installation's state table,
-     * holding an installation id of its own.
+     * Configure `OTHER`, a connection to another installation's state table.
      *
      * @return void
      */
@@ -1048,8 +998,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * What the work sees of the transactions: the connection it runs on, that
-     * connection's transaction level, and the storage connection's.
+     * The connection the work runs on, its transaction level, and the storage
+     * connection's.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return array{0: string, 1: int, 2: int}
@@ -1060,8 +1010,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * Write a row of the state table under the name, as the work of an attempt
-     * writes, so a test can see which attempts committed.
+     * Write a state table row under the name, so a test can see which attempts
+     * committed.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $name
@@ -1073,8 +1023,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * A query of the markers the work of the attempts wrote: the rows of the
-     * state table but the installation id the migrations seed.
+     * A query of the markers the attempts wrote, excluding the seeded
+     * installation id.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return \Illuminate\Database\Query\Builder
@@ -1086,7 +1036,7 @@ final class MaintenanceTransactionTest extends TestCase
 
     /**
      * What a statement is, for a log: the lock, the isolation set or read, or
-     * its verb and the package table it names.
+     * its verb and table.
      *
      * @param  string  $sql
      * @return string
@@ -1141,9 +1091,8 @@ final class MaintenanceTransactionTest extends TestCase
     }
 
     /**
-     * A serialisation failure known by its SQLSTATE alone, as PostgreSQL raises
-     * it: its code is the string `40001`, and no phrase the framework
-     * recognises is in its message.
+     * A serialisation failure known by its SQLSTATE `40001` alone, as
+     * PostgreSQL raises it.
      *
      * @return \Illuminate\Database\QueryException
      */

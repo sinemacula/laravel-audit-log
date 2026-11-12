@@ -35,14 +35,7 @@ use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
 /**
- * Feature tests for the journal as a destructive decision reads it, on
- * whichever engine the suite runs against: the active holds replayed from the
- * verified hold and release rows; every finding of the chain, a contradicted
- * latest seal, a malformed payload and an invalid transition refused, fail
- * closed; advancing reads only the rows after the head and finds a truncated or
- * replaced tail; only the payloads of policies, holds and releases are read, a
- * page of them at a time; the policy versions and the last run's finish known,
- * its payload checked; a replay is a value; and the projection is never read.
+ * Feature tests for the journal as a destructive decision reads it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,10 +86,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Each active hold is rebuilt from its verified row and payload: its id,
-     * scope, basis and review date from the payload, and when, by whom, why and
-     * under which operation and sequence from the row, in the order the holds
-     * were placed.
+     * Each active hold is rebuilt from its verified row and payload, in the
+     * order placed.
      *
      * @return void
      */
@@ -127,8 +118,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A released hold is no longer active, nor held under its id, though the
-     * chain remembers it was placed.
+     * A released hold is no longer active.
      *
      * @return void
      */
@@ -147,8 +137,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Rows of `[what breaks the chain of three rows, the finding, the sequence
-     * of the row it is found at]`: each finding of the chain.
+     * Rows of `[what breaks the chain, the finding, the sequence of the row it
+     * is found at]`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -168,8 +158,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Each finding of the chain refuses the replay, naming the finding and the
-     * row it was found at.
+     * Each finding of the chain refuses the replay, naming the finding and its
+     * row.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -196,8 +186,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Rows of `[what appends the invalid transition]`: a release of a hold
-     * never placed, a second release, and a hold id placed twice.
+     * Rows of `[what appends the invalid transition]`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -236,9 +225,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A journal truncated behind the latest seal, a seal committed to another
-     * head, and a seal whose commitment is half set each contradict the latest
-     * seal, found at the seal.
+     * A journal truncated behind the latest seal, or a malformed seal,
+     * contradicts that seal.
      *
      * @return void
      */
@@ -263,11 +251,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * An earlier seal's higher commitment contradicts a journal truncated
-     * behind it even when the latest seal committed to the shorter journal, a
-     * backwards commitment the sealer now refuses but may already be stored:
-     * the replay is refused at the earlier seal, so a hold the truncation
-     * dropped never lets a prune through.
+     * An earlier seal's higher commitment refuses a truncated journal, even
+     * under a shorter latest seal.
      *
      * @return void
      */
@@ -314,8 +299,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A latest seal whose commitment the chain contradicts refuses the replay,
-     * found at the seal.
+     * A latest seal whose commitment the chain contradicts refuses the replay.
      *
      * @param  array<string, int|string|null>  $commitment
      * @return void
@@ -339,8 +323,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A latest seal that committed to a row below the head, or to none before
-     * any row was written, is no contradiction: rows may follow a seal.
+     * Rows after the latest seal are no contradiction.
      *
      * @return void
      */
@@ -361,9 +344,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Advancing rereads the head's HMAC and then only the rows after it, by a
-     * range bound on the sequence, and reads the payloads of the new policy,
-     * hold and release rows alone.
+     * Advancing reads only the rows after the head, and only the payloads it
+     * needs.
      *
      * @return void
      */
@@ -391,8 +373,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A tail truncated below the replay's head is found by advancing, before
-     * any seal commits to it: the head's row is gone.
+     * Advancing finds a tail truncated below the replay's head.
      *
      * @return void
      */
@@ -412,8 +393,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A head replaced since the replay read it, under another HMAC, is found by
-     * advancing, at the row now stored there.
+     * Advancing finds a head replaced since the replay read it.
      *
      * @return void
      */
@@ -434,8 +414,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A row after the head that breaks the chain is found by advancing, as by
-     * verifying.
+     * Advancing finds a new row that breaks the chain.
      *
      * @return void
      */
@@ -453,8 +432,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Advancing a replay of nothing yet reads the journal from its first row,
-     * and advancing one at the head reads nothing new.
+     * Advancing an empty replay reads from the journal's first row.
      *
      * @return void
      */
@@ -470,10 +448,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Only the payloads of policy, hold and release rows are read: a prune run
-     * or prune row's payload edited without its digest goes unnoticed by the
-     * replay, which decides nothing from it, while a hold's edited payload is a
-     * signature finding.
+     * Only the payloads of policy, hold and release rows are read.
      *
      * @return void
      */
@@ -511,9 +486,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Payloads are read a page of such rows to a statement, so a journal of
-     * more policy rows than a page reads them in two, and every version is
-     * known.
+     * Payloads are read a page of rows to a statement.
      *
      * @return void
      */
@@ -553,8 +526,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Rows of `[payload, kind, hold id]`: policy, hold and release payloads
-     * that do not say what their row records.
+     * Rows of `[payload, kind, hold id]`: payloads that do not say what their
+     * row records.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -577,8 +550,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A signed payload that does not say what its row records is malformed,
-     * found at its row.
+     * A signed payload that does not say what its row records is malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -616,10 +588,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * The last run's finish is the payload of the latest prune run row whose
-     * phase is `finish`, past a start with no finish, read by its sequence and
-     * checked against the digest its verified row signs; with no finish there
-     * is none.
+     * The last run's finish is read from the latest `finish` row and checked
+     * against its digest.
      *
      * @return void
      */
@@ -655,8 +625,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A run row whose payload was replaced by text that is not a canonical map
-     * is malformed when the finish is read.
+     * A run row whose payload is not a canonical map is malformed when the
+     * finish is read.
      *
      * @return void
      */
@@ -674,8 +644,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * The finish is found among more run rows than a page: the latest page is
-     * read first, and an earlier page only when it holds no finish.
+     * The last run's finish is found past a page of starts.
      *
      * @return void
      */
@@ -691,9 +660,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A replay is a value: advancing or accepting returns a new replay and
-     * leaves the one it was called on as it was, and verifying again starts
-     * afresh whatever the replay held.
+     * Advancing or accepting returns a new replay and leaves the original as it
+     * was.
      *
      * @return void
      */
@@ -717,10 +685,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Accepting a signed row onto the head replays it as reading it would: a
-     * policy's version is known, a hold is active and its release is not, a
-     * prune run's finish is found by its digest once stored, and the row is the
-     * last appended; the replay it was called on is left as it was.
+     * Accepting a signed row replays it as reading it would.
      *
      * @return void
      */
@@ -757,9 +722,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A row the chain refuses is not accepted: a release of a hold never placed
-     * is a transition, and a row signed for another place in the chain a gap,
-     * each refused with the replay left as it was.
+     * A row the chain refuses is not accepted.
      *
      * @return void
      */
@@ -782,7 +745,7 @@ final class JournalReplayTest extends TestCase
 
     /**
      * A hold accepted with a payload that does not describe a hold is
-     * malformed, and nothing is accepted.
+     * malformed.
      *
      * @return void
      */
@@ -799,8 +762,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * The holds projection is never read: a projection row deleted by hand
-     * leaves its hold active, and one inserted by hand adds none.
+     * The holds projection is never read.
      *
      * @return void
      */
@@ -817,8 +779,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * An empty journal replays nothing: no head, no hold, no policy version and
-     * no finish.
+     * An empty journal replays nothing.
      *
      * @return void
      */
@@ -833,9 +794,8 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Append a hold of the id, of the scope and review date given or every
-     * entry and none, signed at the next sequence by the default authority,
-     * with an external reference; public, so a provider's closure can call it.
+     * Append a signed hold at the next sequence; public so a provider's closure
+     * can call it.
      *
      * @param  string  $holdId
      * @param  ?\SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $scope
@@ -850,9 +810,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * A row of the kind signed onto the replay's head: the next sequence,
-     * linked to the head's HMAC, in the configured log, at the clock's time,
-     * with the default authority when the kind carries one.
+     * A row of the kind signed onto the replay's head.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -898,8 +856,7 @@ final class JournalReplayTest extends TestCase
     }
 
     /**
-     * Record each statement that reads the journal table from now on, as its
-     * verb, its bindings and its SQL.
+     * Record each statement that reads the journal table from now on.
      *
      * @return \ArrayObject<int, array{0: string, 1: list<int|string|null>, 2: string}>
      */

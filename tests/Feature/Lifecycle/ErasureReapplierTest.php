@@ -42,14 +42,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for erasing again, after a restore, the owners an erasures file
- * names: each owner is erased in part and accepting pending deliveries, once
- * however often it is named; a line that names no owner is rejected and
- * counted; the restore is journalled reconciled, naming the file and the
- * anchor's head, only when every owner ended erased whole or already erased and
- * no line was rejected; a refused owner is counted and the run goes on, any
- * other failure stops it; a file that changed while it was read, or holds more
- * lines than a reapply reads, fails the run; and an anchor that cannot be read
- * fails it before anything is journalled.
+ * names.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,7 +68,7 @@ final class ErasureReapplierTest extends TestCase
 
     /**
      * Freeze the clock, bind the package's key wrapper, encrypter and reader,
-     * and define the card charge.
+     * and define the charge.
      *
      * @return void
      */
@@ -125,9 +118,7 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * Each owner is erased in part and accepting pending deliveries, so a
-     * restored outbox older than the run refuses nothing, and each erasure row
-     * says so.
+     * Each owner is erased in part, accepting pending deliveries.
      *
      * @return void
      */
@@ -155,12 +146,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * A reapply reads each journal row once across its owners, so its cost
-     * grows linearly with them: the first erasure verifies the whole journal,
-     * every later one advances from the head the one before it committed and
-     * reads no row again, and the reconciliation verifies the journal once
-     * more. Whatever the number of owners, two reads start at the journal's
-     * beginning.
+     * A reapply reads each journal row once across its owners, starting from
+     * the beginning twice.
      *
      * @return void
      */
@@ -184,8 +171,7 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * An owner a hold keeps erased in part leaves the restore unreconciled: the
-     * erasures stand, and no reconciliation is journalled.
+     * An owner erased in part leaves the restore unreconciled.
      *
      * @return void
      */
@@ -205,9 +191,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * Once every owner ended erased whole or already erased, the restore is
-     * journalled reconciled under the operation, on the authority, naming the
-     * file's SHA-256, the counts and the anchor's head.
+     * Once every owner is fully erased, the reconciliation is journalled with
+     * the anchor's head.
      *
      * @return void
      */
@@ -239,8 +224,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * Without an anchor that reports its head, the null anchor's or one that
-     * cannot discover, the reconciliation names no anchored head.
+     * Without an anchor that reports its head, the reconciliation names no
+     * anchored head.
      *
      * @return void
      */
@@ -263,9 +248,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * Every line that names no owner is rejected and counted, a blank line
-     * skipped, and the restore left unreconciled; the owners the other lines
-     * name are erased all the same.
+     * A line naming no owner is rejected and counted, and the restore left
+     * unreconciled.
      *
      * @return void
      */
@@ -308,9 +292,7 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * A file that changed while its owners were erased, past the first mebibyte
-     * its second read had taken, fails the run, and the restore is not
-     * journalled reconciled; the erasures made stand.
+     * A file changed during the run fails it, and the erasures made stand.
      *
      * @return void
      *
@@ -338,9 +320,7 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * A file of more lines that are not blank than a reapply reads is refused
-     * before any owner is erased, a rejected line counting; blank lines do not
-     * count.
+     * A file of too many non-blank lines is refused before any owner is erased.
      *
      * @return void
      *
@@ -371,8 +351,7 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * A refused owner is counted and the next owner erased; the restore stays
-     * unreconciled.
+     * A refused owner is counted and the run goes on.
      *
      * @return void
      */
@@ -388,8 +367,7 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * Any failure but a refusal stops the run where it is: the owners after it
-     * are not erased, and nothing is journalled reconciled.
+     * Any failure but a refusal stops the run.
      *
      * @return void
      *
@@ -419,8 +397,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * An anchor that cannot be read fails the run before anything is journalled
-     * reconciled; the erasures stand.
+     * An anchor that cannot be read fails the run before the reconciliation is
+     * journalled.
      *
      * @return void
      */
@@ -441,8 +419,7 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * The erasure given is asked for each owner, and how it ended, with whether
-     * its record was written, is what the result counts.
+     * The erasure given is asked for each owner and its outcome counted.
      *
      * @return void
      */
@@ -461,8 +438,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * The sequence each page read of the journal starts after, in order, while
-     * the work runs.
+     * The sequence each journal page read starts after, in order, while the
+     * work runs.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Lifecycle\ReapplyResult  $work
      * @return list<int>
@@ -487,8 +464,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * Erase again the owners the lines name, through the eraser, under the
-     * operation and the authority every test gives.
+     * Erase again the owners the lines name, under the test's operation and
+     * authority.
      *
      * @param  list<string>  $lines
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\ReapplyResult
@@ -541,9 +518,8 @@ final class ErasureReapplierTest extends TestCase
     }
 
     /**
-     * Write a file of the first line, as many of the filler line as a reapply
-     * reads at most, and the last line, a thousand lines to a write, and return
-     * its path.
+     * Write a file of the first line, the most filler lines a reapply reads,
+     * and the last line.
      *
      * @param  string  $first
      * @param  string  $filler

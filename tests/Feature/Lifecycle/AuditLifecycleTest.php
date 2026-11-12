@@ -70,18 +70,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * Feature tests for the lifecycle's way in: each operation commits first and is
- * recorded after, by its operator, or by no one for a prune; a record that
- * cannot be written leaves the operation standing and the result `recorded:
- * false`; a release of a hold that is not active is recorded `denied` and
- * rethrown; a prune is recorded under its run id, a failed one as a failure and
- * a dry run not at all; an import is recorded with its batch, its hold as held,
- * and a failure after its start as a failure before it is rethrown; an erasure,
- * a reinstatement and a rewrap are recorded after their commits, a refusal
- * `denied` and rethrown and a failure as a failure, and the erasure's record
- * reaches the destinations as any package record does; a reapply erases each
- * owner as `erase()` does; the active holds are read from the verified journal;
- * and every service is resolved again on every call.
+ * Feature tests for the lifecycle facade: each operation commits first and is
+ * recorded after.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -121,9 +111,8 @@ final class AuditLifecycleTest extends TestCase
     private array $files = [];
 
     /**
-     * Freeze the clock, keep entries thirty days, bind the configured policy
-     * and the journal's prune ledger, name this installation's source and
-     * report to a recording handler.
+     * Freeze the clock, keep entries thirty days and report to a recording
+     * handler.
      *
      * @return void
      */
@@ -148,8 +137,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, put the clock back and remove
-     * the files this test wrote.
+     * Roll back any open transaction, restore the clock and remove the files
+     * written.
      *
      * @return void
      */
@@ -176,9 +165,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A hold is journalled and committed first, and its `audit_log.held`
-     * record, by its operator, keeping exactly its evidence, is written only
-     * after that commit.
+     * A hold's `audit_log.held` record is written only after the hold commits.
      *
      * @return void
      */
@@ -212,9 +199,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A record that cannot be written never undoes the hold: the hold stays
-     * placed and active, the failure is reported once, and the result says it
-     * committed and was not recorded.
+     * A record that cannot be written leaves the hold placed and the result
+     * unrecorded.
      *
      * @return void
      */
@@ -236,9 +222,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A release of a hold the verified journal does not hold active is recorded
-     * `denied`, with `unknown_hold`, by the operator who asked, and the refusal
-     * is rethrown; nothing is journalled.
+     * A release of an inactive hold is recorded `denied` with `unknown_hold`
+     * and rethrown.
      *
      * @return void
      *
@@ -268,8 +253,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A release refused for any other reason than an inactive hold, here on a
-     * journal that fails verification, is rethrown and not recorded.
+     * A release refused for another reason is rethrown and not recorded.
      *
      * @return void
      *
@@ -291,8 +275,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A release of an active hold is journalled, then recorded a success under
-     * its own operation, and returns the hold as it was.
+     * A release of an active hold is recorded under its own operation.
      *
      * @return void
      */
@@ -320,8 +303,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A prune is recorded once it has finished, by no one, under the run id
-     * every one of its journal rows names, with its counts.
+     * A prune is recorded by no one under its run id, with its counts.
      *
      * @return void
      */
@@ -359,8 +341,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A prune that fails, here on a journal that fails verification, is
-     * recorded as a failure with the reason the run gives.
+     * A failed prune is recorded as a failure.
      *
      * @return void
      */
@@ -382,8 +363,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A dry run writes nothing, so it is not recorded: no record, and the
-     * result says so.
+     * A dry run prune is not recorded.
      *
      * @return void
      */
@@ -403,8 +383,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An import is recorded once it ends, by its operator, with its batch, its
-     * source, its format, its status and its counts.
+     * An import is recorded with its batch, source, format, status and counts.
      *
      * @return void
      */
@@ -456,9 +435,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * The hold an import places with its start is recorded as held, under the
-     * import's operation, as the import is recorded with it, so a
-     * reconciliation never finds it missing.
+     * The hold an import places is recorded as held under the import's
+     * operation.
      *
      * @return void
      */
@@ -488,8 +466,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An import whose hold could not be recorded says so on its result, though
-     * the import itself is recorded and the hold placed.
+     * An import whose hold went unrecorded says so on its result.
      *
      * @return void
      */
@@ -505,9 +482,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An import that fails once its start committed is recorded as a failure,
-     * `import_failed`, with the counts its batch holds, after the hold it
-     * placed is recorded as held, and the failure is rethrown; the hold stays.
+     * An import that fails after its start is recorded `import_failed` and
+     * rethrown; the hold stays.
      *
      * @return void
      *
@@ -557,8 +533,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An import refused before its start, here because its source is this
-     * installation, records nothing and is rethrown.
+     * An import refused before its start records nothing and is rethrown.
      *
      * @return void
      *
@@ -576,9 +551,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Closing a running batch whose import stopped records the import as a
-     * failure, `interrupted`, under the close's own operation, with the source
-     * and format its batch row holds.
+     * Closing a stopped import records it `interrupted` under the close's
+     * operation.
      *
      * @return void
      */
@@ -614,9 +588,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * The active holds are replayed from the verified journal, never read from
-     * the projection: a projection row deleted changes nothing, and a journal
-     * that fails verification is refused.
+     * Active holds are replayed from the verified journal, never read from the
+     * projection.
      *
      * @return void
      */
@@ -637,8 +610,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Rebuilding the projection puts back what the journal holds, and says how
-     * many holds it holds.
+     * Rebuilding the projection puts back what the journal holds and counts the
+     * holds.
      *
      * @return void
      */
@@ -673,8 +646,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Every operation resolves its service from the container on every call, so
-     * one way into the lifecycle outlives requests and follows rebinding.
+     * Every operation resolves its service from the container on every call.
      *
      * @return void
      */
@@ -701,10 +673,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An erasure is journalled and committed first, and its
-     * `audit_log.subject_erased` record, by the authority's operator, of no
-     * subject and no tenant, naming the owner by its fingerprint alone and
-     * keeping exactly its evidence, is written only after that commit.
+     * An erasure's record, naming the owner by fingerprint alone, is written
+     * after its commit.
      *
      * @return void
      */
@@ -739,9 +709,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An erasure a hold blocks is refused, recorded `denied` with `blocked`,
-     * naming the hold in its `blocked`, and rethrown; nothing is journalled but
-     * the hold.
+     * An erasure a hold blocks is recorded `denied`, naming the hold, and
+     * rethrown.
      *
      * @return void
      *
@@ -773,8 +742,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An erasure refused for anything but a block, here a custom encrypter, is
-     * recorded `denied` with its refusal and blocked by nothing.
+     * An erasure refused for anything but a block names no block.
      *
      * @return void
      *
@@ -801,9 +769,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An erasure that fails, here on a journal that does not verify, is
-     * recorded as a failure with `journal_broken` and rethrown; any other
-     * failure is `erasure_failed`, named by a code and never its message.
+     * A failed erasure is recorded `journal_broken` or `erasure_failed` by code
+     * and rethrown.
      *
      * @return void
      *
@@ -841,9 +808,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A record that cannot be written never undoes the erasure: its keys stay
-     * destroyed, the failure is reported once, the result says it committed and
-     * was not recorded, and a reconciliation writes the record later.
+     * A record that cannot be written leaves the erasure committed for a later
+     * reconciliation.
      *
      * @return void
      */
@@ -875,8 +841,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * An owner already erased that holds no key is recorded `already_erased`,
-     * naming no journal row, and nothing more is journalled.
+     * An owner already erased is recorded `already_erased` and nothing more is
+     * journalled.
      *
      * @return void
      */
@@ -912,9 +878,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A reinstatement is journalled and committed first, and its
-     * `audit_log.keys_reinstated` record, keeping exactly its evidence, is
-     * written after that commit by the authority's operator.
+     * A reinstatement's record is written after its commit.
      *
      * @return void
      */
@@ -949,9 +913,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A reinstatement of an owner who is not erased is recorded `denied` with
-     * `not_erased` and rethrown, naming no row and no floor; nothing is
-     * journalled.
+     * A reinstatement of an owner not erased is recorded `denied` with
+     * `not_erased` and rethrown.
      *
      * @return void
      *
@@ -976,8 +939,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A reinstatement that fails otherwise, here on a journal that does not
-     * verify, is rethrown and not recorded.
+     * A reinstatement failing otherwise is rethrown and not recorded.
      *
      * @return void
      *
@@ -1000,9 +962,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A rewrap is journalled a batch at a time, and its
-     * `audit_log.keys_rewrapped` record, keeping exactly its counts, is written
-     * after its commits by the authority's operator.
+     * A rewrap's record, keeping its counts, is written after its commits.
      *
      * @return void
      */
@@ -1034,8 +994,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A dry run rewraps nothing and records nothing, and a dry run that fails
-     * is rethrown unrecorded.
+     * A dry run rewrap records nothing, and a failing one is rethrown
+     * unrecorded.
      *
      * @return void
      *
@@ -1064,9 +1024,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A rewrap that fails is recorded as a failure, `journal_broken` for a
-     * journal that does not verify and `rewrap_failed` otherwise, counting
-     * nothing, and rethrown.
+     * A failed rewrap is recorded `journal_broken` or `rewrap_failed` and
+     * rethrown.
      *
      * @return void
      *
@@ -1108,9 +1067,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * The erasure's record is delivered like any package record: queued in the
-     * outbox once the erasure commits, and stored and announced as
-     * `AuditRecorded` when the outbox drains to the destinations.
+     * The erasure's record is queued in the outbox and delivered like any
+     * package record.
      *
      * @return void
      */
@@ -1138,8 +1096,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Erasing again from a file erases each owner as `erase()` does, each
-     * recorded, and journals the restore reconciled.
+     * Reapplying erasures from a file erases each owner as `erase()` does.
      *
      * @return void
      */
@@ -1164,8 +1121,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Rebuilding the key uses adds the ones missing from the verified entries,
-     * and a dry run counts them and adds nothing.
+     * Rebuilding the key uses adds the missing ones, and a dry run only counts
+     * them.
      *
      * @return void
      */
@@ -1214,7 +1171,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Record, in order, each commit of a transaction and each insert into the
+     * Record, in order, each transaction commit and each insert into the
      * entries table.
      *
      * @return \ArrayObject<int, string>
@@ -1240,8 +1197,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Start a batch as an import whose process was then killed leaves it: its
-     * row `running` and its journal's `import_started`, and nothing after.
+     * Leave a batch as a killed import does: `running`, with its start
+     * journalled.
      *
      * @param  string  $batchId
      * @return void
@@ -1321,8 +1278,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Bind the service to a factory that fails with the failure, so every
-     * operation that resolves it throws.
+     * Bind the service to a factory that throws the failure.
      *
      * @param  class-string  $service
      * @param  \Throwable  $failure
@@ -1353,8 +1309,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * The properties an erasure's record keeps, in its code's order, for the
-     * owner every test erases, on the authority every test gives.
+     * The properties an erasure's record keeps, in its code's order.
      *
      * @param  string  $operationId
      * @param  ?string  $erasureId
@@ -1402,9 +1357,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * Bind the package's encrypter and reader, and define the card charge, its
-     * card encrypted under its actor's key, as the only code the facade's
-     * recorder knows.
+     * Bind the package's encrypter and reader, and define the card charge as
+     * the only known code.
      *
      * @return void
      */
@@ -1440,9 +1394,8 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * The owner every privacy operation names, unless a test gives another: an
-     * id no hex, base64url or UUID holds by chance, so a record can be searched
-     * for it.
+     * The owner every privacy operation names: an id no hex, base64url or UUID
+     * holds by chance.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\Reference
      */
@@ -1452,8 +1405,7 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * The authority every operation is asked for on, unless a test gives
-     * another.
+     * The authority every operation is asked for on.
      *
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\Authority
      */

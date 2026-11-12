@@ -22,11 +22,7 @@ use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
 /**
- * Feature tests for the prune ledger the package binds: the records of a seal's
- * `prune` rows of the lifecycle journal, every one in the order of the chain,
- * nothing of another kind or another seal, a row whose payload holds no
- * readable record refused naming the seal, and every read on the storage
- * connection's writer, never the maintenance connection or a replica.
+ * Feature tests for the prune ledger read from the lifecycle journal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,9 +50,7 @@ final class JournalPruneLedgerTest extends TestCase
     private const string UNREADABLE = 'The lifecycle journal holds a prune row of the seal `01932b4e-9000-7000-8000-000000000001` with no record that can be read.';
 
     /**
-     * Every record of the seal is read, in the order of the journal's sequence,
-     * interleaved as they are with another seal's, each as it was signed; the
-     * ledger is a prune ledger.
+     * Every record of the seal is read in journal order, each as it was signed.
      *
      * @return void
      */
@@ -82,8 +76,7 @@ final class JournalPruneLedgerTest extends TestCase
     }
 
     /**
-     * Rows of other kinds, a row of another seal and a row of another kind
-     * naming the seal give the seal nothing: only its `prune` rows count.
+     * Only the seal's own `prune` rows count.
      *
      * @return void
      */
@@ -104,9 +97,7 @@ final class JournalPruneLedgerTest extends TestCase
     }
 
     /**
-     * Rows of `[the payload stored, the message]`: a payload that is not JSON,
-     * nested past the depth, one with no record, one whose record is not a map,
-     * and one whose record cannot be read, named by its field.
+     * Rows of `[the payload stored, the message]`.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -124,9 +115,7 @@ final class JournalPruneLedgerTest extends TestCase
     }
 
     /**
-     * A prune row of the seal whose payload holds no readable record is
-     * refused: one with no record naming the seal, and one whose record cannot
-     * be read naming its field, either a forged record to verification.
+     * A prune row whose payload holds no readable record is refused.
      *
      * @param  string  $payload
      * @param  string  $message
@@ -145,10 +134,8 @@ final class JournalPruneLedgerTest extends TestCase
     }
 
     /**
-     * The records are read in one statement on the storage connection's writer:
-     * never its reader, which a replica would lag behind, and never the
-     * maintenance connection, so verification needs no credentials that can
-     * delete.
+     * Records are read on the storage writer, so verification needs no
+     * credentials that can delete.
      *
      * @return void
      */
@@ -182,8 +169,7 @@ final class JournalPruneLedgerTest extends TestCase
     }
 
     /**
-     * Append a `prune` row of the record's seal holding the record, as the
-     * pruner writes one.
+     * Append a `prune` row holding the record, as the pruner writes one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\PruneRecord  $record
      * @return void
@@ -194,8 +180,8 @@ final class JournalPruneLedgerTest extends TestCase
     }
 
     /**
-     * A record of the seal, of four members, setting the positions, signed
-     * under the ring's signing key.
+     * A record of the seal, of four members, signed under the ring's signing
+     * key.
      *
      * @param  string  $sealId
      * @param  list<int>  $positions

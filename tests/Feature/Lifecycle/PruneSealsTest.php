@@ -20,10 +20,7 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Feature tests for the seals a prune walks, on whichever engine the suite runs
- * against: an authentic seal loads with its members sorted bytewise; each way a
- * seal can fail authentication loads nothing; and its present members are read
- * in one statement, with the columns a plan and a hold read.
+ * Feature tests for the seals a prune walks and their present members.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,8 +64,8 @@ final class PruneSealsTest extends TestCase
     }
 
     /**
-     * An authentic seal loads: its envelope is the stored seal's, its digest
-     * the stored one, and each member's HMAC the one it was sealed with.
+     * An authentic seal loads with its stored envelope, digest and member
+     * HMACs.
      *
      * @return void
      */
@@ -100,8 +97,7 @@ final class PruneSealsTest extends TestCase
     }
 
     /**
-     * Rows of `[what the test does to the stored seal]`: each way a seal fails
-     * authentication.
+     * Rows of `[what the test does to the stored seal]`.
      *
      * @return iterable<string, array{0: \Closure(\Tests\Feature\Lifecycle\PruneSealsTest): void}>
      */
@@ -122,8 +118,7 @@ final class PruneSealsTest extends TestCase
     }
 
     /**
-     * Each authentication failure loads nothing, so the seal is skipped and
-     * never pruned.
+     * A seal that fails authentication loads nothing, so it is never pruned.
      *
      * @param  \Closure(\Tests\Feature\Lifecycle\PruneSealsTest): void  $tamper
      * @return void
@@ -139,8 +134,8 @@ final class PruneSealsTest extends TestCase
     }
 
     /**
-     * The members are sorted bytewise by entry id, in PHP, whatever order the
-     * engine returns them in.
+     * The members are sorted bytewise by entry id in PHP, whatever order the
+     * engine returns.
      *
      * @return void
      */
@@ -158,9 +153,7 @@ final class PruneSealsTest extends TestCase
     }
 
     /**
-     * The present members are read in one statement, sorted bytewise, each with
-     * the columns a plan and a hold read, and a member whose entry is gone is
-     * not among them.
+     * The present members are read in one statement, sorted bytewise.
      *
      * @return void
      */
@@ -208,8 +201,7 @@ final class PruneSealsTest extends TestCase
     }
 
     /**
-     * Name another key on the stored seal and store the digest that envelope
-     * gives, so the seal fails on its key alone.
+     * Name another key on the stored seal, so the seal fails on its key alone.
      *
      * @param  string  $keyId
      * @return void

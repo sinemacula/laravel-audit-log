@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay;
 use Tests\TestCase;
 
 /**
- * Feature tests for what a run of erasures carries from one owner to the next:
- * nothing at first, then the replay the last committed erasure left, and
- * whether the installation was confirmed.
+ * Feature tests for what a run of erasures carries from one owner to the next.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +35,8 @@ final class ErasureRunTest extends TestCase
     }
 
     /**
-     * The run keeps the replay committed last, replacing the one before, and
-     * remembers that it confirmed the installation.
+     * The run keeps the last committed replay and remembers confirming the
+     * installation.
      *
      * @return void
      */

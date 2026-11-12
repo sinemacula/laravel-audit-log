@@ -31,14 +31,7 @@ use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
 /**
- * Feature tests for the journal's writer, on whichever engine the suite runs
- * against: the first row starts the chain and every later one links to the
- * head, at the clock's time, in the configured log, signed; a head that is not
- * the replay's, forged, deleted, replaced or added since it was read, is
- * refused and nothing is appended; the replay returned has accepted the row and
- * the one given is left as it was; a sequence taken outside the lock is a
- * programming error; and the row carries its authority and is written on the
- * maintenance connection, only inside a transaction.
+ * Feature tests for the journal's writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,9 +83,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * The first row of an empty journal is sequence 1, with no previous HMAC,
-     * in the configured log, at the clock's time, under the operation, and its
-     * signature verifies.
+     * The first row of an empty journal starts the chain at sequence 1.
      *
      * @return void
      */
@@ -118,8 +109,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * Each row takes the next sequence and links to the head's HMAC, whether
-     * the head was written by an earlier operation or by the same one.
+     * Each row takes the next sequence and links to the head's HMAC.
      *
      * @return void
      */
@@ -148,8 +138,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * A row forged onto the head, signed under no key the ring holds, is
-     * refused by the replay before any append, and nothing is appended onto it.
+     * A row forged onto the head is refused before any append.
      *
      * @return void
      */
@@ -170,8 +159,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * Rows of `[what changes the journal after the replay read it]`: a head
-     * deleted, a row added, and a head replaced under another HMAC.
+     * Rows of `[what changes the journal after the replay read it]`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -187,8 +175,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * A head that is not the replay's, by its sequence or its HMAC, is a gap,
-     * found at the stored head, and nothing is appended.
+     * A head that is not the replay's is a gap, and nothing is appended.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -223,9 +210,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * A replay of an empty journal refuses to append onto a row written since
-     * it read, and one of a journal whose rows were all deleted since refuses
-     * to append onto nothing.
+     * A replay of an empty journal refuses a journal changed since it read.
      *
      * @return void
      */
@@ -260,9 +245,8 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * The replay returned has accepted the row: its head is the row, which is
-     * its last appended row, and it holds the hold the row placed; the replay
-     * given is left as it was.
+     * The replay returned has accepted the row; the one given is left as it
+     * was.
      *
      * @return void
      */
@@ -288,8 +272,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * A transition the chain does not allow, a release of a hold never placed,
-     * is refused by the replay and nothing is appended.
+     * An invalid transition is refused and nothing is appended.
      *
      * @return void
      */
@@ -303,9 +286,8 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * A row already stored at the next sequence, written after the head was
-     * read as only an append outside the lock could, makes the insert a
-     * programming error that names no value of the row.
+     * A sequence collision is a programming error that names no value of the
+     * row.
      *
      * @return void
      */
@@ -335,8 +317,8 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * The row is inserted through the maintenance connection when another is
-     * configured, inside the transaction it holds.
+     * The row is inserted through the maintenance connection, inside its
+     * transaction.
      *
      * @return void
      */
@@ -362,8 +344,8 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * A row of a kind that carries an authority holds its operator, its reason
-     * and its external reference in its own columns, signed.
+     * A row carrying an authority holds its operator, reason and reference,
+     * signed.
      *
      * @return void
      */
@@ -401,8 +383,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * Rows of `[kind, authority given]`: a kind that carries an authority
-     * without one, and one that never carries one with one.
+     * Rows of `[kind, authority given]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind, 1: bool, 2: string}>
      */
@@ -417,8 +398,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * A row's authority follows its kind, and a mismatch is a programming error
-     * that reads nothing and appends nothing.
+     * An authority that does not match its kind is a programming error.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind  $kind
      * @param  bool  $withAuthority
@@ -436,8 +416,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * An append outside a transaction is a programming error, and nothing is
-     * appended.
+     * An append outside a transaction is a programming error.
      *
      * @return void
      */
@@ -454,8 +433,8 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * Append one row of the kind through the journal, in one lifecycle
-     * transaction onto the verified journal.
+     * Append one row of the kind onto the verified journal, in one lifecycle
+     * transaction.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -556,9 +535,7 @@ final class JournalTest extends TestCase
     }
 
     /**
-     * Configure `MAINTENANCE`, a second connection to the worker's database, as
-     * the maintenance connection: on SQLite it shares the in-memory database's
-     * connection.
+     * Configure `MAINTENANCE` as a second connection to the worker's database.
      *
      * @return void
      */

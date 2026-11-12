@@ -10,10 +10,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ImportFile;
 use Tests\TestCase;
 
 /**
- * Feature tests for reading an import file: its streamed SHA-256, its lines by
- * their numbers in the file, blank lines skipped, an over-long line rejected
- * without being held, a line across the reads' blocks read whole, and the
- * digest of what the lines' read read, known once it has ended.
+ * Feature tests for reading an import file, its lines and its digests.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,8 +43,8 @@ final class ImportFileTest extends TestCase
     }
 
     /**
-     * The digest is the SHA-256 of the file's bytes, as lower-case hex, read
-     * whole whatever its size.
+     * The digest is the lower-case hex SHA-256 of the file's bytes, whatever
+     * its size.
      *
      * @return void
      */
@@ -62,10 +59,8 @@ final class ImportFileTest extends TestCase
     }
 
     /**
-     * A line longer than the limit is rejected by its number, and what is read
-     * of it is never held whole: reading a line of 16 MiB under a limit of 1
-     * KiB costs far less memory than the line, and the lines either side of it
-     * are read as they are.
+     * An over-long line is rejected by its number without being held whole in
+     * memory.
      *
      * @return void
      */
@@ -96,8 +91,8 @@ final class ImportFileTest extends TestCase
     }
 
     /**
-     * A line of exactly the limit is read, one byte more is rejected, and a
-     * carriage return before the line feed is neither kept nor counted.
+     * The limit counts a line's bytes without its line end, carriage return
+     * included.
      *
      * @return void
      */
@@ -113,9 +108,7 @@ final class ImportFileTest extends TestCase
     }
 
     /**
-     * Blank lines, empty or of spaces and tabs only, are skipped, and the lines
-     * around them keep their numbers in the file; a last line without a line
-     * feed is read.
+     * Blank lines are skipped and the lines around them keep their numbers.
      *
      * @return void
      */
@@ -146,9 +139,7 @@ final class ImportFileTest extends TestCase
     }
 
     /**
-     * The read digest is the SHA-256 of what the lines' read read, blank and
-     * over-long lines included: the file's own digest when it did not change,
-     * and the changed bytes' when it did.
+     * The read digest is the SHA-256 of what the lines' read read.
      *
      * @return void
      */
@@ -172,8 +163,7 @@ final class ImportFileTest extends TestCase
     }
 
     /**
-     * The read digest is unknown before the lines are read, and while a read of
-     * them has not ended, even once it has begun.
+     * The read digest is unknown until a read of the lines has ended.
      *
      * @return void
      */
