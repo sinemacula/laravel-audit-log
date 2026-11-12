@@ -11,9 +11,8 @@ use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the context an encrypter is given: the parts it keeps, each
- * malformed part it refuses without naming it, and the owners kept each once
- * and sorted bytewise by type and then id.
+ * Unit tests for the context an encrypter is given: the parts it keeps and
+ * refuses, and its owners kept once each, sorted by type then id.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

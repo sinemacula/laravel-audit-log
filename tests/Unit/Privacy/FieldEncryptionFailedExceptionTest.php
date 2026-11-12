@@ -14,8 +14,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
  * Unit tests for the exception reported when a field encrypter fails: it names
- * the encrypter's class and nothing else, and it cannot carry what the
- * encrypter threw.
+ * only the encrypter's class and carries nothing it threw.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

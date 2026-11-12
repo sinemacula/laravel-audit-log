@@ -12,9 +12,8 @@ use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
 
 /**
- * Unit tests for the field reader the package binds: it answers `encrypted` for
- * every field of a page, one reading for each, in order, and its answer holds
- * nothing of the fields it was given.
+ * Unit tests for the bound field reader: it answers `encrypted` for every field
+ * of a page, in order, holding nothing of the fields.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,9 +27,8 @@ final class SealedFieldReaderTest extends TestCase
     private const string ENTRY_ID = '01932b4e-8a40-7000-8000-000000000001';
 
     /**
-     * An IP address, an owned note and a nested property of a page are each
-     * answered `encrypted`, with no value, shown as its marker, one reading for
-     * each field.
+     * An IP address, an owned note and a nested property are each answered
+     * `encrypted` and shown as the marker, one reading each.
      *
      * @return void
      */

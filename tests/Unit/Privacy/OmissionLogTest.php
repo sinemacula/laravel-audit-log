@@ -189,9 +189,8 @@ final class OmissionLogTest extends TestCase
     }
 
     /**
-     * Length is measured under the fixed flags, which leave a slash and a
-     * multi-byte character as they are: 128 slashes fit, and 65 two-byte
-     * characters do not, though they are 65 characters.
+     * Length is measured with slashes and multi-byte characters unescaped: 128
+     * slashes fit, and 65 two-byte characters do not.
      *
      * @return void
      *
@@ -304,9 +303,8 @@ final class OmissionLogTest extends TestCase
     }
 
     /**
-     * A path that is not valid UTF-8 cannot be measured, and fails without
-     * saying what it held; the masker cannot produce one, since a rule's path
-     * is clean text.
+     * A path that is not valid UTF-8 fails without saying what it held; the
+     * masker never produces one.
      *
      * @return void
      */

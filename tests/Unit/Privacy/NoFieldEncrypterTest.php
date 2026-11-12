@@ -12,8 +12,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
  * Unit tests for the field encrypter that never encrypts: it holds no key for
- * anyone, whatever it is sealing for, and marks the plaintext it is given as
- * sensitive.
+ * anyone and marks its plaintext as sensitive.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

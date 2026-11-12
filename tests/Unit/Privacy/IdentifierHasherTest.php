@@ -12,9 +12,8 @@ use SineMacula\Laravel\AuditLog\Privacy\IdentifierHasher;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 
 /**
- * Unit tests for the keyed hashes: the golden vector of each domain, the key
- * they derive from, how a value is normalised, the separation of the domains,
- * and the values no failure ever shows.
+ * Unit tests for the keyed hashes: each domain's golden vector, the key,
+ * normalisation, domain separation, and what no failure shows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -508,9 +507,8 @@ final class IdentifierHasherTest extends TestCase
     }
 
     /**
-     * A value with no canonical encoding is refused, naming its type and never
-     * what it holds. The normaliser leaves no such value, so this is a
-     * programming error.
+     * A value with no canonical encoding is refused naming only its type; the
+     * normaliser leaves none, so this is a programming error.
      *
      * @return void
      */

@@ -30,9 +30,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Privacy\ThrowingFieldEncrypter;
 
 /**
- * Unit tests for the field policy: what each handling does to a value, how the
- * walker selects a rule, what is cut and what never is, whose key a field is
- * sealed under, and what the omission log is told.
+ * Unit tests for the field policy: each handling, rule selection, cutting,
+ * whose key seals a field, and what the omission log is told.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -680,9 +679,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * A string is cut before the encrypter sees it to the longest prefix whose
-     * encoding fits 1024 bytes, quotes and escapes counted, without splitting a
-     * character, and the field is kept rather than diagnosed.
+     * A string is cut before encryption to the longest prefix whose encoding
+     * fits 1024 bytes, without splitting a character.
      *
      * @return void
      */
@@ -703,10 +701,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * Rows of `[list element bytes]`: a list whose typed plaintext, its
-     * canonical encoding, is one byte short of the limit, and exactly the
-     * limit, the brackets and quotes being the four bytes more than its one
-     * string.
+     * Rows of `[list element bytes]`: a list whose canonical encoding is one
+     * byte short of the limit, and exactly the limit.
      *
      * @return iterable<string, array{0: int}>
      */
@@ -740,9 +736,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: containers whose encoding passes the limit, one by a
-     * single byte and one by much more, measured in bytes after encoding, an
-     * escaped character costing what its escape does.
+     * Rows of `[value]`: containers whose encoding passes the limit by one byte
+     * and by much more, an escape costing its encoded bytes.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -761,8 +756,7 @@ final class FieldPolicyTest extends TestCase
 
     /**
      * A value whose encoding passes the limit is removed and logged under its
-     * rule's path, rather than sealed as JSON that could never be decoded, and
-     * the encrypter never sees it.
+     * rule's path, never reaching the encrypter.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -784,9 +778,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * A value whose encoding passes the limit only once escaped is removed
-     * without reaching the encrypter, while one whose encoding just fits is
-     * sealed, so the limit is the encoding's and never the value's.
+     * The limit is on the escaped encoding: a value over it only once escaped
+     * is removed, and one that just fits is sealed.
      *
      * @return void
      */
@@ -834,9 +827,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * Rows of `[value, plaintext]`: every type is sealed as its canonical
-     * encoding, a string as a JSON string with its quotes, so the string
-     * `"true"` and the boolean `true` are sealed apart.
+     * Rows of `[value, plaintext]`: each type sealed as its canonical encoding,
+     * so the string `"true"` and the boolean `true` differ.
      *
      * @return iterable<string, array{0: bool|int|string|null, 1: string}>
      */
@@ -1041,11 +1033,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * Rows of `[owner, properties]`: every way a field can have no owner. A
-     * marker in either part counts, since a field is never keyed on a redacted
-     * value. The scalar on the way comes first because reading on from it is an
-     * error, which protects against a mutation of the path walk that an absent
-     * key would only warn about.
+     * Rows of `[owner, properties]`: every way a field has no owner, a scalar
+     * on the way first since reading past it errors where others warn.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1140,9 +1129,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * An encrypted field is sealed for its path in the stored entry, under
-     * `properties`, with the scope's entry, log, tenant, category and every
-     * owner of the record.
+     * An encrypted field is sealed for its stored path under `properties`, with
+     * the scope's entry, log, tenant, category and owners.
      *
      * @return void
      */
@@ -1164,9 +1152,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * An element of a list is sealed at the index it is stored at once the
-     * elements removed before it are gone, whether removed by a rule or left
-     * empty, so its envelope opens after the list reindexes.
+     * A list element is sealed at the index it has once earlier elements are
+     * removed, so its envelope opens after the list reindexes.
      *
      * @return void
      */
@@ -1207,11 +1194,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * A member is named by its key as PHP keys it, whatever its container's
-     * shape: a list index and a map key PHP holds as an integer from 0 are
-     * integer segments, and any other map key, a negative or zero-padded number
-     * included, a string. A map key and a list index never name the same place,
-     * since one container is never both.
+     * A member is named by its key as PHP keys it: a list index or an integer
+     * map key from 0 is an integer, any other map key a string.
      *
      * @return void
      */
@@ -1237,9 +1221,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * A map that loses every key but 0 to n - 1 is stored as a list, and its
-     * members were sealed at the integer segments a reader of that list gives
-     * them.
+     * A map left with only keys 0 to n - 1 is stored as a list, its members
+     * sealed at the integer segments a reader gives them.
      *
      * @return void
      */
@@ -1256,9 +1239,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * The owners of a definition's encrypted rules are listed each once, in the
-     * order their rules are defined; a rule whose owner is absent, and a rule
-     * that does not encrypt, name none.
+     * The owners of a definition's encrypted rules are listed once each in rule
+     * order; an absent owner or a plain rule names none.
      *
      * @return void
      */
@@ -1455,9 +1437,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * Rows of `[whether the failure is thrown]`: each way the walker fails with
-     * a concrete path on its stack, thrown from a hash with a malformed key and
-     * reported from a throwing encrypter.
+     * Rows of `[whether the failure is thrown]`: a hash thrown on a malformed
+     * key, and a throwing encrypter reported.
      *
      * @return iterable<string, array{0: bool}>
      */
@@ -1470,12 +1451,8 @@ final class FieldPolicyTest extends TestCase
     }
 
     /**
-     * A dynamic key under a wildcard is on the walker's stack as part of the
-     * concrete path whenever a failure is met, and no frame of the failure,
-     * thrown or reported, holds it. The search is of the arrays in the
-     * package's frames, closure and helpers alike: this test's own frames hold
-     * the payload, and a frame's objects reach the reporter and so the test's
-     * frames again.
+     * No package frame of a failure, thrown or reported, holds the dynamic key
+     * on the walker's stack; the test's own frames hold the payload.
      *
      * @param  bool  $thrown
      * @return void

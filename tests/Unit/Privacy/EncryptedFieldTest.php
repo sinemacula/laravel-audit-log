@@ -11,11 +11,8 @@ use SineMacula\Laravel\AuditLog\Privacy\EncryptedField;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * Unit tests for an encrypted fragment of an entry: built only by its factory,
- * the entry, segments and envelope it keeps, its path the dotted form of its
- * segments, the `null` it is made of for anything that is not exactly an
- * envelope, the segments it refuses, and the parameters kept out of a stack
- * trace.
+ * Unit tests for an encrypted fragment of an entry: its factory, what it keeps,
+ * its path, the values it refuses, and its sensitive parameters.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,9 +65,8 @@ final class EncryptedFieldTest extends TestCase
     }
 
     /**
-     * The segments are kept as given, each map key a string and each list index
-     * an integer, a key of digits staying a string, and the path is their
-     * dotted form.
+     * The segments are kept as given, a key of digits staying a string, and the
+     * path is their dotted form.
      *
      * @return void
      */
@@ -132,9 +128,8 @@ final class EncryptedFieldTest extends TestCase
     }
 
     /**
-     * Whether a value is well formed is exactly whether the factory builds a
-     * field of it, so the projector can tell a malformed envelope from one it
-     * shows sealed without building a field of either.
+     * A value is well formed exactly when the factory builds a field of it, so
+     * the projector can check without building one.
      *
      * @return void
      */
@@ -212,9 +207,8 @@ final class EncryptedFieldTest extends TestCase
     }
 
     /**
-     * A member's segment is its key as PHP keys it: an integer from 0 as that
-     * integer, and a negative integer or any other key as a string; so a map
-     * key and a list index at the same position are named alike.
+     * A member's segment is its key as PHP keys it: an integer from 0 stays an
+     * integer, and a negative integer or any other key is a string.
      *
      * @return void
      */

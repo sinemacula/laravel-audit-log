@@ -25,9 +25,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Privacy\ThrowingFieldEncrypter;
 
 /**
- * Unit tests for the IP minimiser: the canonical form, what each mode stores,
- * the IPv4-mapped rule, invalid addresses, and an encrypted address as
- * canonical JSON that fits its column or is dropped.
+ * Unit tests for the IP minimiser: the canonical form, each mode, IPv4-mapped
+ * and invalid addresses, and the encrypted column limit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -224,8 +223,7 @@ final class IpMinimiserTest extends TestCase
 
     /**
      * An invalid address is diagnosed by its fixed path in every mode, `drop`
-     * included, since the mode's choice was never applied to it, and the
-     * address itself appears nowhere in the log.
+     * included, and appears nowhere in the log.
      *
      * @param  string  $mode
      * @param  string  $address
@@ -380,9 +378,8 @@ final class IpMinimiserTest extends TestCase
     }
 
     /**
-     * The address is sealed for the path `["ip"]` of the scope's entry, with
-     * the scope's log, tenant, category and owners, so its envelope opens in
-     * that column of that entry and nowhere else.
+     * The address is sealed for the path `["ip"]` with the scope's entry, log,
+     * tenant, category and owners.
      *
      * @return void
      */
@@ -403,9 +400,8 @@ final class IpMinimiserTest extends TestCase
     }
 
     /**
-     * The address's plaintext is its typed plaintext, the JSON string of its
-     * canonical form, which decodes back to the address and to nothing of
-     * another type.
+     * The address's plaintext is the JSON string of its canonical form, which
+     * decodes back to the address and nothing else.
      *
      * @return void
      */
@@ -556,9 +552,8 @@ final class IpMinimiserTest extends TestCase
     }
 
     /**
-     * The limit is on encoded bytes: 117 two-byte characters are far fewer than
-     * 255 characters and one byte too many; protects against a mutation that
-     * counts characters.
+     * The limit is on encoded bytes: 117 two-byte characters are one byte too
+     * many, though far fewer than 255 characters.
      *
      * @return void
      */
@@ -571,9 +566,8 @@ final class IpMinimiserTest extends TestCase
     }
 
     /**
-     * The limit is on what is stored, after escaping: quotes that fit raw and
-     * not once escaped are dropped, and slashes, which the canonical encoding
-     * does not escape, still fit.
+     * The limit is on the escaped form: quotes that fit raw but not escaped are
+     * dropped, and unescaped slashes still fit.
      *
      * @return void
      */
@@ -625,9 +619,8 @@ final class IpMinimiserTest extends TestCase
     }
 
     /**
-     * An address is hashed in its own domain, so its hash never equals the hash
-     * of the same text as an identifier or as a field, and carries a different
-     * fingerprint.
+     * An address is hashed in its own domain, so its hash and fingerprint
+     * differ from the same text's as an identifier or a field.
      *
      * @return void
      */

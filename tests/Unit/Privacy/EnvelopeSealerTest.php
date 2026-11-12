@@ -20,9 +20,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Fixtures\Privacy\ThrowingFieldEncrypter;
 
 /**
- * Unit tests for the envelope sealer: the envelopes it accepts and the order it
- * returns them in, the failures it contains, and that a failure reaches the
- * reporter once, holding nothing of the plaintext.
+ * Unit tests for the envelope sealer: the envelopes it accepts and their order,
+ * the failures it contains, and that each is reported once without plaintext.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -241,9 +240,8 @@ final class EnvelopeSealerTest extends TestCase
     }
 
     /**
-     * What is reported is the package's own exception, naming only the
-     * encrypter's class, with no previous exception, and with frames that keep
-     * the plaintext out of its trace even with arguments recorded.
+     * What is reported is the package's own exception naming only the
+     * encrypter's class, with no previous and no plaintext in any frame.
      *
      * @param  \Tests\Fixtures\Privacy\MalformedFieldEncrypter|\Tests\Fixtures\Privacy\ThrowingFieldEncrypter  $encrypter
      * @return void

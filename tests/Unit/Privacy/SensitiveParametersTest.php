@@ -45,13 +45,8 @@ use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * Holds every parameter that carries a raw value or a raw key to
- * `#[\SensitiveParameter]`, because with `zend.exception_ignore_args` off every
- * frame of a thrown exception keeps its arguments, private helpers included: a
- * named table for the way in, and a scan of the whole privacy layer by
- * parameter name, which must find what it expects so that it cannot pass by
- * finding nothing. A concrete path holds raw keys, and a key can be an email
- * address.
+ * Holds raw value and key parameters to `#[\SensitiveParameter]`, since with
+ * `zend.exception_ignore_args` off every frame keeps its arguments.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -119,8 +114,7 @@ final class SensitiveParametersTest extends TestCase
 
     /**
      * Rows of `[class, method, parameter]`: where a raw value enters the
-     * package and each helper it passes through on the way to the privacy
-     * layer.
+     * package and each helper on its way to the privacy layer.
      *
      * @return iterable<string, array{0: class-string, 1: string, 2: string}>
      */
@@ -221,9 +215,8 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
-     * Every method of every class in the privacy layer, private ones included,
-     * marks a parameter that goes by one of the raw names, and the scan finds
-     * one in each class that must hold one.
+     * Every privacy-layer method, private ones included, marks a parameter with
+     * a raw name, and the scan finds one in each expected class.
      *
      * @return void
      */
@@ -247,9 +240,8 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan reads the whole namespace, the classes nested in its folders
-     * included, so a class added to the layer is held to the rule without
-     * editing this test.
+     * The scan reads the whole namespace, nested folders included, so a class
+     * added to the layer is held to the rule.
      *
      * @return void
      */
@@ -280,10 +272,8 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
-     * The message of the exception a failed encrypter is reported with is let
-     * go because only its own named constructor can call it, with a message it
-     * composes from the encrypter's class. It is private, so nothing else can
-     * pass it a raw value.
+     * The failed-encrypter exception's message is exempt: its private
+     * constructor takes only a message composed from the encrypter's class.
      *
      * @return void
      */
@@ -296,9 +286,8 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
-     * The message a sealing scope refuses with is let go because the method is
-     * private and every call passes it a literal the package wrote, so nothing
-     * else can pass it a raw value.
+     * A sealing scope's refusal message is exempt: the method is private and
+     * every call passes a literal the package wrote.
      *
      * @return void
      */
@@ -313,9 +302,8 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
-     * Each exemption names a parameter that exists and goes by a raw name, so
-     * an entry left behind by a rename fails instead of silently excusing
-     * nothing.
+     * Each exemption names an existing parameter with a raw name, so one left
+     * behind by a rename fails.
      *
      * @return void
      */
@@ -331,11 +319,8 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan holds a concrete path to the rule through every helper that
-     * walks one, so a raw dynamic key cannot be left in a frame of the walker
-     * by adding one more of them, through the encrypted field that carries one
-     * to a field reader as its segments, and through the context and the cipher
-     * that bind an envelope to one. Each is found, whatever else holds a path.
+     * The scan finds every helper that walks, carries or binds a concrete path,
+     * so each is held to the rule.
      *
      * @return void
      */
@@ -364,9 +349,8 @@ final class SensitiveParametersTest extends TestCase
     }
 
     /**
-     * The closure the walker hands every field to takes the concrete path too,
-     * and a closure is out of a scan of methods, so its marking is read from
-     * the source.
+     * The walker's per-field closure takes the concrete path too, and closures
+     * are outside a method scan, so its marking is read from source.
      *
      * @return void
      */

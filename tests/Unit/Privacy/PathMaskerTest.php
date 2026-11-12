@@ -11,9 +11,8 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Privacy\PathMasker;
 
 /**
- * Unit tests for the path masker: a segment is written only from a rule that
- * matches that same field or the branch holding it, or from the fixed context
- * names, and a concrete key is never written.
+ * Unit tests for the path masker: a segment is written only from a matching
+ * rule or the fixed context names, never a concrete key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,8 +58,7 @@ final class PathMaskerTest extends TestCase
 
     /**
      * Rows of `[retained paths, dropped paths, concrete path, mask]`: the mask
-     * table, then a rule more specific than another, a rule matching only a
-     * prefix of the path, numeric keys, and several rules beneath a path.
+     * table, then specificity, prefixes, numeric keys and nesting.
      *
      * @return iterable<string, array{0: list<string>, 1: list<string>, 2: list<int|string>, 3: string}>
      */

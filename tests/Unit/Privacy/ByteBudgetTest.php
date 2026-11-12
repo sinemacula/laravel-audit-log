@@ -15,8 +15,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 
 /**
  * Unit tests for the byte budget: the order keys are omitted in, what is never
- * omitted, the masked paths it reports, that the final encoding fits whatever
- * the metadata adds, and that the result depends only on the input's contents.
+ * omitted, the paths it reports, and that the final encoding fits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -192,8 +191,7 @@ final class ByteBudgetTest extends TestCase
 
     /**
      * Keys of equal cost go in the byte order of the key, so `Z` goes before
-     * `a`, and only `c` is left here: protects against a case-insensitive or a
-     * reversed comparison, each of which leaves another key.
+     * `a` and only `c` is left.
      *
      * @return void
      *
@@ -227,8 +225,7 @@ final class ByteBudgetTest extends TestCase
 
     /**
      * A branch holding a rule-governed field goes with the rule-governed keys,
-     * even though no rule decides the branch itself, so a retained field is not
-     * lost to a smaller key's benefit.
+     * though no rule decides the branch itself.
      *
      * @return void
      *
@@ -420,9 +417,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * Keys stop going the moment what remains fits beside the reserve: at
-     * exactly the limit the next key stays, and one byte over it goes too,
-     * which pins each key's cost to the byte.
+     * Keys stop going once what remains fits beside the reserve: at exactly the
+     * limit the next key stays, and one byte over it goes.
      *
      * @return void
      *
@@ -463,9 +459,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * Rows of `[values, note, identifier hash, budget]`: a payload exactly at
-     * the limit, one byte over, many small keys, one huge key, and the least
-     * budget with metadata beside the keys.
+     * Rows of `[values, note, identifier hash, budget]`: at the limit, one byte
+     * over, many small keys, one huge key, and the least budget.
      *
      * @return iterable<string, array{0: array<string, string>, 1: ?string, 2: ?string, 3: int}>
      */
@@ -511,9 +506,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * A payload whose final encoding is exactly the budget is left alone, and
-     * one byte more is not: the first comparison is against the budget itself,
-     * with the metadata counted.
+     * A payload whose final encoding is exactly the budget, metadata counted,
+     * is left alone, and one byte more is not.
      *
      * @return void
      *
@@ -535,9 +529,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * The reserve holds the largest metadata there can be, measured rather than
-     * assumed: a full hash, the largest manifest descriptor and 32 paths of 128
-     * bytes under the largest count, with a comma, which is 4535 bytes.
+     * The reserve holds the largest metadata, measured: a full hash, the
+     * largest manifest descriptor and 32 paths of 128 bytes, 4535 bytes.
      *
      * @return void
      *
@@ -555,11 +548,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * The largest manifest descriptor, measured: its key, a lower-case UUID,
-     * the longest kind, `disclosure`, a hex SHA-256 and the greatest count the
-     * settings allow cost 178 bytes with a comma, which the reserve holds
-     * beside the rest of the largest metadata, and still holds should a count
-     * reach the largest integer.
+     * The largest manifest descriptor costs 178 bytes with a comma, which the
+     * reserve holds even should a count reach the largest integer.
      *
      * @return void
      *
@@ -612,9 +602,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * Whatever else goes, the manifest descriptor stays, beside the hash and
-     * the omitted list, and it is never itself a candidate: nothing it costs is
-     * reported, and the final encoding fits.
+     * The manifest descriptor stays beside the hash and the omitted list, and
+     * is never itself a candidate, so nothing it costs is reported.
      *
      * @return void
      *
@@ -656,11 +645,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * The worst case fits the least budget: 32 distinct rule paths of 128 bytes
-     * from the omissions, the largest count, an identifier hash, the largest
-     * manifest descriptor and a note of 1,024 bytes that all need escaping. The
-     * note fits beside the reserve even so, so it stays, and everything else
-     * that could go has gone.
+     * The worst metadata and a 1,024-byte note of escaped characters fit the
+     * least budget: the note stays and all else that can go goes.
      *
      * @return void
      *
@@ -687,10 +673,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * The worst case still fits with a note too large to stay, which only an
-     * envelope can be: the note goes, and the hash, the manifest descriptor and
-     * the list do not. Its path sorts after the 32 already held, so only the
-     * count records it.
+     * Beside the worst metadata a note too large to stay goes, and the hash,
+     * descriptor and list do not; only the count records its path.
      *
      * @return void
      *
@@ -714,9 +698,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * The tightest case fits too: the worst metadata beside a key and a note
-     * that cost exactly what the reserve leaves, so no spare byte hides a bad
-     * reserve.
+     * The tightest case fits: the worst metadata beside a key and a note that
+     * cost exactly what the reserve leaves.
      *
      * @return void
      *
@@ -805,9 +788,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * Sizes are measured as the row stores them: multi-byte characters and
-     * slashes are not escaped, so a payload of them fits where an escaped
-     * encoding would not, and is costed at its stored size when choosing.
+     * Sizes are measured as stored, multi-byte characters and slashes
+     * unescaped, so such a payload fits where an escaped encoding would not.
      *
      * @return void
      *
@@ -909,9 +891,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * The context fits its budget with no reserve: the bytes it would keep for
-     * metadata stay available, so a key costing all but its braces is kept at
-     * the exact limit.
+     * The context fits its budget with no reserve, so a key costing all but its
+     * braces is kept at the exact limit.
      *
      * @return void
      *
@@ -930,10 +911,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * Costs summing to the budget encode one byte over it, because the two
-     * braces outweigh the last key's missing comma, so a key goes; costs one
-     * byte less encode exactly to the budget, so none does. The limit on the
-     * remaining cost is one under the budget, not the budget.
+     * Costs summing to the budget encode one byte over it, the braces
+     * outweighing the last key's missing comma; one byte less fits.
      *
      * @return void
      *
@@ -969,9 +948,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * A list encodes without its keys, so its real encoding decides whether it
-     * fits, not the costs, which count keys it does not store: one that encodes
-     * to exactly the budget comes back whole, and one byte more loses elements.
+     * A list encodes without its keys, so its real encoding decides: exactly
+     * the budget comes back whole, and one byte more loses elements.
      *
      * @return void
      *
@@ -1124,9 +1102,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * A value or a key that cannot be encoded fails with no payload in the
-     * message or in any frame, even with every frame keeping its arguments and
-     * `json_encode()` being unable to mark its own as sensitive.
+     * A value or key that cannot be encoded fails with no payload in any
+     * message or frame, as `json_encode()` cannot mark its own sensitive.
      *
      * @return void
      */
@@ -1169,9 +1146,8 @@ final class ByteBudgetTest extends TestCase
     }
 
     /**
-     * A string whose key and value together cost exactly the bytes given: the
-     * encoded key, a colon, the encoded value and a comma, for a key and value
-     * that need no escaping.
+     * A string whose key and value, encoded with a colon and a comma, cost
+     * exactly the bytes given, for a key needing no escaping.
      *
      * @param  string  $key
      * @param  int  $cost
@@ -1237,8 +1213,7 @@ final class ByteBudgetTest extends TestCase
 
     /**
      * A definition with 32 rules of 128 bytes, and a payload with a key for
-     * each too large for even one of them to stay, so every path reaches the
-     * log.
+     * each too large to stay, so every path reaches the log.
      *
      * @return array{0: \SineMacula\Laravel\AuditLog\Definitions\EventDefinition, 1: array<string, string>}
      */
