@@ -36,18 +36,7 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Feature tests for the audit trail as an application reads it: every filter
- * and the viewer return a new trail and leave the old one as it was, each
- * dimension replaces itself, a model is referred to as capture refers to it,
- * the package's own codes can be filtered on but never recorded, the viewer is
- * referenced as capture references a user and never read as anonymous, and a
- * terminal call without a viewer or with a page size outside the range is
- * refused before anything is queried or recorded; an export and its
- * verification read through the exporter and the verifier, for the trail's
- * viewer; there is no probe of whether a viewer may read. The entries holding
- * an owner's encrypted fragments are found through the package's key store, in
- * a page, a count and an export alike, bound into a page's cursor, and refused
- * naming the bound encrypter when the encrypter keeps its keys elsewhere.
+ * Feature tests for the audit trail's filters, viewer and terminal calls.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,8 +92,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Each filter, and the viewer, returns a new trail and leaves the trail it
-     * was called on unfiltered and without a viewer.
+     * Each filter and the viewer return a new trail, leaving the old unchanged.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $filter
      * @return void
@@ -122,8 +110,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A trail kept and narrowed two ways leaks neither narrowing into the
-     * other, nor into itself, and keeps its viewer in both.
+     * A shared trail narrowed two ways leaks neither narrowing.
      *
      * @return void
      */
@@ -143,8 +130,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Each dimension given again replaces itself, never merging with what was
-     * given before, and a later window clears with `null` on both ends.
+     * Each dimension given again replaces itself, and `null` clears a window.
      *
      * @return void
      */
@@ -179,8 +165,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Exact codes and a prefix are one dimension: a prefix replaces the codes,
-     * and codes replace a prefix.
+     * Exact codes and a prefix are one dimension, each replacing the other.
      *
      * @return void
      */
@@ -194,8 +179,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A model given to a reference filter becomes its reference exactly as
-     * capture builds it, by its morph class and its key as a string.
+     * A model filter becomes its reference as capture builds it.
      *
      * @return void
      */
@@ -216,8 +200,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A filter is validated as it is given, before any viewer or terminal call,
-     * naming the filter and never the value.
+     * A filter is validated as given, naming the filter and never the value.
      *
      * @return void
      */
@@ -230,8 +213,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * The codes of the package's own reads can be filtered on, by their enum or
-     * by name, and a read filtered on them finds the records of earlier reads.
+     * The package's read codes can be filtered on, by enum or by name.
      *
      * @return void
      */
@@ -251,9 +233,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A package code is never recorded through the facade: by name it is
-     * refused as reserved, and naming it with `forPackage()` on a builder the
-     * facade made is refused when it is recorded, with nothing stored.
+     * A package code is never recorded through the facade.
      *
      * @return void
      */
@@ -288,8 +268,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A terminal call without a viewer is refused before the policy is asked or
-     * anything is queried, and is not recorded.
+     * A terminal call without a viewer is refused before any query or record.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): (int|\SineMacula\Laravel\AuditLog\Querying\TrailPage)  $terminal
      * @return void
@@ -315,8 +294,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A model viewer is handed to the policy as it was given, and the read is
-     * recorded under its reference as capture builds it.
+     * A model viewer goes to the policy as given and is recorded by reference.
      *
      * @return void
      */
@@ -328,8 +306,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Another authenticatable viewer is handed to the policy as it was given,
-     * and the read is recorded under its class and its identifier.
+     * An authenticatable viewer is recorded by its class and identifier.
      *
      * @return void
      */
@@ -341,8 +318,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A reference viewer is handed to the policy and recorded exactly as it was
-     * given.
+     * A reference viewer is handed on and recorded as given.
      *
      * @return void
      */
@@ -354,8 +330,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Rows of `[viewer]`: a model without a key, and an authenticatable user
-     * whose identifier is neither a string nor an integer.
+     * Rows of `[viewer]`: viewers that cannot be referenced.
      *
      * @return iterable<string, array{0: \Illuminate\Contracts\Auth\Authenticatable}>
      */
@@ -369,8 +344,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A viewer that cannot be referenced is refused as it is given, never read
-     * as anonymous, and nothing is queried or recorded.
+     * An unreferenceable viewer is refused, never read as anonymous.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable  $viewer
      * @return void
@@ -392,9 +366,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * There is no way to ask whether a viewer may read without reading: no
-     * probe, and no terminal call but a page, a count, an export and the
-     * verification of one.
+     * There is no probe of whether a viewer may read.
      *
      * @return void
      */
@@ -406,9 +378,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * An export and the verification of one without a viewer are refused before
-     * the policy is asked, anything is queried or any file is written, and are
-     * not recorded.
+     * An export or verification without a viewer is refused before any work.
      *
      * @return void
      */
@@ -442,9 +412,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * An export reads through the exporter with the trail's filters and viewer,
-     * in the format given, and the verification of it through the verifier for
-     * the same viewer.
+     * Export and verify delegate to the exporter and verifier for the viewer.
      *
      * @return void
      */
@@ -483,8 +451,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Rows of `[page size, the greatest configured or null for the default,
-     * the greatest the message names]`.
+     * Rows of `[page size, configured maximum, maximum the message names]`.
      *
      * @return iterable<string, array{0: int, 1: ?int, 2: int}>
      */
@@ -500,9 +467,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A page size outside 1 to `read.max_per_page` is refused, naming the
-     * range, before the policy is asked or anything is queried, and is not
-     * recorded.
+     * A page size outside 1 to `read.max_per_page` is refused before a query.
      *
      * @param  int  $perPage
      * @param  ?int  $configured
@@ -552,8 +517,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * The terminal calls read through the reader with the trail's filters and
-     * viewer: a page and a count of what the filters select.
+     * The terminal calls read through the reader with the trail's filters.
      *
      * @return void
      */
@@ -574,10 +538,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A trail holding the data of an owner reads the entries holding one of its
-     * encrypted fragments, whichever field holds it and whatever else the entry
-     * holds, given by a model or by its reference, and no entry holding only
-     * another owner's fragments or none.
+     * `holdingDataOf()` finds only entries holding the owner's fragments.
      *
      * @return void
      */
@@ -604,10 +565,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * With a field encrypter bound that keeps its keys outside the package's
-     * key store, an anonymous one included, the filter is refused naming the
-     * bound class, before anything is queried; the package's encrypter and the
-     * one that never encrypts are accepted.
+     * A custom encrypter keeping keys elsewhere is refused, naming its class.
      *
      * @return void
      */
@@ -660,10 +618,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * The encrypter is the one bound when the trail was made, carried by every
-     * filter and by the viewer, never looked up again: a trail made under a
-     * custom encrypter is refused after the binding changes, and one made under
-     * the package's store is not.
+     * A trail keeps the encrypter bound when it was made.
      *
      * @return void
      */
@@ -690,9 +645,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A count and an export of the trail holding an owner's data apply it as a
-     * page does: each counts or writes only the entries holding the owner's
-     * fragments.
+     * A count and an export apply the owner filter as a page does.
      *
      * @return void
      */
@@ -731,9 +684,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * An erased owner's entries are still found: erasure destroys its keys and
-     * leaves the key uses, so the entries holding its now unreadable fragments
-     * can still be reviewed.
+     * An erased owner's entries are still found through its key uses.
      *
      * @return void
      */
@@ -754,9 +705,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * A page's cursor is bound to the owner whose data the trail holds: it
-     * opens the next page of the same owner's entries and is refused for
-     * another owner's, or for the trail without the owner.
+     * A page's cursor is bound to the owner whose data the trail holds.
      *
      * @return void
      */
@@ -788,9 +737,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Read a count and a page as the viewer, and assert the policy was handed
-     * the viewer itself each time and the reads were recorded under the
-     * reference given.
+     * Read as the viewer and assert the policy and the records name it.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable|\SineMacula\Laravel\AuditLog\Records\Reference  $viewer
      * @param  array{0: string, 1: string}  $reference
@@ -816,8 +763,7 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Store an entry holding a fragment of each owner, each sealed under the
-     * owner's key in a field of its own, and return its id.
+     * Store an entry with a sealed fragment of each owner, and return its id.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Records\Reference>  $owners
      * @return string

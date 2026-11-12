@@ -26,15 +26,7 @@ use Tests\Concerns\SeedsArtifacts;
 use Tests\TestCase;
 
 /**
- * End-to-end proofs of exporting the trail and verifying the export, through
- * the trail alone: an export verifies, a changed or reordered line fails its
- * verification, a denied export is published empty and journalled as a denial,
- * an export limited to a tenant holds that tenant alone and is verified only by
- * a viewer whose scope reaches its journal, a verification by a denied viewer
- * is recorded as a denial that finds the entry missing, an export never holds
- * its own journal and still verifies once the trail has grown, and a page, a
- * count and an export under one scope and one set of filters see the same
- * entries.
+ * End-to-end proofs of exporting the trail and verifying the export.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -100,9 +92,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * An export of captured and bulk entries verifies with no finding, naming
-     * its journal and its lines, and the verification is recorded as a success
-     * with the verdict `verified`.
+     * An export verifies with no finding and is recorded `verified`.
      *
      * @return void
      */
@@ -130,10 +120,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * Changing one value of one line, re-encoded canonically so the line is
-     * still well formed, fails the verification: the file's digest no longer
-     * matches and the line's HMAC no longer verifies, and the verification is
-     * recorded with the verdict `not_verified` and those findings.
+     * Changing one line fails verification on its digest and its HMAC.
      *
      * @return void
      */
@@ -160,9 +147,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * Swapping two untouched lines keeps every line's HMAC whole and the count
-     * the same, yet fails the verification: the file's digest and the
-     * membership digest bind the order.
+     * Reordering lines fails verification: the digests bind the order.
      *
      * @return void
      */
@@ -182,10 +167,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * A viewer the default policy denies is given an empty export, published
-     * with its bundle, journalled as `denied` with `no_scope` and an `export`
-     * artifact of no member; the journal has no tenant, and a viewer who may
-     * see it verifies the empty export.
+     * A denied export is published empty and journalled as `denied`.
      *
      * @return void
      */
@@ -220,11 +202,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * An export by a viewer limited to one tenant holds that tenant's entries
-     * alone, neither another tenant's nor those of no tenant; its journal is
-     * recorded in that tenant, its manifest names the tenant's scope, the same
-     * viewer verifies it, and a viewer of another tenant finds its journal
-     * missing.
+     * A tenant-limited export holds that tenant alone, verifiable in its scope.
      *
      * @return void
      */
@@ -255,10 +233,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * A verification by a viewer the policy denies finds the export entry
-     * missing, though the result names the entry the bundle claims, and is
-     * recorded as `denied` with `no_scope`, under the denied scope's
-     * fingerprint, naming no export entry and disclosing none.
+     * A denied viewer's verification finds the entry missing and is recorded.
      *
      * @return void
      */
@@ -294,9 +269,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * An export never holds its own journal, which is written once its snapshot
-     * has ended, but a later export holds the earlier one's journal and the
-     * read records made since.
+     * An export never holds its own journal, written after its snapshot ends.
      *
      * @return void
      */
@@ -317,8 +290,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * An export still verifies once the trail has grown: entries recorded, read
-     * and verified since are not in its snapshot and change nothing it proves.
+     * An export still verifies once the trail has grown.
      *
      * @return void
      */
@@ -337,11 +309,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * Under one scope, of a tenant and its entries of no tenant, without the
-     * package's own records, and one set of filters, a page, a count and an
-     * export see exactly the same entries, though entries of another tenant, of
-     * no tenant, of another actor and of another category are there, and every
-     * read records itself as it goes.
+     * A page, a count and an export see the same rows under one scope.
      *
      * @return void
      */
@@ -398,8 +366,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * The lines of the export at the path, or the target, without their line
-     * feeds.
+     * The lines of the export at the path, or the target, without line feeds.
      *
      * @param  ?string  $path
      * @return list<string>
@@ -423,8 +390,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * The ids of the NDJSON lines of the export at the path, or the target, in
-     * order.
+     * The ids of the export's lines at the path, or the target, in order.
      *
      * @param  ?string  $path
      * @return list<string>
@@ -462,8 +428,7 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * The NDJSON line with its envelope as the edit gives it, in the canonical
-     * encoding an export writes.
+     * The NDJSON line with its envelope edited, canonically encoded.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

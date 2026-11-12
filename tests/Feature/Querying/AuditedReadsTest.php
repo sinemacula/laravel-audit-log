@@ -33,13 +33,7 @@ use Tests\Fixtures\Querying\ClosurePolicy;
 use Tests\TestCase;
 
 /**
- * Feature tests for the records the reads of the trail leave, through the read
- * API alone: each read recorded once, a denial included, and a read of the read
- * records recording only that read; the evidence each record holds, its readers
- * seeing fingerprints and never the tenants of another scope, and its
- * disclosure listing what was returned; a count recorded with what it counted;
- * a read fail-closed under the `report` failure mode, assertable under the
- * fake, by the viewer whoever is signed in, and in the `audit` category.
+ * Feature tests for the records the trail's reads leave.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,8 +70,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * A page read is recorded once, as a success, and leaves nothing else: no
-     * other record, and no spilled line.
+     * A page read is recorded once, as a success, and leaves nothing else.
      *
      * @return void
      */
@@ -97,8 +90,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * Each terminal call is authorised and recorded on its own: the same page
-     * read twice is recorded twice.
+     * Each terminal call is recorded on its own, the same page twice included.
      *
      * @return void
      */
@@ -114,8 +106,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * A denied read returns an empty page and is recorded once, as a denial
-     * with `no_scope`, having returned nothing.
+     * A denied read returns an empty page and is recorded once as `no_scope`.
      *
      * @return void
      */
@@ -134,9 +125,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * A read of the read records shows the records made before it, and is
-     * itself recorded once: it records no read of its own record, and reading
-     * that record again records only that read.
+     * Reading the read records records only that read, never its own record.
      *
      * @return void
      */
@@ -160,10 +149,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * The record of a page holds exactly the evidence of the read, in order:
-     * the purpose, the fingerprints of the filters and the scope, the policy,
-     * the page and its size, what it returned and the outcome; `_audit` holds
-     * the disclosure's descriptor alone.
+     * A page's record holds exactly the read's evidence, in order.
      *
      * @return void
      */
@@ -204,11 +190,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * The read row of a scope of several tenants names none of them: it is in
-     * no tenant, its evidence holds keyed fingerprints, which no reader without
-     * the key can reverse by hashing candidate filters or scopes, and neither
-     * its columns, its artifact's columns nor the entry another viewer reads of
-     * it hold a tenant's id, which only the decrypted disclosure does.
+     * A multi-tenant read row holds keyed fingerprints, never a tenant's id.
      *
      * @return void
      */
@@ -259,10 +241,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * A read of the entries holding an owner's data names the owner only in its
-     * encrypted disclosure: the read row and its artifact hold the keyed
-     * fingerprint of the filters, which differs from the same read's without
-     * the owner, and no column of either names the owner's id.
+     * An owner filter is fingerprinted in the read row, never named.
      *
      * @return void
      */
@@ -296,9 +275,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * The disclosure lists the id and HMAC of each entry the page returned, in
-     * the order returned, beside the normalised filters and the whole scope,
-     * and nothing of the entries the page did not return.
+     * The disclosure lists the id and HMAC of each returned entry, in order.
      *
      * @return void
      */
@@ -319,8 +296,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * A count is recorded once with what it counted, its purpose and its own
-     * evidence, which has no page, and a disclosure of no entry.
+     * A count is recorded once with what it counted and no page.
      *
      * @return void
      */
@@ -343,9 +319,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * Under the `report` failure mode, where an application's record whose
-     * write fails goes on, a read whose record fails is refused and returns
-     * nothing.
+     * Under the `report` failure mode, a read whose record fails is refused.
      *
      * @return void
      */
@@ -366,8 +340,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * Under the fake, which acknowledges at once, a read returns what it found
-     * and its record can be asserted by its code and its outcome.
+     * Under the fake, a read returns its rows and its record is assertable.
      *
      * @return void
      */
@@ -388,8 +361,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * The read record's actor is the viewer the read named, never the user
-     * signed in to the request, who is not named anywhere in it.
+     * A read record's actor is the viewer, never the signed-in user.
      *
      * @return void
      */
@@ -407,8 +379,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * Every read record is in the `audit` category, at version 1 of its code, a
-     * page's and a count's, a success's and a denial's.
+     * Every read record is in the `audit` category at version 1.
      *
      * @return void
      */
@@ -432,9 +403,7 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * The trail, in the `finance` category the seeded entries are in, read for
-     * the viewer, so the records of the reads themselves are never among what
-     * is read.
+     * The viewer's `finance` trail, which never holds the reads' own records.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
      */

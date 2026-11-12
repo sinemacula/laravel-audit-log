@@ -42,17 +42,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for the projection of a page of stored entries into the entries
- * a viewer is shown: a reason concealed on the stored value, properties and
- * context projected recursively, every encryption envelope `encrypted` without
- * asking the reader under a scope that does not reveal them, and under one that
- * does, each row's signature verified first, then every field of the page, an
- * owned note and an encrypted IP address among them, read at its segments in
- * one call to the field reader, `encrypted`, `erased`, `unreadable` or a
- * revealed value; a reader that throws or answers wrongly costing the page's
- * fields, reported once naming its class; the page's counts of each state; no
- * ciphertext anywhere in what is shown; and only a descriptor the artifact
- * inspector accepts lifted out of the properties.
+ * Feature tests for projecting stored entries into the entries a viewer sees.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -85,8 +75,7 @@ final class EntryProjectorTest extends TestCase
     private const array NO_FRAGMENT = ['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0];
 
     /**
-     * A reason is `null` when the stored properties flag `concealed` as `true`,
-     * which the shown properties still say.
+     * A reason is `null` when the stored properties flag it `concealed`.
      *
      * @return void
      */
@@ -101,8 +90,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Rows of `[properties]`: stored properties whose `concealed` is not
-     * exactly `true`, or is not at the top of a map.
+     * Rows of `[properties]`: `concealed` not exactly `true` at the top level.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -120,8 +108,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A flag that is not exactly `true` at the top of the stored properties
-     * conceals nothing.
+     * A `concealed` flag not exactly `true` at the top conceals nothing.
      *
      * @param  string  $properties
      * @return void
@@ -133,9 +120,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Maps become associative arrays and lists stay lists at every depth; an
-     * empty map and an empty list are both empty arrays, and a map with numeric
-     * keys keeps its keys.
+     * Maps and lists are projected at every depth, numeric map keys kept.
      *
      * @return void
      */
@@ -154,10 +139,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A scope that does not reveal the encrypted fields never reaches the
-     * reader, whatever the page holds, a row that would verify included: every
-     * envelope, a note and an address among them, is `encrypted`, and counted
-     * so.
+     * Without the reveal, every envelope is `encrypted` and the reader unused.
      *
      * @return void
      */
@@ -179,9 +161,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Under the grant, an envelope at any depth, in a map or a list, is read
-     * through the field reader at its path, the list's indexes as digits, in
-     * the order the properties hold them, and shown as the reader answers.
+     * Under the grant, an envelope at any depth is read at its path.
      *
      * @return void
      */
@@ -204,10 +184,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Each field carries its segments: its column, then each list index as an
-     * integer and each map key as PHP keys it, a key of digits from 0 as an
-     * integer and any other as a string, as the writer named them and the
-     * envelope's additional data binds them; an address is at `ip`.
+     * Each field carries its segments, list indexes and digit keys as integers.
      *
      * @return void
      */
@@ -232,9 +209,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Every field of a page, of every entry, is read in one call to the field
-     * reader, in the order of the entries and, within each, of its properties,
-     * address and context; a page holding no envelope never calls it.
+     * Every field of a page is read in one call to the field reader, in order.
      *
      * @return void
      */
@@ -265,10 +240,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Under the grant, a row whose signature does not verify, or whose signing
-     * key the ring does not hold, shows every envelope, a note and an address
-     * among them, as `unreadable`, and none of them reaches the reader; the
-     * rows beside it that verify are read as usual.
+     * A row that fails its HMAC shows every envelope `unreadable`, unread.
      *
      * @return void
      */
@@ -298,12 +270,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Under the grant, a map of exactly an integer `v` from 1 and non-empty
-     * strings `k` and `c` is read through the field reader even when the
-     * application stored that shape itself, so its `c` is never shown; one
-     * whose parts the envelope's rules refuse is `unreadable` without asking
-     * the reader, under the grant or not; and a map that only resembles one is
-     * shown as a map.
+     * An envelope-shaped map is always read, so its ciphertext is never shown.
      *
      * @return void
      */
@@ -337,8 +304,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * An owned note, sealed at `_audit.note`, is read through the field reader
-     * there, beside the metadata the entry keeps as it was stored.
+     * An owned note at `_audit.note` is read through the field reader.
      *
      * @return void
      */
@@ -352,8 +318,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * An IP address stored as an envelope under the `encrypt` mode is read
-     * through the field reader at `ip`.
+     * An IP address under the `encrypt` mode is read through the field reader.
      *
      * @return void
      */
@@ -375,9 +340,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Rows of `[ip, what the reader answers]`: values beginning `{` that are
-     * not an encrypted address, and an encrypted address the reader reveals as
-     * something other than a string.
+     * Rows of `[ip, what the reader answers]`: malformed encrypted addresses.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -400,9 +363,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A stored IP beginning `{` that is not exactly an envelope is `unreadable`
-     * and never reaches the reader, under the grant or not, and one the reader
-     * reveals as anything but a string is `unreadable` too, and counted so.
+     * A malformed encrypted IP, or one revealed as no string, is `unreadable`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -442,8 +403,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * An address stored in any other mode, or none, is shown as stored, never
-     * reaches the reader and is not counted.
+     * An address stored in any other mode is shown as stored and not counted.
      *
      * @param  ?string  $ip
      * @return void
@@ -460,8 +420,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A field whose owner's keys were destroyed reads as `[ERASED]`, a
-     * property, a note and an address alike.
+     * A field whose owner's keys were destroyed reads as `[ERASED]`.
      *
      * @return void
      */
@@ -476,8 +435,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A revealed field is shown as the value the reader gave, a map as it is,
-     * and a field the reader calls unreadable as its marker.
+     * A revealed field reads as the value the reader gave.
      *
      * @return void
      */
@@ -490,10 +448,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The page counts every fragment it shows by what it showed: `encrypted`,
-     * `erased` and `unreadable` as the reader answered or the envelope's rules
-     * required, and `revealed` for each value, across every entry, column and
-     * address, keeping the grant.
+     * The page counts each fragment it shows by state, keeping the grant.
      *
      * @return void
      */
@@ -522,10 +477,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A reader that throws costs every field it was asked for, a note, an
-     * address and a field it would have revealed among them, each shown as
-     * `[UNREADABLE]` and counted so, and the failure is reported naming the
-     * reader's class alone: nothing it threw is kept, chained or shown.
+     * A throwing reader leaves its fields unreadable, reported by class only.
      *
      * @return void
      */
@@ -554,10 +506,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The fields of every entry of a page are read in the one call, so a reader
-     * that throws is asked once and reported once for the page, while each
-     * entry still shows its fields as `[UNREADABLE]`; the next page is reported
-     * once again.
+     * A throwing reader is asked and reported once per page.
      *
      * @return void
      */
@@ -585,9 +534,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Rows of `[what the reader answers for a page of two fields]`: fewer
-     * readings, more, a list holding something other than a reading, and a map
-     * of readings.
+     * Rows of `[what the reader answers for a page of two fields]`.
      *
      * @return iterable<string, array{0: \Closure(): array<int, \SineMacula\Laravel\AuditLog\Privacy\FieldReading|string>}>
      */
@@ -605,10 +552,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A reader that answers another count, anything but readings or anything
-     * but a list costs every field of the page, each shown as `[UNREADABLE]`,
-     * nothing it answered is shown, and the failure is reported once naming the
-     * reader's class.
+     * A reader answering the wrong shape costs every field of the page.
      *
      * @param  \Closure(): array<int, \SineMacula\Laravel\AuditLog\Privacy\FieldReading|string>  $answer
      * @return void
@@ -655,8 +599,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A reader that answers is never reported, and a reporter that fails is
-     * contained: the entry is still shown.
+     * Only a failure is reported, and a failing reporter is contained.
      *
      * @return void
      */
@@ -677,9 +620,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * With the package's own reader, under the grant or not, no ciphertext of a
-     * property, a nested envelope, an owned note, the context or the address
-     * reaches any string the shown entry holds.
+     * No ciphertext reaches any string the shown entry holds.
      *
      * @return void
      */
@@ -705,8 +646,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The context is read as the properties are, an envelope in it through the
-     * field reader at its path under `context`.
+     * The context is read as the properties are, at paths under `context`.
      *
      * @return void
      */
@@ -736,11 +676,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A descriptor the artifact inspector accepts is lifted out of the
-     * properties to the entry's manifest, as its kind, count and digest; the
-     * metadata it was in is dropped when it held nothing else and kept, less
-     * the descriptor, when it did, an envelope beside it read at its segments;
-     * and the stored entry is left as it was.
+     * An accepted descriptor is lifted out of the properties to the manifest.
      *
      * @return void
      */
@@ -782,9 +718,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A descriptor the artifact inspector refuses is never shown: the entry has
-     * no manifest, the descriptor is dropped from the properties, and the page
-     * is not refused for it.
+     * A refused descriptor is dropped and never shown, and the page is kept.
      *
      * @param  string  $descriptor
      * @return void
@@ -799,9 +733,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * References, enums, versions, times and an imported entry's source fields
-     * and digest are built from the stored columns; a reference of which only
-     * one part is stored is none, and a captured entry has no source digest.
+     * The columns are built into typed values; a half-stored reference is none.
      *
      * @return void
      */
@@ -855,8 +787,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * Rows of `[column, stored value]`: columns whose stored value the shown
-     * entry cannot hold.
+     * Rows of `[column, stored value]`: values the shown entry cannot hold.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -872,8 +803,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A column the shown entry cannot hold is refused, naming the column and
-     * never the value, under the grant or not.
+     * A column the entry cannot hold is refused, naming the column only.
      *
      * @param  string  $column
      * @param  string  $value
@@ -898,11 +828,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * An entry recorded through the facade, with a field encrypted under the
-     * actor, a note owned by the actor and an address in the `encrypt` mode, is
-     * read back from the table, its row signed as the store signs it, and shown
-     * under the grant with each fragment read through the field reader and none
-     * of its ciphertexts.
+     * An entry recorded through the facade is read back through the seam.
      *
      * @return void
      */
@@ -935,8 +861,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The projector the package resolves reads through the field reader bound
-     * in the container, and verifies rows under the ring the container holds.
+     * The resolved projector uses the container's field reader and ring.
      *
      * @return void
      */
@@ -953,8 +878,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The entry of the stored entry, read under the grant through the reader
-     * given, or the package's own, and reported to the handler given.
+     * The entry of the stored entry, under the grant, through the reader given.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $stored
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\FieldReader  $reader
@@ -970,8 +894,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The page of the stored entries, read under the grant or not through the
-     * reader given, or the package's own, and reported to the handler given.
+     * The page of the stored entries, through the reader given or the default.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Querying\StoredEntry>  $stored
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\FieldReader  $reader
@@ -990,9 +913,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A stored entry of a captured record of an approved invoice, with the
-     * fields given in place of its own and its JSON columns as given, under the
-     * fixed key id and an HMAC that verifies under no key.
+     * A stored invoice approval with the fields given and an unverifiable HMAC.
      *
      * @param  string  $properties
      * @param  array<string, ?string>  $fields
@@ -1005,9 +926,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The stored entry `stored()` gives, signed as the package signs a row:
-     * under the ring's signing key, or under the key id given, which the ring
-     * does not hold, with the signing key's secret.
+     * The `stored()` entry, signed as the package signs a row.
      *
      * @param  string  $properties
      * @param  array<string, ?string>  $fields
@@ -1028,8 +947,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A stored entry signed with the first properties, then edited to hold the
-     * second, as a copy of another entry's envelope would be.
+     * An entry signed over the first properties, then edited to the second.
      *
      * @param  string  $signed
      * @param  string  $edited
@@ -1063,9 +981,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * The stored row of a captured record of an approved invoice, with the
-     * fields given in place of its own, finalised at `RECORDED_AT` under the
-     * fixed key id and HMAC.
+     * The stored row of an invoice approval, with the fields given.
      *
      * @param  array<string, ?string>  $fields
      * @return array<string, int|string|null>
@@ -1090,8 +1006,7 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * A JSON map of an envelope under each key holding the ciphertext given,
-     * then any further members given as JSON.
+     * A JSON map of an envelope per key, then any further members given.
      *
      * @param  array<string, string>  $ciphertexts
      * @param  ?string  $more

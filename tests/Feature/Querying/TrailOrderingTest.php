@@ -21,11 +21,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the order the trail is read in, through the read API alone:
- * newest occurrence first, then the greatest id, so entries of one microsecond
- * keep a total order a cursor can split; entries a microsecond apart, across a
- * second included, ordered by their times; a walk of every page showing each
- * entry once and ending; and the order that of occurrence, not of recording.
+ * Feature tests for the order the trail is read in.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,10 +65,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * Entries that occurred in the same microsecond are read greatest id first,
-     * whatever order they were stored in, and a cursor between two of them
-     * splits them exactly: every page of two holds the next two ids, and none
-     * repeats or goes missing.
+     * Entries of one microsecond keep a total order a cursor splits exactly.
      *
      * @return void
      */
@@ -89,9 +82,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * Entries a microsecond apart are ordered by their times, newest first,
-     * whatever their ids: across a second, the later of two entries with the
-     * smaller id comes first, and a cursor on one opens the other.
+     * Entries a microsecond apart are ordered by time, newest first.
      *
      * @return void
      */
@@ -111,9 +102,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * A walk from the first page by each page's cursor shows every entry once,
-     * in order, entries of a shared microsecond among them, and ends on a page
-     * with no cursor; the count agrees.
+     * A walk of every page shows each entry once and ends with no cursor.
      *
      * @return void
      */
@@ -135,8 +124,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * The order is that of occurrence, not of recording: an entry that occurred
-     * first but was recorded last, as a late delivery is, is read last.
+     * The order is that of occurrence, not of recording.
      *
      * @return void
      */
@@ -156,12 +144,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * A walk of entries recorded in another order than they occurred pages by
-     * occurrence too: each cursor carries the occurrence time of the last entry
-     * shown, never its recording time, so an entry delivered late is neither
-     * skipped nor repeated. Each later page's record names the occurrence
-     * position it read after, under a scope of the entries' one tenant, which
-     * is where a position is shown.
+     * A cursor carries occurrence time, so a late entry is never skipped.
      *
      * @return void
      */
@@ -187,9 +170,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * Entries of a shared microsecond in different tenants keep their total
-     * order inside a scope of both, and a walk across them under a tenant
-     * filter shows only that tenant's, in order.
+     * The total order holds under a scope of two tenants and a tenant filter.
      *
      * @return void
      */
@@ -205,9 +186,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * The trail, in the `finance` category the seeded entries are in, read for
-     * the viewer, so the records of the reads themselves are never among what
-     * is read.
+     * The viewer's `finance` trail, which never holds the reads' own records.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
      */
@@ -217,8 +196,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * Every page of the trail given, or of the trail, of the size given, from
-     * the first by each page's cursor, in order.
+     * Every page of the trail given, or the default, from the first, in order.
      *
      * @param  int  $perPage
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\AuditTrail  $trail
@@ -239,8 +217,7 @@ final class TrailOrderingTest extends TestCase
     }
 
     /**
-     * Store a captured record under the id, occurring and recorded at the
-     * instants given.
+     * Store a captured record under the id, occurring and recorded as given.
      *
      * @param  string  $id
      * @param  string  $occurredAt

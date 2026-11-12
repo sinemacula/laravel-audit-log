@@ -42,16 +42,7 @@ use Tests\Fixtures\Querying\RevealingFieldReader;
 use Tests\TestCase;
 
 /**
- * Feature tests for the reader of the trail: one statement on the storage
- * connection for a page and one `count(*)` for a count, the policy handed the
- * viewer as given and the purpose, a denied or disjoint read answered without a
- * statement and recorded as a denial or a success of none, a policy, a
- * statement or a row that fails recorded as a failure before anything is
- * thrown, a refused cursor recorded and thrown, the cursor walking the trail,
- * the look-ahead row neither shown nor disclosed, no artifact read for a page
- * of bulk entries, a page's encrypted fields revealed only under the grant and
- * counted in its record, a cursor bound to the grant, and a refusal that names
- * nothing it read.
+ * Feature tests for the reader of the trail.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -118,8 +109,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * The statement reads the storage connection, a connection other than the
-     * default when one is configured, and the read is recorded there.
+     * The read and its record use the storage connection, not the default.
      *
      * @return void
      */
@@ -143,8 +133,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A page of fifty is one statement on the entries table, the newest fifty
-     * of what the filters select, with a cursor to the next.
+     * A page of fifty is one statement, with a cursor to the next.
      *
      * @return void
      */
@@ -164,8 +153,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * The policy is handed the viewer exactly as the application gave it, and
-     * the purpose of each terminal call.
+     * The policy gets the viewer as given and each terminal call's purpose.
      *
      * @return void
      */
@@ -182,8 +170,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * The policy runs inside the read guard's window, so a read it makes is
-     * refused.
+     * The policy runs inside the read window, so a read it makes is refused.
      *
      * @return void
      */
@@ -205,8 +192,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A read entered inside a read is refused by the gate before the policy is
-     * asked or anything is queried.
+     * A read inside a read is refused by the gate before the policy is asked.
      *
      * @return void
      */
@@ -245,8 +231,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A denied scope reads nothing: no statement reads the entries table, and
-     * the result is empty.
+     * A denied scope reads nothing, with no statement on the entries table.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): int  $terminal
      * @param  int  $empty
@@ -263,8 +248,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A tenant filter outside a scope of listed tenants reads nothing: no
-     * statement, and the empty result a denial gives.
+     * A tenant filter outside the scope reads nothing, with no statement.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): int  $terminal
      * @param  int  $empty
@@ -282,8 +266,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A category filter outside the scope's categories reads nothing: no
-     * statement, and the empty result a denial gives.
+     * A category filter outside the scope reads nothing, with no statement.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): int  $terminal
      * @param  int  $empty
@@ -301,9 +284,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A denied read is recorded as `denied` with `no_scope`, under the scope
-     * the policy answered, having returned nothing; a page's is an empty page
-     * with no cursor.
+     * A denied read is recorded as `denied` with `no_scope`, returning nothing.
      *
      * @return void
      */
@@ -328,8 +309,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A read whose filters the scope cannot meet is recorded as a success that
-     * returned nothing, and discloses no entry.
+     * A disjoint read is recorded as a success that returned nothing.
      *
      * @return void
      */
@@ -349,9 +329,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A policy that throws is recorded as a failure with `policy_failed` and no
-     * scope, and what it threw propagates unchanged, from a page and a count
-     * alike.
+     * A throwing policy is recorded as `policy_failed` and rethrown unchanged.
      *
      * @return void
      *
@@ -385,8 +363,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A failure whose own record cannot be written is still thrown as it would
-     * have been, and the failure to record it is reported.
+     * A failure whose record fails is still thrown, and the failure reported.
      *
      * @return void
      *
@@ -414,8 +391,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A success whose record cannot be written returns nothing: the read is
-     * refused as unrecorded.
+     * A success whose record cannot be written is refused as unrecorded.
      *
      * @return void
      */
@@ -430,9 +406,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A statement that fails is recorded as a failure with `query_failed`, and
-     * the read is refused naming the class that failed, from a page and a count
-     * alike.
+     * A failing query is recorded and refused, naming only the failing class.
      *
      * @return void
      */
@@ -465,9 +439,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A row that cannot be decoded or shown is recorded as a failure with
-     * `format_failed`, which discloses no entry, and the read is refused naming
-     * the class that failed.
+     * A row that cannot be shown is recorded as `format_failed` and refused.
      *
      * @return void
      */
@@ -495,10 +467,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A cursor that is refused is recorded as a denial with `cursor_rejected`
-     * whose page is `cursor`, since a cursor was presented and gave no
-     * position, never `first`, and thrown as the uniform refusal, before
-     * anything is read.
+     * A refused cursor is recorded as `cursor_rejected` and thrown uniformly.
      *
      * @return void
      */
@@ -524,8 +493,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A cursor issued for another page size is refused, since it was bound to
-     * the read it was issued for.
+     * A cursor issued for another page size is refused.
      *
      * @return void
      */
@@ -544,12 +512,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A page read under a scope that reveals the encrypted fields asks the
-     * bound field reader once for every field of the rows that verify, and its
-     * record keeps the grant and how many fragments it showed in each state; a
-     * row whose signature no longer verifies shows its field as unreadable
-     * without the reader seeing it. The same page without the grant shows every
-     * field as encrypted and asks no reader.
+     * A revealing page asks the reader once and records its disclosure counts.
      *
      * @return void
      */
@@ -597,11 +560,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A cursor is bound to the scope it was issued under, the grant included:
-     * one issued without the grant is refused once the policy grants it, and
-     * one issued with it is refused once the policy withdraws it, each recorded
-     * as a denial that keeps the grant of the scope it was presented under and
-     * counts no fragment.
+     * A cursor is refused once the policy grants or withdraws the reveal.
      *
      * @return void
      */
@@ -640,9 +599,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * The cursor of a page opens the next one, which starts after the last
-     * entry shown, and that read is recorded from the position it started at:
-     * under a scope of exactly one tenant, in the record's own properties.
+     * A page's cursor opens the next page, recorded from its position.
      *
      * @return void
      */
@@ -676,10 +633,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * Under a scope that is not of exactly one tenant, whose read record is
-     * tenantless and so visible beyond any one tenant, a page after the first
-     * names `next` and no entry of the trail in its properties; the position it
-     * read after is kept in its encrypted disclosure alone.
+     * A wide scope keeps a page's position in the encrypted disclosure alone.
      *
      * @return void
      */
@@ -707,12 +661,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A viewer who loses access between pages, and asks for the next page with
-     * the cursor it already holds, is answered as any denied viewer is: an
-     * empty page, recorded as `denied` with `no_scope`, never the refusal of a
-     * cursor bound to the scope it no longer has, so the answer does not say
-     * the access was revoked. The cursor is never opened, so the page is
-     * `cursor` and no entry is read.
+     * A viewer denied between pages gets a plain denial, hiding the revocation.
      *
      * @return void
      */
@@ -743,10 +692,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A page that names no size holds 50 entries, or `read.max_per_page` when
-     * that is fewer, so the call with no arguments works under every setting
-     * the package accepts, and its cursor opens the next page asked for the
-     * same way.
+     * A page with no size holds 50, or `read.max_per_page` when fewer.
      *
      * @return void
      */
@@ -790,9 +736,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * The row read beyond the page is dropped before it is decoded: it is not
-     * shown, not disclosed and not counted as returned, and a row there that
-     * could not even be decoded costs the page nothing.
+     * The look-ahead row is dropped undecoded, never shown or disclosed.
      *
      * @return void
      */
@@ -816,8 +760,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A count is one `count(*)` statement on the entries table, and is recorded
-     * with what it counted and a disclosure of no entry.
+     * A count is one `count(*)` statement, recorded with what it counted.
      *
      * @return void
      */
@@ -843,8 +786,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A page of bulk entries reads no artifact: the members are never loaded,
-     * and each entry shows only its manifest's descriptor.
+     * A page of bulk entries reads no artifact, showing only descriptors.
      *
      * @return void
      */
@@ -868,8 +810,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A refusal names the class that failed and nothing the read held: no
-     * statement, no binding, and no previous exception.
+     * A refusal names the failing class and nothing the read held.
      *
      * @return void
      */
@@ -891,9 +832,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A page of the entries holding an owner's data is still one statement, the
-     * owner's key uses read inside it, and the read's record, like a count's,
-     * keeps the owner in its normalised filters.
+     * An owner's page is one statement, its record keeping the owner filter.
      *
      * @return void
      */
@@ -925,9 +864,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * A cursor issued for one owner's entries is refused for another owner's,
-     * since the owner is part of the filters the cursor is bound to, and the
-     * refusal is recorded.
+     * A cursor for one owner's entries is refused for another's, and recorded.
      *
      * @return void
      */
@@ -959,8 +896,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * The trail, in the `finance` category the seeded entries are in, read for
-     * the viewer.
+     * The viewer's `finance` trail.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
      */
@@ -981,9 +917,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * Store a key of the owner, by its id, and a key use of it for each entry,
-     * as an entry holding a fragment sealed under it has; only the columns the
-     * filter reads mean anything.
+     * Store the owner's key and a key use of it for each entry.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  string  $keyId
@@ -1016,9 +950,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * Make every read of the entries table on the storage connection fail with
-     * the engine's exception, which holds the statement and its bindings, until
-     * the flag is cleared.
+     * Make every storage read of the entries table fail until the flag clears.
      *
      * @return void
      */
@@ -1036,10 +968,8 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * Store the entry's properties as JSON the row codec refuses to decode: a
-     * valid document every engine's JSON column holds, but with a key that
-     * starts with a NUL character, which PHP cannot make the name of an
-     * object's property.
+     * Store properties the row codec refuses: valid JSON, but with a key
+     * starting with NUL, which PHP cannot name a property.
      *
      * @param  string  $id
      * @return void
@@ -1050,8 +980,7 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
-     * Configure the connection, an in-memory SQLite database, as the storage
-     * connection, with the entries and artifacts tables migrated on it.
+     * Make an in-memory SQLite connection the migrated storage connection.
      *
      * @param  string  $connection
      * @return void

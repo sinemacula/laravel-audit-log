@@ -48,13 +48,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for reads of the trail that would recurse, through the read API
- * alone: a listener of a read record, synchronous, at a drain or at a replay,
- * refused and reported once; a terminal call inside a write, a failure handler
- * or an event mapper refused before anything is queried; a listener of an
- * application's record reading once, and its own read record's listener
- * refused; and the write guard refusing a record inside a store as it always
- * has, a read record's write included.
+ * Feature tests for reads of the trail that would recurse.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,8 +74,7 @@ final class ReadRecursionTest extends TestCase
     private ?string $spillFile = null;
 
     /**
-     * Bind the read path, report to a recording handler, and capture every line
-     * logged.
+     * Bind the read path, report to a recording handler and capture logs.
      *
      * @return void
      */
@@ -114,10 +107,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A synchronous listener of a read record that reads the trail is refused
-     * before anything is queried, as every such listener is, and the recursion
-     * is reported once; the read that was recorded returns all the same, and is
-     * the only read recorded.
+     * A sync read-record listener reading the trail is refused, reported once.
      *
      * @return void
      */
@@ -149,9 +139,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A listener of a read record that a drain delivers is refused too: the
-     * read record queued in the outbox is heard of only at the drain, inside
-     * the read guard, and nothing more is recorded.
+     * A drained read-record listener reading the trail is refused too.
      *
      * @return void
      */
@@ -181,8 +169,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A listener of a read record that a replay of the spill restores is
-     * refused too, and nothing more is recorded.
+     * A replayed read-record listener reading the trail is refused too.
      *
      * @return void
      */
@@ -219,8 +206,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A terminal call made inside a store's write is refused before the policy
-     * is asked or anything is read, and the record being written is stored.
+     * A terminal call inside a store's write is refused before any query.
      *
      * @return void
      */
@@ -246,8 +232,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A terminal call made by a listener of a failed write, while its failure
-     * is handled, is refused before the policy is asked or anything is read.
+     * A terminal call in a failure handler is refused before any query.
      *
      * @return void
      */
@@ -277,9 +262,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A terminal call made by an event mapper, while the event it maps is
-     * captured, is refused before the policy is asked or anything is read,
-     * reported once, and the mapped record is written all the same.
+     * A terminal call inside an event mapper is refused before any query.
      *
      * @return void
      */
@@ -308,10 +291,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A listener of an application's own record reads the trail, which is
-     * recorded; the listener then hears of that read record inside the read
-     * guard, and its read there is refused, before the first read returns, so a
-     * listener that reads on every record reads once and records one read.
+     * A listener of an application's record reads once, then is refused.
      *
      * @return void
      */
@@ -338,9 +318,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * The write guard is unchanged: a record made inside a store is refused,
-     * reported naming its code and returned, as it always has been, and only
-     * the outer record is stored.
+     * The write guard still refuses a record made inside a store.
      *
      * @return void
      */
@@ -370,9 +348,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A record made inside the write of a read's own record is refused and
-     * reported as one inside any other write is, and the read returns what it
-     * found once its record is stored.
+     * A record inside a read record's write is refused like any other.
      *
      * @return void
      */
@@ -395,8 +371,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * Map the portal interface to the portal mapper while the application
-     * boots.
+     * Map the portal interface to the portal mapper while the app boots.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -409,8 +384,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * The trail, in the `finance` category the seeded entries are in, read for
-     * the viewer.
+     * The viewer's `finance` trail.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
      */
@@ -437,8 +411,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * Assert the listener read once and was refused as a re-entered read, with
-     * nothing chained.
+     * Assert the listener read once and was refused as re-entered, unchained.
      *
      * @param  \Tests\Fixtures\Querying\ReadingListener  $listener
      * @return void
@@ -512,8 +485,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * An event mapper that runs the work, then maps the event as the portal
-     * mapper does.
+     * An event mapper that runs the work, then maps as the portal mapper does.
      *
      * @param  \Closure(): void  $work
      * @return \SineMacula\Laravel\AuditLog\Contracts\EventMapper
@@ -553,8 +525,7 @@ final class ReadRecursionTest extends TestCase
     }
 
     /**
-     * A store that keeps attachments and says a return is durable, running the
-     * work inside each write before the store given writes the record.
+     * A durable store keeping attachments that runs the work inside each write.
      *
      * @param  \SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore  $store
      * @param  \Closure(): void  $work

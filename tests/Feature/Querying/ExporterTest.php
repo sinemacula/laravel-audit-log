@@ -53,15 +53,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for the exporter: the export authorised for its purpose, each
- * NDJSON line the stored envelope untouched and the lines in ascending recorded
- * order, read in chunks inside the snapshot, the file prepared, then journalled
- * once the snapshot has ended, then published with a bundle built from the
- * journalled envelope, an empty export for a denied viewer, an existing target
- * refused without `force` and replaced with it, nothing published when the
- * journal fails, a failing statement, line or publication recorded as a
- * failure, bulk members never read, OCSF and CEF lines the formatters'
- * projections, and the acknowledgement the result names.
+ * Feature tests for the exporter.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,8 +101,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * Remove the directory and everything in it, and put the entries table
-     * back.
+     * Remove the directory and restore the entries table.
      *
      * @return void
      */
@@ -135,8 +126,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * The policy is asked for the viewer, as given, and the purpose `export`,
-     * once.
+     * The policy is asked once for the viewer and the purpose `export`.
      *
      * @return void
      */
@@ -153,8 +143,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * Each NDJSON line is the canonical encoding of the stored envelope,
-     * untouched, so its HMAC verifies against the line itself.
+     * Each NDJSON line is the stored envelope untouched, so its HMAC verifies.
      *
      * @return void
      */
@@ -177,8 +166,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * The lines are in ascending recorded order, and entries recorded at the
-     * same instant follow by id, whatever order they were written in.
+     * Lines are in ascending recorded order, ties broken by id.
      *
      * @return void
      */
@@ -197,13 +185,8 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * Entries recorded in another order than they occurred, as late deliveries
-     * from queues, the outbox and imports are, are exported in recorded order
-     * across several chunks, each chunk carrying the keyset on to the next by
-     * recorded time and id, and the manifest's first and last positions are the
-     * recorded positions of the first and last lines. The recording order here
-     * follows neither the occurrence order nor its reverse, so a chunk ordered
-     * or carried on by occurrence would export the wrong rows.
+     * Chunks follow recorded order, not occurrence; the seeded order matches
+     * neither, so ordering by occurrence would fail.
      *
      * @return void
      */
@@ -237,9 +220,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A malformed `export.chunk` refuses the export before anything else, with
-     * the refusal naming the key: no statement runs, the policy is not asked,
-     * nothing is recorded and no file is made.
+     * A malformed `export.chunk` refuses the export before anything else.
      *
      * @return void
      */
@@ -267,11 +248,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A manifest that cannot be built of what the snapshot and the file hold,
-     * here a session that names no database, as a MySQL connection with no
-     * default database does, removes the temporary file, is recorded as a
-     * failure with `format_failed`, and refuses the export naming the class
-     * that failed; nothing is published.
+     * An unbuildable manifest is recorded as `format_failed` and refused.
      *
      * @return void
      */
@@ -311,9 +288,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * When the journal is written, the temporary file exists beside the target
-     * and the target does not; once the export returns, the target and its
-     * bundle are published and no temporary file is left.
+     * The file is prepared, then journalled, then published with its bundle.
      *
      * @return void
      */
@@ -339,9 +314,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * The snapshot is begun, the bound is its first statement, the chunks
-     * follow, and it is committed before the journal is written, so no write
-     * runs inside it.
+     * The snapshot is committed before the journal is written.
      *
      * @return void
      */
@@ -368,9 +341,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * The journal's artifact is the export's manifest: its plaintext is the
-     * bundle's manifest exactly, of kind `export`, counting the file's lines,
-     * with the file's digest and membership digest.
+     * The journal's artifact is the export's manifest.
      *
      * @return void
      */
@@ -401,8 +372,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * The bundle holds the very envelope the store acknowledged, the stored
-     * journal's columns, and the descriptor the journal signed.
+     * The bundle holds the envelope the store acknowledged.
      *
      * @return void
      */
@@ -425,8 +395,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * An export that finds nothing publishes an empty file, journalled with no
-     * line and the digests of nothing, and it verifies.
+     * An export of nothing publishes an empty file that verifies.
      *
      * @return void
      */
@@ -443,9 +412,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A viewer the policy denies is given an empty export, published with its
-     * bundle and an `export` artifact of no member, journalled as `denied` with
-     * `no_scope`, and no entry is read.
+     * A denied viewer gets an empty export, journalled as `denied`.
      *
      * @return void
      */
@@ -471,8 +438,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A scope the filters cannot meet reads no entry, and its empty export is a
-     * success.
+     * A scope the filters cannot meet reads nothing and succeeds.
      *
      * @return void
      */
@@ -490,8 +456,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A scope of one tenant exports only that tenant's entries, and the journal
-     * is recorded in that tenant.
+     * A one-tenant scope exports only that tenant, journalled in it.
      *
      * @return void
      */
@@ -523,9 +488,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * An export to a target, or a bundle, that exists is refused without
-     * `force` before the policy is asked or anything is queried, and is not
-     * recorded; what is there is left as it was.
+     * An existing target or bundle is refused without `force`, untouched.
      *
      * @param  string  $suffix
      * @return void
@@ -575,8 +538,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A target whose directory does not exist is refused before anything, and
-     * is not recorded.
+     * A target in a missing directory is refused before anything.
      *
      * @return void
      */
@@ -597,8 +559,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * An engine an export cannot read is refused before the policy is asked or
-     * anything is queried, and is not recorded.
+     * An engine an export cannot read is refused before anything.
      *
      * @return void
      */
@@ -628,8 +589,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * An export entered while a read of the trail is running is refused by the
-     * gate before the policy is asked, and nothing is written.
+     * An export during a read of the trail is refused by the gate first.
      *
      * @return void
      */
@@ -654,8 +614,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A journal that cannot be written refuses the export as unrecorded, and no
-     * file, bundle or temporary file is left.
+     * A failed journal refuses the export and leaves no file behind.
      *
      * @return void
      */
@@ -678,8 +637,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A policy that throws is recorded as a failure with `policy_failed` and no
-     * scope, what it threw propagates unchanged, and nothing is written.
+     * A throwing policy is recorded as `policy_failed` and rethrown unchanged.
      *
      * @return void
      *
@@ -707,10 +665,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A row whose line cannot be written, here because its properties hold a
-     * number with a fraction, which has no canonical form, is recorded as a
-     * failure with `format_failed`, which discloses no entry, the export is
-     * refused naming the class that failed, and the temporary file is removed.
+     * A line that cannot be written is recorded as `format_failed` and refused.
      *
      * @return void
      */
@@ -742,9 +697,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A formatter that throws, here because the code's OCSF mapper returns an
-     * attribute the formatter sets, is recorded as a failure with
-     * `format_failed`.
+     * A throwing formatter is recorded as `format_failed`.
      *
      * @return void
      */
@@ -771,9 +724,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A statement that fails is recorded as a failure with `query_failed`, the
-     * export is refused naming the class that failed and nothing it held, and
-     * the temporary file is removed.
+     * A failing query is recorded and refused, naming only the failing class.
      *
      * @return void
      */
@@ -803,9 +754,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A publication that fails, because the target appeared once the export was
-     * journalled, is recorded as `audit_log.export_publish_failed` naming the
-     * export entry, the export is refused, and what appeared is never replaced.
+     * A failed publication is recorded and refused, never replacing the target.
      *
      * @return void
      */
@@ -837,9 +786,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * A publication that fails and whose own record cannot be written is still
-     * refused as a failed publication, and the failure to record it is
-     * reported.
+     * A failed publication whose record fails is still refused, and reported.
      *
      * @return void
      */
@@ -875,9 +822,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * An export of bulk entries reads nothing of the artifacts table before its
-     * journal: the members they reference are never exported, and each line
-     * carries the entry's descriptor alone.
+     * A bulk entry's members are never read or exported.
      *
      * @return void
      */
@@ -923,8 +868,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * Each OCSF and CEF line is the formatter's projection of the stored entry,
-     * in ascending recorded order, and the result names the format.
+     * OCSF and CEF lines are the formatters' projections, in recorded order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat  $format
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\AuditFormatter>  $formatter
@@ -945,8 +889,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * In outbox mode the journal is a committed outbox row, and the result
-     * names it accepted: the store does not hold it yet.
+     * In outbox mode the journal is a committed outbox row, named accepted.
      *
      * @return void
      */
@@ -966,9 +909,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * The result names the journal entry, where the file and its bundle were
-     * published, the format, the lines, the file's digest, and, in sync mode,
-     * that the journal is stored.
+     * The result names the journal entry, files, format, lines and digest.
      *
      * @return void
      */
@@ -989,8 +930,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * The journal keeps the export's evidence: its purpose, fingerprints,
-     * policy, format, the lines it returned and the file's digest.
+     * The journal keeps the export's evidence.
      *
      * @return void
      */
@@ -1019,10 +959,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * An export under a scope that reveals the encrypted fields decrypts
-     * nothing: no field reader is asked, each envelope is exported as stored,
-     * and the journal keeps its evidence as it is, its scope fingerprint the
-     * granted scope's, which differs from the same scope's without the grant.
+     * A revealing scope exports stored envelopes and asks no field reader.
      *
      * @return void
      */
@@ -1051,9 +988,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * With a chunk of 100, 250 entries are read in four statements inside the
-     * snapshot: the bound, then chunks of 100, 100 and 50, and every entry is
-     * exported once.
+     * With a chunk of 100, 250 entries are read in four statements.
      *
      * @return void
      */
@@ -1185,8 +1120,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * Run the callback once, right after an export's journal is inserted into
-     * the entries table.
+     * Run the callback once, right after an export's journal is inserted.
      *
      * @param  \Closure(): void  $callback
      * @return void
@@ -1207,9 +1141,7 @@ final class ExporterTest extends TestCase
     }
 
     /**
-     * Make every read of the entries table, on any connection, the export's own
-     * session included, fail with the engine's exception, which holds the
-     * statement and its bindings, until the flag is cleared.
+     * Make every entries table read, on any connection, fail until cleared.
      *
      * @return void
      */
