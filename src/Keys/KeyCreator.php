@@ -30,9 +30,6 @@ final readonly class KeyCreator
     /** @var int Length of a data key, in bytes. */
     public const int DATA_KEY_BYTES = 32;
 
-    /** @var string The isolation PostgreSQL creates a key at, as `transaction_isolation` reads it. */
-    private const string READ_COMMITTED = 'read committed';
-
     /**
      * Constructor.
      *
@@ -263,7 +260,7 @@ final readonly class KeyCreator
         $row   = $connection->selectOne('select current_setting(\'transaction_isolation\') as level', [], false);
         $level = is_object($row) && isset($row->level) && is_string($row->level) ? $row->level : '';
 
-        if ($level !== self::READ_COMMITTED) {
+        if ($level !== 'read committed') {
             throw new \UnexpectedValueException('A key is created at `read committed` alone, and the transaction it would be created in is not.');
         }
     }

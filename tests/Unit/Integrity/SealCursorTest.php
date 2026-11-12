@@ -32,7 +32,7 @@ final class SealCursorTest extends TestCase
 
         self::assertSame('2026-11-01 12:00:00.250000', $cursor->recordedAt);
         self::assertSame('', $cursor->id);
-        self::assertTrue($cursor->startsAtItsTime());
+        self::assertTrue($cursor->fromItsTime);
     }
 
     /**
@@ -59,7 +59,7 @@ final class SealCursorTest extends TestCase
 
         self::assertSame('2026-11-01 12:00:00.2', $cursor->recordedAt);
         self::assertSame('01932b4e-8a40-7000-8000-000000000001', $cursor->id);
-        self::assertFalse($cursor->startsAtItsTime());
+        self::assertFalse($cursor->fromItsTime);
     }
 
     /**
@@ -77,7 +77,7 @@ final class SealCursorTest extends TestCase
         self::assertSame(['recorded_at' => '2026-11-01 12:00:00.000000', 'id' => '', 'from_its_time' => true], $from->toProgress());
         self::assertEquals($after, SealCursor::fromProgress($after->toProgress()));
         self::assertEquals($from, SealCursor::fromProgress($from->toProgress()));
-        self::assertTrue(SealCursor::fromProgress($from->toProgress())?->startsAtItsTime());
+        self::assertTrue(SealCursor::fromProgress($from->toProgress())?->fromItsTime);
     }
 
     /**
@@ -91,10 +91,10 @@ final class SealCursorTest extends TestCase
         foreach ([null, 1, 'true', false] as $flag) {
             $cursor = SealCursor::fromProgress(['recorded_at' => '2026-11-01 12:00:00', 'id' => '', 'from_its_time' => $flag]);
 
-            self::assertFalse($cursor?->startsAtItsTime(), var_export($flag, true));
+            self::assertFalse($cursor?->fromItsTime, var_export($flag, true));
         }
 
-        self::assertFalse(SealCursor::fromProgress(['recorded_at' => '2026-11-01 12:00:00', 'id' => ''])?->startsAtItsTime());
+        self::assertFalse(SealCursor::fromProgress(['recorded_at' => '2026-11-01 12:00:00', 'id' => ''])?->fromItsTime);
     }
 
     /**
@@ -160,7 +160,7 @@ final class SealCursorTest extends TestCase
 
         self::assertSame($recordedAt, $cursor->recordedAt);
         self::assertSame($id, $cursor->id);
-        self::assertFalse($cursor->startsAtItsTime());
+        self::assertFalse($cursor->fromItsTime);
         self::assertEquals($cursor, SealCursor::fromProgress($cursor->toProgress()));
     }
 }

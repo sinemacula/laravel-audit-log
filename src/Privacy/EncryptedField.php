@@ -120,8 +120,10 @@ final readonly class EncryptedField
      *
      * @param  array<array-key, mixed>|\stdClass  $envelope
      * @return ?array{v: int, k: string, c: string}
+     *
+     * @internal
      */
-    private static function parts(#[\SensitiveParameter] array|\stdClass $envelope): ?array
+    public static function parts(#[\SensitiveParameter] array|\stdClass $envelope): ?array
     {
         $parts = $envelope instanceof \stdClass ? get_object_vars($envelope) : $envelope;
         $keys  = array_map(strval(...), array_keys($parts));

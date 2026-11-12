@@ -37,18 +37,20 @@ final class IntegrityCheckFailedException extends \RuntimeException
      */
     public static function of(IntegrityCheckFailed $event): self
     {
+        $firstBadId = $event->firstBadId !== null && preg_match(SealEnvelope::UUID_PATTERN, $event->firstBadId) === 1 ? $event->firstBadId : self::NONE;
+
         return new self(sprintf(
             self::FAILED,
             $event->command,
-            $event->integrity['tampered']      ?? 0,
-            $event->integrity['incomplete']    ?? 0,
-            $event->integrity['unverifiable']  ?? 0,
-            $event->anchoring['unanchored']    ?? 0,
-            $event->anchoring['unavailable']   ?? 0,
-            $event->anchoring['contradicted']  ?? 0,
-            $event->finding                    ?? self::NONE,
-            self::nameable($event->firstBadId) ?? self::NONE,
-            $event->head                       ?? self::NONE,
+            $event->integrity['tampered']     ?? 0,
+            $event->integrity['incomplete']   ?? 0,
+            $event->integrity['unverifiable'] ?? 0,
+            $event->anchoring['unanchored']   ?? 0,
+            $event->anchoring['unavailable']  ?? 0,
+            $event->anchoring['contradicted'] ?? 0,
+            $event->finding                   ?? self::NONE,
+            $firstBadId,
+            $event->head ?? self::NONE,
         ));
     }
 
@@ -63,16 +65,5 @@ final class IntegrityCheckFailedException extends \RuntimeException
     public static function stopped(string $command, string $class): self
     {
         return new self(sprintf(self::STOPPED, $command, $class));
-    }
-
-    /**
-     * The id when it is a lower-case UUID, and `null` otherwise.
-     *
-     * @param  ?string  $id
-     * @return ?string
-     */
-    private static function nameable(?string $id): ?string
-    {
-        return $id !== null && preg_match(SealEnvelope::UUID_PATTERN, $id) === 1 ? $id : null;
     }
 }

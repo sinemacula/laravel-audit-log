@@ -33,7 +33,7 @@ final readonly class SealCursor
         public string $id,
 
         /** Whether the position starts at its time, the row at that time included, rather than after the entry. */
-        private bool $fromItsTime,
+        public bool $fromItsTime,
     ) {}
 
     /**
@@ -79,17 +79,6 @@ final readonly class SealCursor
         }
 
         return new self($recordedAt, $id, ($value['from_its_time'] ?? false) === true);
-    }
-
-    /**
-     * Whether the position starts at its time, the row at that time included,
-     * rather than after an entry.
-     *
-     * @return bool
-     */
-    public function startsAtItsTime(): bool
-    {
-        return $this->fromItsTime;
     }
 
     /**

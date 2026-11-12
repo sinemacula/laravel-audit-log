@@ -46,12 +46,6 @@ final readonly class KeyStoreVerifier
     /** @var string The least canonical UUID: the leading bound of the first page of key uses. */
     private const string LEAST_UUID = '00000000-0000-0000-0000-000000000000';
 
-    /** @var string The payload key an erasure row lists the keys it destroyed under. */
-    private const string DESTROYED = 'destroyed';
-
-    /** @var string The payload key an erasure row lists the keys it kept under. */
-    private const string KEPT = 'kept';
-
     /**
      * Constructor.
      *
@@ -315,7 +309,7 @@ final readonly class KeyStoreVerifier
         }
 
         try {
-            return self::keyIdsIn(($erasure->payloadMap() ?? [])[self::DESTROYED] ?? null);
+            return self::keyIdsIn(($erasure->payloadMap() ?? [])['destroyed'] ?? null);
         } catch (\JsonException) {
             // A payload that cannot be read lists nothing
             return [];
@@ -574,7 +568,7 @@ final readonly class KeyStoreVerifier
             return null;
         }
 
-        return [$fingerprintKey, $fingerprint, $floor, $journalRow->kind === JournalKind::ERASURE ? self::keyIdsIn($payload[self::KEPT] ?? null) : null];
+        return [$fingerprintKey, $fingerprint, $floor, $journalRow->kind === JournalKind::ERASURE ? self::keyIdsIn($payload['kept'] ?? null) : null];
     }
 
     /**

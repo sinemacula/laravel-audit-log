@@ -27,9 +27,6 @@ use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
  */
 final readonly class SubjectKeyFieldReader implements FieldReader
 {
-    /** @var string The payload key an erasure row lists the keys it destroyed under. */
-    private const string DESTROYED = 'destroyed';
-
     /** @var string The key each destroyed key's id is listed under. */
     private const string KEY_ID = 'key_id';
 
@@ -178,7 +175,7 @@ final readonly class SubjectKeyFieldReader implements FieldReader
                 return [];
             }
 
-            $listed = $erasure->payloadMap()[self::DESTROYED] ?? null;
+            $listed = $erasure->payloadMap()['destroyed'] ?? null;
         } catch (\JsonException|\UnexpectedValueException|UnknownKeyException) {
             // An unreadable or unverifiable row proves no erasure
             return [];

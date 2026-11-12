@@ -21,6 +21,9 @@ final class ByteBudget
     /** @var int Bytes kept for the bounded metadata at its largest: 4535 measured with a `disclosure` descriptor, rounded up. */
     public const int METADATA_RESERVE_BYTES = 4600;
 
+    /** @var string The path an omitted note is reported under. */
+    public const string NOTE_PATH = '_audit.note';
+
     /** @var int How far the context's costs must stay under its budget: its two braces, less the last key's comma. */
     private const int CONTEXT_OVERHEAD_BYTES = 1;
 
@@ -29,12 +32,6 @@ final class ByteBudget
 
     /** @var string The key the note sits under in the metadata. */
     private const string NOTE_KEY = 'note';
-
-    /** @var string The key the manifest descriptor sits under in the metadata. */
-    private const string MANIFEST_KEY = 'manifest';
-
-    /** @var string The path an omitted note is reported under. */
-    private const string NOTE_PATH = '_audit.note';
 
     /** @var int Tier of a property no rule governs and of an application's context key: the first to go. */
     private const int TIER_FIRST = 0;
@@ -172,7 +169,7 @@ final class ByteBudget
         }
 
         if ($manifest !== null) {
-            $metadata[self::MANIFEST_KEY] = $manifest;
+            $metadata['manifest'] = $manifest;
         }
 
         $omitted = $omissions->toArray();

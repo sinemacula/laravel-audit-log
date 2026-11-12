@@ -93,7 +93,9 @@ final readonly class SealSigner
      */
     public function verifies(SealEnvelope $seal, string $signature): bool
     {
-        self::checkSignature($signature);
+        if (preg_match(SealEnvelope::DIGEST_PATTERN, $signature) !== 1) {
+            throw new \UnexpectedValueException('A seal\'s `signature` must be 64 lower-case hexadecimal characters.');
+        }
 
         return hash_equals(self::signature(self::SEAL_LABEL, $seal->digest(), $this->keys->key($seal->keyId)), $signature);
     }
@@ -164,21 +166,5 @@ final readonly class SealSigner
     private static function signature(string $label, string $digest, #[\SensitiveParameter] IntegrityKey $key): string
     {
         return hash_hmac('sha256', $label . $digest, self::sealKey($key->secret()));
-    }
-
-    /**
-     * Refuse a stored signature that is not 64 lower-case hex: no key could
-     * have made it.
-     *
-     * @param  string  $signature
-     * @return void
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function checkSignature(string $signature): void
-    {
-        if (preg_match(SealEnvelope::DIGEST_PATTERN, $signature) !== 1) {
-            throw new \UnexpectedValueException('A seal\'s `signature` must be 64 lower-case hexadecimal characters.');
-        }
     }
 }

@@ -339,7 +339,7 @@ final readonly class CheckpointWriter
 
         $query->where($time, '>=', $after->recordedAt);
 
-        if ($after->startsAtItsTime()) {
+        if ($after->fromItsTime) {
             return $query;
         }
 

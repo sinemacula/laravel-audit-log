@@ -15,9 +15,6 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
  */
 final class SealFailedException extends \RuntimeException
 {
-    /** @var string The message format, taking the class. */
-    private const string MESSAGE = 'Sealing stopped with %s.';
-
     /**
      * The exception for a run stopped by a failure of the class.
      *
@@ -26,6 +23,6 @@ final class SealFailedException extends \RuntimeException
      */
     public static function stoppedBy(string $class): self
     {
-        return new self(sprintf(self::MESSAGE, $class));
+        return new self(sprintf('Sealing stopped with %s.', $class));
     }
 }

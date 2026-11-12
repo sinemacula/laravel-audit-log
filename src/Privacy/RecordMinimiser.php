@@ -24,9 +24,6 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  */
 final readonly class RecordMinimiser
 {
-    /** @var string The diagnostic path of a note that was not stored. */
-    private const string NOTE_PATH = '_audit.note';
-
     /** @var list<string> The path a note is sealed at. */
     private const array NOTE_SEGMENTS = ['properties', '_audit', 'note'];
 
@@ -226,7 +223,7 @@ final readonly class RecordMinimiser
         $envelope = $owner === null ? null : $this->sealer->seal($owner, (string) TypedPlaintext::encode($snapshot->note), $scope->at(self::NOTE_SEGMENTS));
 
         if ($envelope === null) {
-            $omissions->add(self::NOTE_PATH);
+            $omissions->add(ByteBudget::NOTE_PATH);
         }
 
         return $envelope;

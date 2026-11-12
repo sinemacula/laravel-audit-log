@@ -25,9 +25,6 @@ final readonly class KeyRing
     /** @var int Length of every derived secret, in bytes. */
     private const int DERIVED_SECRET_BYTES = 32;
 
-    /** @var string Prefix of every derived key id. */
-    private const string DERIVED_ID_PREFIX = 'd';
-
     /** @var int Hex characters of the fingerprint a derived key id keeps. */
     private const int FINGERPRINT_LENGTH = 16;
 
@@ -121,7 +118,7 @@ final readonly class KeyRing
     private static function derive(#[\SensitiveParameter] string $applicationKey): IntegrityKey
     {
         $secret = hash_hkdf('sha256', $applicationKey, self::DERIVED_SECRET_BYTES, self::DERIVATION_INFO, '');
-        $id     = self::DERIVED_ID_PREFIX . substr(hash_hmac('sha256', self::KEY_ID_LABEL, $secret), 0, self::FINGERPRINT_LENGTH);
+        $id     = 'd' . substr(hash_hmac('sha256', self::KEY_ID_LABEL, $secret), 0, self::FINGERPRINT_LENGTH);
 
         return new IntegrityKey($id, $secret);
     }

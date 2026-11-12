@@ -130,7 +130,11 @@ final readonly class RecordSigner
 
         self::checkVersion($signed['integrity_version']);
 
-        $key = $this->keys->key(self::storedKeyId($signed['key_id']));
+        if (!is_string($signed['key_id'])) {
+            throw new \UnexpectedValueException('A stored entry\'s `key_id` must be a string.');
+        }
+
+        $key = $this->keys->key($signed['key_id']);
 
         return hash_equals(hash_hmac('sha256', CanonicalEncoder::encode($signed), $key->secret()), $hmac);
     }
@@ -214,20 +218,5 @@ final readonly class RecordSigner
         }
 
         return $hmac;
-    }
-
-    /**
-     * The stored key id, refused unless it is a string.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $keyId
-     * @return string
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function storedKeyId(mixed $keyId): string
-    {
-        return is_string($keyId) ? $keyId : throw new \UnexpectedValueException('A stored entry\'s `key_id` must be a string.');
     }
 }

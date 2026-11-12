@@ -81,7 +81,9 @@ final readonly class JournalSigner
      */
     public function verifies(#[\SensitiveParameter] JournalRow $signed): bool
     {
-        self::checkHmac($signed->hmac);
+        if (preg_match(SealEnvelope::DIGEST_PATTERN, $signed->hmac) !== 1) {
+            throw new \UnexpectedValueException('A journal row\'s `hmac` must be 64 lower-case hexadecimal characters.');
+        }
 
         return hash_equals(self::hmac($signed, $this->keys->key($signed->keyId)), $signed->hmac);
     }
@@ -99,21 +101,5 @@ final readonly class JournalSigner
     private static function hmac(#[\SensitiveParameter] JournalRow $journalRow, #[\SensitiveParameter] IntegrityKey $key): string
     {
         return hash_hmac('sha256', $journalRow->kind->label() . $journalRow->digest(), self::key($key->secret()));
-    }
-
-    /**
-     * Refuse a stored HMAC that is not 64 lower-case hex: no key could have
-     * made it, so it is malformed, never merely wrong.
-     *
-     * @param  string  $hmac
-     * @return void
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function checkHmac(string $hmac): void
-    {
-        if (preg_match(SealEnvelope::DIGEST_PATTERN, $hmac) !== 1) {
-            throw new \UnexpectedValueException('A journal row\'s `hmac` must be 64 lower-case hexadecimal characters.');
-        }
     }
 }
