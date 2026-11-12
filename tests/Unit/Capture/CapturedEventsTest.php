@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
 use Tests\Fixtures\Capture\Events\PortalSignedIn;
 
 /**
- * Unit tests for the claims a capture takes on event objects and the window in
- * which a mapper runs: an object is claimed once, a claim goes with its object,
- * asking claims nothing, and the window is open only while its work runs,
- * however that work ends, and nests.
+ * Unit tests for the claims a capture takes on event objects and the window a
+ * mapper runs in.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -141,9 +139,8 @@ final class CapturedEventsTest extends TestCase
     }
 
     /**
-     * A window inside another leaves the outer one open when it ends, even by
-     * throwing, until the outermost ends too; protects against a counter
-     * replaced by a flag.
+     * A nested window leaves the outer one open until the outermost ends, even
+     * by throwing; catches a counter replaced by a flag.
      *
      * @return void
      */
@@ -190,9 +187,8 @@ final class CapturedEventsTest extends TestCase
     }
 
     /**
-     * An event object is being described only while its description runs,
-     * inside a mapping window, and the description's result is returned as it
-     * is; another object is not marked, and nothing is claimed.
+     * An object is being described only while its description runs, inside a
+     * mapping window, and nothing is claimed.
      *
      * @return void
      */

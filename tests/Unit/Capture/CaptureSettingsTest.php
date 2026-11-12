@@ -11,10 +11,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Capture\CaptureSettings;
 
 /**
- * Unit tests for the capture settings: the default each missing key takes, the
- * guards the core capture skips, the one credential key, the Gate flag and the
- * abilities it selects, the reason codes, the two bulk bounds, everything they
- * fail closed on, and the values no message ever shows.
+ * Unit tests for the capture settings: each default, what each setting fails
+ * closed on, and the values no message shows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,9 +63,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * A list of names is kept whole and in order, a name is excluded exactly
-     * when the list holds it, compared exactly, and a name at either bound of
-     * its length, counted in characters, is accepted.
+     * Except guards are kept whole and in order, matched exactly, and a name at
+     * either length bound, in characters, is accepted.
      *
      * @return void
      */
@@ -119,10 +116,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[except guards]`: a string, a map, a list with a gap, an
-     * explicit `null`, a member that is not a string, an empty or over-long
-     * name, one that is not clean text, and the wildcard beside a name or
-     * repeated.
+     * Rows of `[except guards]`: malformed lists and names, and the wildcard
+     * beside a name or repeated.
      *
      * @return iterable<string, array{0: array<int|string, int|string|null>|string|null}>
      */
@@ -211,9 +206,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[identifier key]`: empty, over-long, starting with a dot or a
-     * hyphen, holding a space, a slash, a non-ASCII letter or a trailing line
-     * feed, and values that are not strings.
+     * Rows of `[identifier key]`: keys outside the grammar and values that are
+     * not strings.
      *
      * @return iterable<string, array{0: bool|int|list<string>|string|null}>
      */
@@ -239,8 +233,7 @@ final class CaptureSettingsTest extends TestCase
 
     /**
      * A key outside the grammar fails closed, naming the setting and never the
-     * value: protects against a mutation that drops either anchor of the
-     * pattern.
+     * value; catches a dropped anchor in the pattern.
      *
      * @param  bool|int|list<string>|string|null  $key
      * @return void
@@ -381,10 +374,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[the list's key, its value, the expected message]`: an empty
-     * only list, which must be said as `null`, a 192-byte member, counted in
-     * bytes, a member that is not a string, an empty or unclean member, a
-     * string, a map, and an explicit `null` for the excepted list.
+     * Rows of `[the list's key, its value, the expected message]`: malformed
+     * ability lists, a member's length counted in bytes.
      *
      * @return iterable<string, array{0: 'except_abilities'|'only_abilities', 1: array<int|string, int|string|null>|string|null, 2: string}>
      */
@@ -482,9 +473,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * A reason code that is not a machine-readable code fails closed, naming
-     * the setting and never the code, so a list that could keep free text is
-     * never used.
+     * A reason code that is not a machine code fails closed, naming the setting
+     * and never the code.
      *
      * @param  array<int|string, int|string|null>|string|null  $codes
      * @return void
@@ -498,9 +488,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * With no setting a manifest holds at most 100000 subjects and 4194304
-     * bytes, and each bound is read from its own key, as an integer or the
-     * digits `env()` returns, at either end of its range.
+     * The bulk limits default to 100000 subjects and 4194304 bytes, each read
+     * from its own key as an integer or digits, at either end of its range.
      *
      * @return void
      */
@@ -523,9 +512,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[the bound's key, its value, its range]`: one past either end of
-     * each range, a negative, a padded or fractional string, a float, an
-     * explicit `null` and a word.
+     * Rows of `[the bound's key, its value, its range]`: values just outside
+     * each range and values of the wrong form.
      *
      * @return iterable<string, array{0: 'max_bytes'|'max_members', 1: float|int|string|null, 2: string}>
      */
@@ -568,9 +556,8 @@ final class CaptureSettingsTest extends TestCase
     }
 
     /**
-     * Validation passes on the defaults and on good values, and reads every
-     * setting, so a malformed one anywhere fails it with that setting's
-     * message.
+     * Validation passes on good values and reads every setting, so any
+     * malformed one fails it with its own message.
      *
      * @return void
      */

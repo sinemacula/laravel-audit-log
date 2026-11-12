@@ -11,16 +11,8 @@ use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the access scope algebra: what each starting scope sees, that
- * a denied scope absorbs every operation, that an empty list denies and an
- * empty except list excepts nothing, that narrowing only ever intersects, that
- * the tenantless rows are the one addition, the limits, and the sorted
- * normalised form and its fingerprint.
- *
- * What a scope sees is checked on its normalised form against a small universe
- * of rows, every combination of a tenant (a full pair, both columns `null`, or
- * a type with no id), a category, an actor and a subject, so a claim that a
- * scope sees a subset of another is a claim about rows, not about its fields.
+ * Unit tests for the access scope algebra. What a scope sees is judged on its
+ * normalised form against a small universe of rows, not on its fields.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -489,8 +481,7 @@ final class AccessScopeTest extends TestCase
 
     /**
      * Every list of the normalised form is sorted bytewise, references by type
-     * then id, however the scope was given them, so two scopes given the same
-     * in another order have the same form.
+     * then id, so the order given never changes the form.
      *
      * @return void
      */
@@ -545,9 +536,8 @@ final class AccessScopeTest extends TestCase
     }
 
     /**
-     * No scope reveals the encrypted fields until it is granted: `none()`,
-     * `all()` and `tenants()` each start without the grant, and say so in their
-     * normalised form.
+     * `none()`, `all()` and `tenants()` start without the reveal grant, and
+     * their normalised form says so.
      *
      * @return void
      */
@@ -592,8 +582,7 @@ final class AccessScopeTest extends TestCase
 
     /**
      * The grant survives every narrowing that leaves the scope seeing
-     * something, from every starting scope that sees anything, and changes
-     * nothing of what the scope sees.
+     * something, and changes nothing of what it sees.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Access\AccessScope): \SineMacula\Laravel\AuditLog\Access\AccessScope  $narrowing
      * @return void
@@ -615,9 +604,8 @@ final class AccessScopeTest extends TestCase
     }
 
     /**
-     * A denied scope never reveals: the grant on a denied scope is the denied
-     * scope itself, and a narrowing that leaves a revealing scope seeing
-     * nothing gives the one form of `none()`, without the grant.
+     * A denied scope never reveals, and a narrowing that denies a revealing
+     * scope gives the plain form of `none()`.
      *
      * @return void
      */
@@ -671,10 +659,8 @@ final class AccessScopeTest extends TestCase
     }
 
     /**
-     * Two scopes that see the same entries by the same rules, one granted the
-     * reveal and one not, have different normalised forms and fingerprints,
-     * whatever order the grant was given in, and granting it twice is granting
-     * it once.
+     * Scopes differing only in the grant differ in form and fingerprint,
+     * whatever order it was given in, and granting twice is granting once.
      *
      * @return void
      */
@@ -770,10 +756,7 @@ final class AccessScopeTest extends TestCase
     }
 
     /**
-     * Whether a row is seen under the normalised form: not denied; its tenant
-     * one of the pairs, or both columns `null` when tenantless rows are seen;
-     * its category among the only ones and not excepted; and its actor or
-     * subject one of the about-references.
+     * Whether a row is seen under the normalised form.
      *
      * @formatter:off
      *

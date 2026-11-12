@@ -9,10 +9,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Capture\CaptureFailedException;
 
 /**
- * Unit tests for what is reported when a capture fails: the classes of the
- * event, of the mapper and of the failure, each by name alone, a message built
- * from them alone, and no previous exception through which the failure's text
- * could reach a log.
+ * Unit tests for what a capture failure reports: class names only, so no
+ * failure text can reach a log.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,9 +57,8 @@ final class CaptureFailedExceptionTest extends TestCase
     }
 
     /**
-     * The failure is never kept as the previous exception, so neither a handler
-     * nor a log that walks the chain reaches its message, and nothing of it is
-     * kept on the exception but its class.
+     * The failure is never the previous exception, so nothing walking the chain
+     * reaches its message.
      *
      * @return void
      */

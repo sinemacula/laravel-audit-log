@@ -16,10 +16,7 @@ use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 
 /**
  * Unit tests for the classifier of database failures that end a host's
- * transaction: the concurrency errors and lost connections Laravel recognises,
- * a PostgreSQL transaction already aborted, an ordinary failure that is none of
- * these, and the sanitised deadlock that still reads as a concurrency error to
- * Laravel.
+ * transaction, and the sanitised deadlock Laravel still retries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -123,9 +120,8 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
-     * A statement refused because the host's transaction is already aborted is
-     * known as such, and is neither a concurrency error nor a lost connection,
-     * so it follows the failure policy.
+     * A statement refused in an already aborted host transaction is known as
+     * such, and is neither a concurrency error nor a lost connection.
      *
      * @param  \PDOException  $failure
      * @return void
@@ -141,12 +137,8 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
-     * PostgreSQL's lock timeout is known by its SQLSTATE at the root of the
-     * chain, from the driver's error information or its code, whatever its
-     * message, and is no concurrency error or lost connection as Laravel
-     * recognises them, so a host's savepoint still recovers it; any other
-     * failure, a deadlock or the same SQLSTATE only in a message among them, is
-     * none.
+     * PostgreSQL's lock timeout is known by its root SQLSTATE, never its
+     * message, and is no concurrency error, so a savepoint recovers it.
      *
      * @return void
      */
@@ -243,9 +235,8 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
-     * A constraint or data failure's driver message can quote the value itself,
-     * as PostgreSQL's `DETAIL` and MySQL's duplicate entry do, so its SQLSTATE
-     * decides.
+     * A constraint or data failure is judged by its SQLSTATE, since
+     * PostgreSQL's `DETAIL` and MySQL's duplicate entry quote the value.
      *
      * @param  string  $phrase
      * @return void
@@ -266,9 +257,8 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
-     * A phrase in something other than a database failure says nothing of a
-     * database connection: a store's cURL error, a queue's Redis error or a
-     * channel's missing file ended no transaction.
+     * A phrase in something other than a database failure is no lost
+     * connection: it ended no transaction.
      *
      * @param  string  $phrase
      * @return void
@@ -402,9 +392,8 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
-     * The SQLSTATE in the driver's error information wins over its code, so a
-     * constraint failure whose code says otherwise still loses its quoted
-     * value.
+     * The error information's SQLSTATE wins over the code, so a constraint
+     * failure whose code says otherwise still loses its quoted value.
      *
      * @return void
      */
@@ -434,11 +423,8 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
-     * The sanitised deadlock is a `DeadlockException` with the settled message
-     * and code, and Laravel's own trait, which decides whether its
-     * `transaction()` retries, reads it as a concurrency error: the pin for the
-     * host's retry on every supported Laravel. It is neither a lost connection
-     * nor an aborted host.
+     * The sanitised deadlock is a `DeadlockException` Laravel's `transaction()`
+     * retries on every supported version, and nothing else.
      *
      * @return void
      */
@@ -471,9 +457,8 @@ final class FailureClassifierTest extends TestCase
     }
 
     /**
-     * The sanitised deadlock has no previous exception and no error
-     * information, and each call builds a new one, so nothing of a failure
-     * travels with it and no throw changes another's trace.
+     * The sanitised deadlock is new on each call and carries no previous
+     * exception or error information.
      *
      * @return void
      */

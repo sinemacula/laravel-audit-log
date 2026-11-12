@@ -37,24 +37,8 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use Tests\Concerns\SearchesForSecrets;
 
 /**
- * Holds the capture layer, the listeners and the record pipeline to the rule
- * that keeps what a capture reads out of a stack trace: with
- * `zend.exception_ignore_args` off every frame keeps its arguments, so a
- * parameter that holds an event, a model, a user, a record or a payload, a
- * failure, or a closure capturing any of them is marked
- * `#[\SensitiveParameter]` on every method it passes through, and a closure's
- * own parameters too, which reflection of a class cannot reach and so are read
- * from the source.
- *
- * Each scan must find what it expects, so it cannot pass by finding nothing,
- * and is shown to flag what it should. Real throws through a user's reference
- * and a mapping window then show what the marking leaves in a frame.
- *
- * The listeners that carry context into jobs and track command and job frames
- * read the framework's own lifecycle events for an id or a frame, never for
- * anything a capture records; their parameters are listed apart, each pinned to
- * its type and to being unmarked, so marking one shrinks the list and any other
- * listener is held to the rule.
+ * Holds the capture layer, listeners and record pipeline to marking every
+ * payload parameter `#[\SensitiveParameter]`, closures included.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -198,10 +182,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Every method of every class the rule holds, private ones included, marks
-     * a parameter that goes by a payload's name or type, and the only ones left
-     * unmarked are the lifecycle listeners' and those that hold only a name or
-     * a reference.
+     * Every method of every held class marks each parameter that goes by a
+     * payload's name or type, bar the listed exemptions.
      *
      * @return void
      */
@@ -229,9 +211,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan finds a payload parameter in each class that must hold one, and
-     * each parameter it must find, and reads every class of the folders the
-     * rule holds, the enums and one added later included.
+     * The scan finds each parameter it must in every held class, so it cannot
+     * pass by finding nothing.
      *
      * @return void
      */
@@ -292,9 +273,7 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan reads a parameter as one the rule holds by its name or its type,
-     * so it flags what it should and nothing else: protects against a scan that
-     * passes by flagging nothing.
+     * The scan holds a parameter by its name or its type, and nothing else.
      *
      * @param  string  $parameter
      * @param  bool  $held
@@ -375,10 +354,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Each lifecycle parameter is still there, unmarked, typed by the
-     * framework's lifecycle events or a throwable it says: a rename or a change
-     * of type fails instead of excusing it, and one marked since is taken off
-     * the list.
+     * Each lifecycle exemption is still there, unmarked and typed as a
+     * framework event or a throwable, so a rename or retype fails.
      *
      * @return void
      */
@@ -398,10 +375,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Each parameter excused as a name or a reference is still there, unmarked,
-     * goes by a payload's name and is typed as only a string or a reference can
-     * be, so a rename, or a change of its type to something that can hold an
-     * event or a user, fails instead of excusing it.
+     * Each name or reference exemption is still there, unmarked and typed as
+     * only a string or a reference, so a retype to a payload fails.
      *
      * @return void
      */
@@ -421,9 +396,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * A closure's parameters are out of a scan of methods, so they are read
-     * from the source: every one that goes by a payload's name or type is
-     * marked, and the scan finds each it must.
+     * Every payload parameter of a closure, read from the source since
+     * reflection cannot reach it, is marked.
      *
      * @return void
      */
@@ -482,9 +456,7 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[a closure's parameters, the names the scan must flag]`: a
-     * payload is flagged by its name or its type unless it is marked, and
-     * anything else is left alone.
+     * Rows of `[a closure's parameters, the names the scan must flag]`.
      *
      * @return iterable<string, array{0: list<string>, 1: list<string>}>
      */
@@ -522,9 +494,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * A user whose identifier cannot be read throws through its reference, and
-     * each frame that held the user shows the value PHP leaves for a marked
-     * parameter, in its arguments and in its trace as a string.
+     * A user whose identifier throws leaves each frame that held it hiding the
+     * user, in its arguments and its string trace.
      *
      * @return void
      */
@@ -549,9 +520,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Work that throws inside a mapping window leaves the window's frame
-     * holding the value PHP leaves for a marked parameter, never the closure,
-     * and the window closes all the same.
+     * Work that throws inside a mapping window leaves the window's frame hiding
+     * the closure, and the window still closes.
      *
      * @return void
      */
@@ -574,9 +544,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * What the marking hides is really in the frame's reach: an unmarked frame
-     * of the same call keeps the secret, so the tests above cannot pass by
-     * there being nothing to hide.
+     * An unmarked frame of the same call keeps the secret, so the tests above
+     * cannot pass with nothing to hide.
      *
      * @return void
      */
@@ -741,9 +710,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of each closure in the source that takes any, in order,
-     * read from its tokens: a `function` or `fn` followed straight by a
-     * bracket, which a named method never is.
+     * The parameters of each closure in the source, read from its tokens:
+     * `function` or `fn` followed straight by a bracket.
      *
      * @param  string  $source
      * @return list<list<string>>
@@ -793,9 +761,8 @@ final class CaptureSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The arguments of the bracket that opens at the index, split at its
-     * top-level commas, each as its text with its spaces trimmed; a trailing
-     * comma adds none.
+     * The arguments of the bracket opening at the index, split at its top-level
+     * commas and trimmed.
      *
      * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  int  $open

@@ -19,9 +19,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use SineMacula\Laravel\AuditLog\Querying\ReadSettings;
 
 /**
- * Unit tests for the shipped `config/audit-log.php`: the env vars it reads, the
- * defaults it falls back to and the leaves it ships, so a renamed key or env
- * var, or an added or dropped leaf, fails here rather than shipping silently.
+ * Unit tests for the shipped `config/audit-log.php`: the env vars it reads, its
+ * defaults and its leaves, so a renamed or dropped key fails here.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -556,9 +555,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * With nothing in the environment a strict verification runs daily, and an
-     * unsealed entry is overdue after 25 hours, longer than the day a late
-     * entry can wait for the sweep.
+     * By default a strict verification runs daily and an unsealed entry is
+     * overdue after 25 hours, longer than a late entry waits for the sweep.
      *
      * @return void
      */
@@ -714,11 +712,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * With nothing in the environment everything is kept forever, no category
-     * has a retention or a preservation of its own, a prune deletes 1000
-     * entries per transaction, runs for 3000 seconds and is due daily at 03:30,
-     * as integers; and the shipped retention settings pass, keeping nothing for
-     * less than forever, so no prune is scheduled.
+     * The retention leaves default to keeping everything forever, as integers,
+     * and the shipped settings pass with no prune scheduled.
      *
      * @return void
      */
@@ -796,10 +791,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * With nothing in the environment the import batches live in
-     * `audit_log_import_batches`, an import writes 500 lines per transaction,
-     * allows five minutes of skew and reads lines of up to 1 MiB, as integers;
-     * and the shipped import settings pass.
+     * The import leaves have their defaults, as integers, and the shipped
+     * import settings pass.
      *
      * @return void
      */
@@ -960,10 +953,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * With nothing in the environment no guard is excepted, `email` is the
-     * credential read, Gate capture is off and selects every ability with no
-     * reason code kept, and a manifest holds 100000 subjects and 4194304 bytes,
-     * as integers; and the shipped capture settings pass.
+     * The capture leaves have their defaults, as integers, and the shipped
+     * capture settings pass.
      *
      * @return void
      */
@@ -994,9 +985,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * Each capture setting with an env var is read from it, raw, so a malformed
-     * number fails closed when it is read rather than casting to `0`, and the
-     * flag is the boolean `env()` makes of `true`.
+     * Each capture setting with an env var reads it raw, so a malformed number
+     * fails closed rather than casting to `0`.
      *
      * @return void
      */
@@ -1027,9 +1017,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * With nothing in the environment a page of the trail may ask for at most
-     * 100 entries and an export reads 1000 per statement, as integers; and the
-     * shipped read and export settings pass.
+     * The read and export leaves have their defaults, as integers, and the
+     * shipped settings pass.
      *
      * @return void
      */
@@ -1331,11 +1320,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * With nothing in the environment the wrapping keys are derived from
-     * `app.key`, with no explicit ring and no current key, the three key tables
-     * have their default names and a rewrap changes 500 keys per transaction,
-     * as an integer; and the shipped privacy settings pass beside a valid
-     * `app.key`.
+     * The privacy leaves have their defaults, the wrapping keys derived from
+     * `app.key`, and the shipped settings pass beside a valid `app.key`.
      *
      * @return void
      */
@@ -1393,9 +1379,8 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * A current wrapping key named in the environment beside the shipped empty
-     * ring fails closed rather than falling back to the key derived from
-     * `app.key`, and an empty env line reads as no current key.
+     * A current wrapping key beside the shipped empty ring fails closed instead
+     * of falling back to `app.key`, and an empty env line means none.
      *
      * @return void
      */
@@ -1552,9 +1537,7 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
-     * With nothing in the environment the monitoring limits are 30 minutes for
-     * sealing, a day and two hours for the daily runs and 15 minutes for the
-     * outbox, as integers, and they pass.
+     * The monitoring limits have their defaults, as integers, and pass.
      *
      * @return void
      */

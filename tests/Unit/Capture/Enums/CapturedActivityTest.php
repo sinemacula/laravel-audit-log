@@ -16,10 +16,8 @@ use SineMacula\Laravel\AuditLog\Definitions\FieldRule;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * Unit tests for the codes the package records when it captures Laravel's own
- * events: the whole ordered vocabulary, each case defining its own code, and
- * every definition in the security category on its first version, dropping what
- * it does not list and keeping only what each code needs.
+ * Unit tests for the codes the package records for Laravel's own events and the
+ * definition behind each.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,9 +78,8 @@ final class CapturedActivityTest extends TestCase
     }
 
     /**
-     * Each definition is version 1 of its payload contract, in the `security`
-     * category, drops every field it does not list, maps to no OCSF class of
-     * its own, and is the same on every call.
+     * Each definition is version 1 in the `security` category, drops unlisted
+     * fields, maps to no OCSF class and is the same on every call.
      *
      * @param  \SineMacula\Laravel\AuditLog\Capture\Enums\CapturedActivity  $case
      * @return void

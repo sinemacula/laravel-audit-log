@@ -22,10 +22,8 @@ use Tests\Fixtures\Capture\Models\WatchedInvoice;
 use Tests\Fixtures\Capture\Models\WatchedInvoiceRevision;
 
 /**
- * Unit tests for what an application watches of a model class: the class, the
- * segment and the fields it accepts and every one it refuses, checked by
- * reflection alone, and the five definitions a watch registers, each ruling the
- * watched fields where its record keeps them and dropping every other.
+ * Unit tests for a model watch: what it accepts and refuses, by reflection
+ * alone, and the five definitions it registers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,9 +37,8 @@ final class ModelWatchTest extends TestCase
     private const array CHANGES = ['created', 'updated', 'deleted', 'restored', 'force_deleted'];
 
     /**
-     * A field given alone is retained, and one given as a key takes its
-     * handling, in the order given; the class and the segment are kept as
-     * given.
+     * A field given alone is retained and one given as a key takes its
+     * handling, in order; the class and segment are kept.
      *
      * @return void
      */
@@ -321,9 +318,8 @@ final class ModelWatchTest extends TestCase
     }
 
     /**
-     * Two watches are equal when the class, the segment and every field's
-     * handling are, whatever the order the fields were given in, and differ
-     * when any of them does.
+     * Watches are equal when class, segment and every field's handling match,
+     * whatever the field order.
      *
      * @return void
      */

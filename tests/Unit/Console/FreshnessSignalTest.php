@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Console\FreshnessSignal;
 
 /**
- * Unit tests for a freshness signal: its line names the signal and its status,
- * with its age and its limit only when it has them, and its fields are the
- * closed list `--json` writes.
+ * Unit tests for a freshness signal's line and the fields `--json` writes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

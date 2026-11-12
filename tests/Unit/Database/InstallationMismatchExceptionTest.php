@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
 
 /**
- * Unit tests for the refusal of connections that do not reach one installation:
- * each named constructor's message, which is a full sentence naming no id and
- * no connection, and the runtime exception it is.
+ * Unit tests for the refusal of connections that do not reach one installation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,9 +35,8 @@ final class InstallationMismatchExceptionTest extends TestCase
     }
 
     /**
-     * Each message is one sentence ending in a full stop, says what is wrong,
-     * and names no id, no UUID and no connection: an operator reads it beside
-     * logs another may see.
+     * Each message is one sentence naming no id, UUID or connection, since an
+     * operator reads it beside logs others may see.
      *
      * @param  \SineMacula\Laravel\AuditLog\Database\InstallationMismatchException  $exception
      * @param  string  $message

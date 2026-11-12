@@ -12,13 +12,7 @@ use Tests\Fixtures\Database\EntriesTableShape;
 
 /**
  * Unit tests for the shapes the schema checks compare the package's tables
- * against: the entries table's is what its migration gives, column by column
- * and index by index, the artifacts', the outbox's, the deliveries', the
- * checkpoints', the checkpoint members', the integrity state's, the lifecycle
- * journal's, the holds', the lifecycle lock's, the import batches', the subject
- * keys', the owner erasures' and the key uses' are what theirs give, and each
- * names its table and describes a column the package does not write in its own
- * words.
+ * against, each what its migration gives.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,10 +23,8 @@ use Tests\Fixtures\Database\EntriesTableShape;
 final class TableShapeTest extends TestCase
 {
     /**
-     * The entries shape lists every column the migration creates, in order,
-     * each string column at the length the migration gives it, the other
-     * columns in their families, the indexes the migration names, and the key
-     * over `id` alone.
+     * The entries shape is what the migration gives: every column in order,
+     * each string's length, the indexes and the key over `id`.
      *
      * @return void
      */
@@ -73,10 +65,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * The artifacts shape is what its migration gives: the artifact's id as the
-     * key, the entry it belongs to, its kind, its count and digest, the
-     * encrypted members, when it was recorded, and an entry with at most one
-     * artifact.
+     * The artifacts shape is what its migration gives, an entry having at most
+     * one artifact.
      *
      * @return void
      */
@@ -98,9 +88,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * The outbox shape is what its migration gives: the record's id as the key,
-     * its encrypted payload, its attempts, its lease and its failure, and the
-     * index a drain claims rows by.
+     * The outbox shape is what its migration gives, with the index a drain
+     * claims rows by.
      *
      * @return void
      */
@@ -146,10 +135,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * The checkpoints shape is what its migration gives: the seal's id as the
-     * key, its place in the chain, its members' digest, its times, the journal
-     * head it commits to, its signature, the four anchor columns, one seal per
-     * sequence and the index the anchorer reads the seals not yet anchored by.
+     * The checkpoints shape is what its migration gives, one seal per sequence,
+     * with the index the anchorer reads unanchored seals by.
      *
      * @return void
      */
@@ -189,9 +176,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * The checkpoint members shape is what its migration gives: keyed by the
-     * seal and the entry, the entry's HMAC, and an entry held by at most one
-     * seal.
+     * The checkpoint members shape is what its migration gives, an entry held
+     * by at most one seal.
      *
      * @return void
      */
@@ -245,10 +231,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * The lifecycle journal shape is what its migration gives: the row's id as
-     * the key, its place in the chain, its kind and operation, its authority,
-     * the seal and the hold it names, its payload and digest, its link and its
-     * signature, one row per sequence, and the lookups by seal, hold and kind.
+     * The lifecycle journal shape is what its migration gives, one row per
+     * sequence, found by seal, hold and kind.
      *
      * @return void
      */
@@ -285,9 +269,7 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * The holds shape is what its migration gives: the hold's id as the key,
-     * its scope and digest, its basis, batch and times, its authority, and the
-     * operation and journal row that placed it, found by review date and by
+     * The holds shape is what its migration gives, found by review date and by
      * import batch.
      *
      * @return void
@@ -338,10 +320,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * The import batches shape is what its migration gives: the batch's id as
-     * the key, its source and format, its importer, its file, its hold, its
-     * status and counts, its conflicts and its times, found by status and by
-     * when each was last written.
+     * The import batches shape is what its migration gives, found by status and
+     * by last write.
      *
      * @return void
      */
@@ -377,13 +357,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * Each key table's shape is what its migration gives: the subject keys
-     * keyed by the key's id, with its unit, its generation, its state, its
-     * wrapped key, its erasure and its signature, one key per unit and
-     * generation and its keys found by owner and by erasure; the owner erasures
-     * keyed by the journal row's id, with the owner, the transition,
-     * the floor and the journal's sequence, found by owner in journal order;
-     * and the key uses keyed by the key and the entry, found by the entry.
+     * Each key table's shape is what its migration gives: the subject keys, the
+     * owner erasures and the key uses.
      *
      * @return void
      */
@@ -439,9 +414,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * No column of a key table is named a word any supported engine reserves,
-     * so every statement names them bare: the marker's transition and floor are
-     * `transition` and `generation_floor`, never `action` or `floor`.
+     * No key table column is a word any supported engine reserves, so every
+     * statement can name them bare.
      *
      * @return void
      */
@@ -455,9 +429,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index a lifecycle or
-     * key shape names fits PostgreSQL's 63 characters, and a key use's primary
-     * key, which its migration names after the table too.
+     * At the longest accepted table name, every lifecycle and key index fits
+     * PostgreSQL's 63 characters, a key use's primary key included.
      *
      * @return void
      */
@@ -509,10 +482,8 @@ final class TableShapeTest extends TestCase
     }
 
     /**
-     * Each shape names its table, and describes a column the package does not
-     * write in its own words: an entry and a journal row are covered by an
-     * HMAC, a seal and its members by the seal, and nothing else, an artifact's
-     * own columns included, by either.
+     * Each shape names its table and describes a column the package does not
+     * write by what covers it, if anything.
      *
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
      * @param  string  $label

@@ -17,9 +17,8 @@ use Tests\Fixtures\Contributors\QueryingContributor;
 use Tests\Fixtures\Contributors\TenantContributor;
 
 /**
- * Unit tests for the list of contributors every capture runs: the defaults
- * first and in their order, each registered one after them, once and in order,
- * what is refused, and that freezing refuses any more.
+ * Unit tests for the contributors every capture runs: the defaults first, each
+ * registered one after them once and in order, and the freeze.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

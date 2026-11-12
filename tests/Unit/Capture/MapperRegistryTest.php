@@ -24,10 +24,8 @@ use Tests\Fixtures\Capture\Mappers\PortalMapper;
 use Tests\Fixtures\Capture\Mappers\ThrowingMapper;
 
 /**
- * Unit tests for the registry of event mappers: the exact class first, then
- * exactly one parent class or interface, the subtypes a mapping excepts, the
- * registrations it refuses, the package's own events never mapped, the freeze,
- * and the answer kept per class.
+ * Unit tests for the registry of event mappers: resolution order, excepted
+ * subtypes, refusals, the freeze and the per-class cache.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -432,9 +430,8 @@ final class MapperRegistryTest extends TestCase
     }
 
     /**
-     * Each excepted type must exist and be a proper subtype of the mapped class
-     * or interface; any other is refused, naming both, and nothing is
-     * registered.
+     * An excepted type that is not a proper subtype of the mapped type is
+     * refused, naming both, and nothing is registered.
      *
      * @param  class-string  $mapped
      * @param  string  $excepted
@@ -457,9 +454,8 @@ final class MapperRegistryTest extends TestCase
     }
 
     /**
-     * Once frozen the registry refuses any registration, an identical one
-     * included, and still resolves what it holds; freezing again changes
-     * nothing.
+     * A frozen registry refuses every registration, an identical one included,
+     * and still resolves; freezing again changes nothing.
      *
      * @return void
      */
@@ -484,9 +480,8 @@ final class MapperRegistryTest extends TestCase
     }
 
     /**
-     * The mappings that apply to a class are worked out once and kept by the
-     * class, an unmapped class's none included, and a later registration
-     * forgets them, so it is never answered from a stale lookup.
+     * Resolution is cached per class, misses included, and a later registration
+     * clears the cache.
      *
      * @SuppressWarnings("php:S3011")
      *

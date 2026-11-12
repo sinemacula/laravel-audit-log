@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Capture\Enums\ModelEvent;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * Unit tests for the changes of a watched model: the code suffix each is stored
- * under, the code it makes after a model's segment, and the Eloquent event each
- * is listened for by, a restore by none.
+ * Unit tests for the codes and Eloquent events of a watched model's changes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,9 +84,8 @@ final class ModelEventTest extends TestCase
     }
 
     /**
-     * Each change is listened for by the Eloquent event of its name, a force
-     * delete by `forceDeleted`, and a restore by none, since it is told from an
-     * update.
+     * Each change listens for the Eloquent event of its name, a force delete
+     * for `forceDeleted`, and a restore for none, being told from an update.
      *
      * @return void
      */

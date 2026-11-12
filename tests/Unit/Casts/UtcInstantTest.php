@@ -12,9 +12,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Casts\UtcInstant;
 
 /**
- * Unit tests for the UTC instant cast: a stored time read as a UTC instant with
- * its microseconds whatever the default time zone, an instant written in the
- * stored form in UTC, `null` kept both ways, and the values it refuses.
+ * Unit tests for the UTC instant cast, both ways and whatever the default time
+ * zone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,9 +56,8 @@ final class UtcInstantTest extends TestCase
     }
 
     /**
-     * Rows of `[stored time, the instant it reads as]`: a stored time keeps its
-     * microseconds, and one with fewer fractional digits, as PostgreSQL returns
-     * it, or none, reads right-padded to six.
+     * Rows of `[stored time, the instant it reads as]`: fewer fractional
+     * digits, as PostgreSQL returns them, are right-padded to six.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -180,9 +178,8 @@ final class UtcInstantTest extends TestCase
     }
 
     /**
-     * A value that is not an instant is refused, naming the attribute, rather
-     * than written as it is; a string in the stored form included, since only
-     * the cast decides that form.
+     * A value that is not an instant is refused, naming the attribute, even a
+     * string in the stored form, since only the cast decides that form.
      *
      * @return void
      */

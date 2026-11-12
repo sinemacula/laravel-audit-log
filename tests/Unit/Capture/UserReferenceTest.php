@@ -18,10 +18,8 @@ use Tests\Unit\Stubs\StubDocument;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for the reference of the user an event carries: a model by its
- * reference, any other authenticatable user by its class and identifier, and no
- * one for a user that cannot be referred to or is not a user, with nothing
- * asked of the user but its identifier and nothing asked of any guard.
+ * Unit tests for the reference of the user an event carries, which asks the
+ * user only for its identifier and asks no guard anything.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,9 +45,7 @@ final class UserReferenceTest extends TestCase
     }
 
     /**
-     * `UserReference` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *
@@ -150,9 +146,8 @@ final class UserReferenceTest extends TestCase
     }
 
     /**
-     * An identifier that is not a string or an integer, or one a reference
-     * refuses, is no one; the row of a float protects against a mutation that
-     * casts any scalar.
+     * An identifier that is not a string or an integer, or that a reference
+     * refuses, is no one; the float row catches a cast of any scalar.
      *
      * @param  array<int, int>|bool|float|object|string|null  $identifier
      * @return void
