@@ -26,55 +26,11 @@ use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Imports another system's records, as a privileged operation: a file of either
- * import format read into this installation's entries, as its acceptance of a
+ * Imports another system's records as this installation's acceptance of a
  * foreign assertion, never as activity it witnessed.
  *
- * An import is refused inside a transaction on the storage or the maintenance
- * connection, with a malformed import setting, and when its source is this
- * installation, whose own records come back through `audit-log:replay`. The
- * file's SHA-256 is read first, whole. The installation is confirmed, the batch
- * row inserted `running`, and one lifecycle transaction then verifies the
- * journal and appends `import_started` and, with a hold asked for, places the
- * hold on the batch, its journal row and projection row with it, so the hold
- * commits with the start, before any entry; a failure of that transaction
- * journals the batch's finish if its start did commit, marks the batch
- * `failed`, with no entry written, and is rethrown. The file is then read
- * again, its lines parsed and written in chunks of `audit-log.import.chunk`,
- * each in its own storage transaction, and hashed as it is read: a file that
- * changed between the two reads fails the batch. The batch ends `complete` when
- * nothing was rejected and nothing conflicted and `partial` otherwise. Any
- * failure after the start ends it `failed`, as best it can, reporting what
- * fails, leaves the hold in place, and is rethrown, a failed statement masked
- * so no binding of an imported record reaches the caller's reporter.
- *
- * The journal is the truth of how a batch ended, and the batch row follows it:
- * `import_finished` is journalled first, behind the lifecycle lock, only while
- * the verified journal holds the batch's `import_started` and no finish of it,
- * and the batch is made final after, as best it can. A batch whose finish could
- * not be journalled stays `running`, which `audit-log:check` notes once it is
- * stale; one whose finish was journalled but whose row was not made final is
- * made final by `close()`. So a batch's finish is journalled at most once,
- * never for a batch that never started, and a crash at any boundary leaves a
- * batch that `close()` brings to its end.
- *
- * Imported rows are signed by this installation's ring and sealed in its chain,
- * marked imported, never dispatched as `AuditRecorded` and never delivered to a
- * destination. A dry run reads, validates, minimises encrypting nothing and
- * classifies, counts the lines already past retention on arrival, and writes
- * nothing: no batch, no journal row, no key, no record.
- *
- * `close()` brings a batch whose import stopped to its end: a running batch
- * whose start the journal holds and whose finish it does not is journalled
- * `interrupted`, under its import's operation, and marked so; one whose finish
- * the journal holds is marked with the status journalled, which journals
- * nothing; one the journal never started is marked `interrupted` and journals
- * nothing; and a final batch whose start the journal holds with no finish has
- * that finish journalled from its row. Any other batch, and an id that is not a
- * lower-case UUID, is refused before anything is read. The activity records of
- * an import and its hold are written by the caller once the operation has
- * committed; a caller told of the start, through the closure it may give, can
- * record the hold even when the import then fails.
+ * The journal is the truth of how a batch ended and the batch row follows it,
+ * so a crash at any boundary leaves a batch that `close()` brings to its end.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,7 +39,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class AuditImporter
 {
-    /** @var string The pattern of a batch id: a lower-case UUID. */
+    /** @var string A batch id: a lower-case UUID. */
     private const string BATCH_ID = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
     /** @var string The refusal of a batch that cannot be closed. */
@@ -106,10 +62,10 @@ final readonly class AuditImporter
      */
     public function __construct(
 
-        /** The container the parsers, the policy and the journal's signer are resolved from on every import. */
+        /** Resolves the parsers, the policy and the signer on every import. */
         private Container $container,
 
-        /** The frame of the journal rows, behind the lifecycle lock. */
+        /** Runs the journal writes behind the lifecycle lock. */
         private MaintenanceTransaction $transaction,
 
         /** The journal an import's start and finish are appended to. */
@@ -135,11 +91,8 @@ final readonly class AuditImporter
     ) {}
 
     /**
-     * Import the source on the authority given, or plan it as a dry run, with a
-     * hold on its batch, of the basis given, placed with its start when one is
-     * asked for. The closure given, if any, is told of the start once it has
-     * committed, with the result as it then stands; what it throws fails the
-     * batch, as any failure after the start does.
+     * Import the source, or plan it as a dry run, optionally holding its batch.
+     * `$started` runs once the start commits; what it throws fails the batch.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportSource  $source
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -201,11 +154,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * Bring the batch whose import stopped to its end, on the authority given:
-     * journal its finish when the journal holds its start and no finish, then
-     * make it final with the status the journal holds. A batch the journal
-     * never started is marked `interrupted`; any other batch, and a malformed
-     * id, is refused.
+     * Bring the batch whose import stopped to its end, journalling any missing
+     * finish, and make it final with the status the journal holds.
      *
      * @param  string  $batchId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -244,11 +194,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * Tell the closure given of the start, read and write the file's lines,
-     * check the file did not change, journal the batch's finish, then make the
-     * batch final as best it can, and return the status journalled; a failure
-     * before the finish was journalled ends the batch `failed`, as best it can,
-     * and is rethrown masked.
+     * Write the file's lines and journal the batch's finish, returning the
+     * status journalled; a failure ends the batch `failed` and is rethrown.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportFile  $file
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportSource  $source
@@ -303,11 +250,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * Begin the import in one lifecycle transaction: the journal verified,
-     * `import_started` appended and, with a hold id, the hold placed on the
-     * batch; return the replay that accepted them and the hold, once committed.
-     * A failure ends the batch `failed`, as best it can, journalling its finish
-     * only if its start did commit, and is rethrown masked.
+     * Journal `import_started` and place any hold in one lifecycle transaction,
+     * so the hold commits before any entry.
      *
      * @param  array{0: string, 1: string, 2: string, 3: string}  $import
      * @param  ?string  $holdId
@@ -354,8 +298,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * Read the file's lines, counting each, rejecting those that cannot be read
-     * or parsed, and hand the rest to the closure a chunk at a time.
+     * Read and parse the file's lines, handing the accepted ones to `$write` a
+     * chunk at a time.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportFile  $file
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportSource  $source
@@ -405,13 +349,9 @@ final readonly class AuditImporter
     }
 
     /**
-     * End the batch `failed`, each step as best it can, reporting what fails:
-     * its finish journalled while the journal holds its start and no finish,
-     * then the batch made final with the status the journal holds, or `failed`
-     * when the journal never started it. A batch whose finish could not be
-     * journalled stays `running` for `close()`, unless its start may never have
-     * committed, which marks it `failed` all the same; a batch closed while its
-     * import ran is left as its close left it.
+     * End the batch `failed` as best it can; one whose finish could not be
+     * journalled stays `running` for `close()` unless its start may not have
+     * committed.
      *
      * @param  array{0: string, 1: string, 2: string, 3: string}  $import
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
@@ -435,14 +375,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * Journal the batch's finish in one lifecycle transaction, onto the replay
-     * of the import's start advanced, or onto a fresh replay verified, under
-     * its import's operation, unless the verified journal already holds a
-     * finish of the batch or no start of it; return the status the journal then
-     * holds for the batch, the operation it is journalled under, and whether
-     * this call journalled it, or nothing for a batch never started. Unless
-     * `$finishedToo`, a batch the journal finished already, or never started,
-     * is refused.
+     * Journal the batch's finish unless the journal already finished it or
+     * never started it, which is refused unless `$finishedToo`.
      *
      * @param  array{0: string, 1: string, 2: string, 3: string}  $import
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
@@ -496,9 +430,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * Whether the step succeeds, run as best it can: a failure is reported,
-     * named by its class alone, so nothing of a line, a statement or a binding
-     * reaches a reporter.
+     * Whether the step succeeds; a failure is reported by its class alone so no
+     * imported data reaches a reporter.
      *
      * @template TResult
      *
@@ -520,10 +453,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * The run's retention decisions at the instant given, which count the lines
-     * past retention on arrival, or `null` when the bound policy cannot be
-     * resolved: the count is then given up, reported once by its class, and the
-     * import goes on.
+     * The retention decisions that count lines past retention on arrival, or
+     * `null` when the policy cannot be resolved and the count is given up.
      *
      * @param  \DateTimeInterface  $now
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportTally  $tally
@@ -544,8 +475,7 @@ final readonly class AuditImporter
     }
 
     /**
-     * A fresh replay of nothing yet, of the configured log, for one lifecycle
-     * transaction.
+     * A fresh replay of the configured log.
      *
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay
      *
@@ -558,8 +488,8 @@ final readonly class AuditImporter
     }
 
     /**
-     * Refuse an import inside a transaction on the storage or the maintenance
-     * connection: its chunks would become savepoints of the host's.
+     * Refuse an import inside a transaction: its chunks would become savepoints
+     * of the host's.
      *
      * @return void
      *
@@ -594,9 +524,7 @@ final readonly class AuditImporter
     }
 
     /**
-     * The batch to close, its stored status and when it started, refused before
-     * anything is read when its id is not a lower-case UUID, and when it does
-     * not exist.
+     * The batch to close, its stored status and when it started.
      *
      * @param  string  $batchId
      * @param  \Closure(string): ?array<string, scalar|null>  $find
@@ -618,9 +546,7 @@ final readonly class AuditImporter
     }
 
     /**
-     * The status the journal holds for a batch it never started, `null`, or
-     * finished, the finish's; refused unless `$finishedToo`, since a close of a
-     * final batch journals only the finish it lacks.
+     * The status journalled for the batch, or `null` when it never started.
      *
      * @param  bool  $finishedToo
      * @param  ?string  $status
@@ -643,9 +569,7 @@ final readonly class AuditImporter
     }
 
     /**
-     * The result of a close: its operation, whether it committed a finish of
-     * its own or ended a batch never started, the batch, the status reached,
-     * and the counts and conflicts the batch row holds.
+     * The result of a close, with the counts the batch row holds.
      *
      * @param  string  $operationId
      * @param  bool  $committed
@@ -725,7 +649,7 @@ final readonly class AuditImporter
     }
 
     /**
-     * The conflicting ids the stored batch lists, or none.
+     * The conflicting ids the stored batch lists.
      *
      * @param  bool|float|int|string|null  $stored
      * @return list<string>
@@ -738,7 +662,7 @@ final readonly class AuditImporter
     }
 
     /**
-     * The stored value as text, or `null` for anything else.
+     * The stored value as text, or `null` when it is not a string.
      *
      * @param  bool|float|int|string|null  $value
      * @return ?string

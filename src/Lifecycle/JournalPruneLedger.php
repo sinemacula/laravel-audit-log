@@ -13,21 +13,11 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 
 /**
- * The prune ledger the package binds: the records the lifecycle journal's
- * `prune` rows hold, each written in the transaction that deleted the members
- * it sets.
+ * The prune ledger the package binds: the records of the journal's `prune`
+ * rows, read on the writer so a replica's lag never hides a committed prune.
  *
- * A seal's records are read in one indexed statement, by the seal id of the
- * rows of kind `prune`, in the order of their sequence, on the storage
- * connection's writer: verification needs no credentials that can delete, and a
- * replica's lag never hides a committed prune. Each row's payload is decoded
- * and its `record` read as a prune record of version 2. A payload that is not
- * JSON or holds no record is an `UnexpectedValueException` naming the seal, and
- * a record that cannot be read one naming its field; verification reports
- * either as a forged record of the seal. The row's own signature is not checked
- * here: the record carries the seal key's, which verification checks, and
- * `audit-log:verify`'s journal section checks the row's. It keeps no state
- * between calls.
+ * The row's own signature is not checked here: verification checks the seal
+ * key's signature on the record.
  *
  * @api
  *
@@ -39,7 +29,7 @@ final readonly class JournalPruneLedger implements PruneLedger
     /** @var int How deep a payload may nest. */
     private const int DEPTH = 64;
 
-    /** @var string The refusal of a prune row of a seal that holds no record, by the seal's id. */
+    /** @var string The refusal of a seal's prune row with no readable record. */
     private const string UNREADABLE = 'The lifecycle journal holds a prune row of the seal `%s` with no record that can be read.';
 
     /**
@@ -49,13 +39,13 @@ final readonly class JournalPruneLedger implements PruneLedger
      */
     public function __construct(
 
-        /** The connections the storage connection is resolved from on every call. */
+        /** Resolves the storage connection on every call. */
         private DatabaseManager $database,
     ) {}
 
     /**
-     * Every record the journal's prune rows hold for the seal, in the order of
-     * their sequence, or none when the seal was never pruned.
+     * Every prune record of the seal in sequence order, or none when it was
+     * never pruned.
      *
      * @param  string  $sealId
      * @return list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>
@@ -70,9 +60,8 @@ final readonly class JournalPruneLedger implements PruneLedger
     }
 
     /**
-     * Every record the journal's prune rows hold for the seal, read on the
-     * connection given, in the order of their sequence: what a prune chunk
-     * reads inside its own lifecycle transaction.
+     * Every prune record of the seal on the connection given, for a prune chunk
+     * inside its own transaction.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $sealId

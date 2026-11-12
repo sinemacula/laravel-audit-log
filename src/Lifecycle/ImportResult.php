@@ -8,16 +8,11 @@ use Illuminate\Contracts\Support\Arrayable;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 
 /**
- * What an import, or the close of a batch, did: the operation, whether it
- * committed anything and whether its activity record was written, the batch and
- * the status it reached, the hold placed with its start, and its counts.
+ * What an import, or the close of a batch, did; it carries counts, never a
+ * line's content.
  *
- * A dry run commits nothing and names no batch, status or hold: its counts are
- * a plan of what an import would do, never a promise, since another import may
- * store the same records first. Lines past retention on arrival are counted so
- * an operator can see what the next prune would delete unless it is held; the
- * count is `null` when the retention policy failed to answer, which never stops
- * the import. The counts are of lines; nothing of a line's content is carried.
+ * A dry run's counts are a plan, not a promise, since another import may store
+ * the same records first.
  *
  * @api
  *
@@ -64,7 +59,7 @@ final readonly class ImportResult implements Arrayable
         /** The operation's id. */
         public string $operationId,
 
-        /** Whether the operation committed anything: never for a dry run. */
+        /** Whether anything was committed; never for a dry run. */
         public bool $committed,
 
         /** Whether its activity record was written. */
@@ -79,10 +74,10 @@ final readonly class ImportResult implements Arrayable
         /** The status the batch reached, or `null` for a dry run. */
         public ?ImportStatus $status,
 
-        /** The id of the hold placed with the batch's start, or `null` when none was asked for. */
+        /** The batch's hold id, or `null` when none was asked for. */
         public ?string $holdId,
 
-        /** The hold placed with this import's start, or `null` when it placed none. */
+        /** The hold this import placed, or `null` when it placed none. */
         public ?Hold $hold,
 
         /** The lines read, blank lines aside. */
@@ -100,13 +95,13 @@ final readonly class ImportResult implements Arrayable
         /** The lines rejected. */
         public int $rejected,
 
-        /** How many lines were rejected for each reason, by its value. */
+        /** Rejected lines per reason value. */
         public array $rejections,
 
         /** The first hundred conflicting source record ids, in file order. */
         public array $conflictIds,
 
-        /** The lines whose records were already past their retention when they arrived, or `null` when the policy failed to answer. */
+        /** Lines past retention on arrival, or `null` when the policy failed. */
         public ?int $pastRetention,
 
         /** The envelope-shaped values and descriptors removed from the lines. */
@@ -114,8 +109,7 @@ final readonly class ImportResult implements Arrayable
     ) {}
 
     /**
-     * The result of an operation from its tally: committed unless it was a dry
-     * run, its record not yet written.
+     * The result of an operation from its tally, its record not yet written.
      *
      * @param  string  $operationId
      * @param  bool  $dryRun
@@ -182,8 +176,7 @@ final readonly class ImportResult implements Arrayable
     }
 
     /**
-     * The result as a map: the operation, whether it committed, was recorded
-     * and was a dry run, the batch, its status and hold, and the counts.
+     * The result as a snake-case map.
      *
      * @formatter:off
      *

@@ -18,38 +18,11 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Erases again, after a database was restored, every owner an erasures file
- * names, and journals the restore reconciled once every one of them is erased.
+ * Erases again, after a restore, every owner an erasures file names, and
+ * journals the restore reconciled once every one of them is erased.
  *
- * The file is the operator's own record of the owners erased since the restored
- * head, one JSON object per line, `{"type": <owner type>, "id": <owner id>}`,
- * at most 100,000 lines that are not blank, each of at most 1,024 bytes; a
- * blank line is skipped. It is read twice: whole first, for its SHA-256 and its
- * length, refused with an `InvalidArgumentException` before anything is erased
- * when it holds more lines than that; then line by line, hashing again as it
- * reads, each read a mebibyte at a time. A line that is not exactly such an
- * object, or is longer than the limit, is rejected and counted; an owner named
- * twice is erased once.
- *
- * Each owner is erased on its own, in part and accepting pending deliveries,
- * since the restored outbox is no new evidence and a blocked key's obligation
- * stands: by the eraser under a fresh operation, or by the erasure given, which
- * `AuditLifecycle` makes `erase()`, so each is recorded as any erasure is. A
- * refused erasure is counted and the next owner erased; any other failure stops
- * the run, and the erasures before it stand. A file whose second read differs
- * from its first fails the run with an `UnexpectedValueException`, journalling
- * nothing. The owners are erased in one `ErasureRun`, so the installation is
- * confirmed once and each journal row verified once for the whole file, never
- * once per owner.
- *
- * Only when the file was read whole and unchanged, no line was rejected and
- * every owner ended erased whole or already erased is a `restore_reconciled`
- * row appended, in one `MaintenanceTransaction` onto the verified head, naming
- * the authority, the file's SHA-256, the counts, and the anchor's head as it
- * reports it, its sequence and digest, both `null` when the anchor cannot
- * report one; an anchor that fails to answer fails the run before anything is
- * journalled. That row is what tells `audit-log:check` the restore was
- * reconciled.
+ * Each owner is erased in part and accepting pending deliveries, since the
+ * restored outbox is no new evidence and a blocked key's obligation stands.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,7 +34,7 @@ final readonly class ErasureReapplier
     /** @var int The most lines an erasures file may hold. */
     public const int MAX_LINES = 100000;
 
-    /** @var int The longest line an erasures file may hold, in bytes, without its line feed. */
+    /** @var int Longest line of an erasures file, in bytes, without its newline. */
     public const int MAX_LINE_BYTES = 1024;
 
     /** @var string Why a file that changed between its two reads fails the run. */
@@ -86,26 +59,25 @@ final readonly class ErasureReapplier
         /** The journal the reconciliation is appended to. */
         private Journal $journal,
 
-        /** The signer the journal is verified with. */
+        /** Verifies the journal. */
         private JournalSigner $signer,
 
-        /** The frame the reconciliation is journalled in, behind the lifecycle lock. */
+        /** Journals the reconciliation behind the lifecycle lock. */
         private MaintenanceTransaction $transaction,
 
-        /** The settings the journal's log id is read from. */
+        /** Gives the journal's log id. */
         private SealSettings $settings,
 
         /** The anchor whose head the reconciliation names. */
         private CheckpointAnchor $anchor,
 
-        /** The time each owner's own operation id is minted at. */
+        /** Mints each owner's own operation id. */
         private Clock $clock,
     ) {}
 
     /**
-     * Erase again every owner the file at the path names, by the erasure given
-     * or the eraser's, and journal the restore reconciled under the operation
-     * when every one ended erased; return what was done.
+     * Erase again every owner the file names and journal the restore reconciled
+     * when every one ended erased.
      *
      * @formatter:off
      *
@@ -178,8 +150,7 @@ final readonly class ErasureReapplier
     }
 
     /**
-     * The file's SHA-256, read whole first, refused when it holds more lines
-     * that are not blank than a reapply reads.
+     * The file's SHA-256, refusing a file with more than `MAX_LINES` lines.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportFile  $file
      * @return string
@@ -201,8 +172,7 @@ final readonly class ErasureReapplier
     }
 
     /**
-     * The tally of the second read, once the file it read is known to be the
-     * file the first read measured; a file whose two reads differ is refused.
+     * The tally, refused when the file changed since it was measured.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportFile  $file
      * @param  string  $digest
@@ -221,10 +191,8 @@ final readonly class ErasureReapplier
     }
 
     /**
-     * Erase each distinct owner the file's lines name, reading them again, in
-     * one run of erasures that confirms the installation once and carries the
-     * verified journal from owner to owner, and tally how each ended and how
-     * many lines were rejected.
+     * Erase each distinct owner the file names in one run of erasures, and
+     * tally how each ended.
      *
      * @formatter:off
      *
@@ -272,8 +240,8 @@ final readonly class ErasureReapplier
     }
 
     /**
-     * The tally with the owner erased, by how the erasure ended: a refusal is
-     * counted, and any other failure thrown.
+     * The tally with the owner erased; a refusal is counted, any other failure
+     * thrown.
      *
      * @formatter:off
      *
@@ -296,8 +264,7 @@ final readonly class ErasureReapplier
         try {
             $result = $erase($owner, $erasures);
         } catch (ErasureRefusedException) {
-            // A refused owner is counted and left for the operator: the restore
-            // stays unreconciled, and the next owner is erased
+            // Left for the operator; the restore stays unreconciled
             $tally['refused']++;
 
             return $tally;
@@ -316,8 +283,7 @@ final readonly class ErasureReapplier
     }
 
     /**
-     * The owner a line names: a JSON object of exactly a string `type` and a
-     * string or integer `id` that make a reference; `null` for anything else.
+     * The owner a `{"type", "id"}` line names, or `null` for anything else.
      *
      * @param  string  $line
      * @return ?\SineMacula\Laravel\AuditLog\Records\Reference
@@ -327,7 +293,7 @@ final readonly class ErasureReapplier
         try {
             $decoded = json_decode($line, true, 2, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
-            // A line that is not JSON names no owner, and is counted
+            // Counted as rejected
             return null;
         }
 
@@ -338,15 +304,13 @@ final readonly class ErasureReapplier
         try {
             return is_string($type) && (is_string($id) || is_int($id)) ? Reference::of($type, $id) : null;
         } catch (\InvalidArgumentException) {
-            // A type or an id a reference refuses names no owner, and is
-            // counted
+            // Counted as rejected
             return null;
         }
     }
 
     /**
-     * The anchor's head, or `null` when the anchor is the null anchor or cannot
-     * report its head; an anchor that cannot be read throws.
+     * The anchor's head, or `null` when the anchor cannot report one.
      *
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead
      */
@@ -360,9 +324,7 @@ final readonly class ErasureReapplier
     }
 
     /**
-     * Append the `restore_reconciled` row of the payload, under the operation
-     * and on the authority given, onto the verified head, once the installation
-     * is confirmed; and return it.
+     * Append and return the `restore_reconciled` row onto the verified head.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -387,8 +349,7 @@ final readonly class ErasureReapplier
     }
 
     /**
-     * A fresh operation id for one owner's erasure: a UUID v7 of the clock's
-     * time.
+     * A fresh UUID v7 operation id for one owner's erasure.
      *
      * @return string
      */

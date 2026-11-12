@@ -9,18 +9,11 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The retention policy the package binds: the configured days of each category,
- * `audit-log.retention.after_days` for a category with none of its own, and the
- * configured preservation of each category, with 0 meaning forever in each. The
- * tenant is never consulted.
+ * The retention policy the package binds, read from configuration with 0
+ * meaning forever; the tenant is never consulted.
  *
- * Its version is `config:` and the first 16 hexadecimal characters of the
- * SHA-256 of its canonical settings, so it changes exactly when the settings
- * do. It is not keyed: the settings are not secret, and a fingerprint under the
- * integrity ring would change with every rotation of the ring and journal a
- * policy that is not new. Every answer validates every retention setting first,
- * so a malformed one, or a category kept for less than it is preserved, prunes
- * nothing.
+ * The version is unkeyed so a rotation of the integrity ring does not journal a
+ * policy that is not new.
  *
  * @api
  *
@@ -32,7 +25,7 @@ final readonly class ConfiguredRetentionPolicy implements RetentionPolicy
     /** @var string What every version of the configured policy starts with. */
     public const string VERSION_PREFIX = 'config:';
 
-    /** @var int How many hexadecimal characters of the settings' digest a version keeps. */
+    /** @var int Hexadecimal characters of the settings' digest a version keeps. */
     private const int VERSION_DIGEST_CHARACTERS = 16;
 
     /**
@@ -62,8 +55,8 @@ final readonly class ConfiguredRetentionPolicy implements RetentionPolicy
     }
 
     /**
-     * The days the category's entries are kept: its own, else
-     * `audit-log.retention.after_days`, and `null` for forever when that is 0.
+     * The days the category's entries are kept, falling back to `after_days`,
+     * or `null` for forever.
      *
      * @param  string  $category
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
@@ -82,8 +75,8 @@ final readonly class ConfiguredRetentionPolicy implements RetentionPolicy
     }
 
     /**
-     * The days the category's entries must stay readable: `null` when the
-     * category has no preservation, and `PHP_INT_MAX` for forever when it is 0.
+     * The days the category's entries must stay readable: `null` for none and
+     * `PHP_INT_MAX` for forever.
      *
      * @param  string  $category
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
@@ -102,9 +95,8 @@ final readonly class ConfiguredRetentionPolicy implements RetentionPolicy
     }
 
     /**
-     * The canonical settings the version is the digest of, which the journal
-     * records with the policy: the default days and each map of days, sorted
-     * bytewise by category.
+     * The canonical settings the version digests, which the journal records
+     * with the policy.
      *
      * @return array{after_days: int, categories: array<string, int>, preserve: array<string, int>}
      *

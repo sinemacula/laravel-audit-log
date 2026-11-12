@@ -24,50 +24,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * Writes one chunk of an import: its lines built, classified and inserted, and
- * its batch's counts written with them, in one transaction of its own on the
- * storage connection's writer.
+ * Writes one chunk of an import in its own transaction on the storage
+ * connection's writer, so its counts never drift from its rows.
  *
- * Every line is built and finalised first, and a line that does not build is
- * counted rejected, so only the lines that built are classified and a rejected
- * line is never the candidate of a later one. The chunk's transaction then
- * writes the batch's time, its first statement, which on SQLite takes the
- * database's write lock before anything is read; classifies the lines against
- * the stored rows and each other; inserts the new ones, 24 rows to a statement
- * on SQLite, whose oldest builds allow 999 placeholders, and up to 1,000 on
- * MySQL and PostgreSQL, under their 65,535; inserts the key uses of the new
- * ones' envelopes, one row for each distinct key of each entry, 400 rows to a
- * statement on SQLite and up to 10,000 elsewhere, never one statement per
- * entry; writes the batch's counts; and commits, so the counts never run ahead
- * of or behind the rows, and no entry is kept without its key uses. The
- * transaction makes one attempt and is refused inside another, so it is never a
- * savepoint and never a subtransaction of the host's, whatever the chunk's
- * size; a row's failure fails its chunk.
- *
- * A concurrent import of the same source records can insert one between the
- * classification and the insert: the source's unique index refuses the insert,
- * the whole chunk rolls back, and it is classified and written again once, when
- * the rows stored meanwhile are duplicates or conflicts. A second violation
- * makes the chunk's new lines conflicts, listed with the rest, and only the
- * batch's counts are written; a later import of the same file imports them, or
- * finds them duplicates. Two imports whose files share records in different
- * orders can deadlock, or fail to serialise, or time out waiting on each
- * other's locks: the chunk that lost rolled back whole and is tried again after
- * a short random wait, up to four attempts in all, reclassified as after a
- * violation; a lost connection is never tried again, since its commit may have
- * happened. A batch closed while its import ran is not written to, and the
- * chunk is rolled back and refused. A failed statement is rethrown masked, its
- * class and SQLSTATE kept and no binding of an imported record in its message.
- *
- * The lines already past their retention on arrival are counted through the
- * run's retention decisions as best it can: a policy or setting that fails to
- * answer gives the count up for the rest of the import, reported once by its
- * class, and never rejects a line or fails a chunk.
- *
- * A dry run builds the lines encrypting nothing and classifies them against the
- * stored rows outside any transaction, writing nothing, key uses included;
- * lines repeated in different chunks of one file are not compared, since
- * nothing of an earlier chunk is stored.
+ * A chunk that loses to a concurrent import is retried with jitter, never after
+ * a lost connection, whose commit may have happened.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,25 +37,25 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  */
 final readonly class ImportWriter
 {
-    /** @var int Rows one insert writes on SQLite: 24 rows of 37 columns is 888 placeholders, under the oldest limit of 999. */
+    /** @var int Rows per insert on SQLite: 888 placeholders, under its oldest 999. */
     public const int SQLITE_ROWS_PER_INSERT = 24;
 
-    /** @var int Rows one insert writes on MySQL and PostgreSQL: 37,000 placeholders, under their limit of 65,535; a chunk of the default 500 is one insert. */
+    /** @var int Rows per insert on MySQL and PostgreSQL, under 65,535 placeholders. */
     public const int ROWS_PER_INSERT = 1000;
 
-    /** @var int The attempts a chunk makes at its rows: the first, and one after a unique violation. */
+    /** @var int Attempts at a chunk's rows: the first, and one after a violation. */
     public const int ATTEMPTS = 2;
 
-    /** @var int The most attempts a chunk makes in all, those after it lost to a concurrent chunk included. */
+    /** @var int The most attempts a chunk makes in all. */
     public const int MAX_ATTEMPTS = 4;
 
-    /** @var int The bound of the wait after the first attempt lost to a concurrent chunk, in milliseconds; it doubles after each. */
+    /** @var int The first retry's wait bound, in milliseconds; it then doubles. */
     public const int JITTER_BASE_MS = 20;
 
     /** @var int The longest wait between two attempts, in milliseconds. */
     public const int JITTER_MAX_MS = 1000;
 
-    /** @var string The report of a policy that failed to count the lines past retention, by the failure's class. */
+    /** @var string The report of a past-retention count given up, by class. */
     private const string PAST_RETENTION_GIVEN_UP = 'Counting an import\'s lines past retention did not complete: %s; the import goes on without the count.';
 
     /**
@@ -111,7 +72,7 @@ final readonly class ImportWriter
      */
     public function __construct(
 
-        /** The connections the storage connection is resolved from on every chunk. */
+        /** Resolves the storage connection on every chunk. */
         private DatabaseManager $database,
 
         /** Classifies the built lines as new, duplicates or conflicts. */
@@ -126,20 +87,18 @@ final readonly class ImportWriter
         /** Turns each record into its row. */
         private RowCodec $codec,
 
-        /** Writes the batch's time and counts in each chunk's transaction. */
+        /** Writes the batch's time and counts in each chunk. */
         private ImportBatches $batches,
 
         /** Tells a chunk lost to a concurrent one from any other failure. */
         private FailureClassifier $failures,
 
-        /** What a policy's failure to count the lines past retention is reported to. */
+        /** Reports a failed past-retention count. */
         private ExceptionHandler $reporter,
     ) {}
 
     /**
-     * Write the chunk of lines of the batch, imported at the time given, in one
-     * transaction, and count it; each record past its retention on arrival is
-     * counted too when the run's decisions are given.
+     * Write the chunk of lines in one transaction and count it.
      *
      * @param  string  $batchId
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
@@ -180,9 +139,7 @@ final readonly class ImportWriter
     }
 
     /**
-     * Plan the chunk of lines as a dry run, imported at the time given, and
-     * count it: built encrypting nothing, classified against the stored rows
-     * outside any transaction, and nothing written.
+     * Plan the chunk as a dry run and count it, writing nothing.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportTally  $tally
@@ -213,10 +170,8 @@ final readonly class ImportWriter
     }
 
     /**
-     * Make the chunk's attempts until one commits, and return its plan: after a
-     * unique violation the chunk is classified again once, after a second only
-     * its counts are written, its new lines conflicts; after losing to a
-     * concurrent chunk it waits and is tried again, up to the most attempts.
+     * Attempt the chunk until one commits; after a second unique violation its
+     * new lines become conflicts.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $batchId
@@ -249,8 +204,7 @@ final readonly class ImportWriter
             try {
                 return $this->attempt($connection, $batchId, $lines, $rows, $uses, $tally, $planned);
             } catch (UniqueConstraintViolationException) {
-                // The chunk rolled back whole: classified again once, and after
-                // that its new lines are conflicts
+                // The chunk rolled back whole and is classified again
                 $violations++;
             } catch (QueryException $failure) {
                 $this->waitOrRethrow($failure, $attempt);
@@ -264,8 +218,7 @@ final readonly class ImportWriter
 
     /**
      * Wait before the next attempt when the failed one lost to a concurrent
-     * chunk, a deadlock, a serialisation failure or a lock timeout, and more
-     * attempts remain; rethrow anything else, a lost connection included.
+     * chunk; rethrow anything else.
      *
      * @param  \Illuminate\Database\QueryException  $failure
      * @param  int  $attempt
@@ -287,11 +240,8 @@ final readonly class ImportWriter
     }
 
     /**
-     * Make one attempt at the chunk, in one transaction of one attempt: the
-     * batch's time written first, the lines classified, the new ones inserted
-     * and then their key uses, and the counts written, and return the plan once
-     * it has committed. The plan is kept as made, whether or not the attempt
-     * commits.
+     * Make one attempt at the chunk, keeping `$planned` even when it rolls
+     * back.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $batchId
@@ -333,8 +283,7 @@ final readonly class ImportWriter
     }
 
     /**
-     * Write only the counts of the plan of a chunk whose inserts were refused
-     * twice, in one transaction, and return it once it has committed.
+     * Write only the counts of a chunk whose inserts were refused twice.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $batchId
@@ -356,10 +305,7 @@ final readonly class ImportWriter
     }
 
     /**
-     * Build each line of the batch, rejecting those that do not, and count
-     * those whose record is past its retention on arrival, when the run's
-     * decisions are given: the lines that built, in file order, and their
-     * records, by line number.
+     * The lines that built, in file order, and their records by line number.
      *
      * @param  string  $batchId
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
@@ -409,10 +355,8 @@ final readonly class ImportWriter
     }
 
     /**
-     * Whether the record was already past its retention when it arrived, as
-     * best the run's decisions can say: once they fail to answer, the count is
-     * given up for the import, the failure reported once by its class, and no
-     * record is past retention.
+     * Whether the record was past retention on arrival; a failure gives the
+     * count up and is reported by its class.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $retention
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
@@ -438,9 +382,7 @@ final readonly class ImportWriter
     }
 
     /**
-     * The line's record, of the batch and with its digest under the ring's
-     * signing key, or why it is rejected: a source the record refuses is
-     * `INVALID_FIELD`.
+     * The line's record, or why it is rejected.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine  $line
      * @param  string  $batchId
@@ -469,9 +411,7 @@ final readonly class ImportWriter
     }
 
     /**
-     * The key uses of the record's envelopes: one row for each distinct key
-     * that is a canonical lower-case UUID, and none for a record that holds no
-     * envelope.
+     * The key uses of the record's envelopes, one row per distinct key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return list<array{key_id: string, entry_id: string}>
@@ -486,8 +426,8 @@ final readonly class ImportWriter
     }
 
     /**
-     * Refuse a chunk inside a transaction on the storage connection: it would
-     * become a savepoint of the host's, and a subtransaction on PostgreSQL.
+     * Refuse a chunk inside a transaction: it would become a savepoint of the
+     * host's, and a subtransaction on PostgreSQL.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -504,8 +444,7 @@ final readonly class ImportWriter
     }
 
     /**
-     * Insert the rows, as many to a statement as the engine allows placeholders
-     * for.
+     * Insert the rows in groups the engine's placeholder limit allows.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<array<string, int|string|null>>  $rows

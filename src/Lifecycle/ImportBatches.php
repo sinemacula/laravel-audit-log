@@ -14,21 +14,11 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The rows of the import batches table, each the record of one import, written
- * and read on the storage connection's writer, which the entries are written
- * through, so a chunk's counts commit with its entries.
+ * The import batches table, on the storage connection's writer so a chunk's
+ * counts commit with its entries.
  *
- * A batch is inserted `running`, with its counts at nothing, before its first
- * entry. Each chunk writes the time first, which on SQLite takes the write lock
- * before the chunk reads, and its counts last, inside the chunk's own
- * transaction, and the batch moves once from `running` to a final status, its
- * counts and its finishing time written with it; a batch that is no longer
- * running is never updated again, and an attempt to is refused; no row is ever
- * deleted. A `running` batch that has not been written for an hour is stale:
- * the import that ran it has most likely stopped, and `close()` marks it
- * `interrupted`. An import makes its batch final only once the journal holds
- * its finish, through `settles()`, which moves a batch still running and leaves
- * any other as it is.
+ * A batch moves once from `running` to a final status and is never updated
+ * again or deleted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +27,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class ImportBatches
 {
-    /** @var list<string> The columns a new batch is given by its import, in table order. */
+    /** @var list<string> The columns an import gives a new batch, in table order. */
     public const array GIVEN = [
         'id', 'source_id', 'source_region', 'input_format', 'importer_type', 'importer_id', 'reason', 'external_reference',
         'file_sha256', 'externally_verified', 'hold_id',
@@ -51,16 +41,15 @@ final readonly class ImportBatches
      */
     public function __construct(
 
-        /** The connections the storage connection is resolved from on every call. */
+        /** Resolves the storage connection on every call. */
         private DatabaseManager $database,
 
-        /** The time a batch is started, written and finished at. */
+        /** Stamps a batch's start, writes and finish. */
         private Clock $clock,
     ) {}
 
     /**
-     * Insert the batch `running`, with its counts at nothing, started and last
-     * written now: the columns its import gives, and no others.
+     * Insert the batch `running` with zero counts, given exactly `GIVEN`.
      *
      * @param  array<string, bool|string|null>  $batch
      * @return void
@@ -94,10 +83,8 @@ final readonly class ImportBatches
     }
 
     /**
-     * Write the time to the running batch as the first statement of a chunk's
-     * transaction, which the connection holds, so the chunk holds the storage
-     * database's write lock on SQLite before it reads, and a concurrent chunk
-     * waits for it rather than failing on a stale read.
+     * Touch the running batch first in a chunk's transaction, so on SQLite the
+     * chunk takes the write lock before it reads.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $id
@@ -113,11 +100,8 @@ final readonly class ImportBatches
     }
 
     /**
-     * Write the running batch's counts and the time, inside the transaction the
-     * connection holds, a chunk's own; a batch closed while its import ran is
-     * refused, which rolls the chunk back. The tally is the import's, so the
-     * lines read only grow and each chunk's update changes the row, which MySQL
-     * needs to count it as updated.
+     * Write the running batch's counts in the chunk's transaction; the counts
+     * always grow, so MySQL counts the row as updated.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $id
@@ -136,8 +120,8 @@ final readonly class ImportBatches
     }
 
     /**
-     * Move the running batch to its final status, with its counts, written and
-     * finished now; a batch no longer running is refused.
+     * Move the running batch to its final status; a batch no longer running is
+     * refused.
      *
      * @param  string  $id
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus  $status
@@ -157,9 +141,8 @@ final readonly class ImportBatches
     }
 
     /**
-     * Move the batch to the final status given, with the counts given or those
-     * it holds, written and finished now, while it is still running, and say
-     * whether it was; a batch no longer running is left as it is.
+     * Move the batch to its final status if it is still running, and say
+     * whether it was.
      *
      * @param  string  $id
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus  $status
@@ -178,8 +161,7 @@ final readonly class ImportBatches
     }
 
     /**
-     * Mark the running batch `interrupted`, written and finished now, its
-     * counts as they stand; any other batch is refused.
+     * Mark the running batch `interrupted`; any other batch is refused.
      *
      * @param  string  $id
      * @return void
@@ -195,7 +177,7 @@ final readonly class ImportBatches
     }
 
     /**
-     * The batch's row as the engine returns it, or `null` when there is none.
+     * The batch's row, or `null` when there is none.
      *
      * @param  string  $id
      * @return ?array<string, scalar|null>
@@ -213,8 +195,7 @@ final readonly class ImportBatches
     }
 
     /**
-     * Every running batch not written for longer than a running batch stays
-     * fresh, by when each was last written.
+     * Every running batch not written within `STALE_SECONDS`, oldest first.
      *
      * @return list<array<string, scalar|null>>
      */
@@ -299,9 +280,8 @@ final readonly class ImportBatches
     }
 
     /**
-     * Refuse an update of a running batch that changed no row: the batch is no
-     * longer running, or never existed. A close is refused as a caller's error,
-     * and anything else as the import's.
+     * Refuse an update that changed no row: a close as the caller's error,
+     * anything else as the import's.
      *
      * @param  int  $updated
      * @param  bool  $closing
@@ -324,7 +304,7 @@ final readonly class ImportBatches
     }
 
     /**
-     * The clock's instant, as the database stores it.
+     * The clock's instant in storage form.
      *
      * @return string
      */

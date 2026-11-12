@@ -8,17 +8,8 @@ use Illuminate\Contracts\Config\Repository;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 
 /**
- * The import settings, read from configuration on every call and validated as
- * they are read: how many lines one chunk of an import writes
- * (`audit-log.import.chunk`), how far ahead of the clock an imported entry may
- * claim to have happened (`audit-log.import.max_skew_seconds`), and the longest
- * line an import reads (`audit-log.import.max_line_bytes`).
- *
- * A missing number takes its default; a number is an integer, or the canonical
- * digit string an environment line gives, within its range. Every malformed
- * value fails closed with an `InvalidArgumentException` naming the key and
- * never the value. How long a running import may stand still before it is
- * called stale is fixed, not configured.
+ * The import settings, read and validated on every call; a malformed value
+ * fails closed, naming the key and never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,13 +18,13 @@ use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
  */
 final readonly class ImportSettings
 {
-    /** @var int How long a `running` batch may go without moving before it is stale, in seconds: an hour. */
+    /** @var int Seconds a `running` batch may go unwritten before it is stale. */
     public const int STALE_SECONDS = 3600;
 
     /** @var string Prefix of every import setting's key. */
     private const string PREFIX = 'audit-log.import.';
 
-    /** @var array<string, array{0: int, 1: int, 2: int}> Default, least and greatest value of each numeric setting, by its key under the prefix. */
+    /** @var array<string, array{0: int, 1: int, 2: int}> Default, min and max by key. */
     private const array NUMBERS = [
         'chunk'            => [500, 100, 5000],
         'max_skew_seconds' => [300, 0, 86400],
@@ -47,13 +38,12 @@ final readonly class ImportSettings
      */
     public function __construct(
 
-        /** Configuration the settings are read from on every call. */
+        /** Read on every call. */
         private Repository $config,
     ) {}
 
     /**
-     * The most lines one chunk of an import writes, in one transaction, from
-     * 100 to 5000.
+     * The most lines one chunk transaction writes, 100 to 5000.
      *
      * @return int
      *
@@ -65,8 +55,8 @@ final readonly class ImportSettings
     }
 
     /**
-     * How far after the clock an imported entry may claim to have happened, in
-     * seconds, from 0 to a day.
+     * How far ahead of the clock an imported entry may be, in seconds, 0 to a
+     * day.
      *
      * @return int
      *
@@ -78,8 +68,7 @@ final readonly class ImportSettings
     }
 
     /**
-     * The longest line an import reads, in bytes, from 1 KiB to 16 MiB; a
-     * longer one is rejected without being held.
+     * The longest line an import reads, in bytes, 1 KiB to 16 MiB.
      *
      * @return int
      *

@@ -9,16 +9,11 @@ use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * What an import reads: a file of NDJSON lines in one of the import's formats,
- * and the source that asserted them, with its region if it names one.
+ * What an import reads: an NDJSON file in one of the import's formats and the
+ * source that asserted it.
  *
- * `fromFile()` reads the import format, whose every line names it;
- * `fromExport()` reads this package's own export lines, and the source is then
- * the installation that exported them. The path must name a readable regular
- * file when the source is made, the source id is 1 to 64 characters of clean
- * text and the region 1 to 32, each validated, never cleaned or cut. A refusal
- * names the path's problem or the field, never the file's content or the
- * field's value.
+ * A refusal names the path's problem or the field, never the file's content or
+ * the field's value.
  *
  * @api
  *
@@ -78,8 +73,8 @@ final readonly class ImportSource
     }
 
     /**
-     * A file of this package's own export lines, `audit-log-export/v1`,
-     * exported by the installation given as the source.
+     * A file of this package's own `audit-log-export/v1` lines, exported by the
+     * source given.
      *
      * @param  string  $path
      * @param  string  $sourceId
@@ -94,8 +89,7 @@ final readonly class ImportSource
     }
 
     /**
-     * Refuse a path that names nothing, something other than a regular file, or
-     * a file this process cannot read.
+     * Refuse a path that is not a readable regular file.
      *
      * @param  string  $path
      * @return void
@@ -119,8 +113,7 @@ final readonly class ImportSource
     }
 
     /**
-     * Refuse a text field that is empty, longer than its column, or not already
-     * clean text.
+     * Refuse a text field that is empty, too long or not clean.
      *
      * @param  'region'|'source id'  $field
      * @param  string  $value

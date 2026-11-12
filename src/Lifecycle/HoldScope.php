@@ -11,35 +11,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The entries a hold keeps: which tenants, whether entries of no tenant, whose
- * activity, which categories, when, and which import batch, every dimension
- * ANDed with the others.
+ * The entries a hold keeps, every dimension ANDed; narrowing again only
+ * intersects, and an empty list or a scope that keeps nothing is refused.
  *
- * A scope starts from `all()`, every entry, `tenants()`, the entries of exactly
- * those tenants, each matched as its type and id together, or `tenantless()`,
- * the entries whose tenant type and tenant id are both `null`. It is then
- * narrowed: `withTenantless()` adds the entries of no tenant to a scope of
- * listed tenants; `about()` keeps the activity of the references given, as
- * actor or subject; `categories()` keeps those categories; `occurredBetween()`
- * keeps a half-open window, from its start inclusive to its end exclusive; and
- * `importBatch()` keeps one import's entries. Narrowing a dimension again
- * intersects with what it holds, so it never widens the scope. An empty list is
- * refused, never read as everything, and so is a narrowing that would leave a
- * dimension holding nothing: a hold that keeps no entry is a mistake, not a
- * hold. At most 100 tenants, 100 references and 50 categories are held, each
- * once. Every refusal is an `InvalidArgumentException` naming the dimension.
- *
- * The canonical form sorts every list bytewise, references by type then id, so
- * two scopes that keep the same entries by the same rules have the same form
- * and digest; it is what the journal signs and the projection stores, and
- * `fromArray()` reads it back strictly, refusing any other form with an
- * `UnexpectedValueException` naming the key.
- *
- * Whether a scope keeps an entry is answered by `matches()` over the entry's
- * stored row, in PHP and never in SQL, so any number of holds is evaluated
- * alike on every engine and no `NULL` comparison can make a tenant's hold keep
- * every entry of no tenant. A row whose time cannot be read is kept by any
- * window, so a hold never lets go of an entry it cannot place.
+ * Matching runs in PHP, never SQL, so no `NULL` comparison can make a tenant's
+ * hold keep every tenantless entry.
  *
  * @api
  *
@@ -62,16 +38,16 @@ final readonly class HoldScope implements Arrayable
     /** @var int Most categories a scope holds. */
     public const int MAX_CATEGORIES = 50;
 
-    /** @var list<string> The keys of the canonical form, each exactly once. */
+    /** @var list<string> The keys of the canonical form. */
     private const array KEYS = ['v', 'tenants', 'tenantless', 'about', 'categories', 'from', 'to', 'import_batch'];
 
-    /** @var string Pattern of an import batch's id: a lower-case UUID. */
+    /** @var string An import batch id: a lower-case UUID. */
     private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
-    /** @var string Why a stored scope is refused, by the key it names. */
+    /** @var string Why a stored scope is refused, by key. */
     private const string MALFORMED = 'A stored hold scope\'s `%s` is malformed.';
 
-    /** @var string Why a window is refused that starts at or after its end. */
+    /** @var string Why a window that does not start before its end is refused. */
     private const string BACKWARD_WINDOW = 'A hold scope\'s window must start before it ends.';
 
     /**
@@ -87,14 +63,14 @@ final readonly class HoldScope implements Arrayable
      */
     private function __construct(
 
-        /** The tenants whose entries are kept, sorted, or `null` for every tenant. */
+        /** The tenants kept, sorted, or `null` for every tenant. */
         #[\SensitiveParameter]
         private ?array $tenants,
 
         /** Whether the entries with both tenant columns `null` are kept. */
         private bool $tenantless,
 
-        /** The references whose activity, as actor or subject, is kept, sorted, or `null` for anyone's. */
+        /** The actors or subjects kept, sorted, or `null` for anyone's. */
         #[\SensitiveParameter]
         private ?array $about,
 
@@ -104,7 +80,7 @@ final readonly class HoldScope implements Arrayable
         /** The instant the window starts at, inclusive, or `null` for none. */
         private ?string $from,
 
-        /** The instant the window ends before, or `null` for none. */
+        /** The instant the window ends at, exclusive, or `null` for none. */
         private ?string $to,
 
         /** The import batch whose entries are kept, or `null` for any. */
@@ -112,8 +88,7 @@ final readonly class HoldScope implements Arrayable
     ) {}
 
     /**
-     * A scope that keeps every entry: every tenant, the entries of no tenant,
-     * anyone's activity, every category, at any time, of any batch.
+     * A scope that keeps every entry.
      *
      * @return self
      */
@@ -123,9 +98,8 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * A scope that keeps the entries of exactly these tenants, each matched as
-     * its type and id together, and not the entries of no tenant. Each tenant
-     * counts once; at least one is given and at most 100.
+     * A scope that keeps the entries of exactly these tenants, 1 to 100, and
+     * not the tenantless ones.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  ...$tenants
      * @return self
@@ -138,8 +112,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * A scope that keeps only the entries whose tenant type and tenant id are
-     * both `null`.
+     * A scope that keeps only the entries whose tenant columns are both `null`.
      *
      * @return self
      */
@@ -149,8 +122,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope with the entries of no tenant added, under its other
-     * dimensions. A scope of every tenant, or of no tenant, already keeps them.
+     * The scope with the tenantless entries added.
      *
      * @return self
      */
@@ -160,10 +132,8 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope keeping only the activity of these references, as the actor or
-     * the subject of an entry, each matched as its type and id together: the
-     * intersection with any earlier list. At least one is given, at most 100,
-     * and the intersection must keep one.
+     * The scope keeping only the activity of these references, 1 to 100, as
+     * actor or subject.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  ...$references
      * @return self
@@ -188,9 +158,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope keeping only these categories: the intersection with any
-     * earlier list. At least one is given, at most 50, each held to the
-     * definitions' grammar, and the intersection must keep one.
+     * The scope keeping only these categories, 1 to 50.
      *
      * @param  string  ...$categories
      * @return self
@@ -210,10 +178,8 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope keeping only the entries that occurred in the half-open window:
-     * at or after its start and before its end, either of which may be open but
-     * not both. Narrowing it again keeps the later start and the earlier end,
-     * and the window must start before it ends.
+     * The scope keeping only the entries in the half-open window; either end
+     * may be open, not both.
      *
      * @param  ?\DateTimeInterface  $from
      * @param  ?\DateTimeInterface  $to
@@ -240,9 +206,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope keeping only the entries of one import batch, by its id, a
-     * lower-case UUID. A scope keeps one batch: narrowing it to another would
-     * keep nothing.
+     * The scope keeping only the entries of one import batch.
      *
      * @param  string  $batchId
      * @return self
@@ -263,9 +227,8 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope's canonical form: its version, each list sorted bytewise,
-     * references as their type and id by type then id, `null` for a dimension
-     * left open, and the window's instants in the package's form.
+     * The canonical form the journal signs, with every list sorted bytewise and
+     * `null` for an open dimension.
      *
      * @formatter:off
      *
@@ -298,8 +261,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The lower-case hex SHA-256 of the canonical encoding of the canonical
-     * form.
+     * The lower-case hex SHA-256 of the canonical form.
      *
      * @return string
      *
@@ -311,10 +273,8 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope of a stored canonical form, read strictly: exactly its keys, a
-     * scope the builders accept, and the canonical form of that scope, so a
-     * value of the wrong type, a list out of order, a reference twice, a limit
-     * exceeded or a dimension that keeps nothing is refused, naming the key.
+     * The scope of a stored canonical form, refusing any form that is not
+     * exactly canonical.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -350,11 +310,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * Whether the scope keeps the entry of the stored row, every dimension
-     * ANDed: a row of no tenant only when the scope keeps those, any other only
-     * when its tenant pair is one held or every tenant is; its actor's or its
-     * subject's pair one held; its category one held; its import batch the one
-     * held; and its time within the window.
+     * Whether the scope keeps the entry of the stored row.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -375,9 +331,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * Whether the row's parties are held: its tenant pair one held, or every
-     * tenant held, and a row of no tenant only when those are; and its actor's
-     * or its subject's pair one held, or anyone's activity held.
+     * Whether the row's tenant and its actor or subject are held.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -398,9 +352,8 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * Whether the row's time is within the window: at or after its start and
-     * before its end. A scope with no window holds any time, and a row whose
-     * time cannot be read is held by any window.
+     * Whether the row's time is within the window; an unreadable time is held,
+     * so a hold never lets go of an entry it cannot place.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -425,8 +378,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The references, each exact pair once, sorted by type then id bytewise: at
-     * least one, and refused beyond the limit.
+     * The distinct references sorted by type then id, 1 to the limit.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Records\Reference>  $references
      * @param  int  $limit
@@ -440,8 +392,7 @@ final readonly class HoldScope implements Arrayable
         $unique = [];
 
         foreach ($references as $reference) {
-            // A part holds no control character, so the NUL keeps the pair
-            // apart and sorts it first
+            // Parts hold no control character, so NUL separates and sorts first
             $unique[$reference->type . "\0" . $reference->id] = $reference;
         }
 
@@ -459,8 +410,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The categories, each held to the definitions' grammar, each once, sorted
-     * bytewise: at least one, and refused beyond the limit.
+     * The distinct valid categories sorted bytewise, 1 to the limit.
      *
      * @param  list<string>  $categories
      * @return list<string>
@@ -491,8 +441,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * Whether the references hold the pair: every pair when there is no list,
-     * and otherwise a type and an id, both text, equal to one of them.
+     * Whether the references hold the pair; a `null` list holds every pair.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -510,10 +459,8 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The scope the builders make of a stored form's values and its window's
-     * ends, each value of the wrong type left out, so the canonical form it
-     * gives differs from the stored one there; a value the builders refuse is
-     * refused, naming its key.
+     * The scope the builders make of a stored form, values of the wrong type
+     * left out so its canonical form differs.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -554,8 +501,7 @@ final readonly class HoldScope implements Arrayable
     }
 
     /**
-     * The references of a stored list of type and id pairs, or `null` for
-     * none; anything else is refused, naming the key.
+     * The references of a stored list of type and id pairs, or `null` for none.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

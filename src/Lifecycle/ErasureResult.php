@@ -8,21 +8,8 @@ use Illuminate\Contracts\Support\Arrayable;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
 
 /**
- * What erasing an owner did: the operation, the id of the erasure's journal
- * row, which the owner's marker shares and every key it destroyed names, how it
- * ended, the owner's keyed fingerprint and the id of the ring key it was taken
- * under, how many keys it destroyed and kept, how many entries the destroyed
- * keys encrypted, every reason a kept key was blocked, whether it accepted
- * outbox rows older than itself, that it committed, and whether its
- * `audit_log.subject_erased` record was written.
- *
- * An owner already erased that holds no key is `already_erased`: nothing was
- * written, so the result names no erasure row. `committed` is always `true` on
- * a result that is returned, since an erasure that is refused or fails throws
- * instead. `recorded` is `false` when the record could not be written after the
- * commit, which never undoes the erasure; `audit-log:reconcile` writes the
- * record later from the journal. The fingerprint is personal data while it can
- * be linked to the owner, and the result names the owner by nothing else.
+ * What erasing an owner did; the owner is named only by its keyed fingerprint,
+ * which is personal data while it can be linked to the owner.
  *
  * @api
  *
@@ -33,10 +20,10 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
  */
 final readonly class ErasureResult implements Arrayable
 {
-    /** @var bool Whether the erasure committed: always, once a result is returned. */
+    /** @var bool Always `true`: a refused or failed erasure throws. */
     public bool $committed;
 
-    /** @var list<string> Every reason a kept key was blocked, each once, sorted bytewise. */
+    /** @var list<string> The distinct reasons keys were kept, sorted bytewise. */
     public array $blocked;
 
     /**
@@ -61,34 +48,34 @@ final readonly class ErasureResult implements Arrayable
         /** The operation that erased the owner. */
         public string $operationId,
 
-        /** The id of the erasure's journal row, or `null` when nothing was written. */
+        /** The erasure's journal row id, or `null` when nothing was written. */
         public ?string $erasureId,
 
         /** How the erasure ended. */
         public ErasureStatus $status,
 
-        /** The owner's fingerprint: HMAC-SHA256, lower-case hex, under the ring key named. */
+        /** The owner's HMAC-SHA256 fingerprint in lower-case hex. */
         public string $fingerprint,
 
         /** The id of the ring key the fingerprint was taken under. */
         public string $fingerprintKey,
 
-        /** How many keys the erasure destroyed. */
+        /** Keys destroyed. */
         public int $keysDestroyed,
 
-        /** How many keys the erasure kept, each blocked. */
+        /** Keys kept, each blocked. */
         public int $keysKept,
 
-        /** How many entries the destroyed keys encrypted, each entry once. */
+        /** Distinct entries the destroyed keys encrypted. */
         public int $entriesAffected,
 
-        // Every reason a kept key was blocked, in any order and with repeats.
+        // Not promoted: deduplicated and sorted into $this->blocked.
         array $blocked,
 
-        /** Whether the erasure went ahead over outbox rows created before it started. */
+        /** Whether the erasure went ahead over older outbox rows. */
         public bool $pendingAccepted,
 
-        /** Whether the erasure's `audit_log.subject_erased` record was written. */
+        /** Whether the `audit_log.subject_erased` record was written. */
         public bool $recorded = false,
     ) {
         $unique = array_values(array_unique($blocked));
@@ -100,8 +87,7 @@ final readonly class ErasureResult implements Arrayable
     }
 
     /**
-     * The result of an owner already erased that holds no key: nothing written,
-     * nothing destroyed.
+     * The result for an owner already erased that holds no key.
      *
      * @param  string  $operationId
      * @param  string  $fingerprint
@@ -139,10 +125,7 @@ final readonly class ErasureResult implements Arrayable
     }
 
     /**
-     * The result as a map, under snake-case keys: the operation, whether it
-     * committed and was recorded, the erasure row, the status, the owner's
-     * fingerprint and its key, the counts, the blocked reasons and whether the
-     * outbox was accepted.
+     * The result as a snake-case map.
      *
      * @return array<string, bool|int|list<string>|string|null>
      */

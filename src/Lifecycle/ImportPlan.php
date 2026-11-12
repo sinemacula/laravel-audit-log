@@ -5,11 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 /**
- * What one chunk of an import does with its lines, once they are classified:
- * the new lines it inserts, each with the digest of its source assertion under
- * the ring's signing key, how many lines are duplicates of a record imported
- * already, and the source record ids of the lines that conflict with one, by
- * their line numbers, so they are listed in file order.
+ * What one chunk of an import does with its classified lines.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,13 +30,13 @@ final readonly class ImportPlan
         #[\SensitiveParameter]
         public array $lines,
 
-        /** The digest of each new line's source assertion under the ring's signing key, by its line number. */
+        /** Each new line's source assertion digest, by line number. */
         public array $digests,
 
-        /** How many lines are duplicates of a record imported already, or of an earlier line of the chunk. */
+        /** Lines repeating a stored record or an earlier line of the chunk. */
         public int $duplicates,
 
-        /** The source record id of every line that conflicts, by its line number. */
+        /** The source record id of every conflicting line, by line number. */
         public array $conflicting,
     ) {
         if ($duplicates < 0) {
@@ -55,8 +51,7 @@ final readonly class ImportPlan
     }
 
     /**
-     * How many lines conflict with a record imported already, or with an
-     * earlier line of the chunk.
+     * How many lines conflict.
      *
      * @return int
      */
@@ -66,7 +61,7 @@ final readonly class ImportPlan
     }
 
     /**
-     * The source record id of every line that conflicts, in file order.
+     * The source record id of every conflicting line, in file order.
      *
      * @return list<string>
      */
@@ -80,8 +75,7 @@ final readonly class ImportPlan
     }
 
     /**
-     * The digest of the new line's source assertion under the ring's signing
-     * key.
+     * The digest of the new line's source assertion.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine  $line
      * @return string
@@ -94,9 +88,8 @@ final readonly class ImportPlan
     }
 
     /**
-     * The plan with every new line a conflict instead, and nothing inserted:
-     * what a chunk whose inserts violated the source's unique index twice is
-     * left with.
+     * The plan with every new line a conflict, for a chunk whose inserts hit
+     * the source's unique index twice.
      *
      * @return self
      *

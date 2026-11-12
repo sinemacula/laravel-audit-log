@@ -20,34 +20,11 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * Reads a line of the import format, `audit-log-import/v1`, into an import
- * line, or says why it is rejected.
+ * Reads an `audit-log-import/v1` line into an import line, or says why it is
+ * rejected; the export adapter shares its rules through `lineOf()`.
  *
- * A line is one JSON object, at most 64 levels deep, whose `format` is exactly
- * the format's name; another version of the format is `UNSUPPORTED_VERSION`,
- * and anything else `UNSUPPORTED_FORMAT`. It requires `source_record_id` (1 to
- * 191 characters of clean text), `occurred_at` (an instant in the package's
- * form, no further ahead of the clock than `audit-log.import.max_skew_seconds`),
- * `event` (a code outside the reserved prefix) and `outcome`; it may give
- * `reason` (the grammar of every reason, and only with a failure or a denial),
- * `actor`, `subject`, `principal` and `tenant` (each `{type, id}` or `null`),
- * `category`, `correlation_id`, `properties` and `context` (objects), `origin`
- * (one of this package's origins, or `null` when the source does not know) and
- * `ip`. Any other field is `UNKNOWN_FIELD`, and a field of the wrong type or
- * grammar `INVALID_FIELD`; a property key under the package's reserved
- * `_audit` prefix, at any depth, is refused as the record refuses it.
- *
- * No value shaped as an encrypted envelope is ever imported: every value that
- * is exactly an object of `v`, `k` and `c`, at any depth of the properties and
- * the context, and an IP address that is such an envelope's JSON, is removed
- * and counted, so another system can never plant a value the read path would
- * take for this installation's ciphertext. A decimal is kept as the string the
- * record would store it as, and an integer too large for PHP as its digits.
- *
- * An import whose source is this installation is refused before its file is
- * read; a line is `OWN_SOURCE` here only should that check be bypassed. The
- * export adapter reads its lines' fields through `lineOf()`, so both formats
- * are held to one set of rules.
+ * Envelope-shaped values are dropped so another system can never plant a value
+ * the read path would take for this installation's ciphertext.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,19 +36,19 @@ final readonly class ImportLineParser
     /** @var int Deepest JSON a line is decoded to. */
     public const int JSON_DEPTH = 64;
 
-    /** @var list<string> The fields a line must give, in the import format. */
+    /** @var list<string> The fields a line must give. */
     public const array REQUIRED = ['source_record_id', 'occurred_at', 'event', 'outcome'];
 
-    /** @var list<string> The fields a line may give, in the import format. */
+    /** @var list<string> The fields a line may give. */
     public const array OPTIONAL = ['reason', 'actor', 'subject', 'principal', 'tenant', 'category', 'correlation_id', 'properties', 'context', 'origin', 'ip'];
 
     /** @var string The field naming a line's format. */
     private const string FORMAT = 'format';
 
-    /** @var string What every version of the import format's name begins with. */
+    /** @var string The prefix of every version of the import format's name. */
     private const string FORMAT_FAMILY = 'audit-log-import/';
 
-    /** @var string Prefix of every property key the record reserves for the package's own metadata. */
+    /** @var string The property key prefix reserved for the package's metadata. */
     private const string RESERVED_KEY = '_audit';
 
     /** @var list<string> The keys of an encrypted envelope, sorted. */
@@ -89,19 +66,18 @@ final readonly class ImportLineParser
      */
     public function __construct(
 
-        /** The settings the skew allowed is read from. */
+        /** Gives the allowed clock skew. */
         private ImportSettings $settings,
 
-        /** The clock a line's occurrence time is held against. */
+        /** Bounds a line's occurrence time. */
         private Clock $clock,
 
-        /** The settings this installation's own source is read from. */
+        /** Gives this installation's own source id. */
         private SourceSettings $sources,
     ) {}
 
     /**
-     * The line of the import format, by its number in the file, as asserted by
-     * the import's source, or why it is rejected.
+     * The import line, or why it is rejected.
      *
      * @param  int  $number
      * @param  string  $text
@@ -118,10 +94,8 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The line of the fields given under the import format's names, as asserted
-     * by the source given, with the count of what was already removed from it,
-     * or why it is rejected. The export adapter reads its lines through this
-     * once it has mapped their fields.
+     * The line of fields already mapped to the import format's names, or why it
+     * is rejected.
      *
      * @param  int  $number
      * @param  \stdClass  $fields
@@ -149,8 +123,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * Whether the value is exactly an encrypted envelope's shape: an object, or
-     * a map, of exactly `v`, `k` and `c`, whatever they hold.
+     * Whether the value is an object or map of exactly `v`, `k` and `c`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -173,9 +146,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The line built from its values, every optional field among them, once its
-     * fields, time and code are known to be acceptable; a value of the wrong
-     * type or grammar is refused with an `\InvalidArgumentException`.
+     * The line built from values whose fields, time and code are acceptable.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -223,9 +194,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * Why the line's time is rejected: `INVALID_TIME` for anything but an
-     * instant in the package's form, and `FUTURE_TIME` for one further ahead of
-     * the clock than the skew allows; `null` when it is accepted.
+     * Why the line's time is rejected, or `null` when it is accepted.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -246,10 +215,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The JSON object the text holds, without its `format`, once that is the
-     * import format's name; or why the line is rejected: `MALFORMED_JSON` for
-     * anything but a JSON object, `UNSUPPORTED_VERSION` for another version of
-     * the import format, and `UNSUPPORTED_FORMAT` for any other format or none.
+     * The JSON object without its `format`, or why the line is rejected.
      *
      * @param  string  $text
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection|\stdClass
@@ -280,9 +246,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * Why the line's fields are rejected: `UNKNOWN_FIELD` for one the format
-     * does not have, and `MISSING_FIELD` for a required one absent or `null`;
-     * `null` when they are acceptable.
+     * Why the line's fields are rejected, or `null` when they are acceptable.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -302,9 +266,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * Why the line's code is rejected: `RESERVED_CODE` for one under the
-     * package's reserved prefix, and `INVALID_FIELD` for anything else that is
-     * not a code; `null` when it is accepted.
+     * Why the line's code is rejected, or `null` when it is accepted.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -348,8 +310,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The reason, in the grammar of every reason, given only with a failure or
-     * a denial; `null` when none is given.
+     * The reason, allowed only with a failure or a denial.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -373,7 +334,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The reference an object of exactly a type and an id gives, or `null`.
+     * The reference an object of exactly a type and an id gives.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -400,8 +361,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The category, a slug of the definitions' grammar, or the origin, one this
-     * package names; `null` when it is not given.
+     * The category or origin, validated by its field's grammar.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -423,8 +383,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The object as a map with every envelope-shaped value removed and counted,
-     * or `null`; anything but an object is refused.
+     * The object as a map with every envelope-shaped value removed and counted.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -453,9 +412,8 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The value with every envelope-shaped member removed and counted, at any
-     * depth: objects as maps, lists as lists, and a decimal as the string the
-     * record would store it as.
+     * The value with envelope-shaped members removed at any depth, and decimals
+     * as the strings the record stores.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -491,8 +449,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The IP address as given, or `null`: one that is an envelope's JSON is
-     * removed and counted.
+     * The IP address, dropped and counted when it is an envelope's JSON.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -535,7 +492,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The value as a string, or `null` for `null`; anything else is refused.
+     * The value as a string, keeping `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -551,7 +508,7 @@ final readonly class ImportLineParser
     }
 
     /**
-     * The value as a string; anything else is refused.
+     * The value as a string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

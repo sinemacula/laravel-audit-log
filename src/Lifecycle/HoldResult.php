@@ -7,15 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
- * What placing a hold did: the operation that placed it, that it committed,
- * whether its `audit_log.held` record was written, and the hold as the verified
- * journal records it.
- *
- * `committed` is always `true` on a result that is returned, since a hold that
- * did not commit throws instead: the hold's journal row and projection row are
- * in the database. `recorded` is `false` when the record could not be written
- * after the commit, which never undoes the hold; `audit-log:reconcile` writes
- * the record later from the journal.
+ * What placing a hold did; `recorded` is `false` when the `audit_log.held`
+ * record could not be written after the commit.
  *
  * @api
  *
@@ -34,7 +27,7 @@ use Illuminate\Contracts\Support\Arrayable;
  */
 final readonly class HoldResult implements Arrayable
 {
-    /** @var bool Whether the hold committed: always, once a result is returned. */
+    /** @var bool Always `true`: a hold that did not commit throws. */
     public bool $committed;
 
     /**
@@ -59,8 +52,7 @@ final readonly class HoldResult implements Arrayable
     }
 
     /**
-     * The result as a map: the operation, that it committed, whether it was
-     * recorded, and the hold as a listing shows it.
+     * The result as a map, with the hold as a listing shows it.
      *
      * @formatter:off
      *
