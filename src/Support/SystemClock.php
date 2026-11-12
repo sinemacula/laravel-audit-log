@@ -8,10 +8,8 @@ use Carbon\CarbonImmutable;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 
 /**
- * The system's clock, in UTC: the current instant as Carbon reads it, so a test
- * that freezes `CarbonImmutable::setTestNow()`, in any time zone, freezes it
- * too, and the instant is always given in UTC whatever the application's or the
- * runtime's time zone.
+ * The system clock in UTC, read through Carbon so
+ * `CarbonImmutable::setTestNow()` freezes it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

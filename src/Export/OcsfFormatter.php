@@ -17,26 +17,13 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Projects a finalised record as one OCSF event of version 1.9.0 of the Open
- * Cybersecurity Schema Framework, in canonical JSON on one line.
+ * Projects a finalised record as one OCSF 1.9.0 event, in canonical JSON on one
+ * line.
  *
- * Every event carries `time` (when the activity occurred, in epoch
- * milliseconds), `severity_id` and `severity` (1 Informational for a success, 3
- * Medium for a failure, 4 High for a denial), `status_id` and `status` (1
- * Success, or 2 Failure with the outcome and any reason in `status_detail`),
- * the reason in `status_code`, the event code as `message`, `type_uid`, and
- * `metadata`: the record's id as `uid`, the code as `event_code`, the schema
- * version, the product, the time the activity occurred as stored, the time it
- * was recorded, and the correlation id and tenant when the record has them.
- *
- * A code is classified only by the mapper its definition names, and only for
- * records of the definition's version; the mapper's attributes are checked
- * before they are added. Any other record is a Base Event, unknown activity in
- * no category, whose `unmapped` attribute holds every column with a value that
- * is not carried elsewhere, so a classification is never invented and nothing
- * the record says is lost. The HMAC, its key id and the integrity version are
- * left out: the event is a projection, never the integrity artefact. The same
- * record always gives the same bytes.
+ * A record is classified only by its definition's mapper, for the definition's
+ * version; any other is a Base Event whose `unmapped` holds every column
+ * carried nowhere else. The integrity fields are left out: the event is a
+ * projection.
  *
  * @api
  *

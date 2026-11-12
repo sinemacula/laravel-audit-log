@@ -10,26 +10,15 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Symfony\Component\Uid\AbstractUid;
 
 /**
- * How a value given at capture becomes one a record can store, applied once,
- * the first matching rule winning: a model becomes its reference, never its
- * attributes or its JSON, and is checked first because a model is also
- * `Stringable` and `JsonSerializable`; a reference becomes its type and id; a
- * backed enum becomes its value and a unit enum its name; a date becomes
- * ISO-8601 UTC with microseconds; a UUID or ULID of one of its library's own
- * classes becomes its string, cleaned, and one of any other class
- * `[UNSERIALISABLE]`; booleans and `null` stay, and strings stay once cleaned;
- * an integer stays within the range every JSON reader keeps exactly and becomes
- * its decimal string beyond it; a finite float becomes its shortest round-trip
- * decimal string and a non-finite one `[NONFINITE]`; an array becomes a list or
- * a map; anything else becomes `[UNSERIALISABLE]`, never cast and never called,
- * so callers convert their own values.
+ * How a value given at capture becomes one a record can store, the first
+ * matching rule winning. A model becomes its reference and is checked first,
+ * since a model is also `Stringable` and `JsonSerializable`; anything
+ * unsupported becomes `[UNSERIALISABLE]`, never cast or called.
  *
- * The outermost array is at depth 1, and an array deeper than 8 becomes
- * `[TRUNCATED]`, which also bounds a structure that refers to itself. Map keys
- * are cleaned; a key that, once cleaned, is already in its map keeps the first
- * value and is diagnosed by its concrete path, segment by segment: a map key as
- * its cleaned string and a list index as its integer. A diagnostic holds raw
- * cleaned keys, so it must be masked before it is stored.
+ * An array deeper than 8 becomes `[TRUNCATED]`, which also bounds a structure
+ * that refers to itself. A map key that collides once cleaned keeps the first
+ * value and is diagnosed by its raw path, which must be masked before it is
+ * stored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,11 +78,9 @@ final class ValueNormaliser
     }
 
     /**
-     * The float as ECMAScript's `Number::toString` writes it: the fewest
-     * significant digits that read back as the same float, written out in full
-     * from 1e-6 to below 1e21 and as `d.ddde±n` otherwise, never reading the
-     * `precision` or `serialize_precision` settings. Zero, negative zero
-     * included, is `0`, and a non-finite float is `[NONFINITE]`.
+     * The float as ECMAScript's `Number::toString` writes it, never reading
+     * `precision` or `serialize_precision`; negative zero is `0`, and a
+     * non-finite float `[NONFINITE]`.
      *
      * @param  float  $value
      * @return string
@@ -179,11 +166,8 @@ final class ValueNormaliser
     }
 
     /**
-     * The UUID or ULID's string, cleaned, when the object is one of its
-     * library's own classes. Any other class, an application's subclass or an
-     * anonymous one, can write anything and is never called, so it is
-     * `[UNSERIALISABLE]`; the string is cleaned even so, since a library's own
-     * class may still write through an application's codec.
+     * The UUID or ULID's string, cleaned, from one of its library's own classes
+     * only; any other class could write anything, so it is never called.
      *
      * @param  \Ramsey\Uuid\UuidInterface|\Symfony\Component\Uid\AbstractUid  $value
      * @return string
@@ -311,8 +295,8 @@ final class ValueNormaliser
 
     /**
      * The map with each key cleaned and each value normalised one level
-     * deeper; a key already present once cleaned keeps the first value and
-     * is recorded as a collision.
+     * deeper; a key already present once cleaned keeps the first value and is
+     * recorded as a collision.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -371,19 +355,11 @@ final class ValueNormaliser
 
     /**
      * The fewest significant digits that read back as the positive finite
-     * float, and the decimal exponent of the first. The values that read back
-     * as the float form an interval around it, which holds a decimal of a given
-     * length only if it holds the nearest one below the float or the nearest
-     * one above; `%e` gives the nearer of the two, correctly rounded, so each
-     * length is searched with those digits first and then, if they do not read
-     * back, the next decimal up, a unit above them. The decimal a unit below
-     * never needs trying: the interval reaches as far below the float as above
-     * it, except at a power of two, where it reaches twice as far above, so
-     * when the nearer decimal falls outside it the farther one below does too,
-     * while the farther one above can be inside. `%e` is not locale-aware, and
-     * 17 significant digits always read back, so the search ends by the
-     * sixteenth place. The fewest digits never end in a zero, which would read
-     * back with one digit fewer.
+     * float, and the decimal exponent of the first.
+     *
+     * `%e` gives the nearest decimal at each length, and only it or the one a
+     * unit above can read back, since the rounding interval never reaches
+     * farther below the float than above; 17 digits always read back.
      *
      * @param  float  $value
      * @return array{0: string, 1: int}

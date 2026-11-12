@@ -10,13 +10,9 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Reads a stored time as an instant in UTC with its microseconds, whatever the
- * application's time zone, and writes an instant back in the stored form.
- *
- * Laravel's `datetime` cast parses a stored time in the application's time zone
- * and formats one with the grammar's format, which drops microseconds; this
- * cast reads and writes only through `StoredTime`, so a time reads back as the
- * instant that was stored, to the microsecond.
+ * Reads and writes a stored time as a UTC instant with its microseconds, since
+ * Laravel's `datetime` cast parses in the application's time zone and drops
+ * microseconds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

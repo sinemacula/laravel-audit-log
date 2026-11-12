@@ -5,11 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Support;
 
 /**
- * A machine-readable code, as a reason, a purpose or a channel is kept: 1 to 64
- * lower-case letters, digits, `_`, `.`, `:` or `-`, starting with a letter or a
- * digit, given as a string or as a string-backed enum case. A code is
- * validated, never cleaned or cut, and a refusal names what the code is, never
- * its value.
+ * A machine-readable code, as a reason, a purpose or a channel is kept, given
+ * as a string or a string-backed enum case. It is validated, never cleaned or
+ * cut, and a refusal never names its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

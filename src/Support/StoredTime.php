@@ -7,16 +7,12 @@ namespace SineMacula\Laravel\AuditLog\Support;
 use Carbon\CarbonImmutable;
 
 /**
- * The one conversion between the package's form of an instant, ISO-8601 in UTC
- * with six fractional digits and `Z`, and the form the database stores, `Y-m-d
- * H:i:s.u` in UTC.
+ * Converts between the package's form of an instant, ISO-8601 UTC with six
+ * fractional digits and `Z`, and the stored form, `Y-m-d H:i:s.u` in UTC.
  *
- * Every parse is in UTC with every field reset first, so the default time zone
- * never applies, and a value is accepted only when formatting the parsed
- * instant gives it back, so a date that does not exist, such as `2026-02-30`,
- * or an hour of `24` is refused rather than rolled over. A stored time may
- * carry fewer than six fractional digits, or none, because PostgreSQL drops
- * trailing fractional zeros; it reads back right-padded to six.
+ * A value is accepted only if it formats back unchanged, so a date that does
+ * not exist is refused rather than rolled over. PostgreSQL drops trailing
+ * fractional zeros, so a stored time is right-padded to six digits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -115,8 +111,7 @@ final class StoredTime
 
     /**
      * The stored time parsed in UTC, refused unless it has the stored form and
-     * names a date and a time that exist. A value without the stored form is
-     * parsed as empty, which never parses.
+     * names a date and a time that exist.
      *
      * @param  string  $stored
      * @return \DateTimeImmutable

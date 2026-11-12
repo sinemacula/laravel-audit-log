@@ -18,22 +18,15 @@ use SineMacula\Laravel\AuditLog\Runtime\ContextSettings;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 
 /**
- * Who the guards already hold, read without ever loading anyone: the guards
- * configured in `audit-log.actor.guards` in order, or the default guard, read
- * from configuration so `Auth::shouldUse()` counts.
+ * Who the guards already hold, read without loading anyone: the guards in
+ * `audit-log.actor.guards` in order, or the default guard, read from
+ * configuration so `Auth::shouldUse()` counts.
  *
- * The first guard that holds a user decides. A guard is asked `hasUser()`, and
- * nothing else unless a bound `HeldActorReader` reads it or `CachedUser` can;
- * when that guard's user cannot be read (a foreign guard no reader reads, an
- * unsaved model, an identifier that is no string or integer) there is no
- * ambient actor, and the walk does not go on to a later guard, which could name
- * a different person. A guard that is not configured lets `AuthManager`'s
- * exception propagate: it is a misconfiguration `audit-log:check` reports.
+ * The first guard holding a user decides; if that user cannot be read there is
+ * no ambient actor, since a later guard could name a different person.
  *
- * Laravel's guards outlive a job on a worker, so a user a guard already held
- * when the job started is an earlier job's and is treated as no user at all,
- * while one the job signs in itself counts. The guards themselves are never
- * touched.
+ * Laravel's guards outlive a job on a worker, so a user one already held when
+ * the job started is treated as no user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

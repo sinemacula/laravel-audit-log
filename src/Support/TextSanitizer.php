@@ -5,17 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Support;
 
 /**
- * How every string is made safe to store at capture: invalid UTF-8 is repaired
- * byte by byte to U+FFFD, the whitespace controls (tab, line feed, vertical
- * tab, form feed, carriage return) each become one space, every other control
- * character and the bidirectional embeddings, overrides and isolates are
- * removed, and a cap cuts with `mb_strcut()`, so no character is ever split.
+ * Makes a string safe to store: invalid UTF-8 is repaired to U+FFFD, the
+ * whitespace controls become spaces, other controls and bidirectional overrides
+ * are removed, and a cap never splits a character.
  *
- * Everything else is kept as given: combining marks, zero-width characters, the
- * byte order mark, the directional marks, emoji and their joined sequences.
- * There is no Unicode normalisation, and nothing depends on a runtime setting
- * such as `mb_substitute_character()`, so every runtime and every engine stores
- * the same text.
+ * There is no Unicode normalisation and no runtime setting is read, so every
+ * runtime and engine stores the same text.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

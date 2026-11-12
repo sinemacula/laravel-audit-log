@@ -12,15 +12,12 @@ use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 
 /**
- * Assert in a test what the audit log was asked to store, reading the fake
+ * Assertions on what the audit log was asked to store, read from the fake
  * `AuditLog::fake()` bound as the store.
  *
- * Every assertion takes a code as a string or as a string-backed enum case,
- * held to the grammar and the length, so a malformed one is refused, and one of
- * the package's own codes, such as `audit_log.trail_read`, is accepted. A
- * closure takes the captured record. A failure lists the codes recorded, in
- * order, or says none was, and never prints a property or any other value of a
- * record.
+ * A code is held to the grammar, so a malformed one is refused, and may be one
+ * of the package's own. A failure lists the codes recorded, in order, and never
+ * another value of a record.
  *
  * @api
  *

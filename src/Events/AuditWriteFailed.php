@@ -7,13 +7,12 @@ namespace SineMacula\Laravel\AuditLog\Events;
 use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 
 /**
- * Dispatched when a record could not be written, carrying the record's id and
- * code, the class of the store that failed and the class of the exception it
- * failed with, and nothing else: no value of the record and no text of the
- * exception, whose message can hold the record's values, reaches a listener.
+ * Dispatched when a record could not be written, carrying its id and code and
+ * the classes of the store and the exception, never a value of the record or
+ * the exception's message.
  *
- * The event is dispatched inside the write guard, so a record made by a
- * listener is refused rather than written: it would fail the same way.
+ * It is dispatched inside the write guard, so a record made by a listener is
+ * refused rather than written.
  *
  * @api
  *

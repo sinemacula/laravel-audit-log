@@ -14,24 +14,9 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  * Projects a finalised record as one line of the Common Event Format, version
  * 0: `CEF:0|Sine Macula|laravel-audit-log|<record_version>|<event>|<event>|<severity>|<extension>`.
  *
- * The severity follows the outcome: 3 for a success, 6 for a failure and 7 for
- * a denial. The extension holds, in this order and each only when the record
- * has it, `externalId` (the record's id), `rt` (when the activity occurred, in
- * epoch milliseconds), `act` (the event code), `outcome`, `src` (the client's
- * address, only when the record holds an IP address rather than a hash or a
- * sealed form), `requestClientApplication` (the user agent), and the actor, the
- * subject and the tenant as `<type>:<id>` in the custom strings `cs1`, `cs2`
- * and `cs3`, labelled `actor`, `subject` and `tenant`.
- *
- * In the header a backslash and a pipe are escaped with a backslash, and a
- * carriage return, a line feed, the pair, or a Unicode line or paragraph
- * separator becomes one space; in the extension a backslash, an equals sign, a
- * carriage return and a line feed are escaped as `\\`, `\=`, `\r` and `\n`, and
- * either separator as `\n`, because a reader that honours Unicode line ends
- * would otherwise see a new line. Every other control character is then cleaned
- * as at capture, so no value can end the line or forge a field. Unicode is kept
- * as it is, and the same record always gives the same bytes. The line is a
- * projection, never the integrity artefact.
+ * Separators and line breaks are escaped, Unicode line separators included, and
+ * other control characters cleaned, so no value can end the line or forge a
+ * field. The line is a projection, never the integrity artefact.
  *
  * @api
  *

@@ -10,30 +10,13 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * A stored audit entry, one row of the entries table: evidence that is read,
- * never written, through Eloquent.
+ * A stored audit entry, read through Eloquent and never written through it.
  *
- * It lives in the table `audit-log.entries.table` names, on the storage
- * connection (see `Database\StorageConnection`). The store writes entries;
- * every write through the model (saving, updating, touching, incrementing or
- * deleting an entry, or saving a new one) is refused with
- * `ImmutableEntryException` before any event fires or any statement runs.
- * Query-builder writes bypass the model by design, so that pruning can delete
- * through the builder on the maintenance connection; append-only access is
- * therefore enforced by the database's grants (see `docs/design/storage.md`):
- * the writer holds `SELECT` and `INSERT` on the table and nothing else. On
- * Laravel 12, `incrementEach()` and `decrementEach()` are not model methods, so
- * on an entry they are builder writes like any other.
- *
- * Pruning deletes through the query builder on the maintenance connection,
- * never through the model. Reading it directly bypasses the audit trail, its
- * access policy and its records, as any query of the table does: no scope
- * narrows what it returns, and no read of it is recorded. It declares no query
- * scopes, since reads belong to the trail, not the model.
- *
- * The times read as `CarbonImmutable` instants in UTC with their microseconds,
- * whatever the application's time zone; the JSON columns read as arrays, for
- * display only, since verification never reads through the model.
+ * Every model write is refused with `ImmutableEntryException` before any event
+ * or statement. Builder writes bypass the model, so append-only is enforced by
+ * the database's grants, and pruning deletes through the builder, never through
+ * the model. Reading the model directly bypasses the trail's access policy and
+ * read records.
  *
  * @api
  *
@@ -95,9 +78,8 @@ final class AuditEntry extends Model
     protected $fillable = [];
 
     /**
-     * Create an entry on the storage connection, in the configured table. Both
-     * are applied here, before Eloquent reads them, so this is construction
-     * rather than model behaviour.
+     * Create an entry on the storage connection, in the configured table, both
+     * set before Eloquent reads them.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

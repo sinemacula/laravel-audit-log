@@ -7,13 +7,9 @@ namespace SineMacula\Laravel\AuditLog\Config;
 use Illuminate\Contracts\Config\Repository;
 
 /**
- * Reads a numeric package setting the one way every settings class reads one:
- * an integer, or the canonical decimal string `env()` returns for one (no plus
- * sign, padding, whitespace, exponent or fraction, and nothing past the integer
- * range), within its range. Anything else fails closed with an
- * `InvalidArgumentException` naming the key and the range. A reader whose
- * message names a guard, or another setting, parses with `parse()` and keeps
- * its own message.
+ * Reads an integer setting, or the canonical decimal string `env()` returns for
+ * one, within its range; anything else fails closed naming the key and the
+ * range.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,9 +68,8 @@ final class IntegerSetting
 
     /**
      * The integer the value names, or `null` when it names none. A string must
-     * be exactly the decimal form of the integer it casts to, so one that
-     * overflows the integer range is refused rather than saturated. A negative
-     * value reads as negative, which every package range rejects.
+     * be exactly the decimal form of its integer, so one that overflows is
+     * refused rather than saturated.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

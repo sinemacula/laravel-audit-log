@@ -27,46 +27,13 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
 
 /**
- * The package's way in: records an activity, or gives a builder that records
- * one, captures an event through its mapper, and takes the definitions,
- * contributors, event mappers and watched models an application registers while
- * it boots.
- *
- * A recorded activity runs one pipeline: its definition is found, its timing is
- * checked, the contributors fill its gaps in order, what they leave is
- * minimised, a bulk operation's manifest is sealed, the record is built from
- * that with the clock's time and the configured source, and it is delivered,
- * after commit unless the builder chose otherwise. A refusal before the record
- * is built, a minimiser's failure among them, stores nothing and leaves the
- * builder usable, and a failed write follows the failure policy. The pipeline
- * runs with the definitions and contributors this recorder was made with.
- *
- * An event is captured through the mapper registered for its class, or for the
- * one parent class or interface of it that is mapped: the first mapping
- * listens, through one wildcard listener, for every event the application
- * dispatches, and an application that maps nothing pays nothing. A captured
- * record is written at once, and a capture never throws into the code that
- * dispatched its event but for a failure fatal to an open transaction. A
- * watched model's changes are captured from its own Eloquent events, and a bulk
- * operation is one explicit record carrying the manifest of what it affected,
- * refused up front while the bound store keeps no attachment.
- *
- * The recorder is also the way into the read path: `trail()` gives a fresh
- * trail, resolved from the current container on each call, which reads nothing
- * until a viewer is named and a terminal call made, and which every read
- * authorises through the bound access policy and records before anything it
- * found is returned. `lifecycle()` likewise gives a fresh way into the log's
- * lifecycle, its holds, prunes, imports, erasures, reinstatements and rewraps,
- * on each call.
+ * The package's way in: records an activity or gives a builder for one,
+ * captures mapped events, opens the trail and the lifecycle, and takes the
+ * registrations an application makes while it boots.
  *
  * A singleton that outlives requests under Octane, so it holds only frozen
- * registration data, its definitions and contributors. The event mappers and
- * the model watcher, which every capture reads from the container, are resolved
- * from it for each registration, so the recorder never holds the dispatcher a
- * watch listens with, nor anything that holds a request; both are frozen once
- * the application has booted. Runtime state, the clock, the store, the
- * finaliser and the capture's own state are all resolved from the current
- * container on every capture.
+ * registration data and resolves everything else from the current container on
+ * each call.
  *
  * @api
  *
@@ -344,9 +311,8 @@ final readonly class Recorder
     }
 
     /**
-     * Write the builder's record through the pipeline of the definitions and
-     * contributors this recorder was made with, never one the container holds,
-     * so a recorder made with its own keeps them.
+     * Write the builder's record through a pipeline of this recorder's own
+     * definitions and contributors, never the container's.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
