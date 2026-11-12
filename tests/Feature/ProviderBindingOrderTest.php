@@ -37,10 +37,7 @@ use SineMacula\Laravel\AuditLog\Support\SystemClock;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Feature tests for the order the package's service provider and another
- * package's provider register in: every binding the package makes is a default,
- * kept out of the way of one made before it and replaced by one made after, on
- * an application that holds only its base bindings and the two providers'.
+ * Feature tests for the package's bindings as defaults others can replace.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -85,8 +82,7 @@ final class ProviderBindingOrderTest extends TestCase
     }
 
     /**
-     * A binding another package made before the package's provider registers is
-     * kept: the package's default does not replace it.
+     * A binding made before the package's provider registers is kept.
      *
      * @param  string  $abstract
      * @return void
@@ -104,8 +100,7 @@ final class ProviderBindingOrderTest extends TestCase
     }
 
     /**
-     * A binding another package makes after the package's provider registers
-     * replaces the default, as any later binding does.
+     * A binding made after the provider registers replaces the default.
      *
      * @param  string  $abstract
      * @return void
@@ -123,8 +118,7 @@ final class ProviderBindingOrderTest extends TestCase
     }
 
     /**
-     * A clock bound with `singleton()` after the default has resolved still
-     * replaces it, as the container drops the resolved instance.
+     * A clock bound after the default has resolved still replaces it.
      *
      * @return void
      */
@@ -142,10 +136,7 @@ final class ProviderBindingOrderTest extends TestCase
     }
 
     /**
-     * With nothing bound before it, the package's provider binds the configured
-     * retention policy and the journal's prune ledger, each once per
-     * application; an application's own policy and ledger, bound before it, are
-     * what the container resolves instead.
+     * The policy and ledger are shared defaults that yield to earlier ones.
      *
      * @return void
      */
@@ -173,10 +164,7 @@ final class ProviderBindingOrderTest extends TestCase
     }
 
     /**
-     * With nothing bound before it, the package's provider binds its own field
-     * encrypter, made afresh on every resolution; an application that chooses
-     * never to encrypt binds `NoFieldEncrypter` before it, and that is what the
-     * container resolves instead, as a plain binding too.
+     * The encrypter is an unshared default that yields to one bound earlier.
      *
      * @return void
      */
@@ -210,8 +198,7 @@ final class ProviderBindingOrderTest extends TestCase
     }
 
     /**
-     * An application holding nothing but its base bindings and a configuration
-     * repository, which the package's provider merges its configuration into.
+     * An application with only its base bindings and a config repository.
      *
      * @return \Illuminate\Foundation\Application
      */
@@ -243,7 +230,7 @@ final class ProviderBindingOrderTest extends TestCase
              */
             public function __construct(
 
-                // Application the provider binds into.
+                // Handed to the parent constructor.
                 Application $app,
 
                 /** Abstract the provider binds. */
