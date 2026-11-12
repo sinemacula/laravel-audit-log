@@ -33,17 +33,7 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Feature tests for the sealer, on whichever engine the suite runs against: the
- * recent pass starts the lookback before the last seal, or at the beginning;
- * the sweep resumes from its cursor, saved after every window, and clears it
- * once complete; batches follow each other without restarting, up to the most
- * seals a run writes; nothing recorded after the settle bound is sealed; an
- * attempt lost to a concurrent writer is rolled back whole and made again from
- * a fresh head after a bounded jittered wait, and exhaustion is contention; a
- * lost connection and any other failure are never retried; no savepoint is ever
- * used; progress records each seal and the run; each run ensures the
- * installation's id, written once; and keys mixed in a seal or rotated between
- * seals each sign as they should.
+ * Feature tests for the sealer, on whichever engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -146,11 +136,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * A run leaves the installation's id the migrations seed as it is; on an
-     * installation that lost it, a run, the recent pass and the sweep alike,
-     * writes it on the first run, before its first batch, at the run's time,
-     * and never replaces it: every later run reads the same id, and a run with
-     * nothing to seal ensures it too.
+     * A run keeps the seeded installation id, and where it is lost writes one
+     * before its first batch, at the run's time, never replacing it.
      *
      * @return void
      *
@@ -218,8 +205,7 @@ final class SealerTest extends TestCase
 
     /**
      * The recent pass starts the lookback before the last seal's latest entry:
-     * an unsealed row recorded at that instant is sealed, one recorded a
-     * microsecond before it waits, and a later one is sealed.
+     * a row at that instant is sealed, one a microsecond before waits.
      *
      * @return void
      */
@@ -244,10 +230,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * The recent pass starts the lookback before its own high-water mark, the
-     * latest entry time a recent pass sealed, so a sweep's seal of old rows at
-     * the head never pulls its window back to them; the mark only moves
-     * forward, and a mark that is lost falls back to the head.
+     * The recent pass starts the lookback before its own high-water mark, so a
+     * sweep's old seals never pull it back; a lost mark uses the head.
      *
      * @return void
      */
@@ -315,9 +299,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * Without a high-water mark, the recent pass starts the lookback before the
-     * last seal in the chain, never before a seal stored outside it: a phantom
-     * alone leaves the pass at the beginning of the table.
+     * Without a high-water mark, the recent pass starts before the chain's last
+     * seal, never one outside it, which alone leaves it at the start.
      *
      * @return void
      */
@@ -363,9 +346,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * Batches follow each other without restarting: each reads on strictly
-     * after the last row the one before read, and together they seal every row
-     * once, in order.
+     * Batches follow each other without restarting, each strictly after the
+     * last row before, together sealing every row once, in order.
      *
      * @return void
      */
@@ -442,9 +424,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * A sweep over a sealed table reads it to its end in one run, however few
-     * seals the run may write, since a window that seals nothing does not
-     * count, and completes.
+     * A sweep over a sealed table reaches its end in one run, since a window
+     * that seals nothing does not count against the run's seals.
      *
      * @return void
      */
@@ -496,8 +477,7 @@ final class SealerTest extends TestCase
 
     /**
      * A complete sweep records its completion and clears its cursor, so the
-     * next sweep starts at the beginning and finds a row recorded before where
-     * the last one stopped.
+     * next starts at the beginning.
      *
      * @return void
      */
@@ -585,11 +565,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * An attempt that loses to a competing sealer, which seals one of its
-     * entries at the same sequence between its selection and its insert, fails
-     * on the duplicate, is rolled back whole and is made again from a fresh
-     * head and a fresh selection: it chains onto the competitor's seal and
-     * seals the rest.
+     * An attempt that loses a sequence to a competing sealer is rolled back
+     * whole and made again from a fresh head, chaining onto its seal.
      *
      * @return void
      */
@@ -633,9 +610,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * Each failure a concurrent writer causes rolls the attempt back to no
-     * transaction at all and makes it again, selection included, and the run
-     * then seals.
+     * Each failure a concurrent writer causes rolls the attempt back fully and
+     * makes it again, selection included, and the run then seals.
      *
      * @param  \Closure(): \Illuminate\Database\QueryException  $failure
      * @return void
@@ -697,9 +673,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * PostgreSQL's lock timeout, known by its SQLSTATE alone since Laravel
-     * recognises neither its code nor its message, is retried after a full
-     * rollback rather than stopping the run.
+     * PostgreSQL's lock timeout, known only by its SQLSTATE since Laravel
+     * recognises neither its code nor message, is retried after a rollback.
      *
      * @return void
      */
@@ -720,9 +695,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * Each retry waits a jittered delay no longer than the bound of the attempt
-     * that failed: 20 milliseconds after the first, doubling after each, up to
-     * a second.
+     * Each retry waits a jittered delay within the failed attempt's bound: 20
+     * milliseconds after the first, doubling up to a second.
      *
      * @return void
      */
@@ -784,9 +758,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * When every attempt is lost, the run stops with contention naming the
-     * attempts, carrying nothing of the failures, after one selection per
-     * attempt and a wait between each two.
+     * When every attempt is lost the run stops with contention naming the
+     * attempts, after one selection per attempt and a wait between each.
      *
      * @return void
      *
@@ -1278,14 +1251,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * Make a competing sealer seal the entry at the next sequence just before
-     * this attempt inserts its checkpoint, once.
-     *
-     * On MySQL and PostgreSQL the competitor commits through its own connection
-     * while the attempt is open. SQLite has one writer, so from this process
-     * the competitor's seal is written inside the attempt, which makes the
-     * insert the same duplicate, and committed again once the attempt has
-     * rolled back, as though it had committed first.
+     * Have a competitor seal the entry at the next sequence just before the
+     * attempt inserts, once; SQLite's one writer puts it inside the attempt.
      *
      * @param  string  $entryId
      * @return void
@@ -1432,9 +1399,8 @@ final class SealerTest extends TestCase
     }
 
     /**
-     * A serialisation failure known by its SQLSTATE alone, as PostgreSQL raises
-     * it: its code is the string `40001`, and no phrase Laravel recognises is
-     * in its message.
+     * A serialisation failure as PostgreSQL raises it: the string code `40001`,
+     * with no phrase Laravel recognises in its message.
      *
      * @return \Illuminate\Database\QueryException
      */

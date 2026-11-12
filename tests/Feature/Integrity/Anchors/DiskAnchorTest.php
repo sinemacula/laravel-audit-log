@@ -18,12 +18,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the disk anchor, on a faked disk and on a local disk in a
- * temporary directory: the golden object at the golden path and its receipt;
- * that anchoring is idempotent and write-once, the marker written before the
- * object; that another digest for a sequence conflicts, even after a crash
- * between the marker and the object; which receipts confirm; how the head is
- * discovered and cross-checked against its marker; and that every path stays
- * inside the log's namespace.
+ * temporary directory.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -184,9 +179,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * An object at the summary's path that holds the whole canonical summary of
-     * another seal conflicts, with its marker or without it, and is never
-     * replaced.
+     * An object at the summary's path holding another seal's summary conflicts,
+     * with or without its marker, and is never replaced.
      *
      * @return void
      */
@@ -232,10 +226,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * A path that holds part of a write is the anchor unavailable for now,
-     * never a conflict, so a concurrent anchorer's write in progress never
-     * raises a tamper alarm; nothing there is replaced, and once the write is
-     * whole the same summary anchors with no conflict.
+     * A partial write at a path is unavailable, never a conflict, so a
+     * concurrent anchorer raises no alarm; once whole, the summary anchors.
      *
      * @param  string  $path
      * @param  string  $bytes
@@ -268,10 +260,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * Whatever is anchored, again or conflicting, each path is written once,
-     * never over what was there, and the disk is asked for nothing but reads
-     * and writes, so nothing is deleted, moved, copied or appended to: the
-     * double fails any other call.
+     * Each path is written once, and the disk is asked only to read and write,
+     * never to delete, move, copy or append.
      *
      * @return void
      */
@@ -316,9 +306,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * A marker left without its object, as a crash between the two writes
-     * leaves it, is completed by the next anchoring of the same summary, which
-     * writes the object alone and returns the usual receipt.
+     * A marker left without its object by a crash is completed by the next
+     * anchoring of the same summary, with the usual receipt.
      *
      * @return void
      */
@@ -506,9 +495,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * Rows of `[seals anchored]`: logs of sizes either side of each doubling
-     * the discovery probes, so the halving that follows is exercised at every
-     * offset.
+     * Rows of `[seals anchored]`: log sizes either side of each doubling, so
+     * the halving after it is exercised at every offset.
      *
      * @return iterable<string, array{0: int}>
      */
@@ -564,9 +552,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * Discovery never lists the anchor: it asks whether markers exist, about
-     * twice per doubling of the log, and reads only the head's marker and
-     * object, so its cost grows with the logarithm of the log, not the log.
+     * Discovery never lists the anchor: it probes about twice per doubling and
+     * reads only the head's marker and object.
      *
      * @return void
      */
@@ -597,9 +584,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * Rows of `[seals anchored, markers asked about in order]`: an empty log, a
-     * log of one seal, and a log whose head falls between two doublings; the
-     * last a log with a head asks about is its head's, as the marker is read.
+     * Rows of `[seals anchored, markers asked about in order]`; the last marker
+     * a log with a head asks about is its head's.
      *
      * @return iterable<string, array{0: int, 1: list<int>}>
      */
@@ -611,10 +597,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * Discovery probes the marker at 1 and then at each doubling until one is
-     * missing, then halves the gap until it closes, and reads only the head's
-     * marker and object: an empty log is asked about sequence 1 alone and
-     * nothing is read.
+     * Discovery probes the marker at 1 and each doubling until one is missing,
+     * then halves the gap; an empty log is asked about 1 alone.
      *
      * @param  int  $size
      * @param  list<int>  $expected
@@ -647,9 +631,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * The head is ordered by its sequence alone, never by its digest, even a
-     * digest that sorts below every padded sequence (protects against a
-     * mutation that compares a digest with a sequence).
+     * The head is ordered by its sequence alone, never by its digest, even one
+     * that sorts below every padded sequence.
      *
      * @return void
      */
@@ -689,8 +672,7 @@ final class DiskAnchorTest extends TestCase
 
     /**
      * The markers are authoritative: an object at the head's sequence that its
-     * marker does not name, as only a writer bypassing the anchor could add, is
-     * never the head's digest.
+     * marker does not name is never the head's digest.
      *
      * @return void
      */
@@ -713,8 +695,7 @@ final class DiskAnchorTest extends TestCase
 
     /**
      * A head whose marker names a digest with no object is the seal before it,
-     * and the sequence still refuses any other digest, so a marker that was
-     * rewritten never lets another seal be anchored there.
+     * and the sequence still refuses any other digest.
      *
      * @return void
      */
@@ -874,7 +855,7 @@ final class DiskAnchorTest extends TestCase
 
     /**
      * A newest marker that is not a whole digest is a partial write, which
-     * makes discovery fail for now, never a head and never an absence.
+     * fails discovery, never a head and never an absence.
      *
      * @param  string  $marker
      * @return void
@@ -997,8 +978,7 @@ final class DiskAnchorTest extends TestCase
 
     /**
      * The name is `disk:` and the first 16 hex of the SHA-256 of the disk's
-     * name and the path: one location gives one name, another disk or another
-     * path another name.
+     * name and the path, so each location has its own name.
      *
      * @return void
      */
@@ -1155,12 +1135,8 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
-     * The disk behind a double that answers only what a disk anchor may ask of
-     * it, whether a path exists, its bytes and a write, each from the disk, so
-     * any other call, a listing, a deletion or a move say, fails the test. It
-     * records every write as `put <path>`, marking one to a path that was
-     * already there, refuses every write after the given number, and when
-     * unreadable, answers every read as a failed one.
+     * A double of the disk allowing only exists, reads and writes, each
+     * recorded, failing writes after `$succeeding` and reads when unreadable.
      *
      * @param  \Illuminate\Contracts\Filesystem\Filesystem  $disk
      * @param  \ArrayObject<int, string>  $writes

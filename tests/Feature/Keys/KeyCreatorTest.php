@@ -36,20 +36,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the creation of a unit's key, on whichever engine the suite
- * runs against: the first key at generation one, none for an erased owner, a
- * reinstated owner's and a rotated unit's above their floor, a live key that
- * landed meanwhile returned rather than doubled, a race past the locks settled
- * by the unique index and a re-read, the marker read, the live key read and the
- * insert in one transaction after the lock, the data key wrapped bound to its
- * row and the row signed, and the session closed and the owner released however
- * a creation ends.
- *
- * Where a test needs another writer to act at a moment of the creation, it acts
- * as the creation is about to run its lock statement, or on SQLite, which takes
- * none, its first read inside the transaction: on MySQL and PostgreSQL from the
- * storage connection or a session of its own, committed at once, and on
- * in-memory SQLite inside the creation's own transaction, which is the storage
- * connection's.
+ * runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -110,9 +97,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * A unit's first key is created at generation one, live, at the clock's
-     * time, with a UUID version 7 of that time as its id and 32 random bytes as
-     * its data key, and stored exactly as it is returned.
+     * A unit's first key is created at generation one, live, with a UUID v7 id
+     * of the clock's time and a 32-byte data key, stored as returned.
      *
      * @return void
      */
@@ -160,8 +146,7 @@ final class KeyCreatorTest extends TestCase
 
     /**
      * A reinstated owner's next key is one above the floor its erasure set,
-     * whether that floor came from its own keys or was set higher, never an
-     * erased generation reopened.
+     * never an erased generation reopened.
      *
      * @return void
      */
@@ -225,11 +210,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * Two creations that race past every lock are settled by the unit's unique
-     * index: the one whose insert is refused re-reads the unit's live
-     * key, verified, and returns it with its data key, so one key is stored;
-     * when the winner is no longer live, as after an erasure meanwhile, none is
-     * returned.
+     * A creation race past every lock is settled by the unique index: the loser
+     * re-reads and returns the live key, or none once it is erased.
      *
      * @return void
      */
@@ -256,9 +238,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * A live key of the unit that another creation made while this one waited
-     * for the lock is found after the lock and returned with its data key,
-     * rather than a second live generation made.
+     * A live key another creation made while this one waited for the lock is
+     * returned, rather than a second live generation made.
      *
      * @return void
      */
@@ -280,13 +261,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * The owner's marker, the unit's live key and its largest generation are
-     * read, and the key inserted, in one transaction, the owner's lock taken
-     * before the reads: on MySQL on the session before the transaction begins
-     * and released after it commits, until `release_lock()` says the session no
-     * longer holds it, on PostgreSQL inside it with its wait bounded, once the
-     * transaction is set to `read committed`, and on SQLite by the transaction
-     * itself.
+     * The reads and the insert share one transaction after the owner's lock:
+     * MySQL's session lock, PostgreSQL's bounded one, SQLite's own.
      *
      * @return void
      */
@@ -309,9 +285,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * The data key is wrapped under the wrapper's current key bound to its own
-     * row: it unwraps under the row's wrap context, and under a context naming
-     * another row, unit, generation or wrapping key it does not.
+     * The data key is wrapped bound to its row: it unwraps under the row's
+     * context, never one naming another row, unit, generation or key.
      *
      * @return void
      *
@@ -367,9 +342,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * The owner's marker is read once the lock is held: an erasure that commits
-     * as the creation asks for the lock, after anything the creation could have
-     * read before it, is seen, and no key is made.
+     * The owner's marker is read once the lock is held, so an erasure committed
+     * as the creation asks for the lock is seen.
      *
      * @return void
      */
@@ -385,9 +359,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * A creation that fails, here because the wrapper cannot wrap, leaves no
-     * key, no transaction open and no session behind, and releases the owner's
-     * lock, so the next creation for the owner is made at once.
+     * A failed creation leaves no key, transaction or session behind, and
+     * releases the owner's lock.
      *
      * @return void
      *
@@ -467,9 +440,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * A wrapped key that does not unwrap to the data key it was made from, as a
-     * faulty wrapper gives, is never stored: the creation throws, so the field
-     * is dropped rather than sealed under a key that could not be recovered.
+     * A wrapped key that does not unwrap to its data key is never stored: the
+     * creation throws, so the field is dropped rather than sealed.
      *
      * @return void
      *
@@ -570,9 +542,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * The data key a creation returns seals a field that opens under the same
-     * key at the same entry and path, in the configured log, and at no other
-     * entry.
+     * The returned data key seals a field that opens at the same entry and path
+     * in the configured log, and at no other entry.
      *
      * @return void
      */
@@ -656,9 +627,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * Run the work once, as the next creation is about to run its lock
-     * statement, or on SQLite, which takes none, its first read inside its
-     * transaction, on whichever connection the creation runs.
+     * Run the work once as the next creation is about to lock, or on SQLite,
+     * which takes no lock, at its first read in the transaction.
      *
      * @param  \Closure(): void  $work
      * @return void
@@ -684,14 +654,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * Make the next creation's insert of the winner's unit meet the winner,
-     * already stored, as a creation that raced past every lock would leave
-     * it; with `$erased`, the winner is tombstoned once the creation's
-     * transaction has rolled back, as an erasure meanwhile would leave it.
-     *
-     * On in-memory SQLite the winner is stored inside the creation's own
-     * transaction, which rolls back with the refused insert, so it is stored
-     * again once the rollback has run.
+     * Make the next creation's insert meet the stored winner, tombstoned after
+     * the rollback when erased; in-memory SQLite stores it again then.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $winner
      * @param  bool  $erased
@@ -727,9 +691,8 @@ final class KeyCreatorTest extends TestCase
     }
 
     /**
-     * Call the callback before every statement the storage connection and any
-     * connection established from now on runs, guarding against its own
-     * statements.
+     * Call the callback before every statement the storage connection and later
+     * connections run, ignoring its own statements.
      *
      * @param  \Closure(\Illuminate\Database\Connection, string): void  $callback
      * @return void

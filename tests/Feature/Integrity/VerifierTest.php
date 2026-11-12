@@ -59,18 +59,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the verification of the log, on whichever engine the suite
- * runs against: the walk streams one report per seal, in order, expecting the
- * first sequence of its range and each next one; a ranged run checks its
- * boundary link and never claims the whole log; the anchor's head is asked for
- * first and compared with the local seal at its sequence, even with every local
- * receipt cleared; an anchor that fails is asked once; only a run of the whole
- * log checks for orphaned members and unsealed entries and records its
- * completion; seals written after the run began are never read; keys rotated
- * between seals and within one verify; a bundle's artifact is checked with its
- * seal; every run, a ranged one included, verifies the whole journal, and a
- * journal finding fails it; a run of the whole log verifies the key store, or
- * says it skipped it for a custom encrypter, a ranged one leaves it, and a key
- * finding fails the run; and every statement reads the writer.
+ * runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -177,9 +166,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A first seal deleted with its members and its entries leaves nothing to
-     * link to, and is still found: the walk expects sequence 1 and finds 2, a
-     * gap, which is tampering.
+     * A first seal deleted with its members and entries is still found: the
+     * walk expects sequence 1 and finds 2, a gap.
      *
      * @return void
      */
@@ -285,9 +273,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * The clock is read once, when the run begins, and the grace is measured
-     * from it: seals made 600 seconds before await their first anchoring, and a
-     * strict run passes beside them; seals made 901 seconds before do not.
+     * The grace is measured from the run's start, read once: seals 600 seconds
+     * old await anchoring and pass strictly, 901 seconds old do not.
      *
      * @return void
      */
@@ -354,9 +341,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A ranged run checks its first seal's link to the seal before it: a first
-     * seal re-signed to link elsewhere is a broken chain, though the boundary
-     * seal itself is valid and not streamed.
+     * A ranged run checks its first seal's link: re-signed to link elsewhere it
+     * is a broken chain, though the boundary seal is valid.
      *
      * @return void
      */
@@ -376,9 +362,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A boundary seal that fails its own checks is streamed and counted before
-     * the range, and the first seal's link is checked against its recomputed
-     * digest, so it still holds.
+     * A boundary seal that fails its checks is reported before the range, and
+     * the link is checked against its recomputed digest.
      *
      * @return void
      */
@@ -399,9 +384,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A ranged run makes none of the whole log's checks: an orphaned member and
-     * an overdue unsealed entry are not looked for, so it passes, and a
-     * complete run fails on them.
+     * A ranged run skips the whole log's checks for orphaned members and
+     * overdue entries, which a complete run fails on.
      *
      * @return void
      */
@@ -478,9 +462,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * Entries no seal holds that are older than the allowed age are overdue,
-     * which makes the run incomplete, naming the first by time and id; younger
-     * ones are counted apart as pending.
+     * Unsealed entries older than the allowed age are overdue, making the run
+     * incomplete at the first; younger ones are counted as pending.
      *
      * @return void
      */
@@ -602,9 +585,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * An anchor that holds no seal while the local log has some leaves the log
-     * unanchored: a plain run passes, and a strict one fails on seals past the
-     * grace.
+     * An anchor holding no seal leaves a local log unanchored: a plain run
+     * passes, and a strict one fails on seals past the grace.
      *
      * @return void
      */
@@ -623,10 +605,7 @@ final class VerifierTest extends TestCase
 
     /**
      * An anchor's head with another digest than the local seal at its sequence
-     * contradicts it: the segment is contradicted and tampered, the anchor's
-     * head is contradicted, and the finding is the segment's alone. A head the
-     * local log contradicts settles no seal's anchoring, so the seal before is
-     * put to the anchor, which holds no receipt of it.
+     * contradicts that segment alone, and settles no anchoring.
      *
      * @return void
      */
@@ -646,9 +625,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * An anchor's head the walk meets, at the first seal of a ranged run or
-     * between the first and the last of a whole one, is compared by the walk
-     * alone: the segment carries the contradiction, and the run adds none.
+     * An anchor's head the walk meets is compared by the walk alone: the
+     * segment carries the contradiction, and the run adds none.
      *
      * @return void
      */
@@ -693,8 +671,7 @@ final class VerifierTest extends TestCase
 
     /**
      * An anchor's head outside a ranged run is read on its own: a matching
-     * digest is anchored, and another digest is a contradiction of the run,
-     * naming that seal.
+     * digest is anchored, another contradicts the run at that seal.
      *
      * @return void
      */
@@ -741,9 +718,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * An anchor's head at a seal the local log holds but cannot read can be
-     * neither confirmed nor contradicted, so it is unanchored, while the seal
-     * is unverifiable.
+     * An anchor's head at a local seal that cannot be read is unanchored, while
+     * the seal is unverifiable.
      *
      * @return void
      */
@@ -785,9 +761,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * An anchor that fails when its head is asked for is unavailable, and is
-     * not asked again in the run, so every segment is unavailable without a
-     * call.
+     * An anchor that fails when asked for its head is unavailable and not asked
+     * again, so every segment is unavailable without a call.
      *
      * @return void
      */
@@ -813,9 +788,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * An anchor that cannot discover is never asked for its head: the head is
-     * unanchored, and a strict run fails, since a truncated tail could not be
-     * found.
+     * An anchor that cannot discover is never asked for its head, so the head
+     * is unanchored and a strict run fails.
      *
      * @return void
      */
@@ -880,9 +854,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * The anchor's head is asked for before the local head is read, so a seal
-     * written and anchored meanwhile is within the local log, never a missing
-     * tail.
+     * The anchor's head is asked for before the local head, so a seal anchored
+     * meanwhile is never a missing tail.
      *
      * @return void
      */
@@ -930,9 +903,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A run of the whole log records its completion: when it ran, the head it
-     * observed, whether it passed at the strictness it ran at, and that
-     * strictness, judged without `strict` by default.
+     * A run of the whole log records when it ran, the head it observed, its
+     * strictness and whether it passed at it.
      *
      * @return void
      */
@@ -950,9 +922,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A strict run records whether it passed strictly: a log that passes but
-     * whose seals the anchor holds none of, past the grace, is recorded as a
-     * strict run that did not pass, never as a pass.
+     * A strict run records whether it passed strictly, so unanchored seals past
+     * the grace are never recorded as a pass.
      *
      * @return void
      */
@@ -978,9 +949,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A ranged run whose last seals are missing, with their members and
-     * entries, is a gap: the walk must reach the range's last sequence, so the
-     * coverage it reports is never more than it read.
+     * A ranged run whose last seals are missing is a gap, since the walk must
+     * reach the range's last sequence.
      *
      * @return void
      */
@@ -1015,10 +985,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A seal stored at a sequence below 1, as a writer without the key could
-     * insert one to tie a fabricated entry to, is outside the chain: a run of
-     * the whole log finds it as a gap, with the entry's member row an orphan,
-     * and it is never taken for the head.
+     * A seal below sequence 1 is outside the chain: a whole-log run finds it as
+     * a gap with an orphaned member, and it is never the head.
      *
      * @return void
      */
@@ -1082,9 +1050,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * An unsealed entry recorded further ahead of the run's clock than the
-     * lookback is never sealed, so it is a finding, never pending; one within
-     * the lookback ahead is still pending.
+     * An unsealed entry further ahead of the clock than the lookback is a
+     * finding, never pending; one within it is still pending.
      *
      * @return void
      */
@@ -1108,10 +1075,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A seal at the anchor's head that cannot be read has no digest to
-     * recompute, so its stored digest is compared with the anchor's: another is
-     * a contradiction of the run, never left unanchored, and the same leaves it
-     * unanchored.
+     * An unreadable seal at the anchor's head is compared by its stored digest:
+     * another is a contradiction, the same leaves it unanchored.
      *
      * @return void
      */
@@ -1140,10 +1105,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * When the anchor can report its head and the walk reaches it, no seal's
-     * receipt is put to the anchor: the head settles every seal's anchoring, so
-     * a run asks the anchor once, whatever the size of the log, and clearing
-     * the receipts kept beside the seals changes nothing.
+     * When the walk reaches the anchor's head, the head settles every seal's
+     * anchoring in one call, whatever the receipts hold.
      *
      * @return void
      */
@@ -1185,9 +1148,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A ranged run that ends before the anchor's head cannot settle anchoring
-     * by it, since the chain between is not walked, so each seal's receipt is
-     * put to the anchor.
+     * A ranged run ending before the anchor's head cannot settle anchoring by
+     * it, so each seal's receipt is put to the anchor.
      *
      * @return void
      */
@@ -1284,9 +1246,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * The walk reads the seals in pages of a hundred and reads every one, in
-     * order, across a page boundary, each page only once the seals before it
-     * are verified.
+     * The walk reads the seals in pages of a hundred, in order across page
+     * boundaries, each page after the seals before it verify.
      *
      * @return void
      */
@@ -1304,9 +1265,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A page that is full though a seal is missing from it ends after its last
-     * seal, so the next page starts after it: no seal is read twice, and the
-     * gap is found once.
+     * A full page with a seal missing ends after its last seal, so no seal is
+     * read twice and the gap is found once.
      *
      * @return void
      */
@@ -1368,9 +1328,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A run of the whole log verifies the key store after the journal: its keys
-     * are counted, verified and erased, and its findings are the run's, at the
-     * key they were found at.
+     * A run of the whole log verifies the key store after the journal, its
+     * counts and findings the run's.
      *
      * @return void
      */
@@ -1391,9 +1350,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A run of a range leaves the key store, as it leaves the unsealed entries:
-     * it reads no key and no key use, finds nothing of them, and its summary
-     * holds no key store section.
+     * A ranged run leaves the key store: it reads no key or key use, and its
+     * summary holds no key store section.
      *
      * @return void
      */
@@ -1439,9 +1397,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * With a custom field encrypter bound, the package's key store is not in
-     * use: the run's key store section says it was skipped, naming the
-     * encrypter, and a key use with no key is not found.
+     * With a custom field encrypter bound, the key store section is skipped,
+     * naming the encrypter, and a key use with no key is not found.
      *
      * @return void
      */
@@ -1458,9 +1415,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * Every statement of a run reads the writer, so a replica's lag can never
-     * read as a missing row: with a reader that refuses to be used, a complete
-     * run under an anchor still passes.
+     * Every statement of a run reads the writer, so a replica's lag never reads
+     * as a missing row.
      *
      * @return void
      */
@@ -1486,10 +1442,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A run over a seal holding a bundle whose artifact's digest column was
-     * changed after sealing fails as tampered with a mismatch, its segment
-     * naming the bundle's entry, while the seal of an intact bundle stays
-     * valid.
+     * A bundle's artifact digest changed after sealing fails the run as a
+     * tampered mismatch at its entry; an intact bundle's seal stays valid.
      *
      * @return void
      */
@@ -1514,9 +1468,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A run over a seal holding a bundle whose members were replaced after
-     * sealing by another canonical list, its columns untouched, fails as
-     * tampered with `manifest_tampered`, at the bundle's entry.
+     * A bundle's members replaced after sealing by another canonical list fail
+     * the run as `manifest_tampered`, at the bundle's entry.
      *
      * @return void
      */
@@ -1558,9 +1511,8 @@ final class VerifierTest extends TestCase
     }
 
     /**
-     * A verifier from the container's collaborators, under the anchor given or
-     * none, on the clock given or one stopped when a run begins by default,
-     * with nothing pruned, and the field encrypter given or none.
+     * A verifier from the container's collaborators with nothing pruned, by
+     * default with no anchor or encrypter and a clock stopped at the run.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\Clock  $clock

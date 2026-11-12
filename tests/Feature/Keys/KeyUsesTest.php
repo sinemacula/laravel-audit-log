@@ -16,12 +16,8 @@ use SineMacula\Laravel\AuditLog\Keys\KeyUses;
 use Tests\TestCase;
 
 /**
- * Feature tests for the key uses on the storage connection, on whichever
- * engine the suite runs against: one row per distinct key of an entry, sorted,
- * and none for a key that is no canonical lower-case UUID; rows inserted many
- * to a statement and never more than the engine's share of placeholders
- * allows; nothing inserted for no rows; and a row already there surfacing as
- * the unique violation it is, never ignored.
+ * Feature tests for the key uses on the storage connection, on whichever engine
+ * the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,10 +61,8 @@ final class KeyUsesTest extends TestCase
     }
 
     /**
-     * A key that is not a canonical lower-case UUID has no row, whatever
-     * encrypter named it: a reference of another form, an upper-case UUID and a
-     * UUID in braces; an entry id that is no canonical lower-case UUID is
-     * refused.
+     * A key that is not a canonical lower-case UUID has no row, whatever named
+     * it, and an entry id that is not one is refused.
      *
      * @return void
      */
@@ -86,10 +80,8 @@ final class KeyUsesTest extends TestCase
     }
 
     /**
-     * Rows are inserted as many to a statement as the engine's share of
-     * placeholders allows, 400 on SQLite and 10,000 elsewhere, two placeholders
-     * each, so one more than a statement holds takes two, and every row is
-     * stored.
+     * Rows are inserted as many per statement as the engine's placeholders
+     * allow, 400 on SQLite and 10,000 elsewhere, and every row is stored.
      *
      * @return void
      */

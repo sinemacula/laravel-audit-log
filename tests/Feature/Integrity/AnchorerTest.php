@@ -37,14 +37,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the anchorer, on whichever engine the suite runs against:
- * no anchor costs nothing; pending seals are anchored in sequence order up to
- * the batch, each once, its receipt kept beside it in the four anchor columns
- * alone; a seal that does not verify is refused; an unavailable anchor is
- * recorded by its class and stops the pass, and a later pass retries; a remote
- * success whose local write failed recovers with the same receipt; a conflict
- * stops the pass; moving the anchor anchors every seal again; and progress
- * records the last anchoring and the last failure.
+ * Feature tests for the anchorer, on whichever engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -176,9 +169,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * An unavailable anchor stops the pass at the first seal, keeps the class
-     * of its failure on that seal and nothing else, and is neither reported nor
-     * dispatched: the command decides what to say.
+     * An unavailable anchor stops the pass and keeps its failure's class on the
+     * first seal, unreported: the command decides what to say.
      *
      * @return void
      */
@@ -300,9 +292,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * A failure's class longer than the column is kept to its first 191
-     * characters, never cut inside a character, so the name stays valid UTF-8
-     * and fits the column on every engine.
+     * A failure's class longer than the column is cut to 191 characters, never
+     * inside a character, so it stays valid UTF-8 on every engine.
      *
      * @return void
      */
@@ -320,9 +311,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * When the anchor kept a summary but the receipt could not be written
-     * locally, the next pass is given the identical receipt and anchors the
-     * seal with no conflict.
+     * A remote success whose local write failed is given the identical receipt
+     * on the next pass, and anchors with no conflict.
      *
      * @return void
      */
@@ -412,9 +402,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * A seal that does not verify is refused and never anchored: the anchor is
-     * asked for its head and nothing else, no column of the seal is written,
-     * and no later seal is anchored.
+     * A seal that does not verify is never anchored: only the head is asked
+     * for, no seal column is written and no later seal is anchored.
      *
      * @param  \Closure(self): void  $tamper
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding
@@ -499,9 +488,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * Which seals are anchored is the anchor's own answer: anchor columns
-     * written onto a fresh seal before the pass reaches it, as the writer could
-     * edit them, never keep it from being anchored.
+     * Anchor columns written onto a fresh seal never keep it from being
+     * anchored, since the anchor's own answer decides.
      *
      * @return void
      */
@@ -528,9 +516,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * Below the anchor's head, a seal whose receipt was never written is
-     * anchored again, and a seal whose receipt names another anchor is left as
-     * it is, since the anchor holds it.
+     * Below the anchor's head, a seal with no receipt is anchored again, and
+     * one whose receipt names another anchor is left as it is.
      *
      * @return void
      */
@@ -555,9 +542,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * An anchor that cannot report its head is given the seals after the last
-     * one progress records it anchored under its name, and every seal when
-     * progress names another anchor or none.
+     * An anchor that cannot report its head starts after the last seal progress
+     * records under its name, and from the first seal otherwise.
      *
      * @return void
      */
@@ -679,9 +665,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * A seal stored at a sequence below 1 is outside the chain: it is refused
-     * after the pass, whatever its anchor columns hold, and never stops the
-     * seals in the chain from being anchored.
+     * A seal below sequence 1 is outside the chain: it is refused after the
+     * pass and never stops the chain's seals being anchored.
      *
      * @return void
      */
@@ -769,9 +754,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * Rows of `[the last anchoring progress records]`: progress an anchor that
-     * cannot discover would read, malformed, forged below the chain or naming
-     * another anchor, each of which holds no seal.
+     * Rows of `[the last anchoring progress records]`: progress that is
+     * malformed, below the chain or of another anchor, holding no seal.
      *
      * @return iterable<string, array{0: array<string, scalar|null>}>
      */
@@ -787,9 +771,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * An anchor that cannot discover, given progress that holds no seal, is
-     * given every seal in the chain again, from 1, and never a seal outside it,
-     * which is refused after the pass.
+     * Progress that holds no seal gives an anchor that cannot discover every
+     * seal in the chain from 1, and never one outside it.
      *
      * @param  array<string, scalar|null>  $progress
      * @return void
@@ -815,9 +798,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * Below the anchor's head, a seal outside the chain whose receipt was never
-     * written is no lost receipt: it is refused after the pass, and the seals
-     * in the chain after the head are still anchored.
+     * A seal outside the chain with no receipt below the head is no lost
+     * receipt: it is refused after the pass, and later seals still anchor.
      *
      * @return void
      */
@@ -843,8 +825,7 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * A pass of an anchor that holds nothing reads the seals after its head and
-     * the seals outside the chain, never the lost receipts below a head it has
+     * A pass of an empty anchor never reads lost receipts below a head it has
      * not got.
      *
      * @return void
@@ -868,9 +849,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * A pass reads only the seals after the anchor's head and the lost receipts
-     * below it, by the sequence index and the anchoring index, never an `OR`
-     * across the anchor columns, so it never reads the anchored seals.
+     * A pass reads by the sequence and anchoring indexes, never an `OR` across
+     * the anchor columns, so it never reads the anchored seals.
      *
      * @return void
      */
@@ -921,9 +901,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * A receipt that is not a map of string keys to scalars or `null`, cannot
-     * be encoded, or is longer than 4096 bytes once encoded is treated as an
-     * unavailable anchor, and nothing of it is kept.
+     * A receipt that is no map of string keys to scalars or `null`, cannot be
+     * encoded or exceeds 4096 bytes makes the anchor unavailable.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1008,9 +987,8 @@ final class AnchorerTest extends TestCase
     }
 
     /**
-     * Anchoring a seal writes one update naming exactly the four anchor
-     * columns, and a failure one naming only its error column, so no other
-     * column of a seal is ever written.
+     * Anchoring updates exactly the four anchor columns, and a failure only its
+     * error column, so no other seal column is ever written.
      *
      * @return void
      */

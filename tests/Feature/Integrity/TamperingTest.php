@@ -42,15 +42,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for what `audit-log:verify` finds once the log is altered below
- * the package, through raw `DB::table()` calls, by someone who can write to its
- * database: every alteration of an entry, a member row, a seal or the chain is
- * found with the state and finding it is pinned to, naming the first bad id,
- * and fails the run non-zero; a pruned entry inserted again is found
- * resurrected; editing the anchor columns can at most leave a
- * seal unanchored; a key holder's forgery is caught by an anchor that holds the
- * seals; and the limits the threat model states are pinned as they are: a
- * deletion before the first seal, a truncated tail with no anchor, and a chain
- * forged with the key and no anchor all pass.
+ * the package through raw queries, and the limits it has.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -104,9 +96,8 @@ final class TamperingTest extends TestCase
     private InMemoryPruneLedger $prunes;
 
     /**
-     * Register both commands, bind no anchor, a prune ledger holding nothing
-     * and a clock stopped when every command runs, seal at a fixed time, and
-     * record every report and every integrity event.
+     * Register both commands with no anchor, an empty prune ledger and a
+     * stopped clock, and record every report and integrity event.
      *
      * @return void
      */
@@ -266,9 +257,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Rows of `[column, value, integrity, finding]`: each immutable column of a
-     * seal, a value it could take, and what verification finds once it is
-     * rewritten without the key.
+     * Rows of `[column, value, integrity, finding]`: an immutable seal column,
+     * a value for it, and what verification finds once it is rewritten.
      *
      * @return iterable<string, array{0: string, 1: int|string, 2: 'tampered'|'unverifiable', 3: string}>
      */
@@ -294,13 +284,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Each immutable column of a seal rewritten without the key fails the run,
-     * naming the seal: an envelope field changes the digest recomputed from it,
-     * and `tampered` outranks the `log_mismatch` or `seal_key` the same edit
-     * may also raise; the signature fails as itself; and a signer or version
-     * the package does not know stops the segment, unverifiable, and breaks the
-     * next seal's link to it, tampered, since a seal this release reads never
-     * follows one it cannot.
+     * Each immutable seal column rewritten without the key fails the run at
+     * that seal, with the most severe finding the edit raises.
      *
      * @param  string  $column
      * @param  int|string  $value
@@ -372,10 +357,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * An entry deleted with its member row, and the seal's count, members
-     * digest and digest rewritten to match, still cannot be signed without the
-     * key: the rewritten seal and the next one, relinked to it, both fail their
-     * signatures.
+     * An entry deleted with its member row and the seal rewritten to match
+     * still fails both seals' signatures without the key.
      *
      * @return void
      */
@@ -416,10 +399,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A chain forged with the key, from a rewritten seal to the head, is caught
-     * by an anchor that holds the seals: the rewritten seals' receipts no
-     * longer confirm, and the anchor's head holds another digest than the
-     * forged head, which is tampering, strict or not.
+     * A chain forged with the key is caught by an anchor holding the seals:
+     * their receipts no longer confirm and its head contradicts the forgery.
      *
      * @return void
      */
@@ -444,9 +425,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A forged chain cannot be anchored in place of the one the anchor holds:
-     * with every receipt cleared, the next seal run finds another digest held
-     * for the first forged seal, alarms and fails.
+     * A forged chain cannot be anchored over the one held: with every receipt
+     * cleared, the next seal run finds a conflict, alarms and fails.
      *
      * @return void
      */
@@ -574,9 +554,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A receipt copied from another seal changes nothing: the anchor's head,
-     * not the receipt kept beside a seal, says which seals the anchor holds, so
-     * every seal it holds is anchored, and a strict run passes.
+     * A receipt copied from another seal changes nothing, since the anchor's
+     * head says which seals it holds, and a strict run passes.
      *
      * @return void
      */
@@ -656,8 +635,7 @@ final class TamperingTest extends TestCase
 
     /**
      * The head seal rewritten and signed with the key no longer has the digest
-     * the anchor holds at its sequence: its anchoring is contradicted, which is
-     * tampering.
+     * the anchor holds, so its anchoring is contradicted.
      *
      * @return void
      */
@@ -721,11 +699,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Editing the anchor columns, which are written after a seal and are no
-     * part of it, changes nothing: a receipt of another object, another
-     * anchor's name and a cleared receipt each leave their seal anchored, since
-     * the anchor's head settles which seals it holds, never contradict it nor
-     * fail its integrity, and a strict run passes.
+     * Editing the anchor columns, which are no part of a seal, changes nothing,
+     * since the anchor's head settles which seals it holds.
      *
      * @return void
      */
@@ -796,9 +771,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A pruned entry inserted again, as it was, by someone who kept it, is
-     * covered by a valid record and present: its seal is `resurrected` at that
-     * entry, which is incomplete and fails the run, never valid or pruned.
+     * A pruned entry inserted again as it was is `resurrected`, which is
+     * incomplete and fails the run.
      *
      * @return void
      */
@@ -857,9 +831,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * The limit the threat model states, pinned: with no anchor, the last seal
-     * deleted with its member rows and entries leaves a shorter log that
-     * verifies.
+     * The threat model's limit: with no anchor, the last seal deleted with its
+     * members and entries leaves a shorter log that verifies.
      *
      * @return void
      */
@@ -878,10 +851,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A seal row inserted by hand at the head, with a digest consistent with
-     * its fields and a signature that is not the key's, may be chained onto by
-     * the next seal, is never anchored, however often sealing runs, which
-     * alarms each run, and is reported by verification.
+     * A seal inserted at the head without the key may be chained onto but is
+     * never anchored, alarming each run, and verification reports it.
      *
      * @return void
      */
@@ -918,9 +889,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * An entry's member row deleted leaves the entry unsealed, so the next
-     * sweep seals it again in a new seal, which verifies, while the seal it was
-     * taken from no longer holds what it counts.
+     * An entry whose member row is deleted is sealed again by the next sweep in
+     * a valid seal, while the seal it was taken from is tampered.
      *
      * @return void
      */
@@ -942,9 +912,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A row inserted by hand with a made-up HMAC is sealed like any other,
-     * since sealing never checks a row's HMAC, and verification then reports
-     * it.
+     * A row inserted with a made-up HMAC is sealed like any other, since
+     * sealing never checks a row's HMAC, and verification reports it.
      *
      * @return void
      */
@@ -968,12 +937,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A copy of a seal inserted at sequence 0, its anchor columns copied too,
-     * with a member row tying a fabricated entry to it, as a writer with only
-     * `INSERT` and no key could add, is outside the chain: a run of the whole
-     * log finds it, and the fabricated entry's member row is an orphan, so the
-     * entry is never hidden between unsealed and orphaned, strict or not. The
-     * anchorer refuses the phantom, whatever its anchor columns hold.
+     * A seal copied to sequence 0 to tie a fabricated entry to is found by a
+     * whole-log run, its member row an orphan, and never anchored.
      *
      * @return void
      */
@@ -1009,9 +974,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * An entry inserted with fabricated content, a junk HMAC and a time far
-     * ahead of the clock, which no seal ever takes, is a finding of every run
-     * of the whole log, never pending for good.
+     * An entry recorded far ahead of the clock, which no seal takes, is a
+     * finding of every run of the whole log, never pending for good.
      *
      * @return void
      */
@@ -1036,9 +1000,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Deleting the last seals of a range with their members and entries is a
-     * gap of a ranged run, which reports only the seals it read and fails,
-     * never a pass over seals it never saw.
+     * Deleting the last seals of a range is a gap of a ranged run, which
+     * reports only the seals it read and fails.
      *
      * @return void
      */
@@ -1064,11 +1027,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Marking a seal unreadable, by a later algorithm version, after deleting
-     * its entries and member rows never turns the deletion into anything short
-     * of tampered: the next seal's link to it is broken. At the anchor's head,
-     * a stored digest the anchor does not hold is a contradiction, never
-     * unanchored.
+     * Marking a seal unreadable after deleting its segment still leaves it
+     * tampered by the next link; at the anchor's head it is contradicted.
      *
      * @return void
      */
@@ -1122,9 +1082,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * A seal made under a key since removed from the ring cannot be verified,
-     * which fails the run, while the seal after it, under the key that remains,
-     * verifies and links to it.
+     * A seal under a key removed from the ring is unverifiable and fails the
+     * run, while the next seal verifies and links to it.
      *
      * @return void
      */
@@ -1145,9 +1104,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Rows of `[tamper]`: each alteration that fails a run, applied to a log of
-     * three seals of two entries each, returning the finding the run reports
-     * first and the id it names.
+     * Rows of `[tamper]`: each alteration that fails a run of three seals of
+     * two entries, returning the first finding and the id it names.
      *
      * @return iterable<string, array{0: \Closure(self): array{0: string, 1: ?string}}>
      */
@@ -1270,8 +1228,7 @@ final class TamperingTest extends TestCase
 
     /**
      * Every alteration that fails a run exits 1 and names its first finding and
-     * the first bad id, in the output, in the event dispatched and in the
-     * exception reported.
+     * bad id in the output, the event and the reported exception.
      *
      * @param  \Closure(self): array{0: string, 1: ?string}  $tamper
      * @return void
@@ -1301,10 +1258,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Delete the first member, in entry id order, of the seal at the sequence
-     * with its entry, and rewrite the seal's count and members digest to the
-     * members left, signing the result with the key when asked, as a key holder
-     * could, and storing its digest alone otherwise; return the new digest.
+     * Delete the seal's first member with its entry and rewrite its count and
+     * members digest, signed with the key when asked; return the digest.
      *
      * @param  int  $sequence
      * @param  bool  $withTheKey
@@ -1323,9 +1278,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Forge the chain with the key from the seal at the sequence to the head:
-     * drop a member from that seal and re-sign it, then relink and re-sign
-     * every seal after it.
+     * Forge the chain with the key from the seal at the sequence to the head,
+     * re-signing each seal.
      *
      * @param  int  $sequence
      * @return void
@@ -1341,9 +1295,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Insert, by hand, a seal of the entry after the head, chained onto it and
-     * with a digest consistent with its fields, under a signature that is not
-     * the key's, with its member row, and return its id.
+     * Insert a seal of the entry after the head with a consistent digest and a
+     * signature not the key's, with its member row; return its id.
      *
      * @param  string  $entryId
      * @return string
@@ -1378,9 +1331,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * Delete every entry of the seal and keep a prune record of all of them in
-     * the ledger: one signed with the key, or, when forged, the same record
-     * under a signature that is not the key's.
+     * Delete every entry of the seal and keep their prune record in the ledger,
+     * signed with the key or, when forged, without it.
      *
      * @param  array<string, scalar|null>  $seal
      * @param  bool  $forged
@@ -1521,9 +1473,8 @@ final class TamperingTest extends TestCase
     }
 
     /**
-     * The line the verify command prints for a seal: its sequence and id, its
-     * integrity, its anchoring and the member rows found, then its finding and
-     * the first id it was found at, when it has one.
+     * The line the verify command prints for a seal, with its finding and first
+     * id when it has one.
      *
      * @param  int  $sequence
      * @param  string  $id

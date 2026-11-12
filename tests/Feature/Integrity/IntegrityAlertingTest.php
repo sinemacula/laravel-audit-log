@@ -31,12 +31,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for how an integrity failure reaches the application: sealing
- * and verification alike dispatch one payload-free `IntegrityCheckFailed`,
- * whose maps list every status in order, and report an
- * `IntegrityCheckFailedException` that carries no other exception, on a failure
- * and on a run that stopped; a listener sees the counts and the heads; and a
- * listener or a reporter that fails hides neither the exit code nor the report.
+ * Feature tests for how an integrity failure reaches the application through
+ * `IntegrityCheckFailed` and the exception handler.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -118,9 +114,8 @@ final class IntegrityAlertingTest extends TestCase
     }
 
     /**
-     * The event's public properties are exactly the eight, each typed as a
-     * scalar, `null` or an array, and each array a map of counts by status,
-     * from a failing verification, a stopped one and a seal conflict.
+     * The event's public properties are exactly the eight, each a scalar,
+     * `null` or a map of counts by status, for every kind of failure.
      *
      * @return void
      */
@@ -178,10 +173,8 @@ final class IntegrityAlertingTest extends TestCase
     }
 
     /**
-     * A listener sees the counts of a failing verification, its first finding
-     * and the id it was found at, the local head and the anchor's, and that the
-     * run covered the whole log. The anchor holds the head's digest and no
-     * receipt is kept, so every seal is unanchored on every engine.
+     * A listener sees a failing verification's counts, its first finding and
+     * id, both heads and that the run covered the whole log.
      *
      * @return void
      */
@@ -224,9 +217,8 @@ final class IntegrityAlertingTest extends TestCase
     }
 
     /**
-     * A listener that throws hides nothing: its own exception is reported, as
-     * it threw, and a failing verification still exits 1 and is still reported
-     * after it, and so is a stopped one.
+     * A listener that throws is reported and hides nothing: a failing or
+     * stopped verification still exits 1 and is still reported.
      *
      * @return void
      */
@@ -328,9 +320,8 @@ final class IntegrityAlertingTest extends TestCase
     }
 
     /**
-     * Store and seal the number of seals, two entries each, recorded a minute
-     * apart, through the seal command, which anchors each seal when an anchor
-     * is bound.
+     * Store and seal the number of seals, two entries each a minute apart,
+     * through the seal command, which anchors when an anchor is bound.
      *
      * @param  int  $count
      * @return void
