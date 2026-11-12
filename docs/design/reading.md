@@ -2,14 +2,12 @@
 
 ## Purpose
 
-This note records how the trail is read, for whom, and what a read leaves behind: the one immutable query a terminal
-call ends, the access policy that answers a scope for each viewer and purpose, the one compiler that turns a scope and
-the caller's filters into SQL, the cursor that opens the next page, the entry a viewer is shown and the grant that
-reveals its encrypted fields, the record every read writes before anything it found leaves the package, and the export
-that is journalled before it is published and verified later from its bundle. An audit log is personal data held about
-everyone it names, and a read that is not itself recorded, or that shows more than its scope, would make the log a way
-around the controls it records. How to read the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is
-in `threat-model.md`.
+This note records how the trail is read, for whom, and what a read leaves behind: the immutable query, the access
+policy, the one compiler that turns a scope and the caller's filters into SQL, the signed cursor, the entry a viewer is
+shown and the grant that reveals its encrypted fields, the record every read writes before anything it found leaves the
+package, and the export that is journalled before it is published and verified later from its bundle. A read that is not
+itself recorded, or that shows more than its scope, would make the log a way around the controls it records. How to read
+the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is in `threat-model.md`.
 
 ## Invariants
 

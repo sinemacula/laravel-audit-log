@@ -2,18 +2,14 @@
 
 ## Purpose
 
-This note records what the package does to the log after it is written: how entries are held, kept for as long as a
-retention policy says and then pruned one by one, how another system's records are imported, how the maintenance
-operations on owners' keys, erasure, reinstatement, rewrap and the reconciliation of a restore, are journalled and
-recorded beside them, and what makes each of these accountable. Every destructive or privileged operation is journalled
-in a chained, signed journal that every seal commits to, so the journal is anchored as the entries are, and every
-decision to delete is read from that verified journal inside one lock, never from a table anyone could edit. Two
-guarantees are stated apart, here as everywhere. Database credentials can still destroy rows; the package's
-cryptographic evidence makes unauthorised destruction detectable, never impossible. Whoever holds the maintenance
-credentials can delete entries, holds and journal rows outside the package, and the seals, the journal and
-`audit-log:verify` make that detectable; a hold, a retention policy and the journal decide what the package itself
-deletes, and stop no one else. What none of this promises is in `threat-model.md`; how a prune is verified is in
-`integrity.md`.
+This note records what the package does to the log after it is written: holds, retention and pruning one entry at a
+time, imports from another system, and the journalled maintenance of owners' keys (erasure, reinstatement, rewrap and
+the reconciliation of a restore). Every destructive or privileged operation is journalled in a chained, signed journal
+that every seal commits to, and every decision to delete is read from that verified journal inside one lock, never from
+a table anyone could edit. Two guarantees are stated apart, here as everywhere. Database credentials can still destroy
+rows; the package's cryptographic evidence makes unauthorised destruction detectable, never impossible. A hold, a
+retention policy and the journal decide what the package itself deletes, and stop no one else. What none of this
+promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
 
 ## Invariants
 

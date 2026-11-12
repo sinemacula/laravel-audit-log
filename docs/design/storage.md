@@ -2,15 +2,11 @@
 
 ## Purpose
 
-This note records where and how entries are kept: the entries table and its columns, indexes and engine options, the
-artifacts table beside it, the connections the tables live on and are maintained through, the grants each needs, the
-read model that never writes, and how the database store inserts a finalised record, resolves a duplicate and leaves a
-host transaction usable. It also records the two tables delivery works from, the outbox and the receipts, and the
-connection each is on, the three tables integrity works from, the checkpoints, their members and the integrity state,
-the four tables the lifecycle works from, the journal, the holds, the lock and the import batches, the three tables the
-owners' keys are kept in, the subject keys, the owner erasures and the key uses, the installation's identity, and the
-grants and optional triggers that keep the log append-only, for each of the writer, the maintenance user and the
-verifier, as SQL the tests run. The table is evidence, so what each column holds, how a time or an id is
+This note records where and how entries are kept: the entries and artifacts tables, the connections they live on and are
+maintained through, the read model that never writes, and how the database store inserts a record, resolves a duplicate
+and leaves a host transaction usable. It also records the tables delivery, integrity, the lifecycle and owners' keys
+work from, the installation's identity, and the grants and optional append-only triggers for the writer, the maintenance
+user and the verifier, as SQL the tests run. The table is evidence, so what each column holds, how a time or an id is
 written and what the store may do to a row are fixed here; a change to any of them changes what every stored row means.
 
 ## Invariants
@@ -127,7 +123,7 @@ written and what the store may do to a row are fixed here; a change to any of th
   (`Database\LifecycleTables`). Each follows the entries table: the table name's grammar, no foreign keys, and on MySQL
   `utf8mb4_0900_bin` and `InnoDB`, so each commits with what it describes.
 - The journal holds one signed row per lifecycle event, in 17 columns: `id`, `sequence` (a signed `bigInteger`, 1, 2,
-  3 … with no gap, under the unique `<table>_sequence_unique`), `log_id`, `kind`, `operation_id`, `occurred_at`,
+  3 ... with no gap, under the unique `<table>_sequence_unique`), `log_id`, `kind`, `operation_id`, `occurred_at`,
   `authority_type`, `authority_id`, `reason`, `external_reference`, `seal_id`, `hold_id`, `payload`, `payload_digest`,
   `previous_hmac`, `key_id` and `hmac`. The payload is canonical JSON as `longText`, never a JSON column, so the digest
   the signature covers is the digest of the bytes stored. It is indexed by `<table>_seal_index`, `<table>_hold_index`

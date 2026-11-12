@@ -222,7 +222,7 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 | 5  | a date                                                                                            | ISO-8601 in UTC with microseconds                                                      |
 | 6  | a ramsey UUID or a Symfony UID                                                                    | its string, sanitised, if of its library's own classes; otherwise `[UNSERIALISABLE]`   |
 | 7  | a boolean, `null` or a string                                                                     | itself; a string is sanitised                                                          |
-| 8  | an integer                                                                                        | itself within ±(2^53 − 1), otherwise its decimal string                                |
+| 8  | an integer                                                                                        | itself within +/-(2^53 - 1), otherwise its decimal string                              |
 | 9  | a float                                                                                           | finite: its shortest round-trip decimal string, `-0.0` as `0`; otherwise `[NONFINITE]` |
 | 10 | an array deeper than eight levels                                                                 | `[TRUNCATED]`                                                                          |
 | 11 | a list                                                                                            | a list of each element normalised (`[]` is an empty list)                              |
@@ -232,7 +232,7 @@ because a model is also `Stringable` and `JsonSerializable`, and its string form
 - Floats are formatted as ECMAScript formats numbers, without reading `precision` or `serialize_precision`:
   positional from 1e-6 to below 1e21 (`0.1`, `100`, `0.30000000000000004`), otherwise `1e+21` or `5e-324`.
 - The outermost array is the first level, so a self-referencing array ends in `[TRUNCATED]` rather than recursing.
-- A map whose keys are `0` to `n − 1` in order is a list in PHP and encodes as one; field rules still reach it,
+- A map whose keys are `0` to `n - 1` in order is a list in PHP and encodes as one; field rules still reach it,
   because a literal digit in a path matches a list index.
 - Sanitising (`TextSanitizer`) repairs invalid UTF-8 byte by byte to U+FFFD, turns each whitespace control (U+0009 to
   U+000D) into one space, and strips every other control character (NUL, the rest of C0, DEL and C1) and the bidi
