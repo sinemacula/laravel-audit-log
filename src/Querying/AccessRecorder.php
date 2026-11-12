@@ -20,33 +20,8 @@ use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 
 /**
- * Writes the record of a read of the trail, a count, an export, the
- * verification of an export or an export's failed publication, through the
- * package's own write path, fail-closed whatever the failure mode says, and
- * returns it only once the store or the outbox has acknowledged it, so nothing
- * a read would disclose leaves the package before its record is durable.
- *
- * The transaction rule is confirmed again just before the write, since the
- * policy that authorised the read is the application's code and may have opened
- * a transaction; its refusal records nothing. It is confirmed once more after
- * the write, before the acknowledgement is accepted, since the contributors the
- * write runs are the application's code too and may have left a transaction
- * open that the record's insert joined: an acknowledgement that could still
- * roll back is never accepted, and the read is refused with the transaction's
- * refusal, reported once. The record is the viewer's, by the viewer's
- * reference, in the tenant a scope of exactly one tenant names, or explicitly
- * in none, so an ambient tenant is never inherited. It keeps the evidence
- * exactly or is refused before anything is delivered.
- *
- * A write that failed, spilled under the fail-closed rule, a write the delivery
- * refused before writing, and a write that returned without being acknowledged
- * are each reported once, through the report latch, and refuse the read with
- * `AuditReadRefusedException`, which names nothing of the record. A failure
- * fatal to an open transaction propagates as the write path threw it, already
- * sanitised.
- *
- * It resolves everything from the container on every call, so it outlives
- * requests safely.
+ * Writes the record of a read fail-closed and returns it only once the store or
+ * the outbox has acknowledged it, so nothing is disclosed before it is durable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,14 +37,12 @@ final readonly class AccessRecorder
      */
     public function __construct(
 
-        /** The container the gate, the definitions, the contributors and the reporter are resolved from on every call. */
+        /** Resolved from on every call, so the recorder outlives requests safely. */
         private Container $container,
     ) {}
 
     /**
-     * Record the activity of the viewer under the scope, keeping the evidence
-     * exactly, with its outcome and the reason given for a failure or a denial,
-     * and return the finalised record the store or the outbox acknowledged.
+     * Record the viewer's activity and return the acknowledged record.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
@@ -122,10 +95,8 @@ final readonly class AccessRecorder
     }
 
     /**
-     * Write the builder's record through the record pipeline with the package
-     * write, under the definitions and contributors registered while the
-     * application booted, refusing the read, once the failure is reported, when
-     * the write failed or the delivery refused it.
+     * Write the record through the pipeline, refusing the read when the write
+     * fails or the delivery refuses it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  \SineMacula\Laravel\AuditLog\Delivery\PackageWrite  $package
@@ -149,9 +120,8 @@ final readonly class AccessRecorder
     }
 
     /**
-     * Refuse the read when a transaction is open, after the write, that the
-     * acknowledged record could still be rolled back with, once the refusal is
-     * reported.
+     * Refuse the read when a transaction the contributors left open could still
+     * roll the acknowledged record back.
      *
      * @return void
      *
@@ -169,8 +139,7 @@ final readonly class AccessRecorder
     }
 
     /**
-     * Report the failure once, through the report latch, and refuse the read as
-     * unrecorded.
+     * Report the failure once and refuse the read as unrecorded.
      *
      * @param  \Throwable  $failure
      * @return never
@@ -185,8 +154,7 @@ final readonly class AccessRecorder
     }
 
     /**
-     * Report the failure once, through the report latch, ignoring a reporter
-     * that fails.
+     * Report the failure once, ignoring a reporter that fails.
      *
      * @param  \Throwable  $failure
      * @return void
@@ -200,16 +168,13 @@ final readonly class AccessRecorder
                 $handler->report($failure);
             });
         } catch (\Throwable) {
-            // The read is refused all the same; a broken reporter has nowhere
-            // left to say so, and must not replace the refusal
+            // A broken reporter must not replace the refusal
         }
     }
 
     /**
-     * The builder of the record: the activity's code, by the viewer's
-     * reference, in the scope's single tenant or explicitly none, with the
-     * evidence's properties and manifest, the outcome and its reason,
-     * fail-closed.
+     * The fail-closed record, in the scope's single tenant or explicitly none
+     * so an ambient tenant is never inherited.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer

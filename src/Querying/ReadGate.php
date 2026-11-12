@@ -21,41 +21,11 @@ use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 
 /**
- * The gate every read of the trail passes before anything is queried: a count,
- * a page, an export and the verification of an export alike. It refuses, with
- * `AuditReadRefusedException`, what could not end in a durable record of the
- * read, so nothing is disclosed that the trail might never hold.
+ * The gate every read passes before anything is queried, refusing what could
+ * not end in a durable record of the read.
  *
- * A read is refused when it is entered inside the read guard, the write guard,
- * which also covers a failed write being handled, or an event mapper, where its
- * record would be refused only after the query. The first refusal in a read or
- * a write window is reported, so a recursion refused many times is diagnosed
- * once, and a mapper's refusal is reported through the report latch; a reporter
- * that fails is ignored, and the read is refused all the same.
- *
- * In sync mode a read is refused when the bound store does not say a return is
- * durable, or keeps no attachment, since every read record carries one and
- * would otherwise fail only after the query. The failure mode is never read,
- * since a read's record is fail-closed whatever it says; a malformed delivery
- * mode is refused as it is read.
- *
- * A read is refused, too, while a transaction is open that the framework would
- * not yet call committed, on the storage connection, which the read uses, so a
- * page never shows a row its caller's own transaction could still roll back,
- * or, in outbox mode, on the outbox connection, whose committed row is the
- * read's acknowledgement. The framework's own rule judges it: the transactions
- * manager's `afterCommitCallbacksShouldBeExecuted()` at the connection's level,
- * so the base transaction Laravel's testing manager wraps a test in counts as
- * committed, and any transaction counts as open where no manager is bound. In
- * sync mode the same rule judges every other connection with a transaction open
- * that the bound store says it joins, since such a store's write is durable
- * only once that transaction commits. The same rule runs again just before the
- * read's record is written, and once more before its acknowledgement is
- * accepted, since the policy that authorised the read and the contributors its
- * record runs are the application's code and may have opened one.
- *
- * The gate queries nothing, and opens no connection: it resolves everything
- * from the container on every call, so it outlives requests safely.
+ * An open transaction is judged as Laravel judges after-commit callbacks, so
+ * the testing manager's base transaction counts as committed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,7 +42,7 @@ final readonly class ReadGate
      */
     public function __construct(
 
-        /** The container the guards, the settings, the store, the transactions manager and the reporter are resolved from on every call. */
+        /** Resolved from on every call, so the gate outlives requests safely. */
         private Container $container,
 
         /** Resolves connection names, without opening a connection. */
@@ -80,10 +50,7 @@ final readonly class ReadGate
     ) {}
 
     /**
-     * Let a read in, or refuse it before anything is queried: inside a read or
-     * a write window or an event mapper, with a store that cannot keep its
-     * record in sync mode, and with a transaction open that could still roll
-     * its record back.
+     * Let a read in, or refuse it before anything is queried.
      *
      * @return void
      *
@@ -105,11 +72,9 @@ final readonly class ReadGate
     }
 
     /**
-     * Refuse a read while a transaction is open, on the storage connection, in
-     * outbox mode on the outbox connection, and in sync mode on any connection
-     * the bound store says it joins, that the framework would not yet call
-     * committed. It is the check made before a read's record is written and
-     * before its acknowledgement is accepted.
+     * Refuse a read while a transaction that could roll its record back is
+     * open; rechecked around the write, as the policy and contributors may open
+     * one.
      *
      * @return void
      *
@@ -123,8 +88,7 @@ final readonly class ReadGate
     }
 
     /**
-     * Run the work inside the read guard's window and return what it returns,
-     * closing the window however the work ends.
+     * Run the work inside the read guard's window.
      *
      * @template TResult
      *
@@ -141,9 +105,8 @@ final readonly class ReadGate
     }
 
     /**
-     * Refuse a read inside a read window, a write window or an event mapper,
-     * reporting the first refusal in a window and a mapper's through the report
-     * latch.
+     * Refuse a read inside a read or write window or an event mapper, reporting
+     * a recursion once.
      *
      * @return void
      *
@@ -177,8 +140,7 @@ final readonly class ReadGate
     }
 
     /**
-     * Refuse a re-entered read, reporting it first when it is the window's
-     * first refusal.
+     * Refuse a re-entered read, reporting the window's first refusal.
      *
      * @param  bool  $first
      * @return never
@@ -207,14 +169,13 @@ final readonly class ReadGate
         try {
             $this->container->make(ExceptionHandler::class)->report($refusal);
         } catch (\Throwable) {
-            // The read is refused all the same; a broken reporter has nowhere
-            // left to say so, and must not replace the refusal
+            // A broken reporter must not replace the refusal
         }
     }
 
     /**
-     * Refuse, in sync mode, a store that does not say a return is durable or
-     * that keeps no attachment, naming its class.
+     * Refuse a store that is not durable or keeps no attachment, so the read
+     * does not fail only after the query.
      *
      * @return void
      *
@@ -234,10 +195,8 @@ final readonly class ReadGate
     }
 
     /**
-     * Refuse a read while the storage connection, in outbox mode the outbox
-     * connection, or in sync mode a connection the bound store joins, holds a
-     * transaction the framework would not yet call committed, naming that
-     * connection.
+     * Refuse a read while an acknowledging connection holds an uncommitted
+     * transaction.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void
@@ -254,10 +213,8 @@ final readonly class ReadGate
     }
 
     /**
-     * The connections a read's record could be rolled back with: the storage
-     * connection, which the read reads, and, in outbox mode, the outbox
-     * connection, or, in sync mode, each connection with a transaction open
-     * that the bound store says it joins.
+     * The storage connection, plus the outbox connection, or in sync mode each
+     * open connection the store joins.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return non-empty-list<string>
@@ -278,10 +235,8 @@ final readonly class ReadGate
     }
 
     /**
-     * Whether the named connection is a database connection with a transaction
-     * open that the framework would not yet call committed: no transactions
-     * manager is bound, or the bound one would not yet run the callbacks of a
-     * commit at the connection's level.
+     * Whether the connection has a transaction open that Laravel would not yet
+     * call committed; any counts where no transactions manager is bound.
      *
      * @param  string  $name
      * @return bool

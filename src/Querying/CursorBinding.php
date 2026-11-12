@@ -9,15 +9,8 @@ use SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 
 /**
- * What a page cursor is bound to: the version of the cursor, the log it walks,
- * as the storage connection's name and the entries table, the viewer's
- * reference, the purpose of the read, the order, the normalised filters, the
- * fingerprint of the scope the policy answered, and the page size.
- *
- * A cursor's MAC is computed over the canonical encoding of all of these, with
- * the id of the key that signs it and the payload part exactly as it was sent,
- * so a cursor opens only for the read it was issued for, and nothing of its
- * payload is decoded to check it.
+ * The read a page cursor's MAC is bound to, so a cursor opens only for the read
+ * it was issued for.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,10 +19,10 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
  */
 final readonly class CursorBinding
 {
-    /** @var int The version of the cursor the binding is for. */
+    /** @var int The cursor version. */
     private const int VERSION = 1;
 
-    /** @var string The order every page of the trail walks: newest occurrence first, then the highest id. */
+    /** @var string Newest occurrence first, then the highest id. */
     private const string ORDER = 'occurred_at_desc';
 
     /**
@@ -68,14 +61,12 @@ final readonly class CursorBinding
         /** How many entries a page holds. */
         private int $perPage,
 
-        /** The log the cursor walks: the storage connection's name and the entries table. */
+        /** The storage connection's name and the entries table. */
         private array $log,
     ) {}
 
     /**
-     * The binding of a read of the trail: its viewer, purpose, filters, the
-     * scope the policy answered, its page size, and the storage connection's
-     * resolved name and the entries table it reads.
+     * The binding of a read of the trail.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose  $purpose
@@ -109,8 +100,7 @@ final readonly class CursorBinding
     }
 
     /**
-     * The canonical input of a cursor's MAC under the key with the id, over the
-     * payload part exactly as it was sent, which is never decoded here.
+     * The canonical MAC input over the payload part exactly as sent, undecoded.
      *
      * @param  string  $keyId
      * @param  string  $payload

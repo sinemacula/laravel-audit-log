@@ -10,18 +10,11 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * The codes the package records of its own activity: the read path's reads,
- * counts, exports and their verification, the lifecycle's prunes, holds,
- * releases and imports, and its owners' erasures and the reinstatements and
- * rewraps of their keys. Each is under the reserved `audit_log.` prefix, and
- * this enum is the only way to mint a code under it. It stays among the read
- * path's enums, which the records already name, so no layer gains a dependency
- * to name it.
+ * The codes the package records of its own activity, the only way to mint a
+ * code under the reserved `audit_log.` prefix.
  *
- * Every definition is version 1, in the `audit` category, and drops every field
- * it does not list; it keeps exactly the evidence its record carries. The event
- * catalogue holds these definitions from the moment it is made, so no
- * application registers them and none can define them differently.
+ * The catalogue holds these definitions from creation, so no application can
+ * define them differently.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,7 +50,7 @@ enum PackageActivity: string implements DefinesAuditEvents
     // Records from another source were imported into the trail
     case IMPORTED = 'audit_log.imported';
 
-    // An owner's keys were erased, so the fields sealed under them never read
+    // An owner's keys were erased, so their sealed fields never read
     case SUBJECT_ERASED = 'audit_log.subject_erased';
 
     // The owners' keys were wrapped again under the current wrapping key
@@ -70,11 +63,8 @@ enum PackageActivity: string implements DefinesAuditEvents
     private const string CATEGORY = 'audit';
 
     /**
-     * The definition of this case's event code: version 1, the `audit`
-     * category, every field it does not list dropped, and the evidence of the
-     * read, the count, the export, the verification, the failed publication,
-     * the prune, the hold, the release, the import, the erasure, the rewrap or
-     * the reinstatement retained.
+     * The definition of this case's code, dropping every field but its
+     * evidence.
      *
      * @return \SineMacula\Laravel\AuditLog\Definitions\EventDefinition
      *
@@ -91,9 +81,7 @@ enum PackageActivity: string implements DefinesAuditEvents
     }
 
     /**
-     * Whether the activity reads the trail, an export's verification included;
-     * a failed publication is not a read, and nor is any of the lifecycle's
-     * activity or of its owners' keys.
+     * Whether the activity reads the trail, an export's verification included.
      *
      * @return bool
      */
@@ -113,8 +101,8 @@ enum PackageActivity: string implements DefinesAuditEvents
     }
 
     /**
-     * Whether retention never prunes the code's entries: an export's journal is
-     * its evidence for as long as the database lives.
+     * Whether retention never prunes the code's entries, as an export's journal
+     * is its evidence.
      *
      * @return bool
      */
@@ -149,8 +137,7 @@ enum PackageActivity: string implements DefinesAuditEvents
     }
 
     /**
-     * The properties the record of an operation on the trail or on its owners'
-     * keys keeps, in the order it gives them; a read path's code has none here.
+     * The properties an operation's record keeps, in the order it gives them.
      *
      * @return non-empty-list<string>
      *

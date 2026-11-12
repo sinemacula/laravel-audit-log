@@ -5,13 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Querying;
 
 /**
- * Thrown when a cursor given to a read of the trail is refused: malformed,
- * signed under a key the ring does not hold, tampered with, or issued for
- * another viewer, purpose, scope, set of filters or page size.
- *
- * Its message is the same whatever the cause, so a refusal tells a caller
- * nothing of why: neither which part failed nor whether a key exists. It never
- * carries another exception.
+ * Thrown when a page cursor is refused, with the same message whatever the
+ * cause so a caller learns nothing of why, not even whether a key exists.
  *
  * @api
  *

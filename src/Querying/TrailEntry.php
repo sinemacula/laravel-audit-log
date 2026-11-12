@@ -13,17 +13,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * An entry of the trail as a viewer is shown it, safe to hand on by
- * construction: its references, times, code, outcome and versions as typed
- * values, a reason its record concealed already `null`, and its context and
- * properties as display arrays, in which every encrypted fragment, an owned
- * note included, and an encrypted IP address are what the field reader
- * answered, a value or a marker, never a ciphertext.
+ * An entry as a viewer is shown it, safe to hand on: every encrypted fragment
+ * is a value or a marker, never a ciphertext.
  *
- * An artifact the entry carries is shown by its descriptor alone, its kind,
- * count and digest; its members are never loaded. Times are instants in UTC to
- * the microsecond, and `toArray()` gives them in the package's form. Only the
- * stored row is evidence: this is a projection of it.
+ * It is a projection of the stored row, which alone is evidence. An artifact
+ * shows by its descriptor; its members are never loaded.
  *
  * @api
  *
@@ -103,7 +97,7 @@ final readonly class TrailEntry implements Arrayable
         /** How the activity ended. */
         public Outcome $outcome,
 
-        /** Why it failed or was denied; `null` when none was given or its record concealed it. */
+        /** Why it failed or was denied; `null` when none or concealed. */
         public ?string $reason,
 
         /** Who did it, if known. */
@@ -155,20 +149,20 @@ final readonly class TrailEntry implements Arrayable
         /** The import batch the entry came in, for an imported entry. */
         public ?string $importBatchId,
 
-        /** The keyed digest of an imported entry's source assertion; `null` on every captured entry. */
+        /** The keyed digest of an imported entry's source assertion. */
         public ?string $sourceDigest,
 
-        /** The client's IP address as stored, or what the field reader answered for an encrypted one. */
+        /** The client's IP address, or the field reader's answer if encrypted. */
         public ?string $ip,
 
         /** The client's user agent, if known. */
         public ?string $userAgent,
 
-        /** The context, for display: maps as arrays, every encrypted fragment as the field reader answered it. */
+        /** The context for display, fragments as the field reader answered. */
         #[\SensitiveParameter]
         public array $context,
 
-        /** The properties, for display: maps as arrays, every encrypted fragment as the field reader answered it, the manifest descriptor lifted out. */
+        /** The properties for display, without the manifest descriptor. */
         #[\SensitiveParameter]
         public array $properties,
 
@@ -184,13 +178,12 @@ final readonly class TrailEntry implements Arrayable
         /** The entry's HMAC, lower-case hex. */
         public string $hmac,
 
-        /** The descriptor of the artifact the entry carries, its kind, count and digest, or `null` for none. */
+        /** The artifact's descriptor, or `null` for none. */
         public ?array $manifest,
     ) {}
 
     /**
-     * The entry with snake-case keys: references as `type` and `id` pairs,
-     * enums as their values and times as instants in the package's form.
+     * The entry with snake-case keys, enums as values and times as instants.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -11,18 +11,8 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * A row of the entries table exactly as the row codec decodes it: every column
- * in table order, its JSON as `stdClass` objects so `{}` and maps with numeric
- * keys survive, and its integrity fields, the integrity version, key id and
- * HMAC, included. It is evidence: nothing here trims, folds, conceals or
- * decrypts a value, and its line is the canonical encoding the entry was signed
- * over, byte for byte what the NDJSON formatter writes for the same finalised
- * record.
- *
- * A finalised record rebuilt from it serves a projection, an OCSF or a CEF
- * line, alone: a record with an artifact carries an attachment described from
- * its signed descriptor, with no members, which can never be stored, queued or
- * spilled.
+ * A row of the entries table exactly as the row codec decodes it, kept as
+ * evidence: JSON stays `stdClass` so `{}` and numeric-keyed maps survive.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,10 +21,10 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  */
 final readonly class StoredEntry
 {
-    /** @var string The key the package's metadata sits under in the properties. */
+    /** @var string The package's metadata key in the properties. */
     private const string METADATA_KEY = '_audit';
 
-    /** @var string The key the manifest descriptor sits under in the metadata. */
+    /** @var string The manifest descriptor's key in the metadata. */
     private const string MANIFEST_KEY = 'manifest';
 
     /**
@@ -46,14 +36,13 @@ final readonly class StoredEntry
      */
     private function __construct(
 
-        /** The decoded row: every column of the entries table, in table order, as the row codec read it. */
+        /** Every column of the decoded row, in table order. */
         #[\SensitiveParameter]
         public array $envelope,
     ) {}
 
     /**
-     * The entry a stored row holds, decoded by the row codec with every column
-     * required and each read as its kind.
+     * The entry a stored row holds.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -119,8 +108,7 @@ final readonly class StoredEntry
     }
 
     /**
-     * The entry's place in the order of a page: when its activity occurred,
-     * then its id.
+     * The entry's place in a page's order.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\Position
      *
@@ -132,8 +120,7 @@ final readonly class StoredEntry
     }
 
     /**
-     * The entry's place in the order of an export: when it was recorded, then
-     * its id.
+     * The entry's place in an export's order.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\Position
      *
@@ -145,10 +132,8 @@ final readonly class StoredEntry
     }
 
     /**
-     * The manifest descriptor the entry signed at `_audit.manifest`, as stored,
-     * with its maps as arrays, or `null` when its properties hold none. A value
-     * there that is not a map is given as an empty array, which no descriptor
-     * check accepts.
+     * The signed descriptor at `_audit.manifest`, or `null` for none; a non-map
+     * is an empty array, which no descriptor check accepts.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -169,8 +154,7 @@ final readonly class StoredEntry
     }
 
     /**
-     * The entry as one line of newline-delimited JSON, without its line feed:
-     * its envelope in the canonical encoding it was signed over.
+     * The entry's NDJSON line, without its line feed, as it was signed.
      *
      * @return string
      *
@@ -182,12 +166,8 @@ final readonly class StoredEntry
     }
 
     /**
-     * The finalised record the entry holds, for a projection alone: the record
-     * rebuilt from the envelope with its maps as arrays and, when it signed a
-     * descriptor, an attachment described from it with no members; its
-     * finalisation as stored, and its JSON columns as they were decoded, so the
-     * record's envelope is the entry's. A column the record cannot hold, or a
-     * descriptor that is not exactly one, is refused.
+     * The finalised record, for a projection alone: its attachment has no
+     * members, so it can never be stored, queued or spilled.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
      *
@@ -207,8 +187,7 @@ final readonly class StoredEntry
     }
 
     /**
-     * The value with every `stdClass` within it, itself included, as an
-     * associative array of its members, and everything else as it is.
+     * The value with every `stdClass` in it as an associative array.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -225,8 +204,7 @@ final readonly class StoredEntry
     }
 
     /**
-     * The JSON column's decoded value, which a record can hold only as an
-     * object, a list or `null`.
+     * The JSON column's decoded object, list or `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -247,8 +225,7 @@ final readonly class StoredEntry
     }
 
     /**
-     * The column the row codec read as a string, or a time it read into the
-     * package's form.
+     * The column the row codec read as a string.
      *
      * @param  'hmac'|'id'|'key_id'|'occurred_at'|'recorded_at'  $column
      * @return string
@@ -257,7 +234,7 @@ final readonly class StoredEntry
     {
         $value = $this->envelope[$column];
 
-        // The codec reads each of these columns as a string or refuses the row
+        // The codec reads these columns as a string or refuses the row
         assert(is_string($value));
 
         return $value;
@@ -273,8 +250,7 @@ final readonly class StoredEntry
     {
         $value = $this->envelope[$column];
 
-        // The codec reads each of these columns as an integer or refuses the
-        // row
+        // The codec reads these columns as an integer or refuses the row
         assert(is_int($value));
 
         return $value;

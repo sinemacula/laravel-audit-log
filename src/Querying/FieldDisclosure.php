@@ -7,10 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Querying;
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
- * What a page disclosed of the encrypted fragments of its entries: whether its
- * scope revealed them, and how many it showed in each state, `encrypted`,
- * `erased`, `revealed` and `unreadable`. It counts fragments, never names one,
- * and holds nothing a fragment holds.
+ * How many encrypted fragments a page showed in each state; it counts them and
+ * never names one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,10 +38,10 @@ final readonly class FieldDisclosure implements Arrayable
         /** How many fragments were shown sealed as `encrypted`. */
         public int $encrypted,
 
-        /** How many fragments were shown as `erased`, their owner's keys destroyed. */
+        /** How many fragments were shown as `erased`. */
         public int $erased,
 
-        /** How many fragments were shown as the value the field reader revealed. */
+        /** How many fragments the field reader revealed. */
         public int $revealed,
 
         /** How many fragments were shown as `unreadable`. */
@@ -55,9 +53,7 @@ final readonly class FieldDisclosure implements Arrayable
     }
 
     /**
-     * The disclosure of a page that showed no encrypted fragment, under a scope
-     * that revealed them or not: a denied or failed page's, or one whose
-     * entries hold none.
+     * The disclosure of a page that showed no encrypted fragment.
      *
      * @param  bool  $reveal
      * @return self
@@ -70,7 +66,7 @@ final readonly class FieldDisclosure implements Arrayable
     }
 
     /**
-     * How many fragments were shown in each state, by the state's name, sorted.
+     * The counts by state name, sorted.
      *
      * @return array{encrypted: int, erased: int, revealed: int, unreadable: int}
      */

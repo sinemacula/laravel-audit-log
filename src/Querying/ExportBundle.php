@@ -8,25 +8,11 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 
 /**
- * The offline bundle published beside an export as `<file>.manifest.json`: the
- * canonical encoding of exactly four keys, `bundle_version`, the descriptor of
- * the export's artifact, the signed columns of the entry that journalled the
- * export, and the export's canonical manifest as a string, followed by one line
- * feed.
+ * The offline bundle published beside an export as `<file>.manifest.json`,
+ * which verification checks and never trusts.
  *
- * With the bundle alone an auditor checks the file's digest and its membership
- * digest against the manifest, the manifest's digest against the descriptor the
- * entry signs, and, holding the key, the entry's HMAC over its columns. Nothing
- * in it is trusted: the bundle is what verification checks, never what it
- * believes.
- *
- * Decoding accepts exactly what encoding writes and nothing else: the four
- * keys, version 1, a descriptor of exactly its four keys, each of its kind, an
- * entry that is an object, a manifest that is a string, and bytes that are
- * exactly their canonical encoding and one line feed, within the envelope's
- * bound. It never throws for malformed contents. The entry keeps its JSON
- * columns as they were decoded, objects as objects, so it encodes to the bytes
- * it was signed over.
+ * Decoding accepts exactly what encoding writes. The entry's JSON columns stay
+ * objects so it encodes to the bytes it was signed over.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,10 +24,10 @@ final class ExportBundle
     /** @var int The version of the bundle an export is published with. */
     public const int VERSION = 1;
 
-    /** @var list<string> A bundle's keys, exactly, sorted as the canonical encoding writes them. */
+    /** @var list<string> A bundle's keys, sorted as the canonical encoding writes them. */
     private const array KEYS = ['bundle_version', 'descriptor', 'entry', 'manifest'];
 
-    /** @var array<string, 'integer'|'string'> A descriptor's keys, exactly, sorted, each with the kind of its value. */
+    /** @var array<string, 'integer'|'string'> A descriptor's sorted keys and value types. */
     private const array DESCRIPTOR = [
         'artifact_id' => 'string',
         'count'       => 'integer',
@@ -49,7 +35,7 @@ final class ExportBundle
         'kind'        => 'string',
     ];
 
-    /** @var int How deep a bundle is decoded: one more than an envelope, for the bundle's own object. */
+    /** @var int One more than an envelope's depth, for the bundle's own object. */
     private const int DEPTH = 514;
 
     /**
@@ -58,8 +44,7 @@ final class ExportBundle
     private function __construct() {}
 
     /**
-     * The bundle of an export: the canonical encoding of its version, the
-     * descriptor, the entry's columns and the manifest, and one line feed.
+     * The bundle of an export, canonically encoded with a trailing line feed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -91,8 +76,8 @@ final class ExportBundle
     }
 
     /**
-     * The descriptor, the entry's columns and the manifest a bundle holds, or
-     * `null` for contents that are not exactly a bundle this release writes.
+     * The parts a bundle holds, or `null` for anything this release does not
+     * write.
      *
      * @formatter:off
      *
@@ -125,8 +110,8 @@ final class ExportBundle
     }
 
     /**
-     * The fields of contents that are within the bound and are exactly the
-     * canonical encoding of a JSON object and one line feed, or `null`.
+     * The fields of a bounded, canonically encoded object and line feed, or
+     * `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -146,8 +131,7 @@ final class ExportBundle
 
             return $decoded instanceof \stdClass && CanonicalEncoder::encode($decoded) === $json ? get_object_vars($decoded) : null;
         } catch (\JsonException|\UnexpectedValueException) {
-            // Contents that are not JSON, or hold a value with no canonical
-            // form, are no bundle
+            // Not JSON, or no canonical form: no bundle
             return null;
         }
     }

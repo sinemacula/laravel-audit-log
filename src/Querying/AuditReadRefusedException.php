@@ -7,20 +7,11 @@ namespace SineMacula\Laravel\AuditLog\Querying;
 use SineMacula\Laravel\AuditLog\Querying\Enums\ReadRefusal;
 
 /**
- * Thrown when a read of the trail, a count, an export or the verification of an
- * export is refused or cannot be recorded, so nothing it would have disclosed
- * leaves the package: it was entered while another read, an audit record's
- * write or its failure, or an event mapper was running; a transaction that
- * could still roll its record back was open; the store could not keep its
- * record; its record could not be written or would not have kept its evidence
- * exactly; or the read itself failed, or its export could not be published.
+ * Thrown when a read is refused or cannot be recorded, so nothing it found is
+ * disclosed; `$reason` tells the causes apart without reading the message.
  *
- * Its cause is `$reason`, a `ReadRefusal`, and the class it names, a store's or
- * an exception's, is `$class`, and the connection it names is `$connection`, so
- * a caller tells the causes apart without reading the message. Its message
- * names classes and connections alone, never a value, a statement or a binding,
- * and it never carries another exception, so nothing of what was read, or of
- * what failed, can reach a reporter through it.
+ * Its message names classes and connections only and it carries no previous
+ * exception, so nothing that was read can reach a reporter.
  *
  * @api
  *
@@ -39,14 +30,13 @@ final class AuditReadRefusedException extends \RuntimeException
      */
     private function __construct(
 
-        // The message, built by the named constructor from the class or the
-        // connection alone
+        // Passed to the parent constructor, which owns the message
         string $message,
 
         /** Why the read was refused. */
         public readonly ReadRefusal $reason,
 
-        /** The class of the store that cannot keep the record, or of the exception the read or the publication failed with, or `null`. */
+        /** The store class or the failing exception class, or `null`. */
         public readonly ?string $class = null,
 
         /** The connection a transaction was open on, or `null`. */
@@ -56,9 +46,8 @@ final class AuditReadRefusedException extends \RuntimeException
     }
 
     /**
-     * The refusal of a read entered while a read of the trail, an audit
-     * record's write or the handling of its failure, or an event mapper was
-     * running.
+     * The refusal of a read entered while another read, a write or an event
+     * mapper was running.
      *
      * @return self
      */
@@ -71,9 +60,7 @@ final class AuditReadRefusedException extends \RuntimeException
     }
 
     /**
-     * The refusal of a read while a transaction that could still roll its
-     * record back, or show a row its caller could still roll back, is open on
-     * the connection.
+     * The refusal of a read while a transaction is open on the connection.
      *
      * @param  string  $connection
      * @return self
@@ -87,8 +74,7 @@ final class AuditReadRefusedException extends \RuntimeException
     }
 
     /**
-     * The refusal of a read whose record the store, of the class, does not say
-     * it keeps durably.
+     * The refusal of a read through a store that does not say it is durable.
      *
      * @param  string  $storeClass
      * @return self
@@ -101,8 +87,7 @@ final class AuditReadRefusedException extends \RuntimeException
     }
 
     /**
-     * The refusal of a read whose record's attachment the store, of the class,
-     * does not keep.
+     * The refusal of a read through a store that keeps no attachments.
      *
      * @param  string  $storeClass
      * @return self
@@ -116,8 +101,7 @@ final class AuditReadRefusedException extends \RuntimeException
     }
 
     /**
-     * The refusal of a read whose record could not be written, or was never
-     * acknowledged.
+     * The refusal of a read whose record was not written or acknowledged.
      *
      * @return self
      */
@@ -148,8 +132,7 @@ final class AuditReadRefusedException extends \RuntimeException
     }
 
     /**
-     * The refusal of an export that was recorded and whose file could not be
-     * published, with an exception of the class.
+     * The refusal of a recorded export whose file could not be published.
      *
      * @param  string  $exceptionClass
      * @return self

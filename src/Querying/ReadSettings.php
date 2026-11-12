@@ -8,16 +8,8 @@ use Illuminate\Contracts\Config\Repository;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 
 /**
- * The read and export settings, read from configuration on every call and
- * validated as they are read: the most entries a page of the trail may ask for
- * (`audit-log.read.max_per_page`) and how many entries an export reads per
- * statement (`audit-log.export.chunk`).
- *
- * A missing setting takes its default; a `null` set explicitly is malformed. A
- * number is an integer, or the canonical digit string an environment line
- * gives, within its range. Every malformed value fails closed with an
- * `InvalidArgumentException` naming the key and never the value, so a read or
- * an export never runs on a size nobody chose.
+ * The read and export settings, read and validated on every call; a malformed
+ * value is refused naming the key, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,7 +21,7 @@ final readonly class ReadSettings
     /** @var string Prefix of every read and export setting's key. */
     private const string PREFIX = 'audit-log.';
 
-    /** @var array<string, array{0: int, 1: int, 2: int}> Default, least and greatest value of each numeric setting, by its key under the prefix. */
+    /** @var array<string, array{0: int, 1: int, 2: int}> Default, least and greatest of each setting. */
     private const array NUMBERS = [
         'read.max_per_page' => [100, 1, 500],
         'export.chunk'      => [1000, 100, 10000],

@@ -13,26 +13,11 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The audit trail as a viewer reads it: filters that narrow it, the viewer it
- * is read for, and the terminal calls that read it, a page of entries newest
- * first, a count, an export to a file, or the verification of an export.
+ * The audit trail as a viewer reads it: immutable filters, then a page, a
+ * count, an export or the verification of an export.
  *
- * A trail is immutable: every filter and `visibleTo()` return a new trail and
- * leave this one as it was, so a trail kept and shared leaks no filter. Each
- * filter is validated as it is given and refused with an
- * `InvalidArgumentException` that names the filter, never the value; each
- * dimension replaces itself, and exact codes and a prefix are one dimension. A
- * model given as a reference is referred to exactly as capture refers to it.
- * The entries holding an owner's encrypted fragments are found through the
- * package's key store, so that filter is refused with a `LogicException` naming
- * the bound field encrypter when the encrypter keeps its keys elsewhere.
- *
- * Every terminal call names its viewer, refused with a `LogicException` before
- * anything is queried when none was given, and is authorised on its own: the
- * access policy is asked for the viewer's scope on every call, a denied scope
- * reads as nothing, and the read is recorded before anything it found is
- * returned. There is no way to ask whether a viewer may read without reading,
- * and a page never says how many entries there are in all.
+ * A bad filter is refused naming the filter, never the value. Every terminal
+ * call asks the policy afresh and records the read before returning anything.
  *
  * @api
  *
@@ -41,7 +26,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  */
 final readonly class AuditTrail
 {
-    /** @var string What the filter for an owner's entries is refused with when another encrypter is bound: its type. */
+    /** @var string Refusal of holdingDataOf() under a foreign encrypter. */
     private const string FOREIGN_KEYS = 'holdingDataOf() finds an owner\'s entries through the package\'s key store, which the bound field encrypter, %s, does not use.';
 
     /** @var \SineMacula\Laravel\AuditLog\Querying\TrailFilters What the trail is narrowed to. */
@@ -61,19 +46,19 @@ final readonly class AuditTrail
      */
     public function __construct(
 
-        /** What reads a page of the trail or counts it. */
+        /** Reads a page of the trail or counts it. */
         private TrailReader $reader,
 
-        /** What exports the trail for the export call. */
+        /** Exports the trail. */
         private Exporter $exporter,
 
-        /** What verifies an export for the verification call. */
+        /** Verifies an export. */
         private ExportVerifier $verifier,
 
-        /** The bound field encrypter, which says whether the package's key store is in use; it is never called. */
+        /** Says whether the package's key store is in use; never called. */
         private FieldEncrypter $encrypter,
 
-        // What the trail is narrowed to, or nothing for an unfiltered trail.
+        // Not promoted: `null` defaults to no filters
         ?TrailFilters $filters = null,
 
         /** Who the trail is read for, or `null` until `visibleTo()` names them. */
@@ -140,8 +125,7 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail narrowed to the entries with these exact codes, at least one,
-     * the package's own included, replacing any earlier codes and any prefix.
+     * The trail narrowed to these exact codes, replacing any codes or prefix.
      *
      * @param  \BackedEnum|string  ...$codes
      * @return self
@@ -154,9 +138,8 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail narrowed to the entries whose code begins with the prefix,
-     * lower-case dotted segments ending in a dot such as `invoice.`, replacing
-     * any earlier prefix and any exact codes.
+     * The trail narrowed to codes under the prefix, such as `invoice.`,
+     * replacing any codes or prefix.
      *
      * @param  string  $prefix
      * @return self
@@ -169,8 +152,7 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail narrowed to the entries in these categories, at least one,
-     * replacing any earlier ones.
+     * The trail narrowed to these categories, replacing any earlier ones.
      *
      * @param  string  ...$categories
      * @return self
@@ -183,8 +165,7 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail narrowed to the entries with these outcomes, at least one,
-     * replacing any earlier ones.
+     * The trail narrowed to these outcomes, replacing any earlier ones.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  ...$outcomes
      * @return self
@@ -197,9 +178,8 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail narrowed to the entries that occurred from the first time,
-     * inclusive, before the second, exclusive; either may be `null` for no
-     * limit, and both `null` clears the window.
+     * The trail narrowed to `[from, to)`; `null` is unbounded, and both `null`
+     * clears the window.
      *
      * @param  ?\DateTimeInterface  $from
      * @param  ?\DateTimeInterface  $to
@@ -213,8 +193,7 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail narrowed to the entries carrying the namespaced correlation id,
-     * replacing any earlier one.
+     * The trail narrowed to the correlation id, replacing any earlier one.
      *
      * @param  string  $correlationId
      * @return self
@@ -227,16 +206,8 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail narrowed to the entries holding an encrypted fragment sealed
-     * under one of the owner's keys, the model or the reference, in any of its
-     * tenants and categories and whether or not the owner was erased, replacing
-     * any earlier owner. Each entry is read as a page shows it, every other
-     * owner's fragments in it included, revealed only under a scope that
-     * reveals encrypted fields. It needs the package's key store, so it is
-     * refused with a `LogicException` naming the bound field encrypter when
-     * that encrypter keeps its keys elsewhere; a model that cannot be
-     * referenced is refused with an `InvalidArgumentException`, as by every
-     * other filter.
+     * The trail narrowed to entries holding a fragment sealed under one of the
+     * owner's keys; refused unless the package's key store is in use.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return self
@@ -253,10 +224,8 @@ final readonly class AuditTrail
     }
 
     /**
-     * The trail read for the viewer, whom the application has authenticated: a
-     * model or another authenticatable user, referenced as capture references a
-     * user, or a reference, which asserts who is reading and proves nothing. A
-     * viewer that cannot be referenced is refused, never read as anonymous.
+     * The trail read for the authenticated viewer; a reference asserts who is
+     * reading and proves nothing, and an unreferenceable viewer is refused.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable|\SineMacula\Laravel\AuditLog\Records\Reference  $viewer
      * @return self
@@ -269,11 +238,10 @@ final readonly class AuditTrail
     }
 
     /**
-     * A page of the entries the viewer may see, newest first, from 1 to
-     * `read.max_per_page` of them, 50 when no size is given, or
-     * `read.max_per_page` when that is fewer, after the position the cursor of
-     * an earlier page holds, or from the newest without one. A denied viewer
-     * sees an empty page.
+     * A page of the entries the viewer may see, newest first, after the cursor
+     * if given; a denied viewer sees an empty page.
+     *
+     * Its size is 1 to `read.max_per_page`, or 50 (capped at that) when `null`.
      *
      * @param  ?int  $perPage
      * @param  ?string  $cursor
@@ -306,11 +274,8 @@ final readonly class AuditTrail
     }
 
     /**
-     * Export the entries the viewer may see to the path, oldest first, in the
-     * format, with its bundle beside it at the path with `.manifest.json`
-     * added, replacing what is there only with `force`, and return what was
-     * published once the export is journalled. A denied viewer is given an
-     * empty export.
+     * Export the entries the viewer may see, oldest first, with a bundle at
+     * `<path>.manifest.json`; a denied viewer gets an empty export.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat  $format
@@ -328,9 +293,8 @@ final readonly class AuditTrail
     }
 
     /**
-     * Verify the export at the path, with its bundle beside it, for the viewer,
-     * and return what the verification found once it is recorded; the trail's
-     * filters play no part. A denied viewer sees the export entry missing.
+     * Verify the export at the path and its bundle; the trail's filters play no
+     * part, and a denied viewer sees the export entry missing.
      *
      * @param  string  $path
      * @return \SineMacula\Laravel\AuditLog\Querying\ExportVerification
@@ -346,8 +310,7 @@ final readonly class AuditTrail
     }
 
     /**
-     * The viewer a terminal call reads for, refused before anything is queried
-     * when none was named.
+     * The viewer, refused before anything is queried when none was named.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\Viewer
      *
@@ -359,8 +322,7 @@ final readonly class AuditTrail
     }
 
     /**
-     * A trail of the same readers, encrypter and viewer narrowed to the
-     * filters.
+     * This trail narrowed to the filters.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
      * @return self
@@ -371,8 +333,7 @@ final readonly class AuditTrail
     }
 
     /**
-     * The reference of the model, exactly as capture refers to it, or the
-     * reference as given.
+     * The model's reference as capture refers to it, or the reference as given.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $reference
      * @return \SineMacula\Laravel\AuditLog\Records\Reference

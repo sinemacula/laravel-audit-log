@@ -13,37 +13,12 @@ use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
 use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 
 /**
- * Projects the stored entries of a page as the entries a viewer is shown,
- * privacy-safe by construction, each in this order: a reason is concealed when
- * the stored properties flag `concealed` as exactly `true`, read before
- * anything is projected; the properties are projected recursively, maps as
- * associative arrays and lists as lists, and the manifest descriptor lifted
- * out; then the IP address; then the context, read as the properties are; and
- * last the references, enums and times of the columns.
+ * Projects a page's stored entries as the entries a viewer is shown, reading
+ * every encrypted field in one call to the field reader, and only from rows
+ * whose signature verifies, when the scope reveals them.
  *
- * An encryption envelope is a map of exactly `v`, an integer from 1, and `k`
- * and `c`, non-empty strings, wherever it sits, even when an application stored
- * that shape itself, and an encrypted IP address is one stored as its JSON; one
- * whose parts its rules refuse is `unreadable`. Under a scope that does not
- * reveal the encrypted fields every envelope is shown as `encrypted` and the
- * field reader is never asked. Under one that does, each row's signature is
- * verified first: every envelope of a row that fails it, or whose signing key
- * the ring does not hold, is `unreadable` and never reaches the reader; every
- * envelope of the rows that pass is a field, at its segments, and every field
- * of the page is read in one call to the field reader. Nothing the stored entry
- * holds is changed, so it stays evidence.
- *
- * A field reader that throws, or answers another count or anything but
- * readings, costs every field of the page, each shown as `unreadable`: the
- * failure is reported once for the page, naming only the reader's class, and
- * what it threw is discarded, because its message could hold the plaintext. An
- * address the reader reveals as anything but a string is `unreadable`. The page
- * counts the fragments it shows in each state, never naming one.
- *
- * Only a descriptor the artifact inspector accepts is shown, as its kind, count
- * and digest; any other is dropped from the display and shows as none, since
- * only a tampered row holds one, which verification reports, and a page is
- * never refused for it.
+ * A malformed descriptor shows as none; only a tampered row holds one, and
+ * verification reports it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,16 +27,16 @@ use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
  */
 final readonly class EntryProjector
 {
-    /** @var string The key the package's metadata sits under in the properties. */
+    /** @var string The package's metadata key in the properties. */
     private const string METADATA_KEY = '_audit';
 
-    /** @var string The key the manifest descriptor sits under in the metadata. */
+    /** @var string The manifest descriptor's key in the metadata. */
     private const string MANIFEST_KEY = 'manifest';
 
     /** @var string The key whose value `true` conceals the entry's reason. */
     private const string CONCEALED_KEY = 'concealed';
 
-    /** @var list<string> The keys of an encryption envelope, sorted: exactly these and nothing else. */
+    /** @var list<string> The keys of an encryption envelope, sorted. */
     private const array ENVELOPE_KEYS = ['c', 'k', 'v'];
 
     /** @var int The JSON depth of an encrypted IP address: one object of scalars. */
@@ -73,7 +48,7 @@ final readonly class EntryProjector
     /** @var string The count of the fragments the field reader revealed. */
     private const string REVEALED = 'revealed';
 
-    /** @var array{encrypted: int, erased: int, revealed: int, unreadable: int} A page's counts before any fragment is shown. */
+    /** @var array{encrypted: int, erased: int, revealed: int, unreadable: int} Zero counts. */
     private const array NO_FRAGMENT = ['encrypted' => 0, 'erased' => 0, 'revealed' => 0, 'unreadable' => 0];
 
     /**
@@ -85,20 +60,18 @@ final readonly class EntryProjector
      */
     public function __construct(
 
-        /** What reads the encrypted fields of a page under a scope that reveals them. */
+        /** Reads the encrypted fields under a scope that reveals them. */
         private FieldReader $reader,
 
         /** Where a failed field reader is reported. */
         private ExceptionHandler $handler,
 
-        /** What verifies each row's signature before any of its fields is read. */
+        /** Verifies each row's signature before any of its fields is read. */
         private RecordSigner $signer,
     ) {}
 
     /**
-     * The entries a viewer is shown of the stored entries, in their order, with
-     * the encrypted fields revealed through one call to the field reader when
-     * the scope reveals them, and what the page disclosed of them.
+     * The entries a viewer is shown, in order, and what the page disclosed.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Querying\StoredEntry>  $stored
      * @param  bool  $reveal
@@ -139,10 +112,8 @@ final readonly class EntryProjector
     }
 
     /**
-     * How the stored entry's envelopes are shown under a scope that reveals
-     * them: `null`, each read through the field reader, when its row's
-     * signature verifies, and `unreadable` when it does not, or its signing key
-     * is not in the ring, or the row cannot be judged.
+     * `null` when the row verifies and its fields may be read, else
+     * `unreadable`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $entry
      * @return ?\SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState
@@ -152,15 +123,13 @@ final readonly class EntryProjector
         try {
             return $this->signer->verifies($entry->envelope) ? null : FieldState::UNREADABLE;
         } catch (\UnexpectedValueException|UnknownKeyException) {
-            // A row whose key is not held, or that cannot be judged, is not
-            // authenticated, so none of what it holds reaches the reader
+            // An unauthenticated row never reaches the reader
             return FieldState::UNREADABLE;
         }
     }
 
     /**
-     * The JSON column projected for display, `null` as an empty array; a column
-     * holding anything but an object or a list is refused.
+     * The JSON column projected for display, `null` as an empty array.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -185,11 +154,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * The value at the segments projected for display: an encryption envelope
-     * as its field, to be read, or its marker, a map as an associative array
-     * and a list as a list, each member projected in turn at its key as
-     * `EncryptedField::segment()` names it, which the writer named it by, and
-     * anything else as it is.
+     * The value projected recursively, each envelope as its field or marker.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -223,9 +188,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * The IP address for display: one stored as an encrypted envelope as its
-     * field at `ip`, to be read, or its marker; any other value beginning `{`
-     * as `unreadable`; and any other value as stored.
+     * The IP address for display; a malformed envelope is `unreadable`.
      *
      * @param  ?string  $ip
      * @param  string  $id
@@ -252,10 +215,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * What is shown, once the page's fields are read, of each field by its
-     * object's id, each counted by its state: the reading's display, or
-     * `unreadable` for every field when the field reader failed, which is
-     * reported once, and for an address revealed as anything but a string.
+     * The display of each read field by object id, counted by state.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -285,9 +245,8 @@ final readonly class EntryProjector
     }
 
     /**
-     * The readings of the page's fields, in order, from one call to the field
-     * reader, which is never asked for none; or nothing, once reported, when it
-     * throws or answers another count or anything but readings.
+     * The readings of the page's fields from one call to the field reader, or
+     * none, once reported, when it fails.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Privacy\EncryptedField>  $fields
      * @return list<\SineMacula\Laravel\AuditLog\Privacy\FieldReading>
@@ -301,9 +260,7 @@ final readonly class EntryProjector
         try {
             $readings = $this->reader->readAll($fields);
         } catch (\Throwable) {
-            // What was thrown could hold the plaintext in its message, so it is
-            // never kept: every field shows as unreadable and the failure is
-            // reported naming the reader alone
+            // Discarded: its message could hold the plaintext
             $readings = null;
         }
 
@@ -317,9 +274,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * Report, once, that the field reader failed, naming only its class. A
-     * reporter that fails too is ignored: the fields already show as
-     * unreadable, and there is nowhere left to say so.
+     * Report that the field reader failed, naming only its class.
      *
      * @return void
      */
@@ -328,16 +283,12 @@ final readonly class EntryProjector
         try {
             $this->handler->report(new \UnexpectedValueException(sprintf('The field reader %s failed.', get_debug_type($this->reader))));
         } catch (\Throwable) {
-            // The page is still being shown; a broken reporter must not undo
-            // the containment of the failure it was told about
+            // A broken reporter must not stop the page being shown
         }
     }
 
     /**
-     * The envelope's members for display: under a scope that reveals the fields
-     * and a row that verified, its field, kept to be read, and otherwise the
-     * marker of the state it is sealed as; one whose parts its rules refuse is
-     * `unreadable`. Each marker is counted.
+     * The envelope as its field to be read, or as its counted marker.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -375,7 +326,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * The projected map with each field in it replaced by what is shown of it.
+     * The projected map with each field replaced by its display.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -407,8 +358,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * The IP address with its field, if it is one, replaced by what is shown of
-     * it, which is always a string.
+     * The IP address with its field, if any, replaced by its string display.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -428,8 +378,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * Whether the field reader's answer is exactly a list of as many readings
-     * as it was asked for.
+     * Whether the answer is a list of exactly the count of readings.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -455,8 +404,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * Whether the stored properties conceal the entry's reason: a map whose
-     * `concealed` is exactly `true`.
+     * Whether the properties' `concealed` is exactly `true`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -469,10 +417,8 @@ final readonly class EntryProjector
     }
 
     /**
-     * The stored properties without the manifest descriptor, which the entry
-     * shows on its own or not at all: a copy of the properties and of their
-     * metadata, still maps, left out when the descriptor was all it held, and
-     * the stored value itself, unchanged, when there is no descriptor.
+     * A copy of the properties without the manifest descriptor, which the entry
+     * shows on its own; the stored value is never changed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -504,8 +450,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * Whether the members are an encryption envelope: exactly `v`, an integer
-     * from 1, and `k` and `c`, non-empty strings.
+     * Whether the members are exactly `v` from 1 and non-empty `k` and `c`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -541,8 +486,7 @@ final readonly class EntryProjector
     }
 
     /**
-     * The refusal of a column whose stored value the shown entry cannot hold,
-     * naming the column, never its value.
+     * The refusal of a column the shown entry cannot hold.
      *
      * @param  string  $column
      * @return \UnexpectedValueException

@@ -8,14 +8,8 @@ use SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat;
 use SineMacula\Laravel\AuditLog\Querying\Enums\Acknowledgement;
 
 /**
- * An export of the trail that has been published: the entry that journals it,
- * where its file and its bundle are, its format, how many lines it holds, the
- * SHA-256 of its file, and how the journal entry was acknowledged before
- * anything was published.
- *
- * It is returned only once the export is published: the journal entry was
- * acknowledged, its bundle published beside it, then its file. An export that
- * fails at any step returns none.
+ * A published export; returned only once its journal entry was acknowledged and
+ * its bundle and file published.
  *
  * @api
  *
@@ -45,19 +39,19 @@ final readonly class ExportResult
         /** Where the export's file was published. */
         public string $path,
 
-        /** Where the export's bundle was published: the file's path with `.manifest.json` added. */
+        /** Where the bundle was published: the path plus `.manifest.json`. */
         public string $manifestPath,
 
         /** The format the file is written in. */
         public ExportFormat $format,
 
-        /** How many lines the file holds, one per entry exported. */
+        /** How many lines the file holds, one per entry. */
         public int $lines,
 
-        /** The SHA-256 of the file's bytes, as 64 lower-case hexadecimal characters. */
+        /** The lower-case hex SHA-256 of the file. */
         public string $fileSha256,
 
-        /** How the journal entry was acknowledged: stored, or accepted as a committed outbox row. */
+        /** How the journal entry was acknowledged. */
         public Acknowledgement $acknowledgement,
     ) {}
 }

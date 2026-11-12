@@ -31,44 +31,12 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Exports the entries a viewer may see under the filters to a file, journals
- * the export, and publishes it with its bundle only once the journal is
+ * Exports the entries a viewer may see to a file in one snapshot, journals the
+ * export, and publishes it with its bundle only once the journal is
  * acknowledged.
  *
- * A target that exists without `force`, a directory that does not exist or is
- * not writable or cannot hold a hard link without `force`, an engine an export
- * cannot read, and a malformed `export.chunk` are refused before anything else,
- * and are not recorded. The gate then lets the export in or refuses it, and
- * everything after runs inside the read guard's window: the access policy is
- * asked for the viewer's scope for `export`; the file is prepared beside the
- * target and the snapshot opened; unless the scope is denied or the filters
- * cannot meet it, the bound, the greatest recorded time and id under the scope,
- * is read as the snapshot's first statement, then the entries up to it in
- * chunks of `export.chunk`, ascending by recorded time and then id, each
- * narrowed by the scope compiler alone. Each line is the stored envelope
- * untouched for NDJSON, and the formatter's projection for OCSF and CEF; the
- * bulk members an entry references are never read.
- *
- * The journal is written once the snapshot has ended, so a SQLite reader never
- * becomes a writer: `audit_log.trail_exported`, fail-closed, with the export's
- * manifest as its `export` artifact, `success`, or `denied` with `no_scope` for
- * an export a denied viewer is given, which is empty and published all the
- * same. Its bundle is built from the very envelope the store or the outbox
- * acknowledged, then the bundle and the file are published.
- *
- * A policy that throws is recorded as a failure with `policy_failed`, and what
- * it threw propagates unchanged. A statement that fails is recorded as a
- * failure with `query_failed`, and a line that cannot be formatted or written,
- * or a manifest that cannot be built of what the snapshot and the file hold,
- * with `format_failed`; the snapshot is abandoned, the temporary file removed,
- * and `AuditReadRefusedException` names the class that failed. A journal that
- * cannot be written removes the temporary file and refuses the export, so no
- * file is ever published unrecorded. A publication that fails removes what it
- * had written, is recorded as `audit_log.export_publish_failed` naming the
- * export entry, and refuses the export.
- *
- * It resolves everything from the container on every call, so it outlives
- * requests safely.
+ * The journal is written after the snapshot ends, so a SQLite reader never
+ * becomes a writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,19 +45,19 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class Exporter
 {
-    /** @var string Why an export whose scope the policy denied wrote nothing. */
+    /** @var string The reason of a denied export. */
     private const string NO_SCOPE = 'no_scope';
 
-    /** @var string Why an export whose policy threw failed. */
+    /** @var string The reason of an export whose policy threw. */
     private const string POLICY_FAILED = 'policy_failed';
 
-    /** @var string Why an export whose statement failed failed. */
+    /** @var string The reason of an export whose statement failed. */
     private const string QUERY_FAILED = 'query_failed';
 
-    /** @var string Why an export whose line could not be formatted or written failed. */
+    /** @var string The reason of an export that could not format or write. */
     private const string FORMAT_FAILED = 'format_failed';
 
-    /** @var string Why an export's publication failed. */
+    /** @var string The reason of an export whose publication failed. */
     private const string PUBLISH_FAILED = 'publish_failed';
 
     /**
@@ -99,14 +67,13 @@ final readonly class Exporter
      */
     public function __construct(
 
-        /** The container everything an export needs is resolved from on every call. */
+        /** Resolved from on every call, so the exporter outlives requests safely. */
         private Container $container,
     ) {}
 
     /**
-     * Export the entries the viewer may see under the filters to the path, in
-     * the format, replacing what is there only with `force`, and return what
-     * was published once the export is journalled and published.
+     * Export the entries the viewer may see; a bad target, engine or chunk
+     * setting is refused before anything is recorded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -134,8 +101,7 @@ final readonly class Exporter
     }
 
     /**
-     * Authorise, extract, journal and publish the export, inside the read
-     * guard's window.
+     * Authorise, extract, journal and publish the export.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -191,9 +157,8 @@ final readonly class Exporter
     }
 
     /**
-     * The scope the policy gives the viewer as the application gave it, for
-     * `export`; a policy that throws is recorded as a failure with no scope,
-     * and what it threw propagates unchanged.
+     * The viewer's scope for `export`; a policy that throws is recorded as a
+     * failure and what it threw propagates unchanged.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy  $policy
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
@@ -216,10 +181,8 @@ final readonly class Exporter
     }
 
     /**
-     * Prepare the file and read the export into it inside the snapshot, then
-     * end the snapshot, returning the file and what the manifest says of the
-     * snapshot. A failure abandons the snapshot, removes the temporary file and
-     * is recorded under the stage it failed in, then refused.
+     * Read the export into the file inside the snapshot; a failure is cleaned
+     * up, recorded under its stage, then refused.
      *
      * @formatter:off
      *
@@ -277,9 +240,8 @@ final readonly class Exporter
     }
 
     /**
-     * Copy every entry up to the bound into the file, a chunk of the size at a
-     * time, keeping the stage the copy is in: a statement, or a line's
-     * formatting and writing.
+     * Copy every entry up to the bound into the file a chunk at a time,
+     * tracking the stage for the failure reason.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
@@ -326,8 +288,7 @@ final readonly class Exporter
     }
 
     /**
-     * The greatest recorded time and id under the scope and the filters, read
-     * in one statement, or `null` when nothing is there.
+     * The greatest recorded time and id under the scope, or `null`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
@@ -353,10 +314,7 @@ final readonly class Exporter
     }
 
     /**
-     * The rows of one chunk, as the engine returned them: every column of the
-     * entries table, narrowed by the scope compiler to the scope, the filters
-     * and the keyset after the position up to the bound, oldest first, at most
-     * the chunk.
+     * One chunk's rows after the position up to the bound, oldest first.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
@@ -380,8 +338,7 @@ final readonly class Exporter
     }
 
     /**
-     * A query of the entries table on the snapshot's connection, narrowed by
-     * the scope compiler to the scope and the filters.
+     * The entries on the snapshot's connection, narrowed to the scope.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
@@ -398,8 +355,7 @@ final readonly class Exporter
     }
 
     /**
-     * The formatter of a projection, or `null` for NDJSON, whose line is the
-     * stored envelope itself.
+     * The formatter of a projection, or `null` for NDJSON's stored envelope.
      *
      * @param  \SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat  $format
      * @return ?\SineMacula\Laravel\AuditLog\Contracts\AuditFormatter
@@ -416,10 +372,8 @@ final readonly class Exporter
     }
 
     /**
-     * The export's manifest, as the build gives it; a manifest that cannot be
-     * built of what the snapshot and the file hold removes the temporary file,
-     * is recorded as a failure with `format_failed`, then refused, naming the
-     * class that failed and nothing it held.
+     * The export's manifest; a failed build is cleaned up, recorded, then
+     * refused naming only its class.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportFile  $file
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\Manifest  $build
@@ -442,8 +396,7 @@ final readonly class Exporter
     }
 
     /**
-     * The terms of the export under the filters and the scope, fingerprinted
-     * under the ring's signing key.
+     * The export's terms, fingerprinted under the ring's signing key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
      * @param  ?\SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
@@ -460,9 +413,8 @@ final readonly class Exporter
     }
 
     /**
-     * Write the journal and return the record the store or the outbox
-     * acknowledged; a journal that cannot be written removes the temporary
-     * file, and its refusal propagates.
+     * Write the journal, removing the temporary file if it cannot be written,
+     * so no file is published unrecorded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportFile  $file
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
@@ -484,10 +436,8 @@ final readonly class Exporter
     }
 
     /**
-     * Write the bundle, from the journal's acknowledged envelope, the
-     * manifest's descriptor and its plaintext, then publish it and the file. A
-     * failure removes what was written, is recorded, a recording that fails
-     * reported once and swallowed, and refuses the export.
+     * Write the bundle from the acknowledged envelope, then publish it and the
+     * file; a failure is cleaned up, recorded and refused.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportFile  $file
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $journal
@@ -522,9 +472,7 @@ final readonly class Exporter
     }
 
     /**
-     * The export's manifest, as an `export` artifact: the format, the viewer,
-     * the keyed fingerprints of the scope and the filters, what the snapshot
-     * was, and the file's lines, positions and digests.
+     * The export's manifest, as an `export` artifact.
      *
      * @formatter:off
      *
@@ -560,8 +508,7 @@ final readonly class Exporter
     }
 
     /**
-     * How the journal was acknowledged: accepted as a committed outbox row in
-     * outbox mode, and stored otherwise.
+     * How the journal was acknowledged under the delivery mode.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\Enums\Acknowledgement
      *
@@ -574,8 +521,7 @@ final readonly class Exporter
     }
 
     /**
-     * Record the refusal, then throw it; a recording that fails is reported
-     * once, through the report latch, and the refusal is thrown all the same.
+     * Record the refusal, then throw it, even when the recording fails.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \Throwable  $refusal
@@ -595,8 +541,7 @@ final readonly class Exporter
     }
 
     /**
-     * Report a failure to record the export once, through the report latch,
-     * ignoring a reporter that fails.
+     * Report a failure to record the export once, ignoring a broken reporter.
      *
      * @param  \Throwable  $failure
      * @return void
@@ -610,8 +555,7 @@ final readonly class Exporter
                 $handler->report($failure);
             });
         } catch (\Throwable) {
-            // The export is refused all the same; a broken reporter has nowhere
-            // left to say so, and must not replace the refusal
+            // A broken reporter must not replace the refusal
         }
     }
 }

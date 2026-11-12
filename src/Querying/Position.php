@@ -7,10 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Querying;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * A place in the trail's order: a time, as an instant in the package's form,
- * and the id of an entry at that time, a lower-case UUID. A page cursor holds
- * the occurrence time of the last entry shown, and an export's keyset the time
- * an entry was recorded; the two together order entries of one microsecond.
+ * A place in the trail's order: an instant and an entry id, which together
+ * order entries of one microsecond.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

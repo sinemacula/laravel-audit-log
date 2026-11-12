@@ -9,14 +9,8 @@ use SineMacula\Laravel\AuditLog\Capture\UserReference;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Who is reading the trail: the viewer as the application gave it, which the
- * access policy alone is handed, and its reference, which the record of the
- * read and a cursor are bound to.
- *
- * A viewer is referenced exactly as capture references a user: a model by its
- * reference, any other authenticatable user by its class and its string or
- * integer identifier, and a reference as given. A viewer that cannot be
- * referenced is refused; it is never read as anonymous.
+ * Who is reading: the original for the policy alone, and its reference, which
+ * the read's record and cursor are bound to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,9 +36,7 @@ final readonly class Viewer
     ) {}
 
     /**
-     * The viewer, referenced as capture references a user, or refused when it
-     * cannot be referenced: a model without a key, or an identifier that is
-     * neither a string nor an integer a reference keeps.
+     * The viewer, referenced as capture references a user; never anonymous.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable|\SineMacula\Laravel\AuditLog\Records\Reference  $viewer
      * @return self

@@ -14,30 +14,14 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * The one consistent snapshot an export is read in, from its bound to its last
- * chunk, on a session of its own: a connection made from the storage
- * connection's configuration, with any `read` settings merged over the base and
- * `read` and `write` removed, so the snapshot and every statement of the
- * extraction share one PDO, on the reader where there is one. The session is
- * purged when the snapshot ends.
+ * The one consistent snapshot an export is read in, on a dedicated session so
+ * the snapshot and every statement share one PDO, on the reader if any.
  *
- * Each engine begins its own snapshot, each statement through `unprepared()`:
- * PostgreSQL a repeatable read, read-only transaction; MySQL a consistent
- * snapshot, read-only, at repeatable read; SQLite a deferred transaction, which
- * reads and never writes, so it never takes a writer's lock. No write is ever
- * issued on the session. In-memory SQLite, which a second PDO cannot see, is
- * read on the storage connection itself, in a deferred transaction of its own.
- * A storage connection holding the base transaction Laravel's testing manager
- * wraps a test in, whose rows no other session could see on any engine, is read
- * inside that transaction, beginning and committing nothing, and its
- * consistency is named `testing_transaction`, never a snapshot it did not take.
- * Any other open transaction on the storage connection is refused, as the read
- * gate refuses it.
+ * In-memory SQLite, invisible to a second PDO, is read on the storage
+ * connection. Laravel's testing transaction is read inside, beginning nothing.
  *
  * On SQLite in rollback-journal mode the snapshot's shared lock holds back
- * every writer's commit on the database file until the snapshot ends, as a
- * sealer's read does; in WAL mode a writer commits while it is open, which is
- * why the operations guidance advises WAL.
+ * every writer's commit until it ends; WAL mode does not.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,14 +30,14 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
  */
 final class ExportSnapshot
 {
-    /** @var array<'mysql'|'pgsql'|'sqlite', non-empty-list<string>> The statements each engine begins its snapshot with, in order. */
+    /** @var array<'mysql'|'pgsql'|'sqlite', non-empty-list<string>> Each engine's snapshot statements. */
     public const array BEGIN = [
         'pgsql'  => ['START TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'],
         'mysql'  => ['SET TRANSACTION ISOLATION LEVEL REPEATABLE READ', 'START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY'],
         'sqlite' => ['BEGIN DEFERRED'],
     ];
 
-    /** @var array<'mysql'|'pgsql'|'sqlite', string> The name of each engine's snapshot, as the manifest gives it. */
+    /** @var array<'mysql'|'pgsql'|'sqlite', string> Each engine's consistency name in the manifest. */
     public const array CONSISTENCY = [
         'pgsql'  => 'repeatable_read_read_only',
         'mysql'  => 'consistent_snapshot_read_only',
@@ -86,7 +70,7 @@ final class ExportSnapshot
         /** The connection the snapshot is read on. */
         private readonly Connection $session,
 
-        /** The name of the dedicated session, or `null` when the snapshot is read on the storage connection. */
+        /** The dedicated session's name, or `null` on the storage connection. */
         private readonly ?string $dedicated,
 
         /** The storage connection's resolved name. */
@@ -97,10 +81,8 @@ final class ExportSnapshot
     ) {}
 
     /**
-     * Open the snapshot: refuse an engine other than MySQL, PostgreSQL and
-     * SQLite before anything, then read inside the testing manager's base
-     * transaction, or begin a snapshot on the storage connection for in-memory
-     * SQLite and on a dedicated session otherwise.
+     * Open the snapshot, refusing an engine an export cannot read and any open
+     * transaction but the testing one.
      *
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @return self
@@ -149,9 +131,7 @@ final class ExportSnapshot
     }
 
     /**
-     * Refuse, before anything, an engine other than MySQL, PostgreSQL and
-     * SQLite on the storage connection: the check `open()` makes first, so an
-     * export can make it before anything else. No statement is run.
+     * Refuse an engine an export cannot read, without running a statement.
      *
      * @param  \Illuminate\Database\DatabaseManager  $database
      * @return void
@@ -177,9 +157,7 @@ final class ExportSnapshot
     }
 
     /**
-     * What the manifest says of the snapshot: the storage connection's name,
-     * the snapshot's consistency, the database it read, the engine and the
-     * entries table.
+     * What the manifest says of the snapshot.
      *
      * @return array{connection: string, consistency: string, database: string, engine: string, table: string}
      *
@@ -197,9 +175,7 @@ final class ExportSnapshot
     }
 
     /**
-     * End the snapshot: commit what it began, then purge the dedicated session,
-     * which is purged even when the commit fails, and the failure thrown.
-     * Ending it again does nothing.
+     * Commit the snapshot and purge the session, even when the commit fails.
      *
      * @return void
      *
@@ -211,8 +187,7 @@ final class ExportSnapshot
     }
 
     /**
-     * End the snapshot of a failing export: roll back what it began and purge
-     * the dedicated session, never throwing. Ending it again does nothing.
+     * Roll back the snapshot of a failing export and purge the session.
      *
      * @return void
      */
@@ -221,15 +196,12 @@ final class ExportSnapshot
         try {
             $this->end('ROLLBACK');
         } catch (\Throwable) {
-            // The export is already failing, and the session is purged; a
-            // rollback that fails has nothing left to undo, since the snapshot
-            // wrote nothing
+            // The snapshot wrote nothing, so a failed rollback leaves nothing
         }
     }
 
     /**
-     * End the snapshot with the statement, unless it began nothing, then purge
-     * the dedicated session however the statement went, once.
+     * End the snapshot once with the statement, then purge the session.
      *
      * @param  'COMMIT'|'ROLLBACK'  $statement
      * @return void
@@ -272,9 +244,8 @@ final class ExportSnapshot
     }
 
     /**
-     * Run the statement on the connection, unprepared, and refuse one the
-     * connection says did not run, as a connection that reports errors silently
-     * says it, so a snapshot is never claimed that was not begun.
+     * Run the statement unprepared, refusing one a silent connection says did
+     * not run.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  literal-string  $statement
@@ -326,14 +297,8 @@ final class ExportSnapshot
     }
 
     /**
-     * The dedicated session's configuration: the storage connection's, its
-     * `url` resolved over the other keys as the database manager resolves it,
-     * so the session reaches the very database the connection does, with its
-     * `read` settings, one picked at random from a list as Laravel picks a
-     * reader, each with its own `url` resolved, merged over the base, and
-     * `read`, `write` and the name removed, and a handle of its own forced,
-     * never a persistent one the storage connection shares. A connection with
-     * no configuration of its own is made from the settings it was made with.
+     * The storage connection's configuration, URLs resolved and a random `read`
+     * entry merged in as Laravel does, on a non-persistent handle.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -360,8 +325,7 @@ final class ExportSnapshot
     }
 
     /**
-     * The connection settings, each under its name; an entry under an integer
-     * key names no setting.
+     * The settings under string keys.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

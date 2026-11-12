@@ -5,8 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Querying;
 
 /**
- * The entries a page shows, as the projector made them from the stored entries,
- * in their order, and what the page disclosed of their encrypted fragments.
+ * The entries a page shows and what it disclosed of their encrypted fragments.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
