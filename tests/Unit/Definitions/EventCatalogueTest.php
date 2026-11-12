@@ -20,11 +20,7 @@ use Tests\Fixtures\Definitions\Enums\RevisedInvoiceActivity;
 use Tests\Unit\Stubs\Enums\StubActivity;
 
 /**
- * Unit tests for the event catalogue: the permissive default and the refusal of
- * unregistered codes, registering a definition or a whole enum, idempotent
- * repeats, conflicts in either order, the enums it refuses and in what order,
- * freezing once the application has booted, and the package's own definitions,
- * there from the start.
+ * Unit tests for the event catalogue and the definitions it registers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,8 +38,7 @@ final class EventCatalogueTest extends TestCase
 
     /**
      * A code no definition registers takes the permissive default: version 1,
-     * `general`, no rules, and every field retained. Registration is not
-     * required unless asked for.
+     * `general`, no rules, and every field retained.
      *
      * @return void
      */
@@ -93,9 +88,8 @@ final class EventCatalogueTest extends TestCase
     }
 
     /**
-     * Whether registration is required is asked on each call, so one catalogue,
-     * resolved once at boot, answers each capture by what that capture asks: a
-     * refusal leaves nothing behind, and the same code then takes the default.
+     * Whether registration is required is asked per call, so one catalogue
+     * answers each capture by what it asks.
      *
      * @return void
      */
@@ -184,9 +178,8 @@ final class EventCatalogueTest extends TestCase
     }
 
     /**
-     * Registering the same enum twice, then one of its definitions again,
-     * changes nothing and throws nothing: the definition first registered is
-     * kept, and only the enum's two codes are registered.
+     * Registering an enum or a definition again changes nothing and keeps the
+     * first definition.
      *
      * @return void
      */
@@ -344,9 +337,8 @@ final class EventCatalogueTest extends TestCase
     }
 
     /**
-     * An integer-backed enum implementing the contract is refused for its
-     * backing type before any case is asked for its definition, so it is not
-     * reported as defining another code.
+     * An integer-backed enum is refused for its backing type before any case is
+     * asked for its definition.
      *
      * @return void
      */
@@ -397,8 +389,7 @@ final class EventCatalogueTest extends TestCase
     }
 
     /**
-     * The frozen check comes before any check of what is registered, so a
-     * malformed registration after booting is refused as late, not as
+     * A malformed registration after booting is refused as late, not as
      * malformed.
      *
      * @return void
@@ -454,9 +445,8 @@ final class EventCatalogueTest extends TestCase
     }
 
     /**
-     * Every package definition is registered and served from the moment the
-     * catalogue is made, before any registration, even when registration is
-     * required.
+     * Every package definition is served from the start, even when registration
+     * is required.
      *
      * @return void
      */
@@ -495,10 +485,8 @@ final class EventCatalogueTest extends TestCase
     }
 
     /**
-     * Defining a package definition again identically, alone or as the whole
-     * enum, changes nothing and throws nothing; a different definition of a
-     * package code is refused as any conflicting one is, and the package's
-     * stays.
+     * Redefining a package definition identically changes nothing; a different
+     * definition is refused as a conflict.
      *
      * @return void
      */

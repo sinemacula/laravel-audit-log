@@ -11,9 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 
 /**
- * Unit tests for the definition settings: the default a missing key takes, the
- * real booleans they read, and everything else they fail closed on, without
- * naming the value.
+ * Unit tests for the definition settings and the values they fail closed on.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

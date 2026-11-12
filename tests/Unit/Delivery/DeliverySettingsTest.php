@@ -13,13 +13,7 @@ use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 
 /**
- * Unit tests for the delivery settings: the default of each, the values each
- * accepts, the exact message each malformed value fails closed with, and the
- * reader of every setting, the delivery tables and the outbox connection
- * included.
- *
- * The delivery tables are read through the `Config` facade, which each test
- * points at the repository the settings read, and puts back when it ends.
+ * Unit tests for the delivery settings and the messages they fail closed with.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -156,9 +150,8 @@ final class DeliverySettingsTest extends TestCase
     }
 
     /**
-     * Each number takes its least and greatest value, as an integer and as the
-     * digit string an environment line gives, and each read goes back to the
-     * configuration.
+     * Each number takes its least and greatest value, as an integer and as a
+     * digit string.
      *
      * @return void
      */
@@ -229,8 +222,7 @@ final class DeliverySettingsTest extends TestCase
 
     /**
      * Rows of `[delivery configuration, message]`: one malformed setting at a
-     * time, each of those `validate()` reads, the delivery tables and the
-     * outbox connection included.
+     * time.
      *
      * @return iterable<string, array{0: array<string, array<string, int|string>|string>, 1: string}>
      */
@@ -265,8 +257,7 @@ final class DeliverySettingsTest extends TestCase
     }
 
     /**
-     * With every setting malformed, `validate()` fails on the first in its
-     * order, then the next once that one is put right, and passes once none is
+     * `validate()` fails on the first malformed setting in order until none is
      * left.
      *
      * @return void

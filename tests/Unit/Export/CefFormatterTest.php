@@ -13,11 +13,8 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the CEF formatter: the pinned header and extension, the
- * severity of each outcome, the escaping of every separator in the header and
- * the extension, Unicode kept, absent fields omitted, a source only for an IP
- * address, labelled custom strings, one line, the same bytes on every call, and
- * no value able to forge a field.
+ * Unit tests for the CEF formatter: its pinned layout, its escaping, and that
+ * no value can forge a field.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -153,9 +150,8 @@ final class CefFormatterTest extends TestCase
     }
 
     /**
-     * A separator in the code is escaped in both header fields that carry it, a
-     * line break becoming one space, and escaped by the extension's own rules
-     * in `act`; the header keeps its eight fields.
+     * A separator in the code is escaped in both header fields and in `act`,
+     * and the header keeps its eight fields.
      *
      * @param  string  $code
      * @param  string  $header
@@ -197,9 +193,8 @@ final class CefFormatterTest extends TestCase
     }
 
     /**
-     * Each extension separator is escaped with a backslash, a line break as
-     * `\r` or `\n`, and a backslash already in the value is escaped first, so
-     * an escape the value holds never reads as one.
+     * Each extension separator is escaped, a backslash first, so an escape the
+     * value holds never reads as one.
      *
      * @param  string  $value
      * @param  string  $escaped
@@ -214,9 +209,8 @@ final class CefFormatterTest extends TestCase
     }
 
     /**
-     * Every other control character is cleaned as at capture, in the header and
-     * the extension: a tab becomes a space, and a NUL byte and a bidirectional
-     * override are removed.
+     * Other control characters are cleaned as at capture: a tab becomes a
+     * space, and NUL and bidirectional overrides are removed.
      *
      * @return void
      */

@@ -12,9 +12,8 @@ use Symfony\Component\VarDumper\Cloner\VarCloner;
 use Symfony\Component\VarDumper\Dumper\CliDumper;
 
 /**
- * Unit tests for a wrapping key: the id and secret it keeps, the ids the
- * `wrap_key_id` column cannot hold and the short secrets it refuses, and the
- * secret it never shows in a dump or a stack trace.
+ * Unit tests for a wrapping key, which never shows its secret in a dump or a
+ * stack trace.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -140,9 +139,8 @@ final class WrappingKeyTest extends TestCase
     }
 
     /**
-     * A dump of the key shows the id and never the secret: `print_r()` and
-     * `var_dump()` both read `__debugInfo()`, so the one `print_r()` call the
-     * debug-statement sniff allows in a test covers both.
+     * A dump shows the id and never the secret; `print_r()` stands in for every
+     * dumper that reads `__debugInfo()`.
      *
      * @return void
      */
@@ -159,10 +157,8 @@ final class WrappingKeyTest extends TestCase
     }
 
     /**
-     * The secret is no part of the key's visible state, so neither Symfony's
-     * dumper, which `dump()` and `dd()` use and which reads an object's
-     * properties rather than its `__debugInfo()` alone, nor `json_encode()`,
-     * nor `var_export()` shows it.
+     * Symfony's dumper reads properties, not `__debugInfo()`, so the secret is
+     * kept out of the visible state entirely.
      *
      * @return void
      */

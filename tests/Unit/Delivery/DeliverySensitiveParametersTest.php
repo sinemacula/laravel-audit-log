@@ -51,17 +51,9 @@ use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Holds the write path's classes to the rule that keeps a record out of a stack
- * trace: with `zend.exception_ignore_args` off every frame keeps its arguments,
- * so a parameter that holds a payload, a failure or a closure capturing either
- * is marked `#[\SensitiveParameter]` on every method it passes through, and a
- * closure's own parameters too, which reflection of a class cannot reach and so
- * are read from the source.
- *
- * Each scan must find what it expects, so it cannot pass by finding nothing,
- * and is shown to flag what it should. A real failed write then shows what the
- * marking leaves in a frame, and a scan of the source shows nothing chains the
- * failure it replaced or reads the failure's text.
+ * Holds the write path's parameters that carry a payload or a failure to
+ * `#[\SensitiveParameter]`, since a frame keeps its arguments when
+ * `zend.exception_ignore_args` is off.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -192,9 +184,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Every method of every class the rule holds, private ones included, marks
-     * a parameter that goes by a payload's name or type, and the only
-     * exemptions are the listed enums.
+     * Every method of every held class marks a parameter that goes by a
+     * payload's name or type, bar the listed enums.
      *
      * @return void
      */
@@ -217,8 +208,7 @@ final class DeliverySensitiveParametersTest extends TestCase
 
     /**
      * The scan finds a payload parameter in each class that must hold one, and
-     * reads every class of the folders the rule holds, one added later
-     * included.
+     * reads every class of the held folders.
      *
      * @return void
      */
@@ -268,9 +258,7 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan reads a parameter as one the rule holds by its name or its type,
-     * so it flags what it should and nothing else: protects against a scan that
-     * passes by flagging nothing.
+     * The scan flags a parameter by its name or type, and nothing else.
      *
      * @param  string  $parameter
      * @param  bool  $held
@@ -340,9 +328,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Each exemption names a parameter that goes by a payload's name and is
-     * typed by the one enum it says, so a rename, or a change of its type to
-     * something that can hold a value, fails instead of excusing it.
+     * Each exemption names a payload-named parameter typed by its enum, so a
+     * rename or a retype fails.
      *
      * @return void
      */
@@ -364,9 +351,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * A closure's parameters are out of a scan of methods, so they are read
-     * from the source: every one that goes by a payload's name or type is
-     * marked, but for those that call nothing and cannot throw.
+     * Every closure parameter that goes by a payload's name or type is marked,
+     * bar closures that cannot throw.
      *
      * @return void
      */
@@ -386,9 +372,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Each closure let go is still there, with the parameters it was let go
-     * for, and is a one-line filter comparing with `null`, so it calls nothing:
-     * a closure changed to do more is held to the rule again.
+     * Each exempt closure is still there with its parameters and only compares
+     * with `null`, so it calls nothing.
      *
      * @return void
      */
@@ -439,9 +424,7 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[a closure's parameters, the names the scan must flag]`: a
-     * payload is flagged by its name or its type unless it is marked, and
-     * anything else is left alone.
+     * Rows of `[a closure's parameters, the names the scan must flag]`.
      *
      * @return iterable<string, array{0: list<string>, 1: list<string>}>
      */
@@ -477,10 +460,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * A real failed write's exception keeps a frame for each call that held the
-     * failed write and the failure, and each of them shows the value PHP leaves
-     * for a marked parameter, in its arguments and in its trace as a string,
-     * and nothing of the record or the failure it stands for.
+     * A real failed write's exception shows nothing of the record or the
+     * failure in any frame that held them.
      *
      * @return void
      */
@@ -508,9 +489,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * What the marking hides is really in the frame's reach: an unmarked frame
-     * of the same call keeps the secret, so the test above cannot pass by there
-     * being nothing to hide.
+     * An unmarked frame of the same call keeps the secret, so the test above
+     * has something to hide.
      *
      * @return void
      */
@@ -524,9 +504,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * A synchronous capture's failure fatal to an open transaction is thrown
-     * through the failure handler, whose frame hides the capture's signal, and
-     * with it the closure the capture made, as it hides the failed write.
+     * A synchronous capture's fatal failure is thrown through the failure
+     * handler, whose frame hides the capture's signal.
      *
      * @return void
      */
@@ -569,10 +548,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Nothing in the package gives a delivery exception a previous exception:
-     * each `new` of one passes no more than the arguments before a previous, by
-     * position or by name, and each is found, so the scan cannot pass by
-     * finding none. A parent's constructor is given no previous either.
+     * No `new` of a delivery exception, nor its parent constructor call, passes
+     * a previous exception, and each is found.
      *
      * @return void
      */
@@ -643,11 +620,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * Nothing the rule holds reads a failure's SQL, bindings, previous
-     * exception or driver message, or takes a trace of its own, but the
-     * classifier, which reads them to decide and to mask and keeps nothing; and
-     * only the replay command says a caught exception's message, and only of a
-     * refusal of its arguments, which names a path or a setting.
+     * Only the classifier reads a failure's SQL, bindings, previous exception
+     * or driver message; only the replay command says a caught message.
      *
      * @return void
      */
@@ -790,9 +764,8 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of each closure in the source that takes any, in order,
-     * read from its tokens: a `function` or `fn` followed straight by a
-     * bracket, which a named method never is.
+     * The parameters of each closure in the source, in order, read from its
+     * tokens.
      *
      * @param  string  $source
      * @return list<list<string>>
@@ -898,9 +871,7 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The arguments of the bracket that opens at the index, split at its
-     * top-level commas, each as its text with its spaces trimmed; a trailing
-     * comma adds none.
+     * The top-level arguments of the bracket that opens at the index, trimmed.
      *
      * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  int  $open

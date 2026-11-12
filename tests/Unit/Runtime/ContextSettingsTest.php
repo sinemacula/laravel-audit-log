@@ -11,9 +11,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Runtime\ContextSettings;
 
 /**
- * Unit tests for the context settings: the default each missing key takes, the
- * list of guards, the two trust flags and the header name they read, everything
- * they fail closed on, and the values no message ever shows.
+ * Unit tests for the context settings and the values they fail closed on and
+ * never show.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,9 +77,7 @@ final class ContextSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[guards]`: an empty list, a map, a list with a gap, other types,
-     * including falsy ones that must not read as none, and lists holding a bad
-     * name, first or later.
+     * Rows of `[guards]` that are malformed, falsy ones included.
      *
      * @return iterable<string, array{0: array<int|string, int|string|null>|bool|int|string}>
      */
@@ -156,9 +153,8 @@ final class ContextSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[flag's key, its value, the expected message]`: for each flag,
-     * truthy and falsy values of every other type, and a `null` set explicitly,
-     * which is not a missing key.
+     * Rows of `[flag's key, its value, the expected message]`: each wrong type,
+     * and an explicit `null`.
      *
      * @return iterable<string, array{0: 'trust_request_id'|'trust_traceparent', 1: array<never, never>|int|string|null, 2: string}>
      */

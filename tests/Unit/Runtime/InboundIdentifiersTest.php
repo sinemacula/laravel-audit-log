@@ -10,9 +10,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Runtime\InboundIdentifiers;
 
 /**
- * Unit tests for the inbound identifier validators: the request ids, trace ids
- * and version-00 `traceparent` headers they accept, and everything else, any
- * non-string included, which is `null` and never an exception.
+ * Unit tests for the inbound identifier validators, which give `null` for bad
+ * input and never throw.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,9 +28,7 @@ final class InboundIdentifiersTest extends TestCase
     private const string PARENT_ID = '00f067aa0ba902b7';
 
     /**
-     * `InboundIdentifiers` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * `InboundIdentifiers` cannot be instantiated: its constructor is private.
      *
      * @return void
      *

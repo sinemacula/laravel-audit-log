@@ -12,9 +12,7 @@ use SineMacula\Laravel\AuditLog\Delivery\ReplayResult;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 
 /**
- * Unit tests for the tally of one replay: each outcome counted apart, a pruned
- * record among them, the bounded list of events and what an event may hold, how
- * a drain's tally maps across, and which outcomes make a replay unsuccessful.
+ * Unit tests for the tally of one replay and how a drain's tally maps to it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -150,11 +148,8 @@ final class ReplayResultTest extends TestCase
     }
 
     /**
-     * A drain's rows delivered are replayed; those whose record was pruned are
-     * pruned; those failed, or released for a later attempt because a
-     * destination failed again, were not delivered; and those another drain
-     * took over or claimed first are that drain's. It lists no event, since it
-     * does not say which row ended how.
+     * A drain's tally maps row by row to replay outcomes, and lists no event
+     * since it does not say which row ended how.
      *
      * @return void
      */

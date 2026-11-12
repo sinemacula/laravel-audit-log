@@ -12,9 +12,7 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\FieldRule;
 
 /**
- * Unit tests for the field rule: the path, handling and segments it keeps, the
- * owner an encrypted field must name and no other field may, the owner paths it
- * refuses, and how two rules compare.
+ * Unit tests for the field rule and the owner only an encrypted field names.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

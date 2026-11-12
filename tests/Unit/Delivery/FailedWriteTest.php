@@ -12,9 +12,8 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for a failed write as the failure handler is given it: the fields
- * it keeps, and the record, finalised record and failure it hides from every
- * stack frame.
+ * Unit tests for a failed write: the fields it keeps and the values it hides
+ * from stack frames.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,9 +78,8 @@ final class FailedWriteTest extends TestCase
     }
 
     /**
-     * The record, the finalised record and the failure are marked sensitive, so
-     * a stack frame that builds a failed write shows none of them; the rest
-     * hold no value of the record and are not.
+     * The record, the finalised record and the failure are marked sensitive;
+     * the other parameters are not.
      *
      * @return void
      */

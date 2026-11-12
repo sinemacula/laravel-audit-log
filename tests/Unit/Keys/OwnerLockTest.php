@@ -17,15 +17,11 @@ use SineMacula\Laravel\AuditLog\Keys\OwnerLockTimeoutException;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for an owner's lock, against a connection that answers as each
- * engine does: the key and name an owner's lock goes by, PostgreSQL's advisory
- * lock taken only inside a transaction and its wait bounded only when asked,
- * MySQL's named lock granted or refused and released as often as it is held,
- * SQLite taking nothing, any other engine refused, and a lock not granted
- * refused naming neither the owner nor the lock.
+ * Unit tests for an owner's lock against a connection that answers as each
+ * engine does.
  *
- * The statements MySQL and PostgreSQL run are pinned here as strings, and run
- * against those engines in the integration tests.
+ * The engine statements are pinned as strings here and run for real in the
+ * integration tests.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,9 +47,7 @@ final class OwnerLockTest extends TestCase
 
     /**
      * An owner's key is the signed 64-bit integer of the first 8 bytes of the
-     * SHA-256 of its canonical encoding: the same for every reference to the
-     * owner, different for another owner, and negative when the digest's first
-     * bit is set.
+     * SHA-256 of its canonical encoding.
      *
      * @return void
      */
@@ -66,9 +60,8 @@ final class OwnerLockTest extends TestCase
     }
 
     /**
-     * An owner's name is `audit_log_owner_` and the first 32 hex characters of
-     * the same digest: 48 characters, within the 64 MySQL allows, stable per
-     * owner and different for another.
+     * An owner's name is `audit_log_owner_` and 32 hex characters of the
+     * digest, within MySQL's 64.
      *
      * @return void
      */
@@ -102,9 +95,8 @@ final class OwnerLockTest extends TestCase
     }
 
     /**
-     * On PostgreSQL a bounded wait sets the transaction's local lock timeout to
-     * the wait first, then takes the advisory lock of the owner's key on the
-     * writer.
+     * On PostgreSQL a bounded wait sets the local lock timeout before taking
+     * the advisory lock.
      *
      * @return void
      */
@@ -143,9 +135,8 @@ final class OwnerLockTest extends TestCase
     }
 
     /**
-     * On PostgreSQL a wait cancelled by its lock timeout is refused naming the
-     * wait alone, with no previous exception, so neither the owner nor the
-     * lock's key reaches a reporter.
+     * On PostgreSQL a lock timeout is refused naming the wait alone, with no
+     * previous, so the owner never reaches a reporter.
      *
      * @return void
      */
@@ -196,9 +187,8 @@ final class OwnerLockTest extends TestCase
     }
 
     /**
-     * Rows of `[the answer get_lock() gives, whether the lock is granted]`: an
-     * integer or its decimal string from the driver, `0` when the wait ran out
-     * and SQL's `NULL` when the server could not take it.
+     * Rows of `[the answer get_lock() gives, whether the lock is granted]`; a
+     * driver may give the integer as a string.
      *
      * @return iterable<string, array{0: int|string|null, 1: bool}>
      */
@@ -215,9 +205,8 @@ final class OwnerLockTest extends TestCase
     }
 
     /**
-     * On MySQL the session's named lock is asked for with the wait on the
-     * writer, whether or not the wait is asked to be bounded, and anything but
-     * a grant is refused naming the wait alone.
+     * On MySQL the named lock is asked for with the wait, bounded or not, and
+     * anything but a grant is refused.
      *
      * @param  int|string|null  $answer
      * @param  bool  $granted
@@ -258,9 +247,8 @@ final class OwnerLockTest extends TestCase
     }
 
     /**
-     * On MySQL the lock is released as often as the session answers that it
-     * released one, so every level a retried transaction took is freed, and no
-     * more than five times.
+     * On MySQL the lock is released while the session says it released one, at
+     * most five times, as a retry nests it.
      *
      * @return void
      */

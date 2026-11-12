@@ -12,10 +12,8 @@ use SineMacula\Laravel\AuditLog\Keys\OwnerMarker;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for an owner marker: the fields it keeps, the row that stores it
- * and the row it is read back from in any form an engine returns, whether it
- * records an erasure, and every malformed field refused, naming the field and
- * never its value.
+ * Unit tests for an owner marker, its stored row and the malformed fields it
+ * refuses without their value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,9 +72,8 @@ final class OwnerMarkerTest extends TestCase
     }
 
     /**
-     * A stored row is read back as the marker that stored it, its integers as
-     * an integer or their decimal string and its time with fewer fractional
-     * digits, as engines return them.
+     * A stored row reads back in any form an engine returns: integers as
+     * strings, fewer fractional digits.
      *
      * @return void
      */

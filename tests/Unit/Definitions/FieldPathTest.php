@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Definitions\FieldPath;
 
 /**
- * Unit tests for the field path grammar: the paths it parses, the paths it
- * refuses and in what order, how a pattern matches a concrete path, which of
- * two paths is more specific, and when one may lie beneath another.
+ * Unit tests for the field path grammar.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,9 +33,8 @@ final class FieldPathTest extends TestCase
     private const string RESERVED_MESSAGE = 'A field path\'s segments may not begin `_audit`, which is reserved for the package\'s own metadata.';
 
     /**
-     * Raise every PHP warning as an exception, so each path is also parsed,
-     * matched and compared quietly: inside a Laravel application a warning
-     * becomes an exception, which would turn a field rule into an error.
+     * Raise every warning as an exception, as Laravel does, so each path is
+     * shown to be parsed quietly.
      *
      * @return void
      */
@@ -344,9 +341,8 @@ final class FieldPathTest extends TestCase
     }
 
     /**
-     * More segments is more specific; at equal length, the first position where
-     * one has a literal and the other `*` decides, for the literal. Only the
-     * sign is asserted.
+     * More segments is more specific, then a literal over `*` at the first
+     * differing position; only the sign is asserted.
      *
      * @param  string  $a
      * @param  string  $b
@@ -397,9 +393,7 @@ final class FieldPathTest extends TestCase
     }
 
     /**
-     * `FieldPath` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * `FieldPath` cannot be instantiated: its constructor is private.
      *
      * @return void
      *

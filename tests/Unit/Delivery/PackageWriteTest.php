@@ -12,10 +12,8 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for what the package's read path asks of a record it writes: the
- * check it runs before delivery and the hand-over once the record is
- * acknowledged, each kept as given, run through its own closure and kept out of
- * every stack frame.
+ * Unit tests for what the read path asks of a record it writes: the check
+ * before delivery and the hand-over after.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,9 +40,8 @@ final class PackageWriteTest extends TestCase
     }
 
     /**
-     * The check runs the accepting closure with the record, and what it throws
-     * propagates as it is; the hand-over runs the acknowledging closure with
-     * the finalised record, and neither runs the other's closure.
+     * Each step runs only its own closure, and the check's exception propagates
+     * as it is.
      *
      * @return void
      */

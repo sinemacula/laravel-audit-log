@@ -18,9 +18,8 @@ use Tests\Unit\Stubs\StubForeignGuard;
 use Tests\Unit\Stubs\StubHelperGuard;
 
 /**
- * Unit tests for reading the user a guard already holds: only from a guard
- * using `GuardHelpers`, recognised by the trait, and never through `user()` or
- * the guard's provider.
+ * Unit tests for reading the user a `GuardHelpers` guard already holds, never
+ * through `user()` or its provider.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -97,9 +96,8 @@ final class CachedUserTest extends TestCase
     }
 
     /**
-     * A guard that does not use the trait gives nothing, however it answers
-     * `hasUser()`, and is not even asked, even when it has a property of the
-     * same name: only the trait says what that property means.
+     * A guard without the trait gives nothing and is not asked, even with a
+     * property of the same name.
      *
      * @return void
      */
@@ -112,9 +110,8 @@ final class CachedUserTest extends TestCase
     }
 
     /**
-     * The trait counts on a parent class, and a protected property declared
-     * there is read from the subclass's scope. The parent's callback, which
-     * `user()` would run, fails the test.
+     * A protected property on the trait's parent class is read from the
+     * subclass's scope without running `user()`.
      *
      * @return void
      */

@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
 
 /**
- * A drift guard for the facade's `@method` lines: there is one for each public
- * method of the recorder, none for anything else, and each states the method's
- * full signature, so an added, renamed or changed method fails here rather than
- * leaving IDEs and static analysis with a stale answer.
+ * Guards the facade's `@method` lines against drift from the recorder's public
+ * methods and their signatures.
  *
  * Only the recorder's methods are covered: the facade's real statics, such as
  * `fake()`, have no line.
@@ -74,9 +72,8 @@ final class AuditLogMethodLinesTest extends TestCase
     }
 
     /**
-     * The scanner reads each `@method static` line, normalising type order,
-     * leading backslashes and an array's contents, and a default holding a
-     * `::`, and passes over prose, other tags and instance `@method` lines.
+     * The scanner reads each `@method static` line, normalised, and passes over
+     * everything else.
      *
      * @return void
      */
@@ -204,9 +201,8 @@ final class AuditLogMethodLinesTest extends TestCase
     }
 
     /**
-     * A type with no leading backslashes or contents of an array, `?T` written
-     * as `T|null`, a list written as the array it is, and its parts in order,
-     * so two spellings of one type compare equal.
+     * The type normalised so two spellings compare equal: `?T` as `T|null`, a
+     * list as an array, its parts in order.
      *
      * @param  string  $type
      * @return string
