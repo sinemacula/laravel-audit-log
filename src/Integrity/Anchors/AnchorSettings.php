@@ -9,20 +9,8 @@ use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 
 /**
- * The anchor settings, read from configuration on every call and validated as
- * they are read: which anchor keeps the seals
- * (`audit-log.integrity.anchor.driver`), the disk a disk anchor writes to
- * (`audit-log.integrity.anchor.disk`), the namespace on that disk it writes
- * under (`audit-log.integrity.anchor.path`), and how many seals one run anchors
- * (`audit-log.integrity.anchor.batch`).
- *
- * The driver fails closed: a missing one, `null`, an empty one or the string
- * `null` is no anchor, `disk` is the disk anchor, and anything else is refused
- * rather than read as either. The path is relative and can never leave its
- * namespace: no leading, trailing or doubled slash, and no `.` or `..` segment.
- * Every malformed value fails closed with an `InvalidArgumentException` naming
- * the key and never the value. Whether the disk is configured is a question for
- * `audit-log:check`, not for these settings.
+ * The anchor settings under `audit-log.integrity.anchor`, read on every call. A
+ * malformed value fails closed, naming the key and never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,13 +19,13 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
  */
 final readonly class AnchorSettings
 {
-    /** @var string What a path must be: segments of letters, digits, dots, underscores and hyphens, joined by single slashes. */
+    /** @var string Segments of letters, digits, dots, underscores and hyphens, joined by single slashes. */
     public const string PATH_PATTERN = '/\A[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*\z/';
 
     /** @var string Prefix of every anchor setting's key. */
     private const string PREFIX = 'audit-log.integrity.anchor.';
 
-    /** @var string What a disk name must be: 1 to 64 characters of valid UTF-8. */
+    /** @var string A disk name: 1 to 64 characters of valid UTF-8. */
     private const string DISK_PATTERN = '/\A.{1,64}\z/su';
 
     /** @var string The namespace a disk anchor writes under when none is configured. */
@@ -105,8 +93,7 @@ final readonly class AnchorSettings
 
     /**
      * The namespace on the disk a disk anchor writes under, `audit-log-anchors`
-     * unless configured otherwise: 1 to 191 characters of path segments that
-     * can never leave it.
+     * unless configured otherwise.
      *
      * @return string
      *
@@ -158,10 +145,8 @@ final readonly class AnchorSettings
     }
 
     /**
-     * Whether the path is within its length, is made of segments joined by
-     * single slashes, and has no segment that names the current or the parent
-     * directory: the one rule both these settings and a disk anchor hold a path
-     * to.
+     * Whether the path is short enough, made of slash-joined segments, with no
+     * `.` or `..` segment; settings and a disk anchor share the rule.
      *
      * @param  string  $path
      * @return bool

@@ -9,22 +9,8 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\KeyState;
 
 /**
- * What the journal's believed `rewrap` rows commit each key to: the state, the
- * wrapping key id and the wrapped key's digest its latest listing left it in,
- * by key id, folded in sequence order so a later listing replaces an earlier
- * one.
- *
- * A key's state, wrapping key id and wrapped key are its mutable columns, left
- * out of its signature: the wrap context binds the wrapped key to its row, and
- * the journal binds the state. Only a rewrap supersedes a key or replaces its
- * wrapped key, so a key that holds a key must be as its latest listing left it,
- * and a key no rewrap lists must be live: a superseded key no rewrap
- * superseded, a live key whose latest listing superseded it, and a key whose
- * wrapping differs from its latest listing are each `key_substituted`, as a
- * restore or a hand edit of those columns leaves them.
- *
- * Each commitment is kept as one digest of the three values, so a key costs its
- * id and 32 bytes however its listing was written.
+ * Each key's state and wrapping as its latest believed `rewrap` listing left
+ * them, which the key's signature does not cover.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,10 +23,8 @@ final class RewrapCommitments
     private array $committed = [];
 
     /**
-     * Fold a believed journal row in: a `rewrap` row's listed keys replace
-     * whatever an earlier listing committed them to; any other row, a payload
-     * that cannot be read, and a listing that is not well formed commit
-     * nothing.
+     * Fold a believed journal row in; only a well-formed `rewrap` listing
+     * commits anything, replacing the key's earlier listing.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $journalRow
      * @return void
@@ -72,11 +56,8 @@ final class RewrapCommitments
     }
 
     /**
-     * The finding the key row's state and wrapping give against its latest
-     * listing, or `null` when they agree: a key no rewrap lists must be live,
-     * and one a rewrap lists must hold the state, wrapping key and wrapped key
-     * its latest listing left it with. A key that holds no key is the erasure
-     * check's, and gives none here.
+     * The finding against the key's latest listing, or `null`. An unlisted key
+     * must be live; a key holding none is the erasure check's.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $keyRow
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
@@ -100,8 +81,7 @@ final class RewrapCommitments
 
     /**
      * The key id a listing names and the digest of what it left the key in, or
-     * `null` when the listing is not a map of a string `key_id` and an `after`
-     * of a string state, wrapping key id and wrapped digest.
+     * `null` when the listing is malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -9,12 +9,8 @@ use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 
 /**
- * The anchor the package binds when none is configured: it anchors nothing,
- * confirms nothing and cannot discover a head, so every seal is reported
- * unanchored, and that is informational rather than a failure.
- *
- * The package recognises it by its class and never asks it to anchor, so having
- * no anchor costs no statement and no call.
+ * The anchor bound when none is configured: it anchors and confirms nothing, so
+ * every seal is reported unanchored. The package never asks it to anchor.
  *
  * @api
  *
@@ -35,8 +31,7 @@ final readonly class NullAnchor implements CheckpointAnchor
     }
 
     /**
-     * Refuse to anchor: the package never asks this anchor to, so a call is a
-     * programming error.
+     * Refuse to anchor: the package never asks this anchor to.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealSummary  $seal
      * @return array<string, scalar|null>

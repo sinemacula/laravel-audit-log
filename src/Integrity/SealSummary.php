@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * The tuple an anchor binds for one seal: the log, the seal's sequence, its id
- * and its digest.
- *
- * An anchor's receipt is bound to exactly this tuple: anchoring the same tuple
- * again gives the same receipt, a receipt confirms only the tuple it was given
- * for, and another digest at a sequence the anchor already holds is a conflict.
- * The digest covers every immutable field of the seal, so binding it binds the
- * whole seal, its members and its link to the seal before.
+ * The tuple an anchor binds for one seal. Its digest covers every immutable
+ * field, so binding it binds the whole seal and its link to the one before.
  *
  * @api
  *
@@ -66,8 +60,8 @@ final readonly class SealSummary
     }
 
     /**
-     * The summary of the seal, under the digest given, which the caller has
-     * recomputed from the seal's fields.
+     * The summary of the seal under a digest the caller recomputed from its
+     * fields.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @param  string  $digest
@@ -81,8 +75,7 @@ final readonly class SealSummary
     }
 
     /**
-     * The summary under its canonical keys, as an anchor stores it. The order
-     * is irrelevant: the canonical encoding sorts the keys.
+     * The summary under its canonical keys, as an anchor stores it.
      *
      * @return array{v: int, log_id: string, sequence: int, seal_id: string, seal_digest: string}
      */
@@ -98,8 +91,7 @@ final readonly class SealSummary
     }
 
     /**
-     * Whether the other summary binds the same tuple: the same log, sequence,
-     * seal id and digest.
+     * Whether the other summary binds the same tuple.
      *
      * @param  self  $other
      * @return bool

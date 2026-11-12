@@ -8,27 +8,8 @@ use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * Signs a captured record once, as it is finalised, and verifies a stored row
- * against its signature, under integrity version 1.
- *
- * The signature is HMAC-SHA256, under the secret of the ring's signing key,
- * over the canonical encoding of every column but `hmac`, so the time the
- * record was recorded, the integrity version and the key id are covered too.
- * Verification works on the decoded stored row, exactly as it was read: it
- * never normalises or repairs it, every signed column is required (a missing
- * one is never read as `null`), and columns beyond version 1's are ignored. It
- * answers `false` only when the signature does not match; a row it cannot
- * judge, because its key is not in the ring, its version is not supported or
- * the row is malformed, is refused with an exception, never reported as
- * tampered or as intact.
- *
- * The captured-content digest is SHA-256 over the canonical encoding of the 33
- * captured columns alone, leaving out when the record was recorded and how it
- * was signed, so the same record finalised twice has one digest. An imported
- * record's source digest is one of those columns, so the row's signature covers
- * it; two imports of one assertion are two records, with their own ids and
- * batches and so their own captured digests, and a repeated import is found by
- * its source digest, never by this one.
+ * Signs a record as it is finalised and verifies a stored row's signature under
+ * integrity version 1: HMAC-SHA256 over every column but `hmac`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -129,10 +110,8 @@ final readonly class RecordSigner
     }
 
     /**
-     * Whether the decoded stored row's signature matches its signed columns.
-     * `false` means only that the signature does not match; a row whose key the
-     * ring does not hold, whose integrity version is not supported, or that is
-     * malformed is refused instead.
+     * Whether the stored row's signature matches; a row with an unknown key or
+     * version, or a malformed one, is refused instead of answered.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -157,8 +136,8 @@ final readonly class RecordSigner
     }
 
     /**
-     * The captured-content digest of the decoded stored row: SHA-256, in hex,
-     * over the canonical encoding of its captured columns, each required.
+     * The SHA-256 hex of the row's captured columns alone, so the same record
+     * finalised twice has one digest.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -200,8 +179,7 @@ final readonly class RecordSigner
     }
 
     /**
-     * Refuse an integrity version this release does not verify, naming it, or
-     * naming its type when it is not an integer.
+     * Refuse an integrity version this release does not verify.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -239,8 +217,7 @@ final readonly class RecordSigner
     }
 
     /**
-     * The stored key id, refused unless it is a string; whether the ring holds
-     * it is the ring's to say.
+     * The stored key id, refused unless it is a string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

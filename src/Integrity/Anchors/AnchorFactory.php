@@ -10,13 +10,8 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 
 /**
- * Makes the anchor the settings configure: the null anchor when no driver is
- * configured, and a disk anchor on the configured disk, under the configured
- * path, for the log every seal names, for `disk`.
- *
- * The settings are read on every call, so a changed setting takes effect on the
- * next anchor made, and a malformed one fails closed before any disk is
- * resolved.
+ * Makes the anchor the settings configure, reading them on every call so a
+ * change applies to the next anchor made.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,7 +29,7 @@ final readonly class AnchorFactory
      */
     public function __construct(
 
-        /** The anchor settings: the driver, the disk and the path. */
+        /** The anchor settings. */
         private AnchorSettings $anchors,
 
         /** The sealing settings, for the log id. */
@@ -60,8 +55,8 @@ final readonly class AnchorFactory
     }
 
     /**
-     * A disk anchor on the configured disk, under the configured path, for the
-     * configured log, every setting read before the disk is resolved.
+     * A disk anchor for the configured disk, path and log, every setting read
+     * before the disk is resolved.
      *
      * @return \SineMacula\Laravel\AuditLog\Integrity\Anchors\DiskAnchor
      *

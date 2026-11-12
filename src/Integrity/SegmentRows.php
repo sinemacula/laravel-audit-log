@@ -8,13 +8,8 @@ use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * How the verification of a segment reads what it was given: the findings of a
- * seal's set of members and of its link to the seal before, the genesis rule,
- * the receipt kept beside a seal, a stored seal's sequence, the earlier of two
- * ids and a stored value as text.
- *
- * Each reads only what it is given and never a statement, so a stored value of
- * another type is read as none rather than trusted.
+ * Readers a segment's verification applies to what it was given, never a
+ * statement; a stored value of another type is read as none, never trusted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,10 +24,8 @@ final class SegmentRows
     private function __construct() {}
 
     /**
-     * The findings of the set of members: the rows must be as many as the seal
-     * counts, and their pairs must give the members digest. A seal with more or
-     * fewer rows fails both, since a set of another size never gives the digest
-     * the seal recorded.
+     * The findings of the seal's member rows; a set of another size fails both
+     * checks, as it can never give the recorded digest.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @param  int  $count
@@ -55,9 +48,8 @@ final class SegmentRows
     }
 
     /**
-     * The finding of the seal's link to the seal before, when the run has one:
-     * the link must name its id and its recomputed digest, so a link to a seal
-     * that cannot be read, which has none, is broken.
+     * The finding of the seal's link to the seal before, which must name its id
+     * and its recomputed digest.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SegmentReport  $previous
@@ -77,9 +69,7 @@ final class SegmentRows
     }
 
     /**
-     * Whether the seal breaks the genesis rule: the first seal links to none,
-     * and every later one links to the seal before by both its id and its
-     * digest.
+     * Whether the seal breaks the genesis rule: only the first links to none.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @return bool

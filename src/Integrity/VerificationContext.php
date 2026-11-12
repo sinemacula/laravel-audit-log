@@ -7,22 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * What every segment of one verification run shares: the head the anchor
- * reported, whether the anchor may still be asked to confirm a receipt, the
- * instants the anchoring grace runs between, fixed when the run begins, and
- * whether the anchor's head settles each seal's anchoring.
- *
- * The grace ends at the run's clock, so a seal dated after the run began, by a
- * sealing server's clock running ahead or by a forger, is never excused. When
- * discovery gave the anchor's head and the walk reaches it, that head settles
- * anchoring with no call per seal: a seal up to it is anchored, since the
- * head's digest commits to the chain the walk checks, and a seal after it is
- * not held.
- *
- * An anchor that fails once in a run is not asked again in it, so an outage
- * costs one failure rather than one per seal: the run carries on with a context
- * that no longer asks, and every later segment's anchoring is `unavailable`
- * without a call.
+ * What every segment of one verification run shares, fixed when the run begins.
+ * An anchor that fails once is not asked again, so an outage costs one failure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,7 +39,7 @@ final readonly class VerificationContext
         /** The instant, ISO-8601 UTC with microseconds, the anchoring grace before the run's clock. */
         public string $graceFrom,
 
-        /** The instant, ISO-8601 UTC with microseconds, the anchoring grace ends at: the run's clock. */
+        /** The instant the anchoring grace ends at, the run's clock, so a seal dated later is never excused. */
         public string $graceTo,
 
         /** Whether the anchor's head settles each seal's anchoring, with no call per seal. */

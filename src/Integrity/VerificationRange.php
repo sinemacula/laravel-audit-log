@@ -5,15 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * The seals one verification covers, by sequence: the whole log, or a range
- * from a first seal to a last one, either end defaulting to the end of the
- * chain.
- *
- * The range is validated against the head the run observes, never against a
- * seal written after it: a first seal after the last, a last seal beyond the
- * head, and any range of a log with no seal are refused with an
- * `InvalidArgumentException` before anything is verified. Only the whole log is
- * complete, so a ranged run never claims the whole log is valid.
+ * The seals one verification covers: the whole log, or a range checked against
+ * the head the run observes. Only the whole log is complete.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,10 +57,8 @@ final readonly class VerificationRange
     }
 
     /**
-     * The first and last sequence to verify, against the head the run
-     * observed. The whole of a log with no seal is the empty range from 1 to 0;
-     * a range of it, an end that is not a sequence, a first seal after the
-     * last, and an end beyond the head are refused.
+     * The first and last sequence to verify, against the head the run observed;
+     * a log with no seal is the empty range from 1 to 0.
      *
      * @param  ?int  $head
      * @return array{0: int, 1: int}

@@ -13,27 +13,8 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * One generation of an owner's key unit, as it is drafted, signed and stored:
- * its id, which an envelope names as `k`; the unit, the owner with the record's
- * tenant and the definition's category, and the digest of the unit; its
- * generation; its state; the data key wrapped and the id of the wrapping key;
- * when it was made; the erasure that destroyed it; and its signature.
- *
- * The signature covers what never changes, the id, the unit's columns and
- * digest, the generation and the creation time, so a row moved to another owner
- * or generation no longer verifies. What changes is bound elsewhere: the
- * wrapped key by its wrap context, which names the row, its unit, its
- * generation and its wrapping key, and the state by the journal. The unit's
- * digest is the SHA-256, unkeyed, of the canonical encoding of the unit's
- * columns, and a row whose digest is not its columns' is refused.
- *
- * A row holds a wrapped key exactly when its state holds a key, with the id of
- * the key that wrapped it, and an erasure id exactly when it is erased. Every
- * field is checked as it is built: a draft is refused with an
- * `InvalidArgumentException` naming the field, and a stored row read through
- * `fromRow()` with an `UnexpectedValueException` naming the column and never
- * its value. A draft is live, and holds no key id and no HMAC until it is
- * signed.
+ * One generation of an owner's key unit. Its signature covers what never
+ * changes; the wrap context binds the wrapped key, the journal its state.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -195,9 +176,8 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * An unsigned live row for the unit of the owner, the tenant and the
-     * category: its digest taken, its data key wrapped under the wrapping key
-     * named, with no key id and no HMAC until it is signed.
+     * An unsigned live row for the unit, its data key wrapped under the
+     * wrapping key named.
      *
      * @param  string  $id
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -249,11 +229,7 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The row of a decoded stored row: integers are read as an integer or its
-     * decimal string and times in any form an engine returns. A missing or
-     * malformed column is refused naming the column, never quoting its value,
-     * and so is a unit that is not its columns' digest and a wrapped key, a
-     * wrapping key id or an erasure id its state does not allow.
+     * The row of a decoded stored row, refusing a column by name, never value.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -300,9 +276,7 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The digest of a key unit: lower-case hex SHA-256, unkeyed, of the
-     * canonical encoding of the owner's type and id, the tenant's type and id,
-     * or `null` for none, and the category.
+     * The digest of a key unit: unkeyed SHA-256 hex of its canonical columns.
      *
      * @param  string  $ownerType
      * @param  string  $ownerId
@@ -324,10 +298,8 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The additional data a data key is wrapped with: the canonical JSON of the
-     * wrap domain, the generation, the key row's id, the unit's digest and the
-     * wrapping key's id, so a wrapped key moved to another row, unit,
-     * generation or wrapping key does not unwrap.
+     * The additional data a data key is wrapped with, so a wrapped key moved to
+     * another row, unit, generation or wrapping key does not unwrap.
      *
      * @param  string  $keyRowId
      * @param  string  $unit
@@ -343,8 +315,7 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The row signed: the key id and the HMAC given, every other field as it
-     * is.
+     * The row signed with the key id and HMAC given.
      *
      * @param  string  $keyId
      * @param  string  $hmac
@@ -378,9 +349,8 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The fields the HMAC covers, each under its canonical key: every column
-     * that never changes, and the key id. The state, the wrapped key, its
-     * wrapping key id and the erasure id are left out.
+     * The fields the HMAC covers: the columns that never change, and the key
+     * id.
      *
      * @formatter:off
      *
@@ -437,8 +407,7 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The row that stores the signed row, in table order, with its time in the
-     * form the database stores. An unsigned row is never stored.
+     * The row that stores the signed row, in table order.
      *
      * @formatter:off
      *
@@ -478,8 +447,7 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * Every field the row checks, by its column, the state left out: it is a
-     * key state by its type.
+     * Every field the row checks, by its column; the state is typed.
      *
      * @return array<string, int|string|null>
      */
@@ -504,9 +472,7 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The field whose presence the state does not allow: a wrapped key exactly
-     * when the state holds a key, a wrapping key id beside every wrapped key,
-     * and an erasure id exactly when the key is erased.
+     * The field whose presence the state does not allow, or `null`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\KeyState  $state
      * @param  array<string, int|string|null>  $fields
@@ -525,10 +491,8 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The first field, in table order, that is malformed, or `null` when none
-     * is. A tenant names its type and id together, the unit must be its
-     * columns' digest, and an unsigned row's key id and HMAC are left
-     * unchecked.
+     * The first malformed field in table order, or `null`; an unsigned row's
+     * key id and HMAC are left unchecked.
      *
      * @param  array<string, int|string|null>  $fields
      * @param  bool  $unsigned
@@ -579,8 +543,7 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * Whether the text is 1 to 191 characters, with no control characters: an
-     * owner's or a tenant's type or id.
+     * Whether the text is 1 to 191 characters, with no control characters.
      *
      * @param  string  $value
      * @return bool
@@ -618,10 +581,8 @@ final readonly class SubjectKeyRow
     }
 
     /**
-     * The stored column read as it is asked: a string, a string or `null`, an
-     * integer from an integer or its decimal string, or a time in the package's
-     * form from any form an engine returns. A missing column, and a value of
-     * another form, is refused naming the column.
+     * The stored column read as asked, a time in the package's form from any
+     * form an engine returns; a missing or malformed column is refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

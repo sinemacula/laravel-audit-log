@@ -25,49 +25,8 @@ use SineMacula\Laravel\AuditLog\Privacy\KeyStoreUse;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Verifies the log, or a range of its seals, and streams one report per segment
- * as it goes, holding counts and never the reports.
- *
- * The run's clock is read once, so the anchoring grace is measured back from
- * when the run began, and never past it. The anchor's head is asked for first,
- * independently of every receipt kept beside the seals, and the local head
- * after it, so a remote head the local log does not reach can never be a seal
- * committed meanwhile; seals written after the local head was read are never
- * read. The local head is the greatest sequence from 1, so a row at a sequence
- * below 1 is never taken for it. A range is validated against that head before
- * anything is verified. A ranged run checks its first seal's link to the seal
- * before it, and a missing one is a gap.
- *
- * The walk reads the seals in pages by sequence and expects the range's first
- * sequence first, then each next one, through the range's last, so a deleted
- * first seal, a seal missing between two and seals missing at the end of the
- * range are each a gap, and the coverage reported is never more than was read.
- * When discovery gave the anchor's head, the walk reaches it and the local seal
- * there has its digest, that head settles every seal's anchoring with no
- * further call: the head's digest commits to the chain before it, which the
- * walk checks link by link, so a seal up to it is anchored in any run that
- * passes, and a seal after it is not held. Otherwise, a head the local log
- * contradicts among them, each seal's receipt is put to the anchor. An anchor
- * that fails, in discovery or when asked to confirm a receipt, is not asked
- * again in the run. The anchor's head is compared with the local seal at its
- * sequence on every run: a head beyond the local tail, or with no local log, is
- * a missing tail; another digest at its sequence, no local seal there, or a
- * seal there that cannot be read whose stored digest is another is a
- * contradiction.
- *
- * Only a run of the whole log checks for seals outside the chain (a sequence
- * below 1), for member rows of no seal in the chain, and for unsealed entries:
- * those older than the allowed age are overdue, and those recorded further
- * ahead of the run's clock than the lookback are never sealed and are a
- * finding, never pending. Every run, a ranged one included, then verifies the
- * whole lifecycle journal and each seal's commitment to it. A run of the whole
- * log then verifies the owners' key store, with the package's key store in use,
- * which it is while the bound field encrypter is the package's or none, and
- * says it skipped it, naming the encrypter, otherwise; a journal or key finding
- * fails the run as any finding of its status does. A run of the whole log
- * records its completion, with whether it passed at the strictness it ran at.
- * Every statement reads the writer, so a replica's lag never reads as a missing
- * row.
+ * Verifies the log or a range of its seals, streaming one report per segment.
+ * It reads only the writer, so replica lag never reads as a missing row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -126,10 +85,8 @@ final readonly class Verifier
     ) {}
 
     /**
-     * Verify the range, giving each segment's report to the callback as it is
-     * made, then the journal and, for the whole log, the key store, and
-     * summarise the run; a run of the whole log records whether it passed at
-     * the strictness given.
+     * Verify the range, the journal and, for the whole log, the key store. The
+     * anchor's head is read first, so it is never a seal made meanwhile.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationRange  $range
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Integrity\SegmentReport): void  $each
@@ -173,11 +130,8 @@ final readonly class Verifier
     }
 
     /**
-     * Ask the anchor for its head: the head, the anchor's status when asking
-     * settles it, and whether the anchor may still be asked to confirm. With no
-     * anchor, or one that cannot discover, it is not asked; a conflict is a
-     * finding of the run, and any other failure makes the anchor unavailable
-     * for the rest of the run.
+     * Ask the anchor for its head; a conflict is a finding of the run, and any
+     * other failure makes the anchor unavailable for the rest of it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationTally  $tally
      * @return array{0: ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead, 1: ?\SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus, 2: bool}
@@ -205,10 +159,7 @@ final readonly class Verifier
 
     /**
      * Whether the anchor's head settles every seal's anchoring with no call per
-     * seal, once discovery answered: the anchor holds none, or the walk reaches
-     * its head and the local seal there has the head's digest, so the chain the
-     * walk checks commits every seal up to it. A head the local log contradicts
-     * settles nothing, and each seal's receipt is put to the anchor.
+     * seal: it holds none, or the walk reaches its head with the same digest.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead  $remote
      * @param  array{0: int, 1: int}  $bounds
@@ -237,9 +188,8 @@ final readonly class Verifier
     }
 
     /**
-     * The sequence of the local head, the greatest from 1, or `null` when the
-     * log has no seal in the chain; a greatest sequence that cannot be read as
-     * an integer is refused, never taken for an empty log.
+     * The sequence of the local head, or `null` with no seal in the chain; an
+     * unreadable greatest sequence is refused, never read as empty.
      *
      * @return ?int
      *
@@ -257,10 +207,8 @@ final readonly class Verifier
     }
 
     /**
-     * Walk the seals of the range, giving each report to the callback and
-     * counting it, and return the report of the seal at the anchor's head, if
-     * the walk met it. A walk that ends before the range's last sequence, or
-     * reads no seal at all, is a gap.
+     * Walk the range, giving each report to the callback, and return the report
+     * at the anchor's head if met; ending short of the range is a gap.
      *
      * @param  array{0: int, 1: int}  $bounds
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationContext  $context
@@ -289,8 +237,7 @@ final readonly class Verifier
             $each($report);
             $tally->add($report);
 
-            // An anchor asked and found unavailable failed when asked, so it is
-            // not asked again in this run
+            // An anchor that failed when asked is not asked again in this run
             $context  = $report->anchoring === AnchorStatus::UNAVAILABLE && $context->askAnchor ? $context->withoutAnchor() : $context;
             $atRemote = $report->sequence  === $context->remote?->sequence ? $report : $atRemote;
             $previous = $report;
@@ -305,10 +252,7 @@ final readonly class Verifier
     }
 
     /**
-     * The stored seals from the first sequence to the last, as raw rows, read
-     * in pages by sequence as they are needed, so a page is read only once the
-     * seals before it have been verified. Each page starts after the sequence
-     * the last seal of the page before holds, as it is stored.
+     * The stored seals in the range, read a page at a time as needed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -335,9 +279,8 @@ final readonly class Verifier
     }
 
     /**
-     * The first link of a ranged run: the report of the seal before its first,
-     * given to the callback and counted only when it fails. A boundary seal
-     * that does not exist is a gap, and the walk then starts with no link.
+     * The first link of a ranged run: the seal before its first, reported only
+     * when it fails; a missing one is a gap.
      *
      * @param  int  $from
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Integrity\SegmentReport): void  $each
@@ -370,10 +313,8 @@ final readonly class Verifier
     }
 
     /**
-     * How the anchor's head compares with the local log, once discovery gave a
-     * head or none: an empty anchor agrees with an empty log and leaves a local
-     * log unanchored, and a head is compared with the local seal at its
-     * sequence.
+     * How the anchor's head compares with the local log; an empty anchor agrees
+     * only with an empty log.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead  $remote
      * @param  ?int  $head
@@ -399,14 +340,8 @@ final readonly class Verifier
     }
 
     /**
-     * How the anchor's head compares with the local seal at its sequence: a
-     * head beyond the local tail, or with no local log, is a missing tail; no
-     * local seal at its sequence, or another digest there, is a contradiction;
-     * the same digest is anchored. A local seal there that cannot be read has
-     * no digest to recompute, so its stored digest is compared instead: another
-     * is a contradiction, and the same leaves it unanchored. The walk's report
-     * is used when the walk met that seal, and the seal is read on its own when
-     * the range left it out.
+     * How the anchor's head compares with the local seal at its sequence, read
+     * on its own when the range left it out.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\AnchoredHead  $remote
      * @param  ?int  $head
@@ -430,9 +365,7 @@ final readonly class Verifier
         $local  = $walked ? $atRemote : $this->boundaryAt($remote->sequence);
         $status = $this->statusAgainst($remote, $local);
 
-        // A readable seal the walk met and found contradicted carries the
-        // finding already; one read on its own, one that cannot be read, or one
-        // missing, is a finding of the run
+        // The walk reported a readable seal it met; others are the run's
         if ($status === AnchorStatus::CONTRADICTED && ($local?->digest === null || !$walked)) {
             $tally->addFinding(new RunFinding(Finding::ANCHOR_CONTRADICTION, $local?->sealId));
         }
@@ -458,10 +391,8 @@ final readonly class Verifier
     }
 
     /**
-     * How the local seal at the anchor's head compares with it: none there, or
-     * another digest, is a contradiction, and the same digest is anchored. A
-     * seal that cannot be read is compared by its stored digest: another is a
-     * contradiction, and the same leaves it unanchored.
+     * How the local seal at the anchor's head compares with it; an unreadable
+     * seal is compared by its stored digest.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\AnchoredHead  $remote
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SegmentReport  $local
@@ -495,10 +426,8 @@ final readonly class Verifier
     }
 
     /**
-     * Count the seals stored at a sequence below 1, which the chain never holds
-     * and so no walk reads: a gap of the run when there are any, with the first
-     * by sequence and id, since entries tied to one would otherwise be neither
-     * unsealed nor orphaned.
+     * Count the seals below sequence 1, which no walk reads, as a gap: entries
+     * tied to one would otherwise be neither unsealed nor orphaned.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationTally  $tally
      * @return void
@@ -521,9 +450,7 @@ final readonly class Verifier
     }
 
     /**
-     * Count the member rows of no seal in the chain, whose seal is missing or
-     * stored at a sequence below 1, a finding of the run when there are any,
-     * with the first by seal and entry id.
+     * Count the member rows of no seal in the chain as a finding of the run.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationTally  $tally
      * @return void
@@ -552,10 +479,8 @@ final readonly class Verifier
     }
 
     /**
-     * Count the entries no seal holds: those older than the allowed age are
-     * overdue, and those recorded further ahead of the run's clock than the
-     * lookback are never sealed, each a finding of the run with the first by
-     * time and id; the rest are pending, never bad.
+     * Count the unsealed entries: overdue and far-future ones are findings of
+     * the run, and the rest pending.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationTally  $tally
@@ -605,8 +530,8 @@ final readonly class Verifier
     }
 
     /**
-     * Count the unsealed entries the query selects, a finding of the run when
-     * there are any, with the first by time and id, and return how many.
+     * Count the unsealed entries the query selects as a finding of the run, and
+     * return how many.
      *
      * @param  \Illuminate\Database\Query\Builder  $entries
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding

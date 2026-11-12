@@ -5,13 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
 
 /**
- * The check a verification or a seal run found failing, each with the integrity
- * status it gives. Within one status the cases are in order of precedence, so
- * when a segment fails several checks of its most severe status, the first of
- * them in this order is the one reported.
- *
- * A finding names the check and never a value of an entry, so it can be shown,
- * logged and alerted on as it is.
+ * The check a verification or seal run found failing, in order of precedence
+ * within a status. It never names an entry's value, so it can be logged as is.
  *
  * @api
  *
@@ -120,18 +115,16 @@ enum Finding: string
     // A key use names a key with no row
     case KEY_MISSING = 'key_missing';
 
-    // A key row's signature does not verify, its wrapped key does not unwrap
-    // under the context it was wrapped in, or its state or wrapping is not what
-    // its latest journalled rewrap left
+    // A key row's signature or unwrap fails, or its state or wrapping is not
+    // what its latest journalled rewrap left
     case KEY_SUBSTITUTED = 'key_substituted';
 
     // A key is erased, or holds no wrapped key, with no verified erasure row
     // listing it as destroyed
     case KEY_DESTROYED_UNJOURNALLED = 'key_destroyed_unjournalled';
 
-    // A key is live or superseded though its owner's latest verified erasure
-    // did not keep it, or though it is at or below a reinstated owner's floor
-    // and the erasure before the reinstatement did not keep it
+    // A key is live or superseded though an erasure that applies to its owner
+    // did not keep it
     case KEY_RESTORED = 'key_restored';
 
     // A prune record is signed under a key the ring does not hold
@@ -170,10 +163,7 @@ enum Finding: string
     case RESURRECTED = 'resurrected';
 
     /**
-     * The integrity status the finding gives: `tampered` for a check that shows
-     * the log was altered, `unverifiable` for one that could not be made, and
-     * `incomplete` for entries that are missing, unsealed, or present after
-     * their prune.
+     * The integrity status the finding gives.
      *
      * @return \SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus
      */

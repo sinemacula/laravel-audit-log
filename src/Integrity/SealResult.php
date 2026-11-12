@@ -5,10 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * The tally of one seal run: the seals written and the entries they hold, the
- * first and last sequence written, the attempts retried after losing to a
- * concurrent writer, the entries left unsealed because they cannot be sealed,
- * and whether a sweep reached the end of the table.
+ * The tally of one seal run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

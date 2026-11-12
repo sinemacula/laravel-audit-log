@@ -7,17 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * Thrown when sealing refuses to chain onto the last seal: its stored digest is
- * not the digest of its fields, so extending it would build on a seal that has
- * been altered, or it belongs to another log id, so one chain would mix two. It
- * is thrown too when the lifecycle journal's last row cannot be read, since a
- * seal never commits to a row it cannot name, and when the journal's head is
- * behind the last seal's commitment, since commitments never run backwards.
- * Each is evidence for verification to report, not a failure to retry.
- *
- * It names the last seal's id, when the refusal is of the last seal, and the
- * finding it gives, and never carries another exception, so nothing it holds
- * can reach an entry.
+ * Thrown when the last seal or the journal's head is not safe to chain onto. It
+ * names the finding and the last seal's id, never an entry's value.
  *
  * @api
  *
@@ -83,8 +74,7 @@ final class SealChainException extends \UnexpectedValueException
     }
 
     /**
-     * The exception for a lifecycle journal whose last row has a sequence or an
-     * HMAC that cannot be read, which names no value of the row.
+     * The exception for a journal whose last row cannot be read.
      *
      * @return self
      */
@@ -94,9 +84,8 @@ final class SealChainException extends \UnexpectedValueException
     }
 
     /**
-     * The exception for a lifecycle journal whose head is behind the last
-     * seal's commitment to it: a lower sequence, none at all, or another row at
-     * the committed sequence, so its tail was removed or replaced.
+     * The exception for a journal whose head is behind the last seal's
+     * commitment, so its tail was removed or replaced.
      *
      * @param  string  $sealId
      * @return self

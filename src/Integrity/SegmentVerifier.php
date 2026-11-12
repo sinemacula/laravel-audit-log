@@ -19,58 +19,8 @@ use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * Verifies one segment of the log, the entries one stored seal covers, and
- * reports its integrity and its anchoring as two separate answers.
- *
- * The seal's place is checked first, on the raw column: a sequence other than
- * the one expected is a gap, so a deleted first seal is found. A seal of an
- * algorithm version or signer this release does not read, or that cannot be
- * read as a seal, stops the segment there. Otherwise every check runs: the log
- * it names, its stored digest against the digest recomputed from its fields,
- * its signature under the key it names, the genesis rule, and its link to the
- * seal before over that seal's recomputed digest, so a stored digest edited to
- * hide a change breaks the chain after it. A link to a seal before that cannot
- * be read is broken: versions only increase, so a seal this release reads never
- * follows one it cannot, and marking a seal unreadable never turns its deleted
- * segment into anything short of tampered. The members and their entries are
- * read in one statement on the writer, so a prune committing beside it is seen
- * whole or not at all, and streamed: each member's entry must exist, hold the
- * HMAC the seal recorded and verify under its own key, the rows must be as many
- * as the seal counts, and their entry ids and HMACs, sorted bytewise and never
- * in the order the database returned them, must give the members digest. Every
- * missing member is kept, and every present one that verified. A sealed
- * bundle's manifest is checked with its seal: each entry that verified and
- * signs a manifest has its artifact checked by the manifest verifier, in
- * batches, never one statement per entry. An entry pruned under a verified
- * prune record is missing, so it has no descriptor to check, and its artifact
- * goes with it. Every key an entry that verified names in an envelope must have
- * its key use, which is how an erasure finds the entry: the key uses of the
- * segment's entries are read together by one key-use check, none for a segment
- * with no envelope, and an entry short of one is `key_use_missing`.
- *
- * The prune ledger is asked for every segment, after its members and entries
- * were read, even when none is missing, so a seal whose pruned members were all
- * inserted again is found. The order is what tells a prune from a resurrection:
- * the members are read first, then the records, then each present member a
- * valid record covers is read again, by id, on the writer. One gone by then was
- * pruned by a transaction that committed between the reads, and its record
- * accounts for it; one still there was restored or inserted again, and is
- * `resurrected`. A missing member is pruned only when exactly one valid record
- * of exactly this seal, read after the member was, covers it, positions taken
- * from the authenticated members alone; anything else is reported. A ledger
- * that cannot read a stored record is a forged record of the seal.
- *
- * Anchoring comes from the anchor, never from the receipt kept beside the seal.
- * An anchor's head at this sequence with another digest is `contradicted`; no
- * anchor configured is `unanchored`; an anchor that failed earlier in the run,
- * and is not asked again, is `unavailable`. When the run's anchor head settles
- * anchoring, a seal up to it is `anchored` and one after it `unanchored`, with
- * no call. Otherwise the receipt is put to the anchor: no receipt, a receipt of
- * another anchor, or one the anchor does not confirm is `unanchored`, and an
- * anchor that fails is `unavailable`. A configured anchor's `unanchored` seal
- * whose signed `sealed_at` is within the grace, neither before its start nor
- * after the run's clock, awaits its first anchoring. Nothing here writes,
- * repairs or re-signs.
+ * Verifies one segment, the entries one stored seal covers, and reports its
+ * integrity and anchoring apart. It never writes, repairs or re-signs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -82,7 +32,7 @@ final readonly class SegmentVerifier
     /** @var int Most present members read again in one statement. */
     private const int RECHECK_BATCH = 500;
 
-    /** @var string The key the present members that verified are kept under, beside the missing ones' finding: that of no finding. */
+    /** @var string The key verified present members are kept under: no finding's. */
     private const string PRESENT = '';
 
     /**
@@ -126,8 +76,7 @@ final readonly class SegmentVerifier
 
     /**
      * The report of the stored seal's segment, expected at the sequence given,
-     * after the report of the seal before it, if the run has one, under what
-     * the run shares.
+     * after the report of the seal before it, if the run has one.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -161,12 +110,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The report of the seal's own fields alone: its version and signer,
-     * whether it can be read, its log, its stored digest, its signature and the
-     * genesis rule, never its members or its anchoring. It is how the seal
-     * before a ranged run's first, the run's first link, is checked, and how a
-     * seal that cannot be read is reported, with the findings given beside its
-     * own.
+     * The report of the seal's own fields alone: how a ranged run's first link
+     * and an unreadable seal are checked.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -187,9 +132,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The stored seal's envelope, its recomputed digest and the findings of its
-     * own fields. A seal of a version or signer this release does not read, or
-     * that cannot be read, has no envelope and no digest.
+     * The stored seal's envelope, recomputed digest and own findings; an
+     * unreadable seal, or one of an unknown version, has neither.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -239,8 +183,7 @@ final readonly class SegmentVerifier
 
     /**
      * The finding the seal's signature gives, or `null` when it is the seal's
-     * under the key it names. A signature that is not 64 lower-case hex is
-     * malformed.
+     * under the key it names.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @param  string  $signature
@@ -258,22 +201,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * How many member rows the seal has, the findings of its members, of the
-     * manifests its verified entries sign and of the set of members, the member
-     * entry ids sorted bytewise, every missing member's id, every present
-     * member's that verified, and whether the membership is authentic: the rows
-     * as many as the seal counts and giving its members digest. Only as many
-     * member rows as the seal counts are kept, so a seal given extra member
-     * rows costs no more memory than its own; such a seal is never authentic,
-     * so nothing it leaves out could be found pruned.
-     *
-     * Only an entry that verified is trusted for its manifest descriptor and
-     * the keys its envelopes name, the manifests are checked together, in
-     * batches, never one statement per entry, and the key uses of the entries
-     * that name a key are read together, in batches by entry; a segment with no
-     * bundle and no envelope costs no statement more. A missing entry has no
-     * descriptor to check and no envelope, so a pruned entry's artifact, which
-     * goes with it, is never asked for.
+     * The seal's member count, findings, sorted ids, missing and verified ids,
+     * and whether it is authentic; rows past its count are not kept.
      *
      * @formatter:off
      *
@@ -332,9 +261,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The seal's member rows, each with its entry's columns, or the entry's
-     * columns all `null` when it is missing: one statement on the writer,
-     * streamed, in whatever order the database returns them.
+     * The seal's member rows with their entries' columns, `null` for a missing
+     * entry: one statement on the writer, streamed.
      *
      * @param  string  $sealId
      * @return \Illuminate\Support\LazyCollection<int, \stdClass>
@@ -354,10 +282,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The finding of one member row and its entry, or `null` when the entry
-     * exists, holds the HMAC the seal recorded and verifies under its own key,
-     * with the keys its envelopes name when it does. A missing entry is
-     * `missing_entry`, which the prune ledger may account for.
+     * The finding of one member row and its entry, or `null` with the keys its
+     * envelopes name when the entry verifies.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -375,9 +301,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The finding of a present entry's own signature, or `null` when it
-     * verifies under the key it names, with the keys its envelopes name when it
-     * does: only an entry that verified says what it holds.
+     * The finding of a present entry's signature, or `null` with the keys its
+     * envelopes name: only a verified entry says what it holds.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -405,9 +330,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The `key_use_missing` finding at each verified entry one of whose keys
-     * has no key use naming it, the entries' key uses read by one key-use check
-     * for the segment, and none when no entry names a key.
+     * The `key_use_missing` finding at each verified entry naming a key no key
+     * use names, read by one check for the segment.
      *
      * @param  array<string, list<string>>  $keys
      * @return list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>
@@ -424,12 +348,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * The findings of the seal's prune records and of what they cover, and
-     * whether the segment is pruned: at least one member missing, or gone when
-     * read again, and every missing member covered. The ledger is asked once,
-     * after the members were read; each present member a valid record covers is
-     * then read again, so one gone by then was pruned meanwhile and one still
-     * there is `resurrected`, at each such member.
+     * The prune records' findings and whether the segment is pruned; a covered
+     * member still present is read again, and `resurrected` if there.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @param  string  $digest
@@ -455,8 +375,8 @@ final readonly class SegmentVerifier
         $resurrected = array_map(static fn (string $id): array => [Finding::RESURRECTED, $id], $this->stillPresent($result->recheck));
         $findings    = [...$unreadable, ...$result->findings, ...$resurrected];
 
-        // A member read again is either gone or `resurrected`, which outweighs
-        // pruned, so one read again counts towards pruned as a missing one does
+        // One read again is gone or `resurrected`, which outweighs pruned, so
+        // it counts as missing
         return [$findings, ($missing !== [] || $result->recheck !== []) && count($result->covered) === count($missing)];
     }
 
@@ -531,10 +451,8 @@ final readonly class SegmentVerifier
     }
 
     /**
-     * Ask the anchor whether it confirms the seal's receipt: no receipt, a
-     * malformed one or one of another anchor is unanchored without asking for
-     * the confirmation; a receipt the anchor confirms is anchored, one it does
-     * not is unanchored, and an anchor that fails is unavailable.
+     * Ask the anchor whether it confirms the seal's receipt; without a
+     * well-formed receipt of this anchor the seal is unanchored without asking.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

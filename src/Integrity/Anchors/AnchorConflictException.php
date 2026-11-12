@@ -6,9 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Integrity\Anchors;
 
 /**
  * Thrown when an anchor already holds another digest for a seal's sequence, so
- * the local log or the anchor has been altered: the evidence of tampering, not
- * a failure to retry. Its message names the sequence alone, and it never
- * carries another exception, so nothing it holds can reach an entry.
+ * the log or the anchor was altered. Its message names only the sequence.
  *
  * @api
  *
@@ -17,7 +15,7 @@ namespace SineMacula\Laravel\AuditLog\Integrity\Anchors;
  */
 final class AnchorConflictException extends \RuntimeException
 {
-    /** @var string The message, by the sequence it names. */
+    /** @var string The message format, taking the sequence. */
     private const string MESSAGE = 'The anchor already holds another digest for seal %d; the local log or the anchor has been altered.';
 
     /**

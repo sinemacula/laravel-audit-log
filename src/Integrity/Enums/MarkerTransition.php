@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
 
 /**
- * What an owner marker records: the owner was erased, or an erased owner was
- * reinstated. The owner's latest marker decides whether a key may be created
- * for it: none is while the latest is an erasure.
+ * What an owner marker records. While an owner's latest marker is an erasure,
+ * no key may be created for it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

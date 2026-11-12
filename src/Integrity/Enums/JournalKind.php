@@ -8,15 +8,6 @@ namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
  * What a row of the lifecycle journal records. Each kind signs under a label of
  * its own, so a row signed as one kind never verifies as another.
  *
- * Only the kinds a lifecycle operation is asked for carry an authority: a hold,
- * a release, an import's start and finish, an erasure, a reinstatement, a
- * rewrap batch and a reconciled restore. A policy and a prune run, with each of
- * its chunks, are the package's own. The pruner replays the payloads of
- * policies, holds and releases alone: the policy versions already journalled,
- * and the holds still active, are all that a destructive decision reads of the
- * journal beyond its chain. The privacy kinds are read where the owners' keys
- * are checked, never by the pruner's replay.
- *
  * @api
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -72,9 +63,7 @@ enum JournalKind: string
     }
 
     /**
-     * Whether a row of the kind names the authority that asked for it: a hold,
-     * a release, an import's start and finish, an erasure, a reinstatement, a
-     * rewrap batch and a reconciled restore do.
+     * Whether a row of the kind names the authority that asked for it.
      *
      * @return bool
      */
@@ -95,10 +84,7 @@ enum JournalKind: string
 
     /**
      * Whether the pruner reads a row of the kind's payload when it replays the
-     * journal: a policy's, since policy rows are one per version, and a hold's
-     * and a release's, since they decide what a prune keeps. No privacy kind's
-     * is: an erasure, a reinstatement, a rewrap and a reconciled restore decide
-     * nothing a prune keeps.
+     * journal, as only these kinds decide what a prune keeps.
      *
      * @return bool
      */

@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
 
 /**
- * Where an owner's key stands, as its row stores it: it encrypts and decrypts,
- * it only decrypts what it encrypted before it was superseded, or it was erased
- * and holds no key at all.
- *
- * A key moves from `live` to `superseded` when its generation is rotated, and
- * from either to `erased` when its owner is erased. An erased key never holds a
- * key again: a reinstated owner is given a new generation, never an old one
- * back.
+ * Where an owner's key stands, as its row stores it. An erased key never holds
+ * a key again: a reinstated owner is given a new generation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,8 +25,7 @@ enum KeyState: string
     case ERASED = 'erased';
 
     /**
-     * Whether a key in the state still holds its wrapped key: a live and a
-     * superseded one do, and an erased one never does.
+     * Whether a key in the state still holds its wrapped key.
      *
      * @return bool
      */
@@ -46,7 +39,7 @@ enum KeyState: string
     }
 
     /**
-     * Whether a key in the state encrypts a new field: only a live one does.
+     * Whether a key in the state encrypts a new field.
      *
      * @return bool
      */
