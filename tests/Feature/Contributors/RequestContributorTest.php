@@ -103,6 +103,23 @@ final class RequestContributorTest extends TestCase
     }
 
     /**
+     * A client given to the builder is kept whole over the HTTP frame's, while
+     * the request id is still filled.
+     *
+     * @return void
+     */
+    public function testAnExplicitClientIsKeptOverAnHttpFrame(): void
+    {
+        $this->frames()->enterRequest(self::request());
+
+        $snapshot = $this->contributed((new PendingRecord)->event('invoice.approved')->fromClient('198.51.100.9', null));
+
+        self::assertSame('198.51.100.9', $snapshot->ip);
+        self::assertNull($snapshot->userAgent);
+        self::assertNotNull($snapshot->requestId);
+    }
+
+    /**
      * An HTTP frame fills the method and the route's name.
      *
      * @return void
@@ -391,13 +408,14 @@ final class RequestContributorTest extends TestCase
     }
 
     /**
-     * What the contributor fills into a fresh builder.
+     * What the contributor fills into the builder, a fresh one by default.
      *
+     * @param  ?\SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @return \SineMacula\Laravel\AuditLog\Records\PendingSnapshot
      */
-    private function contributed(): PendingSnapshot
+    private function contributed(?PendingRecord $pending = null): PendingSnapshot
     {
-        $pending = (new PendingRecord)->event('invoice.approved');
+        $pending ??= (new PendingRecord)->event('invoice.approved');
 
         (new RequestContributor($this->frames(), app(RequestIdentity::class)))->contribute(new Contribution($pending));
 

@@ -15,17 +15,18 @@ use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
  * The pending record's description of the activity: its event code, the
- * references it names (subject, actor, principal and tenant), the credential
- * and correlation ids, the properties, the note, and the identifier a sign-in
- * was attempted with.
+ * references it names (subject, actor, principal and tenant), the guard, the
+ * session and the client, the credential and correlation ids, the properties,
+ * the note, and the identifier a sign-in was attempted with.
  *
  * Setting a field again replaces it, the last call winning, except that
  * properties merge at the top level, later keys replacing earlier ones. A model
  * is referred to through `Reference::to()`, so an unsaved one is refused, and a
  * value is normalised when it is given, so the builder's properties hold only
  * strings, integers, booleans, `null`, lists and maps, and every other field a
- * validated value. `by(null)`, `asPrincipal(null)` and `forTenant(null)` say
- * that there is explicitly none, which a contributor never fills.
+ * validated value. A `null` given to `by()`, `asPrincipal()`, `forTenant()`,
+ * `viaGuard()`, `inSession()` or `fromClient()` says that there is explicitly
+ * none, which a contributor never fills.
  *
  * The methods sit in a trait only so the builder stays within the number of
  * methods one class may declare; they are `PendingRecord`'s public surface.
@@ -185,6 +186,81 @@ trait DescribesTheActivity
 
         $this->tenant = self::reference($tenant);
         $this->give('tenant');
+
+        return $this;
+    }
+
+    /**
+     * Name the authentication guard the activity ran under, 1 to 64
+     * characters; `null` says there is explicitly none. The last guard given
+     * wins.
+     *
+     * @param  ?string  $guard
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public function viaGuard(?string $guard): self
+    {
+        $this->assertUsable();
+
+        if ($guard !== null) {
+            self::checkIdentifier($guard, self::GUARD_MAX_CHARACTERS, 'A guard name');
+        }
+
+        $this->guard = $guard;
+        $this->give('guard');
+
+        return $this;
+    }
+
+    /**
+     * Name the session by an application-owned, non-secret reference of 1 to
+     * 191 characters, never Laravel's session id; `null` says there is
+     * explicitly none. The last reference given wins.
+     *
+     * @param  ?string  $sessionId
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public function inSession(?string $sessionId): self
+    {
+        $this->assertUsable();
+
+        if ($sessionId !== null) {
+            self::checkIdentifier($sessionId, self::SESSION_MAX_CHARACTERS, 'A session reference');
+        }
+
+        $this->sessionId = $sessionId;
+        $this->give('session');
+
+        return $this;
+    }
+
+    /**
+     * Name the client by its IP address and user agent together, so no
+     * contributor fills either part; `null` says that part is explicitly
+     * unknown. The user agent is cleaned and cut to 512 bytes, and an invalid
+     * address is stored as `null` when the record is minimised. The last client
+     * given wins.
+     *
+     * @param  ?string  $ip
+     * @param  ?string  $userAgent
+     * @return self
+     *
+     * @throws \LogicException
+     */
+    public function fromClient(#[\SensitiveParameter] ?string $ip, #[\SensitiveParameter] ?string $userAgent): self
+    {
+        $this->assertUsable();
+
+        $this->ip        = $ip;
+        $this->userAgent = self::userAgent($userAgent);
+        $this->give('ip');
+        $this->give('user_agent');
 
         return $this;
     }

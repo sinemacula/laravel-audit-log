@@ -275,13 +275,13 @@ trait FillsAmbientContext
     {
         $this->assertUsable();
 
-        $userAgent = $userAgent === null ? '' : TextSanitizer::clean($userAgent, self::USER_AGENT_MAX_BYTES);
+        $userAgent = self::userAgent($userAgent);
 
         if ($this->claims('ip', $ip !== null)) {
             $this->ip = $ip;
         }
 
-        if (!$this->claims('user_agent', $userAgent !== '')) {
+        if (!$this->claims('user_agent', $userAgent !== null)) {
             return;
         }
 
@@ -414,6 +414,20 @@ trait FillsAmbientContext
         if ($value === '' || mb_strlen($value, 'UTF-8') > $maxCharacters || !TextSanitizer::isClean($value)) {
             throw new \InvalidArgumentException(sprintf('%s must be from 1 to %d characters, with no control characters.', $name, $maxCharacters));
         }
+    }
+
+    /**
+     * The user agent cleaned and cut to 512 bytes, or `null` when it is empty
+     * once cleaned.
+     *
+     * @param  ?string  $userAgent
+     * @return ?string
+     */
+    private static function userAgent(#[\SensitiveParameter] ?string $userAgent): ?string
+    {
+        $userAgent = $userAgent === null ? '' : TextSanitizer::clean($userAgent, self::USER_AGENT_MAX_BYTES);
+
+        return $userAgent === '' ? null : $userAgent;
     }
 
     /**

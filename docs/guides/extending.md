@@ -140,6 +140,10 @@ final readonly class IdentitySignInMapper implements EventMapper
 }
 ```
 
+A mapper that reads the guard, the session reference or the client from its event names them with `viaGuard()`,
+`inSession()` and `fromClient()`, so a record written from a queue or after a commit never takes them from another
+request. A part the event does not name is left for the contributors.
+
 Register it from a service provider's `boot()`:
 
 <!-- recipe:boot -->
