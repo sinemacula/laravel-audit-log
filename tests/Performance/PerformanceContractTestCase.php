@@ -13,17 +13,9 @@ use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
 
 /**
- * Shared base for deterministic performance-contract tests.
- *
- * Counts what a subject under test asks of the default connection, so the suite
- * can assert structural statement budgets without making flaky wall-clock
- * assertions: every statement the connection is asked to run, counted before it
- * runs, so one that fails counts too (the query log records only those that
- * succeed); every savepoint, a transaction begun inside another; every
- * rollback, of a transaction or a savepoint; and every top-level transaction
- * and commit, which run on PDO directly and which no statement count sees,
- * though each is a round trip on MySQL and PostgreSQL. The clock is frozen at a
- * time with microseconds.
+ * Base for statement-budget tests: counts what a subject asks of the default
+ * connection, under a frozen clock. Statements are counted before they run,
+ * since the query log keeps only those that succeed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,9 +95,8 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * Run a subject and assert the exact statement budget: its reads, its
-     * writes, its savepoints and its rollbacks. A write is an `insert`,
-     * `update`, `delete` or `replace`; every other statement is a read.
+     * Run a subject and assert its exact reads, writes, savepoints and
+     * rollbacks; a write is an `insert`, `update`, `delete` or `replace`.
      *
      * @template TResult
      *
@@ -132,10 +123,8 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * The reads a commit costs with audit work waiting on it: one on
-     * PostgreSQL, which asks whether the transaction was already aborted,
-     * because a commit there reports a success even then, and none on any other
-     * engine.
+     * The reads a commit costs with audit work waiting: one on PostgreSQL,
+     * whose commit reports success even after an abort, so it asks first.
      *
      * @return int
      */
@@ -145,8 +134,8 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * Run a subject and assert how many top-level transactions it began and how
-     * many it committed, which no statement budget sees.
+     * Run a subject and assert the top-level transactions it began and
+     * committed, which run on PDO directly and no statement budget sees.
      *
      * @template TResult
      *
@@ -166,8 +155,7 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * Run a subject with the counts started afresh, so what is captured
-     * afterwards is what it asked for alone.
+     * Run a subject with the counts reset.
      *
      * @template TResult
      *
@@ -187,8 +175,7 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * The statements the last captured subject asked the default connection to
-     * run, in order.
+     * The statements the last captured subject asked for, in order.
      *
      * @return list<string>
      */
@@ -208,7 +195,7 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * The savepoints the last captured subject began.
+     * The transaction and savepoint rollbacks the last captured subject made.
      *
      * @return int
      */

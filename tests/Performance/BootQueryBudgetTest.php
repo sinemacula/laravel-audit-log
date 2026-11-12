@@ -45,11 +45,8 @@ use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\TestCase;
 
 /**
- * Performance contract for booting the package: registering it adds no query to
- * a request that records nothing, booting with capture wired issues none, and
- * resolving the store, what finalises a record, the recorder and what it works
- * with, the trail and what reads it, or the owners' keys and what erases them
- * issues none and opens no connection.
+ * Query budget for booting the package: registering, booting and resolving its
+ * services issues no query and opens no connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,8 +57,7 @@ use Tests\TestCase;
 final class BootQueryBudgetTest extends TestCase
 {
     /**
-     * A request through a booted application with the package registered issues
-     * no queries.
+     * A request that records nothing issues no queries.
      *
      * @return void
      */
@@ -77,9 +73,8 @@ final class BootQueryBudgetTest extends TestCase
     }
 
     /**
-     * Resolving the store, the clock, the key ring and the finaliser issues no
-     * statement and opens no connection: the store resolves the storage
-     * connection only when it stores a record.
+     * Resolving the store and its collaborators opens no connection: the store
+     * connects only when it stores a record.
      *
      * @return void
      */
@@ -101,9 +96,8 @@ final class BootQueryBudgetTest extends TestCase
     }
 
     /**
-     * Resolving the recorder and everything a capture resolves issues no
-     * statement and opens no connection, so a request that records nothing pays
-     * for none of it.
+     * Resolving the recorder and its collaborators issues no statement and
+     * opens no connection.
      *
      * @return void
      */
@@ -125,10 +119,8 @@ final class BootQueryBudgetTest extends TestCase
     }
 
     /**
-     * Booting with capture wired, an event mapped and a model watched from a
-     * provider's `boot()`, issues no statement and opens no connection, and
-     * neither does resolving everything a capture resolves: the listeners, the
-     * package's codes and the freeze are registration alone.
+     * Booting with an event mapped and a model watched issues no statement and
+     * opens no connection.
      *
      * @return void
      */
@@ -175,9 +167,8 @@ final class BootQueryBudgetTest extends TestCase
     }
 
     /**
-     * Resolving the trail, the describer, the access policy and the field
-     * reader issues no statement and opens no connection: a trail reads only
-     * when a terminal call is made for a viewer.
+     * Resolving the read path opens no connection: a trail reads only on a
+     * terminal call.
      *
      * @return void
      */
@@ -200,10 +191,8 @@ final class BootQueryBudgetTest extends TestCase
     }
 
     /**
-     * Resolving the field encrypter, the key wrapper, the key store, what
-     * creates a key and the lifecycle that erases one issues no statement and
-     * opens no connection, and neither does naming the current wrapping key: a
-     * key is looked up only when a value is sealed.
+     * Resolving the key path, or naming the current wrapping key, opens no
+     * connection: a key is looked up only when a value is sealed.
      *
      * @return void
      */

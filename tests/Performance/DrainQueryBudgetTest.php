@@ -34,16 +34,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Stores\CallbackStore;
 
 /**
- * Statement-budget contract for the drain: an empty run is one read of ids; a
- * row delivered to the database costs its claim, its payload, its tombstone
- * check, its receipts, a renewal before and after the store, its attempt, its
- * insert in a savepoint of the transaction it shares with its receipt, and its
- * delete; each further row costs the same again, one tombstone check each; a
- * pruned row costs its claim, its payload, its check and its delete; a duplicate adds one read and the savepoint's rollback;
- * a further destination adds its renewals and its receipt; a bundle adds its
- * artifact's insert to the same savepoint, and one refused costs a failure; a
- * failure and a lost claim are pinned as well, and no run reads a payload
- * before its claim.
+ * Statement budget for the outbox drain, per row and per destination; no run
+ * reads a payload before its claim.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,9 +52,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     use InteractsWithAuditStore, InteractsWithOutbox, PrunesByHand, SealsEntries, SeedsTheOutbox;
 
     /**
-     * Move the frozen clock on by a millisecond before every statement, because
-     * a renewal at the instant the lease was written changes no row on MySQL,
-     * which would add its follow-up read to that engine's budget alone.
+     * Move the clock on a millisecond before every statement: on MySQL a
+     * renewal at the lease's own instant changes no row and adds a read.
      *
      * @return void
      */
@@ -89,10 +80,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * One row to the database reads its candidates, its payload, its tombstones
-     * and its receipts, and writes its claim, a renewal, its attempt, its
-     * insert, a renewal, its receipt and its delete, with a savepoint around
-     * the insert.
+     * One row to the database has a fixed budget, with a savepoint around its
+     * insert.
      *
      * @return void
      */
@@ -108,9 +97,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A row delivered to the database shares one top-level transaction between
-     * its entry and its receipt, and no other: a second per row, or none, shows
-     * here though no statement budget would see it.
+     * A row to the database shares one top-level transaction between its entry
+     * and its receipt.
      *
      * @return void
      */
@@ -139,8 +127,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Ten rows cost ten times what one costs, apart from the one read of their
-     * candidates they share.
+     * Ten rows cost ten times one row, sharing one read of their candidates.
      *
      * @return void
      */
@@ -157,9 +144,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A bundle to the database costs what one row costs and one more insert,
-     * its artifact's, which precedes its entry's inside the same savepoint of
-     * the one top-level transaction it shares with its receipt.
+     * A bundle costs one row and its artifact's insert, ahead of the entry's in
+     * the same savepoint.
      *
      * @return void
      */
@@ -183,8 +169,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A bundle refused by a store that keeps no attachments costs what any
-     * failure costs, and no insert of the entry or the artifact.
+     * A bundle refused by a store that keeps no attachments costs what a
+     * failure costs, and inserts nothing.
      *
      * @return void
      */
@@ -202,9 +188,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record the database already holds adds the read that resolves the
-     * duplicate and the rollback of the savepoint its insert failed in, and
-     * nothing else.
+     * A duplicate adds one read and the rollback of its savepoint.
      *
      * @return void
      */
@@ -222,9 +206,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A log destination after the database adds its renewal, its attempt, a
-     * renewal and its receipt, and no read: the receipts are read once, and the
-     * log shares no transaction.
+     * A log destination after the database adds its renewals, attempt and
+     * receipt, and no read.
      *
      * @return void
      */
@@ -244,9 +227,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A destination that joins no transaction and fails reads the candidates,
-     * the payload, the tombstones and the receipts, and writes the claim, a
-     * renewal, the attempt, a renewal, the failed receipt and the retry.
+     * A failed delivery to a destination that joins no transaction has a fixed
+     * budget.
      *
      * @return void
      */
@@ -263,9 +245,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A claim lost before the first renewal adds the read that tells a lost
-     * claim from a renewal that changed nothing, and then the drain stops: no
-     * attempt, no store and no receipt.
+     * A claim lost before the first renewal adds one read, then the drain
+     * stops.
      *
      * @return void
      */
@@ -285,8 +266,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The read of the candidates names only the id, so a payload is read only
-     * by the worker that owns its row.
+     * The candidates read names only the id, so only a row's owner reads its
+     * payload.
      *
      * @return void
      */
@@ -302,9 +283,7 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A row whose destination already has the record costs its claim and its
-     * delete and none of a delivery's writes, however it came to be left: the
-     * statements of a recovery are not repeated.
+     * A row its destination already holds costs only its claim and its delete.
      *
      * @return void
      */
@@ -324,9 +303,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A row past its attempts costs its claim, the read of its payload and the
-     * write that fails it, and no delivery is begun: its record is never read,
-     * so its tombstones are not either.
+     * A row past its attempts costs its claim, its payload read and its
+     * failure, and no delivery.
      *
      * @return void
      */
@@ -343,9 +321,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Each row whose record is read costs exactly one read of the tombstones,
-     * whatever happens to it next, and no other statement names the members
-     * table.
+     * Each row whose record is read costs exactly one tombstone read, and no
+     * other statement names the members table.
      *
      * @return void
      */
@@ -369,9 +346,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A pruned row costs its claim, the read of its payload, its tombstone
-     * check, the reads of its seal and the seal's members that tell its prune a
-     * valid record covers, and its delete, and nothing of a delivery.
+     * A pruned row costs its claim, payload read, tombstone check, seal reads
+     * and delete, and nothing of a delivery.
      *
      * @return void
      */
@@ -416,9 +392,8 @@ final class DrainQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * As soon as a drain reads the receipts, hand every outbox row to another
-     * owner over the raw connection, so the statement is not counted and the
-     * next renewal finds its claim gone.
+     * When a drain reads the receipts, reassign every outbox row over the raw
+     * connection, uncounted, so the next renewal finds its claim gone.
      *
      * @return void
      */

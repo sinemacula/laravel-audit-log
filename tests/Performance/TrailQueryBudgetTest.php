@@ -12,12 +12,9 @@ use SineMacula\Laravel\AuditLog\Querying\TrailReader;
 use Tests\Concerns\ReadsTheTrail;
 
 /**
- * Statement-budget contract for reading the trail: a page of fifty is one
- * select on the entries table and none on the artifacts table, with the read's
- * record costing exactly what storing one bundle costs, two inserts, the
- * artifact's first, in one transaction of its own; a count is one select and
- * the same record; a denied read selects nothing and writes only its record;
- * and pages of one, fifty and five hundred cost the same statements.
+ * Statement budget for reading the trail: a page or count is one select and its
+ * record one bundle's two inserts, a denied read selects nothing, and page size
+ * changes nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,10 +40,8 @@ final class TrailQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A page of fifty, of sixty entries, is one select on the entries table and
-     * none on the artifacts table, and its record is the two inserts of one
-     * bundle, the artifact's then the entry's, in one transaction committed
-     * once.
+     * A page of fifty is one entries select and no artifacts select, and its
+     * record one bundle's two inserts in one transaction.
      *
      * @return void
      */
@@ -62,8 +57,7 @@ final class TrailQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A count is one select on the entries table, and its record the same two
-     * inserts in one transaction.
+     * A count is one entries select, with the same record.
      *
      * @return void
      */
@@ -96,9 +90,8 @@ final class TrailQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Pages of one, fifty and five hundred entries cost the same statements:
-     * the one select, differing in its limit alone, and the record's two
-     * inserts.
+     * Pages of one, fifty and five hundred cost the same statements, differing
+     * only in the limit.
      *
      * @return void
      */
@@ -124,8 +117,7 @@ final class TrailQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The trail, in the `finance` category the seeded entries are in, read for
-     * the viewer.
+     * The `finance` trail, read for the viewer.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
      */
@@ -135,9 +127,8 @@ final class TrailQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Assert the last captured statements were one select on the entries table
-     * and none on the artifacts table, then the inserts of one bundle, the
-     * artifact's first.
+     * Assert the last statements were one entries select, no artifacts select,
+     * then one bundle's inserts, the artifact's first.
      *
      * @return void
      */

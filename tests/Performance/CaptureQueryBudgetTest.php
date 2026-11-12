@@ -33,12 +33,8 @@ use Tests\Fixtures\Capture\Models\SigningInUser;
 use Tests\Fixtures\Capture\Models\WatchedInvoice;
 
 /**
- * Statement-budget contract for capture: an event no mapping applies to, an
- * allowed Gate check and a thousand `Authenticated` events cost nothing; a
- * mapped event, a denied Gate check and a sign-in are one insert each; a
- * watched change costs nothing but its own insert until its transaction
- * commits, then one insert, and nothing at all once rolled back; and an
- * application that maps nothing never pays for the routing bridge.
+ * Statement budget for capturing mapped events, Gate checks, sign-ins and
+ * watched changes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -107,8 +103,7 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An event no mapping applies to costs no statement, though the bridge
-     * hears it.
+     * An unmapped event the bridge hears costs no statement.
      *
      * @return void
      */
@@ -166,8 +161,8 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A sign-in of a user the application already holds is one insert: the
-     * session guard reads nothing, and capture adds only its row.
+     * A sign-in of a user already held is one insert; the session guard reads
+     * nothing.
      *
      * @return void
      */
@@ -181,8 +176,7 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A watched change inside a transaction costs only its own insert until the
-     * transaction commits, and the commit then adds one insert.
+     * A watched change in a transaction is one insert at commit.
      *
      * @return void
      */
@@ -203,8 +197,7 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A watched change rolled back costs nothing beyond its own insert and the
-     * rollback: nothing is written for it, at the rollback or after.
+     * A rolled-back watched change writes nothing, at the rollback or after.
      *
      * @return void
      */
@@ -226,8 +219,7 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An application that maps nothing never registers the routing bridge, so
-     * no event it dispatches reaches it.
+     * An app that maps nothing never registers the routing bridge.
      *
      * @return void
      */
@@ -245,9 +237,8 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A thousand `Authenticated` events, one for each request a token signs in
-     * on, cost no read and no write, though a mapping makes the bridge hear
-     * every one.
+     * A thousand `Authenticated` events cost nothing, though a mapping makes
+     * the bridge hear each.
      *
      * @return void
      */
@@ -268,8 +259,8 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Sign users in from the test's users' table, with a cheap hash, and watch
-     * the invoices while the application boots.
+     * Sign users in from the test's users' table with a cheap hash, and watch
+     * the invoices at boot.
      *
      * @param  mixed  $app
      * @return void
@@ -290,8 +281,7 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Map the portal events to the portal mapper while the application boots,
-     * which registers the routing bridge.
+     * Map the portal events at boot, which registers the routing bridge.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -316,8 +306,7 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Create the users' table on the test's connection, and drop it before the
-     * application is destroyed.
+     * Create the users' table, dropping it before the application is destroyed.
      *
      * @return void
      */

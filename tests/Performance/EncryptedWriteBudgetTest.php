@@ -29,20 +29,9 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 
 /**
- * Statement-budget contract for a record's write under the package's encrypter,
- * each path measured against a plain record's cost in the same process: a
- * record that encrypts nothing keeps its single insert and opens no
- * transaction; one whose owner has a key adds one lookup and one key-use
- * insert, in one transaction of its own; a first owner adds what creating its
- * key on the key session costs, measured on its own; several owners still cost
- * one lookup and one key-use insert; inside a host transaction the key uses
- * share the entry's one savepoint; and under the outbox the lookup is paid at
- * capture and the key-use insert at the drain.
- *
- * Every count is of statements and transactions, never a time. The creation's
- * statements run on the key session, which on MySQL and PostgreSQL is a
- * connection of its own, so the first owner's budget counts statements on every
- * connection.
+ * Statement budget for writing an encrypted record, measured against a plain
+ * record in the same process. Statements are counted on every connection, since
+ * key creation runs on a session of its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,19 +47,19 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     /** @var string The code whose card is stored as it is. */
     private const string PLAIN_CODE = 'billing.card_noted';
 
-    /** @var string The code whose card is encrypted for its actor, its account for its subject and its payee name for its payee. */
+    /** @var string The code that encrypts its card, account and payee name. */
     private const string ENCRYPTED_CODE = 'billing.card_charged';
 
     /** @var string The category of both codes. */
     private const string CATEGORY = 'billing';
 
-    /** @var list<string> Each statement run on any connection since counting began, as its connection and its statement. */
+    /** @var list<string> Each statement run on any connection since counting began, prefixed with its connection. */
     private array $everywhere = [];
 
     /**
-     * Bind the package's key wrapper and its encrypter, as the provider will,
-     * fresh on every resolution, define both codes, keep reports from the
-     * framework, and count the statements every connection runs.
+     * Bind the key wrapper and encrypter fresh on every resolution, define both
+     * codes, keep reports from the framework and count statements on every
+     * connection.
      *
      * @return void
      */
@@ -124,8 +113,7 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record that encrypts nothing, under the package's encrypter, keeps its
-     * single insert: no read, no savepoint, no transaction, and nothing asked
+     * A record that encrypts nothing keeps its single insert and asks nothing
      * of the key store.
      *
      * @return void
@@ -139,9 +127,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record whose owner has a key costs a plain record's statements and one
-     * lookup of its keys and one insert of its key uses, both inside one
-     * transaction of its own, committed once, with no savepoint.
+     * An owner with a key adds one key lookup and one key-use insert, in one
+     * transaction of its own.
      *
      * @return void
      */
@@ -160,10 +147,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record whose owner has no key costs what one whose owner has a key
-     * costs, plus what creating a key on the key session costs, measured on its
-     * own for another owner: its statements on every connection, and one
-     * transaction more.
+     * An owner with no key adds what creating its key on the key session costs,
+     * and one transaction more.
      *
      * @return void
      */
@@ -183,8 +168,7 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record of three owners, each with a key, still costs one lookup, of
-     * every unit at once, and one insert of its three key uses.
+     * Three owners with keys still cost one lookup and one key-use insert.
      *
      * @return void
      */
@@ -207,9 +191,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside a host transaction a record written now costs a plain record's
-     * statements and savepoint, and one lookup and one key-use insert, the key
-     * uses in the entry's one savepoint, with no transaction of its own.
+     * Inside a host transaction the key uses share the entry's savepoint, with
+     * no transaction of their own.
      *
      * @return void
      */
@@ -232,11 +215,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Under the outbox the record is encrypted at capture, which costs a plain
-     * capture's statements and one lookup and writes no key use; the drain
-     * writes the key uses with the entry, in the savepoint its store's insert
-     * takes inside the drain's transaction, which costs a plain drain's
-     * statements and one insert.
+     * Under the outbox the lookup is paid at capture and the key-use insert at
+     * the drain, in the store's savepoint.
      *
      * @return void
      */
@@ -261,8 +241,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Record one plain record and drop what it cost, so nothing a process pays
-     * once is counted in a budget.
+     * Record one plain record and discard its cost, so one-off process costs
+     * stay out of a budget.
      *
      * @return void
      */
@@ -272,8 +252,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Run the subject, check it began and committed the transactions given, and
-     * return its reads, writes and savepoints on the default connection.
+     * Run the subject, check its transactions, and return its reads, writes and
+     * savepoints on the default connection.
      *
      * @template TResult
      *
@@ -291,8 +271,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Run the subject, check it began and committed the transactions given, and
-     * return every statement it ran on any connection.
+     * Run the subject, check its transactions, and return every statement it
+     * ran on any connection.
      *
      * @template TResult
      *
@@ -363,9 +343,8 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Capture the code by the actor, of the subject, with a card, and with an
-     * account and a payee's name when there is a subject and a payee, written
-     * now when asked.
+     * Capture the code with a card, and with an account and payee name when
+     * there is a subject and a payee.
      *
      * @param  string  $code
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor

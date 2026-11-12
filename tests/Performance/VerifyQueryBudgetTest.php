@@ -56,28 +56,12 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Statement-budget and memory contract for verification: every run, a ranged
- * one included, reads the seals' journal commitments once and the journal a
- * page at a time, one page for a journal shorter than one, whatever the seals;
- * a run of an empty log reads the head and the five whole-log counts and writes
- * its completion, and reads the key store: the journal's transitions, a page of
- * keys at a time, the erasure rows of a page that holds an erased key, and the
- * keys a key use names and no key row has; each segment adds one read of its
- * members and their entries, and each page of seals one more, and a segment
- * whose entries hold envelopes one read of their key uses for each 500 of them;
- * a segment's bundles add one read of their artifacts and one of their members
- * for each batch of them, and a segment without one adds nothing; a ranged run
- * reads its range, its boundary and the head, and writes nothing; the null
- * prune ledger and the null anchor cost no statement, the journal's ledger one
- * indexed read of each seal's records, and the present members a valid record
- * covers one read again for each 500 of them; an anchor that answers costs one
- * read of the local seal at its head; every report is let go as the run goes;
- * and the peak memory of a run follows its largest segment, never the number of
- * segments.
+ * Statement and memory budget for verification: runs, segments, pages of seals,
+ * bundles, envelopes and anchors each cost a fixed number of reads, nothing is
+ * read per entry, and peak memory follows the largest segment.
  *
- * Memory is measured as the growth of the peak over what the process held
- * before the run, the peak reset first, always against another run in this
- * process.
+ * Memory is the peak's growth over what the process held before the run, the
+ * peak reset first.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,13 +74,13 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 {
     use MakesSubjectKeys, SealsEntries, SeedsArtifacts, WritesTheJournal;
 
-    /** @var int The reads every run makes of the lifecycle journal, a ranged one included, while the journal is shorter than a page: the seals' commitments and one page of rows. */
+    /** @var int The reads every run makes of a journal shorter than a page: the seals' commitments and one page. */
     private const int JOURNAL_READS = 2;
 
-    /** @var int The reads a run of the whole log makes of the key store while it holds fewer keys than a page and no erased one: the journal's transitions, one page of keys and the keys a key use names and no key row has. */
+    /** @var int The key-store reads of a whole-log run with under a page of keys and none erased: transitions, a page of keys and keys named only by a key use. */
     private const int KEY_STORE_READS = 3;
 
-    /** @var int The reads a run of the whole log makes whatever it holds: the head, the seals outside the chain, the orphaned members, the overdue, the far-ahead and the pending entries, the journal's and the key store's. */
+    /** @var int The reads a whole-log run makes whatever it holds: the head, five whole-log counts, the journal's and the key store's. */
     private const int WHOLE_RUN_READS = 6 + self::JOURNAL_READS + self::KEY_STORE_READS;
 
     /** @var string The key every envelope of a test names. */
@@ -120,15 +104,15 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     /** @var string An id no seal has. */
     private const string OTHER_ID = '01932b4e-9000-7000-8000-00000000ffff';
 
-    /** @var int How many entries the test has stored, so each next one is recorded a microsecond later. */
+    /** @var int Entries stored so far, so each next one is recorded a microsecond later. */
     private int $stored = 0;
 
     /** @var list<\SineMacula\Laravel\AuditLog\Integrity\SegmentReport> The reports the last run streamed, in order. */
     private array $streamed = [];
 
     /**
-     * A run of a log with no seal and no entry reads the head and the five
-     * whole-log counts, and writes its completion.
+     * An empty log reads the head and five whole-log counts and writes its
+     * completion.
      *
      * @return void
      */
@@ -141,9 +125,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The journal costs every run one read of the seals' commitments and one
-     * read per page of rows, however many seals commit to it: a journal of
-     * fewer rows than a page is one read, and a page more is one more.
+     * Every run reads the seals' commitments once and the journal a page at a
+     * time, however many seals commit to it.
      *
      * @return void
      */
@@ -170,9 +153,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Each seal whose entries hold envelopes reads their key uses once more,
-     * through the entry index, one statement for each 500 of its entries; a
-     * seal without one reads none, as the segment budget above shows.
+     * Each seal whose entries hold envelopes reads their key uses once per 500
+     * entries; a seal without any reads none.
      *
      * @return void
      */
@@ -194,10 +176,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The key store is read in pages of a thousand keys by id, and a page that
-     * holds an erased key reads the erasure rows its keys name once more: a
-     * thousand and one keys, one of them erased, cost two pages and one read of
-     * the journal by id beyond an empty key store.
+     * The key store is read a thousand keys a page, and a page holding an
+     * erased key reads its erasure rows once more.
      *
      * @return void
      */
@@ -229,8 +209,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Rows of `[segments]`: one, ten, and a hundred, a whole page of seals,
-     * which costs a second page read to find there is no more.
+     * Rows of `[segments]`: one, ten, and a hundred, a whole page of seals that
+     * costs a second page read.
      *
      * @return iterable<string, array{0: int}>
      */
@@ -244,9 +224,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Each segment costs exactly one read, of its members and their entries
-     * together, and each page of seals one more, on top of what an empty log
-     * costs.
+     * Each segment costs one read of its members and entries, and each page of
+     * seals one more.
      *
      * @param  int  $segments
      * @return void
@@ -279,9 +258,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A ranged run reads the head, the seal before its first when there is one,
-     * one page and each segment of its range, and the journal, and nothing
-     * else: no member of a seal outside it, no whole-log count, and no write.
+     * A ranged run reads only the head, its boundary, its page and segments and
+     * the journal, and writes nothing.
      *
      * @param  int  $from
      * @param  int  $to
@@ -302,8 +280,7 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A run of the whole log writes one row, its completion in the state table,
-     * and nothing else.
+     * A whole-log run writes only its completion.
      *
      * @return void
      */
@@ -320,9 +297,7 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The null prune ledger, asked for a seal whose entry is missing, and the
-     * null anchor, asked for nothing, cost no statement: the run costs what one
-     * of an intact log does.
+     * The null prune ledger and the null anchor cost no statement.
      *
      * @return void
      */
@@ -341,9 +316,7 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Under the journal's ledger each seal asks for its records once, in one
-     * indexed statement, whether it was pruned or not, and a missing member it
-     * covers costs no read more: three seals, one of them pruned, cost three
-     * statements more than under the null ledger.
+     * indexed statement, pruned or not.
      *
      * @return void
      */
@@ -367,10 +340,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The present members a valid record covers are read again in one statement
-     * for each 500 of them, and none for a seal that has none: a seal of 501
-     * members all covered and present costs two reads more than its ledger
-     * read, the first of 500 ids and the second of one.
+     * The present members a valid record covers are read again once per 500:
+     * 501 covered members cost two reads.
      *
      * @return void
      */
@@ -394,10 +365,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An anchor that holds every seal is asked for its head alone, and the
-     * local seal at that head is read once to compare it: a run under it costs
-     * one read more than one under no anchor does, whatever the number of
-     * seals.
+     * An anchor that holds every seal costs one read of the local seal at its
+     * head, whatever the number of seals.
      *
      * @return void
      */
@@ -428,8 +397,7 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An orphaned member and an overdue entry each cost one read more than a
-     * log with neither, of the first of them.
+     * An orphaned member and an overdue entry each cost one read more.
      *
      * @return void
      */
@@ -463,9 +431,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A segment's bundles cost one read of their artifacts' columns and one of
-     * their members for each batch of entries whose members fit the byte bound,
-     * on top of what the segment costs, never a read per entry.
+     * A segment's bundles cost one artifacts read and one members read per
+     * batch, never a read per entry.
      *
      * @param  int  $bundles
      * @param  int  $batches
@@ -486,9 +453,7 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A segment of entries none of which is a bundle costs exactly what it did
-     * before manifests were checked: one read of its members, and no read of
-     * the artifacts.
+     * A segment without bundles costs one members read and no artifacts read.
      *
      * @return void
      */
@@ -504,10 +469,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Every report is let go as the run goes: by the time a report is given to
-     * the callback, none but the one before it is still held anywhere, and once
-     * the run ends none is, so neither the verifier nor its summary keeps them,
-     * however many segments there are.
+     * Every report is let go as the run goes: at each callback only the one
+     * before is still held, and none once the run ends.
      *
      * @return void
      */
@@ -535,10 +498,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The peak follows the largest segment alone: eight more segments as large
-     * as the one there was leave it where that one put it, though the log holds
-     * nine times the entries, and one segment six times as large raises it at
-     * least twofold.
+     * Peak memory follows the largest segment: eight more segments of its size
+     * leave it unchanged, and one six times as large at least doubles it.
      *
      * @return void
      */
@@ -562,9 +523,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Run a verification of the range, the whole log by default, under the
-     * anchor given or none and the prune ledger given or the null one, keeping
-     * every report it streams.
+     * Run a verification of the range, the whole log by default, keeping every
+     * report it streams.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\VerificationRange  $range
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
@@ -581,8 +541,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * How much a run of the whole log grows the peak by, in bytes, and how many
-     * segments it reported, holding no report: only their number is kept.
+     * How much a whole-log run grows the peak by, in bytes, and how many
+     * segments it reported, keeping none.
      *
      * @return array{0: int, 1: int}
      */
@@ -605,8 +565,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A verifier from the container's collaborators, under the anchor given or
-     * none, and the prune ledger given or the null one, with nothing pruned.
+     * A verifier under the anchor given or none and the prune ledger given or
+     * the null one, with nothing pruned.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
      * @param  ?\SineMacula\Laravel\AuditLog\Contracts\PruneLedger  $prunes
@@ -629,9 +589,8 @@ final class VerifyQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Store and seal the number of seals, each of the number of entries, the
-     * entries signed as the package signs them and inserted a chunk at a time,
-     * each recorded a microsecond after the one before.
+     * Store and seal seals of the number of entries each, signed as the package
+     * signs them, each entry a microsecond after the last.
      *
      * @param  int  $seals
      * @param  int  $entries

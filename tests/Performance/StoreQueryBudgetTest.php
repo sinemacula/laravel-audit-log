@@ -15,12 +15,9 @@ use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Statement-budget contract for the database store: one plain insert per
- * record, and inside a transaction only Laravel's savepoint beside it; a
- * duplicate adds one read, and inside a transaction the savepoint's rollback. A
- * bundle is two plain inserts, its artifact's first, in one transaction of its
- * own or one savepoint inside a host's; its duplicate is the one insert that
- * fails and two reads, and the rollback of that transaction or savepoint.
+ * Statement budget for the database store: one plain insert per record, a
+ * bundle two in one transaction or savepoint, and a duplicate one read more
+ * plus its rollback.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +48,7 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Outside a transaction a record costs one insert, no read, and no
-     * savepoint or rollback.
+     * Outside a transaction a record is one insert and nothing else.
      *
      * @return void
      */
@@ -66,8 +62,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside a transaction a record costs the same insert and one savepoint,
-     * and the savepoint's success issues nothing.
+     * Inside a transaction a record adds only a savepoint, whose success issues
+     * nothing.
      *
      * @return void
      */
@@ -101,8 +97,7 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside a transaction a duplicate costs its insert, one read, the
-     * savepoint and the savepoint's rollback.
+     * Inside a transaction a duplicate also rolls back its savepoint.
      *
      * @return void
      */
@@ -141,8 +136,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A hundred distinct records cost a hundred inserts, and nothing else, and
-     * store a hundred rows.
+     * A hundred distinct records cost a hundred inserts and store a hundred
+     * rows.
      *
      * @return void
      */
@@ -160,11 +155,9 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside one host transaction every record costs a savepoint of its own,
-     * none of which is released or rolled back before the host commits: on
-     * PostgreSQL each is a subtransaction held until then, which is why the
-     * store's documentation keeps the records of one transaction well under 64,
-     * the most PostgreSQL's snapshots hold before they overflow.
+     * Inside one host transaction each record holds its own savepoint until the
+     * host commits: a PostgreSQL subtransaction, which the docs keep well under
+     * 64.
      *
      * @return void
      */
@@ -188,9 +181,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Outside a transaction a bundle costs two plain inserts, its artifact's
-     * then its entry's, no read, and one transaction of its own, committed
-     * once.
+     * Outside a transaction a bundle is two inserts, the artifact's then the
+     * entry's, in one transaction of its own.
      *
      * @return void
      */
@@ -214,8 +206,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside a transaction a bundle costs the same two inserts and one
-     * savepoint, and begins and commits no transaction of its own.
+     * Inside a transaction a bundle is the same two inserts in one savepoint,
+     * with no transaction of its own.
      *
      * @return void
      */
@@ -235,9 +227,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Outside a transaction a bundle's duplicate costs the artifact's insert,
-     * which fails, so the entry's never runs; the rollback of its transaction;
-     * and two reads, of the entry and of the artifact. Nothing is committed.
+     * Outside a transaction a bundle's duplicate fails at the artifact's
+     * insert, rolls back, and reads the entry and the artifact.
      *
      * @return void
      */
@@ -253,8 +244,7 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside a transaction a bundle's duplicate costs its one insert, the two
-     * reads, the savepoint and the savepoint's rollback.
+     * Inside a transaction a bundle's duplicate also rolls back its savepoint.
      *
      * @return void
      */
@@ -274,9 +264,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A bundle whose entry is stored without its artifact costs both inserts,
-     * the entry's failing, the rollback that takes the artifact back, and the
-     * two reads that find the conflict.
+     * A bundle whose entry is already stored alone costs both inserts, a
+     * rollback and the two reads that find the conflict.
      *
      * @return void
      *
@@ -302,9 +291,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A hundred distinct bundles cost two hundred inserts and nothing else, in
-     * a hundred transactions, and store a hundred entries and a hundred
-     * artifacts.
+     * A hundred distinct bundles cost two hundred inserts in a hundred
+     * transactions.
      *
      * @return void
      */
@@ -323,8 +311,8 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The captured record of an approved invoice under the pinned id, finalised
-     * on the frozen clock.
+     * The approved-invoice record under the pinned id, finalised on the frozen
+     * clock.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
      */

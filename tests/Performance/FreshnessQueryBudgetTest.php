@@ -20,15 +20,8 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 
 /**
- * Statement-budget contract for `audit-log:check --freshness`: a run makes a
- * fixed number of reads, whatever the entries and the outbox hold, and writes
- * nothing. With every signal applicable it reads the log's oldest entry, the
- * five progress rows of sealing, the sweep, verification, retention and the
- * last anchoring, the last failure to anchor and the outbox's oldest row
- * queued: eight reads, each a point read by name or the first row of an index.
- * With none of the optional signals applicable it reads the oldest entry and
- * the three progress rows of sealing, the sweep and verification alone. It
- * begins no transaction, savepoint or rollback.
+ * Statement budget for `audit-log:check --freshness`: a fixed number of point
+ * reads whatever the entries and outbox hold, and no write or transaction.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,8 +59,8 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * With every signal applicable a run makes eight reads and writes nothing,
-     * in no transaction.
+     * With every signal applicable a run reads a fixed budget and writes
+     * nothing, in no transaction.
      *
      * @return void
      */
@@ -82,8 +75,8 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * With no optional signal applicable a run reads the oldest entry and the
-     * three core progress rows alone, and writes nothing.
+     * With only the core signals a run reads the oldest entry and three
+     * progress rows, and writes nothing.
      *
      * @return void
      */
@@ -93,8 +86,8 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A run makes the same statements with two hundred entries and two hundred
-     * outbox rows as with one of each: nothing is read per row.
+     * A run reads no more with two hundred entries and outbox rows than with
+     * one: nothing is read per row.
      *
      * @return void
      */
@@ -119,9 +112,8 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Make every optional signal apply, each with recent progress: entries are
-     * kept for a finite time, an anchor is bound and records go through the
-     * outbox.
+     * Make every optional signal apply with recent progress: finite retention,
+     * a bound anchor and the outbox.
      *
      * @return void
      */
@@ -144,7 +136,7 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Replace the entries and the outbox with the number of rows given in each,
-     * all recorded and due now.
+     * due now.
      *
      * @param  int  $count
      * @return void
@@ -175,8 +167,7 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An entries row with every column a row must have, numbered so each row's
-     * id is its own.
+     * An entries row with every required column, numbered so each id is unique.
      *
      * @param  int  $number
      * @return array<string, int|string>

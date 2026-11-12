@@ -18,29 +18,13 @@ use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Load contract for what handles a whole record at once: a formatter's work and
- * memory grow in line with the record, and a spill file is read in memory that
- * follows each line's own length, never the longest a line may be.
+ * Load budget for formatters and the spill reader: work and memory grow
+ * linearly with the record, and a spill line costs memory in line with its own
+ * length.
  *
- * Nothing here is held to an absolute limit: each large measurement is compared
- * with a small one taken in this process, so a slow machine slows both. A
- * formatter that does not walk the record takes next to no time to measure, so
- * the small side is never less than what hashing a quarter of the small
- * record's bytes takes, and never less than the small record's bytes in memory.
- * A ratio far below quadratic growth and well above linear growth catches a
- * pass that is not linear, and not a noisy neighbour. CPU time is not asserted
- * while Xdebug collects coverage, which slows every line by an order of
- * magnitude, so it would be measuring Xdebug.
- *
- * The peak is reset before each measurement, because within a process it never
- * otherwise falls, and the memory limit is raised for the test, because it is
- * often no more than these records need, and the assertion should be what fails
- * rather than the engine's limit.
- *
- * It claims no coverage because its records are among the slowest things in the
- * suite: a mutant whose covering tests included them would be skipped as taking
- * too long rather than run, so the classes they pass through would go without a
- * mutation check. Their behaviour is pinned by their own tests.
+ * Each large measurement is compared with a small one in this process. CPU time
+ * is not asserted under Xdebug coverage, and no coverage is claimed, since
+ * mutants these slow tests cover would be skipped as timeouts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,22 +43,22 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     /** @var int How many bytes the large record's properties hold: 10 MiB. */
     private const int LARGE_BYTES = 10485760;
 
-    /** @var int How many bytes each property holds, its key apart, so the record has many keys and long values. */
+    /** @var int Bytes each property's value holds, so the record has many keys and long values. */
     private const int FIELD_BYTES = 1024;
 
-    /** @var int How much more work the large record may cost than the small: linear growth is ten times, and quadratic a hundred. */
+    /** @var int Most work the large record may cost over the small: linear is ten times, quadratic a hundred. */
     private const int MAX_WORK_RATIO = 35;
 
-    /** @var int How much more memory the large record may take than the small: linear growth is ten times, and quadratic a hundred. */
+    /** @var int Most memory the large record may take over the small: linear is ten times, quadratic a hundred. */
     private const int MAX_MEMORY_RATIO = 20;
 
-    /** @var int How many runs each CPU measurement takes the least of, since a run can only be slowed by what else is happening. */
+    /** @var int Runs each CPU measurement takes the least of, since noise only slows a run. */
     private const int ROUNDS = 5;
 
-    /** @var int How many lines' worth of bytes a read may hold at once: the line being grown, the next chunk's copy of it, and the object taken out of it. */
+    /** @var int Line copies a read may hold at once: the line growing, the next chunk's copy and the object taken out. */
     private const int MAX_LINE_COPIES = 4;
 
-    /** @var int What reading any line holds beyond the line itself, in bytes: a chunk and the reader's own objects, for a line of any length. */
+    /** @var int What reading any line holds beyond the line itself, in bytes. */
     private const int READER_OVERHEAD = 262144;
 
     /** @var string The memory limit before the test. */
@@ -100,10 +84,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Remove the files the test wrote, and restore the memory limit, as far as
-     * what the process still holds allows: the pages a record scattered may not
-     * all go back at once, and a limit below them is refused with a warning. An
-     * unlimited process stays so.
+     * Remove the files and restore the memory limit as far as the process
+     * allows: a limit below what it still holds is refused.
      *
      * @return void
      */
@@ -128,8 +110,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Rows of `[formatter class, whether its line holds the properties]`: each
-     * formatter the package ships.
+     * Rows of `[formatter class, whether its line holds the properties]`, one
+     * per shipped formatter.
      *
      * @return iterable<string, array{0: class-string<\SineMacula\Laravel\AuditLog\Contracts\AuditFormatter>, 1: bool}>
      */
@@ -143,10 +125,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Formatting a 10 MiB record takes CPU time and memory in line with
-     * formatting a 1 MiB one, and the line it gives holds the whole record, so
-     * what was measured is the walk of it, for each formatter whose line holds
-     * the properties.
+     * Formatting a 10 MiB record costs CPU time and memory in line with a 1 MiB
+     * one, and its line holds the whole record.
      *
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\AuditFormatter>  $class
      * @param  bool  $holdsTheProperties
@@ -201,9 +181,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Reading a spill line grows the peak by a few copies of that line and no
-     * more, a short line by next to nothing, however long a line may be, so a
-     * file of short lines never claims the bound of each.
+     * Reading a spill line grows the peak by a few copies of that line, however
+     * long a line may be.
      *
      * @param  int  $bytes
      * @return void
@@ -226,9 +205,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Each line of a file is read for its own length: many short lines cost
-     * what one does, since each is let go before the next, and the peak never
-     * reaches the file's size.
+     * Each line is read for its own length: many short lines cost what one
+     * does.
      *
      * @return void
      */
@@ -257,9 +235,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A line past the bound holds the bound and no more: its remainder is
-     * skipped without being kept, the line is counted as truncated, and the
-     * line after it is read.
+     * A line past the bound holds only the bound, is counted as truncated, and
+     * the next line is read.
      *
      * @return void
      */
@@ -289,8 +266,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Reading a 10 MiB line takes CPU time in line with reading a 1 MiB one,
-     * measured in this process, whatever the chunks it is read in.
+     * Reading a 10 MiB line takes CPU time in line with a 1 MiB one, whatever
+     * its chunks.
      *
      * @return void
      */
@@ -312,10 +289,9 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A finalised record whose properties hold the bytes given, as many short
-     * keys with long values, holding what a formatter has to escape: a `%`, a
-     * line break and a character beyond ASCII. It is built around the capture,
-     * since capture would cut it to its budget, and is signed once.
+     * A finalised record of many short keys with long values holding the bytes
+     * given, with a `%`, a line break and non-ASCII to escape. It is built
+     * around the capture, which would cut it to its budget.
      *
      * @param  int  $bytes
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
@@ -350,7 +326,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * How much formatting the record grows the peak by, in bytes.
+     * How much formatting the record grows the peak by, in bytes; the peak is
+     * reset first, since it never otherwise falls.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditFormatter  $formatter
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
@@ -413,8 +390,8 @@ final class FormatterLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * The CPU time this process has used, user and system together: waiting for
-     * a core on a busy machine or runner uses none of it.
+     * The CPU time this process has used, user and system: waiting for a core
+     * uses none of it.
      *
      * @return int
      */

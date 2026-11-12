@@ -23,17 +23,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Budget contract for exporting the trail, measured against a baseline taken in
- * the same process, never against the clock: the memory an export of four
- * thousand entries holds at its peak is at most twice what an export of two
- * hundred holds, and an export of eight thousand holds at most 16 bytes more
- * for each entry beyond four thousand, far less than keeping even one short
- * string per entry costs, so it does not grow with the export; and the
- * statements of the larger export exceed those of the smaller by the chunks
- * between them alone, on every connection, the export's own session included.
- *
- * Entries are read in chunks of a hundred, the least the setting takes, so the
- * larger export reads thirty-eight chunks more than the smaller.
+ * Memory and statement budget for exporting the trail, measured against a
+ * smaller export in the same process, never the clock.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,7 +48,7 @@ final class ExportMemoryBudgetTest extends PerformanceContractTestCase
     /** @var int The entries of the largest export, twice the larger. */
     private const int LARGEST = 8000;
 
-    /** @var int The most bytes the peak may rise by for each entry the largest export holds beyond the larger: far less than any string kept per entry costs. */
+    /** @var int Most bytes the peak may rise by per entry beyond the larger export: less than any per-entry string costs. */
     private const int BYTES_PER_ENTRY = 16;
 
     /** @var int The rows inserted by one statement while seeding. */
@@ -114,15 +105,9 @@ final class ExportMemoryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The peak memory of an export of four thousand entries, over the memory in
-     * use when it began, is at most twice that of an export of two hundred, and
-     * that of eight thousand exceeds that of four thousand by at most
-     * `BYTES_PER_ENTRY` for each entry between them, each measured with the
-     * peak reset first, once a first export has loaded everything an export
-     * needs. The ratio alone would let a fixed overhead hide what grows: an
-     * export that kept one id of each entry it wrote, as one that sorted or
-     * hashed its membership at the end would, holds tens of bytes an entry
-     * more, and fails the slope.
+     * Export memory does not grow with the entries: 4,000 take at most twice
+     * what 200 take, and 8,000 at most `BYTES_PER_ENTRY` an entry more than
+     * 4,000, a slope that catches what the ratio alone would hide.
      *
      * @return void
      */
@@ -152,10 +137,8 @@ final class ExportMemoryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The statements an export of four thousand entries runs, on every
-     * connection, exceed those of an export of two hundred by the chunks
-     * between them alone, each a read of the entries table: the begin, the
-     * bound, the commit and the journal cost the same.
+     * An export of 4,000 entries runs more statements than one of 200 only by
+     * the chunk reads between them.
      *
      * @return void
      */
@@ -176,9 +159,8 @@ final class ExportMemoryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Seed the number of captured entries of the `finance` category, each
-     * recorded a microsecond after the one before, signed as the package signs
-     * them and inserted a batch at a time, as the store would insert each.
+     * Seed captured `finance` entries a microsecond apart, signed as the
+     * package signs them, a batch at a time.
      *
      * @param  int  $count
      * @return void
@@ -207,8 +189,8 @@ final class ExportMemoryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Insert the rows into the entries table on the storage connection in one
-     * statement, unless there are none.
+     * Insert the rows into the entries table in one statement, unless there are
+     * none.
      *
      * @param  list<array<string, int|string|null>>  $rows
      * @return void
@@ -223,9 +205,8 @@ final class ExportMemoryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Export the `finance` entries to a file of the name, and return the result
-     * with how far the peak memory rose above the memory in use when the export
-     * began, the peak reset first.
+     * Export the `finance` entries to a file of the name, with how far peak
+     * memory rose above the memory in use when it began.
      *
      * @param  string  $name
      * @return array{0: \SineMacula\Laravel\AuditLog\Querying\ExportResult, 1: int}
@@ -242,9 +223,8 @@ final class ExportMemoryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The statements an export of the `finance` entries to a file of the name
-     * runs on every connection: all of them, the reads of the entries table,
-     * and the writes, in order.
+     * The statements an export of the `finance` entries runs on every
+     * connection: all of them, the entries reads and the writes, in order.
      *
      * @param  string  $name
      * @return array{all: list<string>, reads: list<string>, writes: list<string>}

@@ -50,19 +50,11 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Statement-budget contract for the recorder, scoped as its promise is to the
- * default contributors and a fresh insert: resolving the context costs no
- * query, a session holding only a user id included, one record costs one insert
- * and its timing's savepoint, a deferred record costs nothing until the commit,
- * and an application's contributor adds exactly what it runs itself. The
- * listeners on a host's own code paths, which run whether or not it records
- * anything, cost nothing: making a job's payload, and entering and leaving a
- * job or a command, leave only what the job or command runs itself. Minimising
- * is arithmetic on what capture already holds, so it adds nothing to a record's
- * cost, whatever its definition and its settings ask for.
+ * Statement budget for the recorder with the default contributors: a record is
+ * one insert, a deferred one costs nothing until commit, and context, listeners
+ * and minimising add no query.
  *
- * No `users` table exists, so a guard that tried to load its user would fail
- * the test as well as its budget.
+ * No `users` table exists, so a guard that loaded its user would fail the test.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,9 +101,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The three defaults fill origin, client, request id, actor and guard in an
-     * HTTP frame, from a real session guard holding a user, without one
-     * statement.
+     * The defaults fill an HTTP frame's context from a real session guard
+     * without a statement.
      *
      * @return void
      */
@@ -132,8 +123,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A session holding a user id is never loaded: the guard still holds no
-     * user afterwards and the record has no actor, for no statement.
+     * A session holding only a user id is never loaded: the record has no
+     * actor, for no statement.
      *
      * @return void
      */
@@ -153,8 +144,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Making a job's payload costs nothing, from a request whose session holds
-     * only a user id, which is never loaded to find out who dispatched.
+     * Making a job's payload never loads a session's user id to find who
+     * dispatched.
      *
      * @return void
      */
@@ -194,8 +185,7 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A job starting on a worker notes who the guards hold for nothing, a
-     * session holding only a user id included.
+     * A job starting on a worker notes who the guards hold for nothing.
      *
      * @return void
      */
@@ -227,8 +217,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The whole pipeline, in an HTTP frame with a signed-in user, costs the
-     * same one insert: filling the context adds nothing to it.
+     * An authenticated request's record is the same one insert: filling the
+     * context adds nothing.
      *
      * @return void
      */
@@ -255,9 +245,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Inside a transaction a default record costs nothing until the commit,
-     * when it is one plain insert, outside the transaction, so no savepoint. On
-     * PostgreSQL the commit also asks, once, whether the transaction was
-     * already aborted, because a commit there reports a success even then.
+     * then one plain insert with no savepoint, plus the commit's question on
+     * PostgreSQL.
      *
      * @return void
      */
@@ -349,8 +338,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The fake runs the same pipeline and writes nothing, whether the record
-     * reaches it at once or on a commit, whose one question is all it adds.
+     * The fake writes nothing, whether the record reaches it at once or on a
+     * commit, whose question is all it adds.
      *
      * @return void
      */
@@ -372,8 +361,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A contributor an application registers adds exactly its own read and no
-     * more: the promise covers the defaults only, and this says so.
+     * An application's contributor adds exactly its own read: the budget covers
+     * the defaults only.
      *
      * @return void
      */
@@ -392,10 +381,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record using every handling, an identifier, an owned note and a hashed
-     * address costs what a plain record does inside a transaction: one insert
-     * and the savepoint that isolates it, read from nowhere. The stored values
-     * show the minimiser did run.
+     * A record using every handling costs what a plain record does in a
+     * transaction: one insert and its savepoint.
      *
      * @return void
      */
@@ -489,9 +476,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A builder holding everything minimising acts on, recorded by a recorder
-     * of its own whose definition uses every handling, with a hashed address
-     * and an encrypter that holds a key for everyone.
+     * A builder using every handling, with a hashed address and an encrypter
+     * holding a key for everyone, on a recorder of its own.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
      */
@@ -540,8 +526,8 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * What the default contributors fill into a fresh builder, each made from
-     * the container as a capture makes it.
+     * What the default contributors fill into a fresh builder, each resolved as
+     * a capture resolves it.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingSnapshot
      */
