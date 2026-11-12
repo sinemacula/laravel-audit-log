@@ -18,9 +18,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\Enums\StubActivity;
 
 /**
- * Feature tests for the assertions a test makes on the audit log: when each
- * passes and fails, what a failure says, and that asserting without the fake
- * fails rather than reads the real store.
+ * Feature tests for the audit log assertions, which fail rather than read the
+ * real store without the fake.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -131,9 +130,8 @@ final class InteractsWithAuditLogTest extends TestCase
     }
 
     /**
-     * `assertAudited()` takes one of the package's own codes, as a string or as
-     * the activity, in every assertion that takes a code, and fails naming it
-     * when there is no record of it.
+     * `assertAudited()` takes a package code as a string or as the activity,
+     * and fails naming it.
      *
      * @return void
      */

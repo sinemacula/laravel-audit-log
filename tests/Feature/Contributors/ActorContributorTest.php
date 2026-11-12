@@ -29,10 +29,8 @@ use Tests\Unit\Stubs\StubForeignGuard;
 use Tests\Unit\Stubs\StubHeldActorReader;
 
 /**
- * Feature tests for the default contributor of the actor: an explicit actor is
- * never replaced and fills no guard, the ambient actor beats a carried one, and
- * a carried one counts only while a job frame is on the stack, is never
- * resolved, and is ignored when malformed.
+ * Feature tests for the default actor contributor: explicit, ambient and
+ * carried actors and which one wins.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

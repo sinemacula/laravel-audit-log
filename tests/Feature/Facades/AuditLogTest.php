@@ -20,11 +20,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Feature tests for the facade: it resolves the recorder, gives it typed, and
- * has a real static `fake()`, with which a record, a bulk record and its
- * attachment included, still runs the whole pipeline up to the store; it is the
- * way into the trail, whose reads the fake records; and it is the way into the
- * lifecycle.
+ * Feature tests for the facade and its static `fake()`, which still runs the
+ * whole pipeline up to the store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -211,9 +208,8 @@ final class AuditLogTest extends TestCase
     }
 
     /**
-     * A bulk record reaches the fake, which keeps attachments, with the sealed
-     * manifest of its subjects, bound by the descriptor the signed record
-     * holds.
+     * A bulk record reaches the fake with its sealed manifest, bound by the
+     * descriptor the signed record holds.
      *
      * @return void
      */
@@ -238,9 +234,8 @@ final class AuditLogTest extends TestCase
     }
 
     /**
-     * `trail()` gives a new trail through the facade on each call, and a read
-     * of it is authorised by the default policy, which denies, and recorded
-     * through the fake before its empty result is returned.
+     * `trail()` gives a new trail on each call, and a read is authorised by the
+     * default policy and recorded.
      *
      * @return void
      */

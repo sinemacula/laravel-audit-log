@@ -15,9 +15,8 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 use Tests\TestCase;
 
 /**
- * Feature tests for the default contributor that says where the activity ran:
- * the innermost frame decides the origin and names the command or job, and
- * outside any frame the origin is console, with no name.
+ * Feature tests for the contributor that says where the activity ran, from the
+ * innermost frame.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

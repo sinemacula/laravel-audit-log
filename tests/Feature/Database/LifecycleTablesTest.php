@@ -11,10 +11,8 @@ use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use Tests\TestCase;
 
 /**
- * Feature tests for what the lifecycle tables are called: the four table names,
- * their defaults, each read as configured on every call, the names each
- * refuses, with a message that names the key and never the value, and the
- * validation that reads every one of them.
+ * Feature tests for the lifecycle table names, and the refusal that names the
+ * key and never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,9 +41,7 @@ final class LifecycleTablesTest extends TestCase
     private const string TABLE_MESSAGE = ' must be a table name of 1 to 47 lower-case letters, digits and underscores that does not start with a digit.';
 
     /**
-     * `LifecycleTables` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it so the line is covered.
      *
      * @return void
      *
@@ -66,9 +62,8 @@ final class LifecycleTablesTest extends TestCase
     }
 
     /**
-     * With no lifecycle or import settings at all, the journal is in
-     * `audit_log_lifecycle`, the holds in `audit_log_holds`, the lock in
-     * `audit_log_lifecycle_lock` and the batches in `audit_log_import_batches`.
+     * With no lifecycle or import settings at all, each table has its default
+     * name.
      *
      * @return void
      */
@@ -124,9 +119,8 @@ final class LifecycleTablesTest extends TestCase
     }
 
     /**
-     * Rows of `[setting, value]`: per setting, a capital, a schema-qualified
-     * name, one character too many, a leading digit, a value that is no string,
-     * a `null` set explicitly, and the other shapes a table name must not take.
+     * Rows of `[setting, value]`: per setting, the shapes a table name must not
+     * take.
      *
      * @return iterable<string, array{0: string, 1: int|list<string>|string|null}>
      */

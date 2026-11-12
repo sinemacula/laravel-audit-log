@@ -31,12 +31,8 @@ use Tests\Fixtures\Stores\ThrowingLogHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the spill: the one line a failed write leaves, at
- * `critical`, on the configured channel; the marker and the canonical envelope
- * it holds, signed or marked `unsigned`, a record with an attachment as its
- * whole bundle, which the codec reads back; that it stays one physical line and
- * holds no `%`, so the documented channel writes it back byte for byte; and
- * that a failed channel propagates.
+ * Feature tests for the spill: the one line a failed write leaves on the
+ * configured channel.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -166,9 +162,8 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * A value built to forge a second spill line, with every line break and a
-     * marker of its own, stays inside its string on the one line, and decodes
-     * back to itself.
+     * A value built to forge a second spill line stays inside its string on the
+     * one line and decodes back to itself.
      *
      * @return void
      */
@@ -267,9 +262,7 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * A finalised record with an attachment is spilled as its whole bundle: the
-     * bundle version, the record's signed columns, and the attachment naming
-     * the record as its entry, its sealed members as they were.
+     * A finalised record with an attachment is spilled as its whole bundle.
      *
      * @return void
      */
@@ -298,9 +291,8 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * A record with an attachment that was never finalised is spilled as its
-     * bundle marked `unsigned`, the attachment beside its record, and no
-     * integrity field in the record.
+     * A record whose attachment was never finalised is spilled as a bundle
+     * marked `unsigned`, with no integrity field.
      *
      * @return void
      */
@@ -331,10 +323,8 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * A bundle spilled through the documented channel reads back through the
-     * codec as the same record with the same attachment, whose members open to
-     * the manifest's canonical form; the unsigned bundle beside it is refused
-     * as unsigned, naming its record.
+     * A spilled bundle reads back through the codec as the same record and
+     * attachment; an unsigned one is refused.
      *
      * @return void
      */
@@ -380,9 +370,8 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * A `%` anywhere in a bundle's record is written as its JSON escape, as in
-     * any other line, so the bundle's line holds none, and its record still
-     * verifies once it is read back.
+     * A `%` in a bundle's record is written as its JSON escape, and the record
+     * still verifies once read back.
      *
      * @return void
      */
@@ -514,9 +503,8 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * The whole record reaches no `MessageLogged` listener, so it cannot land
-     * among an error tracker's breadcrumbs beside the report that follows it,
-     * and no shared log context joins the line.
+     * The record reaches no `MessageLogged` listener, which could add it to an
+     * error tracker's breadcrumbs, and no shared log context joins the line.
      *
      * @return void
      */
@@ -588,9 +576,8 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * Rows of `[token, rewritten]`: tokens Monolog's `LineFormatter` knows, and
-     * whether it rewrites or strips the token in its output when it is left
-     * unescaped, even with a format of the message alone.
+     * Rows of `[token, rewritten]`: `LineFormatter` tokens and whether it
+     * rewrites one left unescaped.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -607,10 +594,8 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * A value holding a token the documented channel's formatter knows comes
-     * back from the file exactly as it was spilled, decodes to the record's
-     * envelope, and still verifies. Left unescaped, the same formatter rewrites
-     * most of those tokens, which is what this test guards against.
+     * A value holding a token the documented formatter knows comes back from
+     * the file as spilled and still verifies.
      *
      * @param  string  $token
      * @param  bool  $rewritten

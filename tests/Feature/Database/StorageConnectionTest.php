@@ -11,10 +11,8 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use Tests\TestCase;
 
 /**
- * Feature tests for where the package's tables live: the storage connection,
- * the maintenance connection that falls back to it, the names each resolves to
- * when neither is named, and the message a setting that is not a name fails
- * with.
+ * Feature tests for the storage connection and the maintenance connection that
+ * falls back to it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,9 +87,8 @@ final class StorageConnectionTest extends TestCase
     }
 
     /**
-     * A storage connection that is not a name fails closed, naming the setting
-     * and what an empty one means, rather than falling back to the default
-     * connection.
+     * A storage connection that is not a name fails closed, naming the setting,
+     * instead of falling back to the default connection.
      *
      * @param  bool|int|list<string>  $value
      * @return void
@@ -125,8 +122,7 @@ final class StorageConnectionTest extends TestCase
 
     /**
      * With no maintenance connection named, maintenance runs on the storage
-     * connection: the default one when no storage connection is named either,
-     * and the named one when it is.
+     * connection, named or default.
      *
      * @return void
      */
@@ -187,8 +183,7 @@ final class StorageConnectionTest extends TestCase
 
     /**
      * A maintenance connection that is not a name fails closed, naming the
-     * setting and that an empty one means the storage connection, rather than
-     * falling back to it.
+     * setting, instead of falling back.
      *
      * @param  bool|int|list<string>  $value
      * @return void
@@ -208,9 +203,8 @@ final class StorageConnectionTest extends TestCase
     }
 
     /**
-     * An unnamed maintenance connection falls back through the storage
-     * connection's check, so a storage connection that is not a name fails the
-     * maintenance read too, with the storage connection's message.
+     * An unnamed maintenance connection fails with the storage connection's
+     * message when that is not a name.
      *
      * @return void
      */
@@ -250,9 +244,7 @@ final class StorageConnectionTest extends TestCase
     }
 
     /**
-     * `StorageConnection` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it so the line is covered.
      *
      * @return void
      *

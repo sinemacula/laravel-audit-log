@@ -22,10 +22,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the request id and trace id: generated lazily from the
- * clock, carried, or read from a header only with its flag on, from a trusted
- * proxy, under one well-formed value and from an HTTP frame; stored hidden; and
- * forgotten without touching anything else in Context.
+ * Feature tests for the request id and trace id, and when a header may supply
+ * them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -450,9 +448,8 @@ final class RequestIdentityTest extends TestCase
     }
 
     /**
-     * Beneath a command or a job in the request, the header is still found, so
-     * a nested first record does not replace the request's trusted id with a
-     * generated one for the rest of the request.
+     * Beneath a command or a job in the request the header is still found, so a
+     * nested record keeps the trusted id.
      *
      * @return void
      */
@@ -472,8 +469,7 @@ final class RequestIdentityTest extends TestCase
 
     /**
      * Laravel's placeholder console request is never a frame, so its headers
-     * are never read, even with both flags on and a trusted peer, and whether
-     * or not a command is running.
+     * are never read.
      *
      * @return void
      */
@@ -768,9 +764,8 @@ final class RequestIdentityTest extends TestCase
     }
 
     /**
-     * Rows of `[setting, value, whether the request id is asked for rather than
-     * the trace id, the message]`: each malformed setting on the way to a
-     * header, with both flags otherwise on.
+     * Rows of `[setting, value, whether the request id is asked for, the
+     * message]`: each malformed header setting.
      *
      * @return iterable<string, array{0: string, 1: int|string, 2: bool, 3: string}>
      */
@@ -835,9 +830,8 @@ final class RequestIdentityTest extends TestCase
     }
 
     /**
-     * An id first asked for inside `Context::scope()` outlives it, though the
-     * scope restores hidden Context as it ends, and is back in Context for a
-     * job dispatched afterwards.
+     * An id first made inside `Context::scope()` outlives it, though the scope
+     * restores hidden Context as it ends.
      *
      * @return void
      */

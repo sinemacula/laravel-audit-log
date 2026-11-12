@@ -20,10 +20,8 @@ use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use Tests\TestCase;
 
 /**
- * Feature tests for the default contributor of the request: the identifiers
- * always, and the client, method and route's name only from an innermost HTTP
- * frame, never a URL or a query string, and never from Laravel's placeholder
- * console request.
+ * Feature tests for the request contributor: client details come only from an
+ * innermost HTTP frame, never a URL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -323,9 +321,8 @@ final class RequestContributorTest extends TestCase
     }
 
     /**
-     * An override that is no standard method is left out, and the record still
-     * has the rest: neither the client's value nor Symfony's exception gets
-     * through.
+     * An override that is no standard method is left out, and neither its value
+     * nor Symfony's exception gets through.
      *
      * @param  string  $override
      * @return void
