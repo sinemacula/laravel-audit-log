@@ -11,29 +11,11 @@ use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * An audit store that writes each record as one line, at `info`, to a log
- * channel: the formatter's projection of the record, after the marker
- * `audit-log:v1 `.
+ * An audit store that writes each record as one `info` line to a log channel:
+ * the marker `audit-log:v1 `, then the formatter's projection.
  *
- * The marker keeps a line from starting with `{` or `[`, which Monolog's
- * `LineFormatter` would otherwise read as JSON whose escaped line breaks it
- * turns back into real ones when inline line breaks are allowed. A carriage
- * return, a line feed or a Unicode line or paragraph separator a formatter left
- * in its line, breaking its own promise, is escaped, so a record is always one
- * physical line. The line reaches the channel's own logger, past Laravel's
- * wrapper, so no shared log context joins it and no `MessageLogged` listener
- * receives it, and every `%` that would open one of `LineFormatter`'s tokens is
- * written as `%25`, because that formatter substitutes them inside a message
- * after it has placed it, without any escaping for CEF or JSON, so a value
- * holding `%context%` could otherwise import a field or a physical line. A
- * failure of the channel propagates.
- *
- * It is not durable, since a log handler may buffer, drop or rotate a line
- * after it returns, and it joins no transaction. The store contract's clause
- * that a record is stored at most once is waived for it: a log line cannot be
- * taken back or deduplicated, so a retried record is written again. It keeps no
- * attachment: its line is a projection of the record, which would lose a bulk
- * operation's members, so a bulk record is never handed to it.
+ * Not durable and joins no transaction; a retried record is written again, and
+ * a bulk record is never handed to it.
  *
  * @api
  *
@@ -42,7 +24,7 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  */
 final readonly class LogAuditStore implements AcceptsAttachments, DurableAuditStore
 {
-    /** @var string What every line starts with, its trailing space included. */
+    /** @var string What every line starts with, so Monolog never reads it as JSON. */
     public const string MARKER = 'audit-log:v1 ';
 
     /** @var array<string, string> The line breaks a formatter may leave, each with its escape. */
@@ -90,8 +72,8 @@ final readonly class LogAuditStore implements AcceptsAttachments, DurableAuditSt
     }
 
     /**
-     * Whether a return is a durable acknowledgement: never, since a log handler
-     * may buffer or drop a line after it returns.
+     * Whether a return is durable: never, since a handler may buffer or drop
+     * the line.
      *
      * @return bool
      */
@@ -102,8 +84,7 @@ final readonly class LogAuditStore implements AcceptsAttachments, DurableAuditSt
     }
 
     /**
-     * Whether a write joins a transaction on the connection: never, since a
-     * line written stays written whatever the transaction does.
+     * Whether a write joins a transaction on the connection: never.
      *
      * @param  string  $connection
      * @return bool
@@ -115,8 +96,8 @@ final readonly class LogAuditStore implements AcceptsAttachments, DurableAuditSt
     }
 
     /**
-     * Whether the store keeps a record's attachment with its entry: never,
-     * since its line is a projection that would lose the members.
+     * Whether the store keeps attachments: never, since its projection would
+     * lose the members.
      *
      * @return bool
      */

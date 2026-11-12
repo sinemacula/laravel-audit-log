@@ -5,12 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * What one verification of the owners' key store established: how many key rows
- * it verified, how many of them were erased, and how many key findings it added
- * to the run; or that it was skipped, because the bound field encrypter is not
- * the package's, with that encrypter's class.
- *
- * It names counts and a class, never a key, an owner or a value.
+ * What one verification of the owners' key store established, or that it was
+ * skipped because the bound field encrypter is not the package's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -4,26 +4,18 @@ declare(strict_types = 1);
 
 namespace Tests\Integration\Migration;
 
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversNothing;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\Fixtures\Database\EntriesTableShape;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the table the shipped entries migration
- * creates, on whichever engine the suite runs against.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the table the shipped entries migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,6 +25,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class EntriesTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped entries migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php';
 
@@ -40,8 +34,7 @@ final class EntriesTableSchemaTest extends TestCase
     private const string TABLE = 'audit_log_entries_for_a_very_long_table_name_xx';
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -57,7 +50,7 @@ final class EntriesTableSchemaTest extends TestCase
         Builder::defaultTimePrecision(0);
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
         } finally {
             Builder::defaultTimePrecision($precision);
         }
@@ -77,9 +70,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the 37 columns of the stored envelope; only what a record
-     * may lack is nullable, and every column the HMAC needs to name the event,
-     * its outcome, its source, its times and its signature is not.
+     * Of the 37 columns, only what a record may lack is nullable.
      *
      * @return void
      */
@@ -131,8 +122,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The columns are in the stored envelope's order: the captured record's
-     * fields, then the four the finalisation adds.
+     * The columns follow the stored envelope's order.
      *
      * @return void
      */
@@ -162,8 +152,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * Every string column has the length the record allows it, and the ids
-     * drawn as UUIDs are stored as UUIDs.
+     * String columns have the record's lengths; UUID ids are stored as UUIDs.
      *
      * @return void
      */
@@ -187,9 +176,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * Both times are stored to the microsecond, as the migration declares
-     * whatever the builder's default, so a time written with six fractional
-     * digits reads back with all six.
+     * Both times are stored to the microsecond, whatever the builder's default.
      *
      * @return void
      */
@@ -212,8 +199,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The context and the properties are `json`, never `jsonb`, so nothing the
-     * engine does to the text matters to integrity; SQLite stores them as text.
+     * The payload columns are `json`, never `jsonb`; SQLite stores text.
      *
      * @return void
      */
@@ -247,11 +233,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * Each lookup has its own index, its columns in the order the lookup uses
-     * them and named after the table with a short suffix, each lookup of the
-     * trail ending in the time an entry occurred and then its id, sealing pages
-     * the entries by the time each was recorded and then its id, and a source's
-     * own record id is unique within the source.
+     * Each lookup has its own short-named index, its columns in lookup order.
      *
      * @return void
      */
@@ -278,10 +260,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * No index applies a collation of its own to `id`: each of the eight that
-     * end in it compares the id as the column does, binary on SQLite and with
-     * no collation at all on PostgreSQL, whose `uuid` has none. MySQL keeps no
-     * collation per index; its columns' collation is pinned on its own.
+     * No index gives `id` a collation of its own; MySQL keeps none per index.
      *
      * @return void
      */
@@ -299,10 +278,8 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name, the
-     * primary key's included, fits PostgreSQL's 63 characters, and the longest
-     * reaches it exactly. SQLite names its primary key index itself and limits
-     * no name, so there the primary key is left out.
+     * Every index name fits PostgreSQL's 63 characters, the longest exactly;
+     * SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -319,8 +296,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no timestamps, since a row is never updated, and no foreign
-     * keys, so each table the package keeps is pruned on its own.
+     * The table has no timestamps and no foreign keys.
      *
      * @return void
      */
@@ -332,8 +308,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL every character column takes the table's binary collation
-     * without padding, whatever the connection's collation is.
+     * On MySQL every character column is binary without padding.
      *
      * @return void
      */
@@ -386,9 +361,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * Ids that differ only by a trailing space are distinct, on every engine:
-     * the unique index keeps both and a lookup finds one, which a padding
-     * collation such as MySQL's `utf8mb4_bin` would not.
+     * Ids differing only by a trailing space are distinct on every engine.
      *
      * @return void
      */
@@ -403,8 +376,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The source identity is unique: a source's record id stored twice is
-     * refused.
+     * A source's record id is stored once.
      *
      * @return void
      */
@@ -418,10 +390,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The source digest of an imported record is kept as written, a hex digest
-     * of 64 characters, and a captured record has none; two records of one
-     * source may share a digest, since a repeat is found through the source's
-     * unique index, not this column.
+     * The source digest is kept as written, and is not unique.
      *
      * @return void
      */
@@ -444,14 +413,13 @@ final class EntriesTableSchemaTest extends TestCase
      */
     public function testRollsBackByDroppingTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
     }
 
     /**
-     * A row with every column a row must have, numbered so each row's id is its
-     * own, with the given columns replaced.
+     * A full row, numbered so its id is its own.
      *
      * @param  int  $number
      * @param  array<string, string>  $columns
@@ -478,8 +446,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The collation each secondary index of the table gives `id`, as SQLite
-     * records it for each index's key columns.
+     * The collation SQLite records for `id` in each secondary index.
      *
      * @return list<string>
      */
@@ -507,8 +474,7 @@ final class EntriesTableSchemaTest extends TestCase
     }
 
     /**
-     * The collation each secondary index of the table gives `id`, as the oid
-     * PostgreSQL records for each index column, `0` for none.
+     * The collation oid PostgreSQL records for `id` per index, `0` for none.
      *
      * @return list<string>
      */
@@ -524,25 +490,5 @@ final class EntriesTableSchemaTest extends TestCase
         );
 
         return array_values(array_map(static fn (object $row): string => (string) ((array) $row)['collation_oid'], $rows));
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Entries migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

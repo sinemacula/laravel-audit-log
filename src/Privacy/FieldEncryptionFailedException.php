@@ -7,14 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Privacy;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 
 /**
- * Reported, never thrown, when a field encrypter throws or returns something
- * other than an envelope: the value is dropped and diagnosed, and the record is
- * still written.
- *
- * It names only the encrypter's class. It can hold no previous exception,
- * because the constructor takes none and only `for()` can call it: what the
- * encrypter threw could hold the plaintext in its message. An application names
- * this class to filter, route or alert on the report.
+ * Reported, never thrown, when a field encrypter fails; it names only the
+ * encrypter's class and chains nothing, as the cause could hold the plaintext.
  *
  * @api
  *
@@ -34,10 +28,8 @@ final class FieldEncryptionFailedException extends \RuntimeException
     }
 
     /**
-     * The exception for an encrypter that failed. `get_debug_type()` names an
-     * anonymous class by what it implements, never by the file it is in. The
-     * encrypter is marked sensitive so this frame of the trace does not carry
-     * an object that may hold key material.
+     * The exception for a failed encrypter, marked sensitive since it may hold
+     * key material; `get_debug_type()` never names a file.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter  $encrypter
      * @return self

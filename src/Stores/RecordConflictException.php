@@ -5,13 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Stores;
 
 /**
- * Thrown when a record is stored under an id an entry already holds, and the
- * entry is not the same record: its captured content differs, or its stored row
- * fails verification. A bulk record conflicts too when its entry is stored with
- * another artifact or without its own, or its artifact without its entry. What
- * is stored is kept as it is; the record is never written over it. A record
- * retention has already pruned conflicts too, when its insert violates a unique
- * index: a pruned record is not stored again.
+ * Thrown when a record's id is held by an entry that is not the same record, or
+ * the record was pruned; what is stored is never overwritten.
  *
  * @api
  *
@@ -28,7 +23,7 @@ final class RecordConflictException extends \RuntimeException
      */
     public function __construct(
 
-        // What is wrong.
+        // Handed to the parent, not kept as a property
         string $message,
 
         /** The id the record and the existing entry share, or the pruned record's. */
@@ -50,9 +45,8 @@ final class RecordConflictException extends \RuntimeException
     }
 
     /**
-     * The exception for a bulk record whose entry is stored with another
-     * artifact, or without its own, or whose artifact is stored without its
-     * entry.
+     * The exception for a bulk record stored with another artifact, without its
+     * own, or as an artifact without its entry.
      *
      * @param  string  $id
      * @return self
@@ -63,8 +57,7 @@ final class RecordConflictException extends \RuntimeException
     }
 
     /**
-     * The exception for a record retention has already pruned: a seal holds it
-     * as a member, and its entry is gone.
+     * The exception for a record retention has already pruned.
      *
      * @param  string  $id
      * @return self
@@ -75,8 +68,7 @@ final class RecordConflictException extends \RuntimeException
     }
 
     /**
-     * The exception for an existing entry whose stored row fails verification,
-     * so it cannot be the record.
+     * The exception for an existing entry whose stored row fails verification.
      *
      * @param  string  $id
      * @return self

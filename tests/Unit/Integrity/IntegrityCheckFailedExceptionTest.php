@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException;
 
 /**
- * Unit tests for the exception reported beside every integrity failure: the
- * message built from the event's counts, finding, id and head, absent parts
- * written `none`, a stopped run named by its class, and no exception carried.
+ * Unit tests for the exception reported beside every integrity failure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,9 +25,8 @@ final class IntegrityCheckFailedExceptionTest extends TestCase
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
     /**
-     * The message names the command, every failing integrity count and every
-     * anchoring count short of anchored, each in its own place, then the
-     * finding, its id and the head.
+     * The message names the command, each failing count, the finding, its id
+     * and the head.
      *
      * @return void
      */
@@ -54,9 +51,8 @@ final class IntegrityCheckFailedExceptionTest extends TestCase
     }
 
     /**
-     * A finding, an id and a head the event does not hold are each written
-     * `none`, and a count a map does not hold reads zero, so a strict failure
-     * on anchoring alone still says why.
+     * A finding, id or head the event lacks is written `none`, and a missing
+     * count reads zero.
      *
      * @return void
      */
@@ -77,8 +73,7 @@ final class IntegrityCheckFailedExceptionTest extends TestCase
     }
 
     /**
-     * A head of zero is written as a number, not as absent; protects against a
-     * mutation that tests the head for truthiness.
+     * A head of zero is written as a number, not as absent.
      *
      * @return void
      */
@@ -150,9 +145,8 @@ final class IntegrityCheckFailedExceptionTest extends TestCase
     }
 
     /**
-     * An id that is no lower-case UUID, the only form the package writes, is
-     * written `none`, so nothing read from an altered table reaches a log or an
-     * alert as it is.
+     * An id that is no lower-case UUID is written `none`, so text from an
+     * altered table never reaches a log.
      *
      * @param  string  $id
      * @return void

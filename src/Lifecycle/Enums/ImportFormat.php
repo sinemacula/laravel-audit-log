@@ -5,9 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle\Enums;
 
 /**
- * The formats an import reads, each a versioned NDJSON format: the import
- * format, whose every line names it, and the export format of this package,
- * whose lines an import reads as another installation's evidence.
+ * The versioned NDJSON formats an import reads.
  *
  * @api
  *

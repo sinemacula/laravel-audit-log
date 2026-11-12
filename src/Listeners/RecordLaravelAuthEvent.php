@@ -26,36 +26,11 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Records Laravel's own authentication events: a sign-in or a session restored
- * from a remember-me cookie, a failed sign-in, a lockout, a sign-out on this or
- * the other devices, a registration, an email address verified, a password
- * reset and a reset link sent.
+ * Records Laravel's authentication events from the event alone, never from what
+ * a guard holds now, reading no credential but the configured identifier.
  *
- * Every value comes from the event, never from what a guard holds now: the
- * actor and the subject are the event's user, and an event with no user to
- * name, a failed sign-in, a lockout or a reset link records that no one acted,
- * so no contributor fills in whoever happens to be signed in. The guard is the
- * one the event names, and an event under a guard
- * `audit-log.capture.laravel.except_guards` lists is not recorded; one with no
- * guard is skipped only when every guard is. The only credential a failed
- * sign-in or a lockout is read for is the one
- * `audit-log.capture.laravel.identifier_key` names, and only when it is a
- * string, and both read it as one name, so a password, a one-time code or any
- * other field is never touched, and a failed sign-in and a lockout of one
- * identifier hash it alike. A sign-in is a session restored only when the guard
- * it names is a session guard that says it signed the user in from the
- * remember-me cookie.
- *
- * A failed sign-in and a lockout are written after the transaction, so a
- * rollback around them keeps their record.
- *
- * A malformed setting or a failure to record is contained by the capture, so
- * the sign-in, the sign-out or the reset goes on.
- *
- * It holds nothing: the capture, its settings, the guards and the configuration
- * come from the application serving the event when it is handled, not from the
- * container that built the listener, which under Octane is the application the
- * worker booted rather than the request's sandbox.
+ * Resolves everything per event, since under Octane the container that built
+ * the listener is the worker's, not the request's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -142,8 +117,7 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * A sign-in: the user as actor and subject, whether it was remembered, and
-     * a session restored when the guard it names came from the remember-me
+     * A sign-in, or a session restored when its guard came from the remember-me
      * cookie.
      *
      * @param  \Illuminate\Auth\Events\Login  $event
@@ -159,8 +133,8 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * A failed sign-in: no actor, the user as subject when the event found one,
-     * and the identifier under the configured key when it is a string.
+     * A failed sign-in: no actor, the user as subject when found, and the
+     * configured identifier when it is a string.
      *
      * @param  \Illuminate\Auth\Events\Failed  $event
      * @return \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): ?\SineMacula\Laravel\AuditLog\Records\PendingRecord
@@ -184,11 +158,9 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * A lockout: denied, no actor and no subject, the client the request came
-     * from, and the identifier the request gave under the configured key when
-     * it is a string. The key is read as one name, as a failed sign-in reads
-     * its credentials, never as a path into nested input, so the two hash the
-     * same identifier.
+     * A lockout: denied, no actor or subject, the request's client, and the
+     * identifier read as one name, never a path, so it hashes as a failed
+     * sign-in's does.
      *
      * @param  \Illuminate\Auth\Events\Lockout  $event
      * @return \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): ?\SineMacula\Laravel\AuditLog\Records\PendingRecord
@@ -212,9 +184,8 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * A sign-out or an account event: the user as actor and subject, or no
-     * actor and no subject when the event has no user; an account event names
-     * no guard.
+     * A sign-out or an account event: the user as actor and subject, or neither
+     * when there is no user.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -233,8 +204,8 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * A reset link sent: the user as subject and no actor, since whoever asked
-     * for it is not known to be that user.
+     * A reset link sent: the user as subject and no actor, since the requester
+     * is not known to be that user.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -255,9 +226,7 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * The description, skipped when the guard is one not recorded, and given
-     * the guard and the capture settings otherwise; a guard that is not a
-     * string is no guard. The settings are read when the event is described,
+     * The description, skipped for an excluded guard; the settings are read
      * inside the capture, so a malformed one is contained.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
@@ -292,8 +261,8 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * The builder with the user as actor and subject, or with no actor and no
-     * subject when there is no user to name.
+     * The builder with the user as actor and subject, or neither when there is
+     * no user.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $user
@@ -310,11 +279,8 @@ final readonly class RecordLaravelAuthEvent
     }
 
     /**
-     * Whether the sign-in came from the remember-me cookie: the guard it names
-     * is a session guard that says so. Any other guard did not, a guard
-     * `auth.guards` does not configure is never asked, since the manager would
-     * refuse it, and a configured guard the manager fails to build, such as one
-     * of a driver never registered or with no user provider, is no restore.
+     * Whether the configured session guard signed the user in from the
+     * remember-me cookie; an unconfigured guard is never built.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -334,8 +300,7 @@ final readonly class RecordLaravelAuthEvent
         try {
             $resolved = $container->make(Factory::class)->guard($guard);
         } catch (\Throwable) {
-            // A guard that cannot be built signed no one in from its cookie,
-            // and the sign-in is recorded as one
+            // A guard that cannot be built restored no session
             return false;
         }
 

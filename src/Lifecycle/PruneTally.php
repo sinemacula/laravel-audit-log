@@ -8,18 +8,11 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 
 /**
- * The running count of one prune: what its committed chunks deleted and kept,
- * the seals it skipped, where it got to, why it stopped, and, in a dry run, its
- * plan per pair and per seal; then the journal's finish row, the progress and
- * the result it ends with.
+ * The running count of one prune's committed chunks, and the finish row,
+ * progress and result it ends with.
  *
- * Only a chunk whose transaction committed is counted, so a rolled-back or
- * retried attempt never shows in the counts. Nothing is kept per entry, and per
- * tenant only the pairs deleted from, so the tally grows with the categories,
- * the tenants and the skipped seals, never with the entries. The finish row
- * holds the distinct decisions of the run, at most 1,000, with the count beyond
- * them and a digest of every pair's decision, so it is bounded whatever the
- * tenants.
+ * Nothing is kept per entry, so the tally grows with categories, tenants and
+ * skipped seals, never with entries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,8 +79,8 @@ final class PruneTally
     ) {}
 
     /**
-     * Note the run's policy version, cursor and boundary, and, when it is not a
-     * dry run, that its start row committed.
+     * Note the run's policy version, cursor and boundary, and that its start
+     * row committed unless a dry run.
      *
      * @param  string  $policyVersion
      * @param  int  $cursor
@@ -103,8 +96,8 @@ final class PruneTally
     }
 
     /**
-     * Limit the run: the most entries a chunk deletes, and how long it runs
-     * from the Unix time it started before it stops between chunks.
+     * Limit the entries a chunk deletes and the seconds the run lasts from its
+     * start.
      *
      * @param  positive-int  $batch
      * @param  int  $maxSeconds
@@ -178,8 +171,8 @@ final class PruneTally
     }
 
     /**
-     * Count a committed chunk of the seal: what it deleted, by the category and
-     * tenant of each deleted entry's planned row, and what it kept.
+     * Count a committed chunk of the seal, by each deleted entry's category and
+     * tenant.
      *
      * @param  string  $sealId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneChunkOutcome  $outcome
@@ -217,8 +210,7 @@ final class PruneTally
     }
 
     /**
-     * Count an eligible entry of a dry run's plan, under its pair's decision
-     * and its seal's sequence, as held when a hold keeps it.
+     * Count an eligible entry of a dry run's plan, or a held one.
      *
      * @param  int  $sequence
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecision  $decision
@@ -279,9 +271,7 @@ final class PruneTally
     }
 
     /**
-     * How the run ends: failed once it has failed; partial when it stopped on
-     * its time budget, skipped a seal, or left an eligible entry held or
-     * awaiting delivery; complete otherwise.
+     * How the run ends.
      *
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus
      */
@@ -298,9 +288,8 @@ final class PruneTally
     }
 
     /**
-     * The payload of the run's finish row: its status and why it failed, its
-     * counts, its cursor and what it left, its deletions per category, the
-     * tenants it deleted from, and its decisions, bounded.
+     * The run's finish row payload, its decisions bounded with a digest of them
+     * all.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $decisions
      * @return array<string, array<array-key, array<array-key, int|string|null>|int>|int|string|null>
@@ -332,8 +321,7 @@ final class PruneTally
     }
 
     /**
-     * The progress the run leaves under `retention.last_run`, as of the instant
-     * given.
+     * The progress the run leaves under `retention.last_run`.
      *
      * @param  string  $at
      * @return array{at: string, run_id: string, status: string, deleted: int, cursor: int}
@@ -382,9 +370,8 @@ final class PruneTally
     }
 
     /**
-     * The distinct decisions among those given, each as its category, the days
-     * kept and preserved, its cut-off and the pairs that share it, sorted
-     * bytewise by their canonical encoding.
+     * The distinct decisions, each with how many pairs share it, sorted
+     * bytewise by canonical encoding.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecision>  $decisions
      * @return list<array{0: string, 1: ?int, 2: ?int, 3: ?string, 4: int}>

@@ -5,18 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * The bitmap a prune record holds over its seal's members: which of them the
- * prune deleted, one bit per member in member order.
- *
- * Members are in order of their entry ids compared bytewise, and position `i`
- * is the `i`-th of them, from 0. Bit `i` is bit `i % 8`, the least significant
- * first, of byte `intdiv(i, 8)`. The bitmap is exactly `ceil(member_count / 8)`
- * bytes, every bit past the last member is zero, and it is written as strict
- * base64url (`A-Z`, `a-z`, `0-9`, `-` and `_`) with no padding. Reading it back
- * accepts only that one text: another alphabet, padding, a length base64 cannot
- * have, a text that does not encode its bytes canonically, another length or a
- * padding bit set is refused, so a bitmap has exactly one stored form. A seal's
- * most members, 50000, take 6250 bytes.
+ * The bitmap of the members a prune deleted: bit `i % 8` of byte `intdiv(i, 8)`
+ * for the `i`-th member by entry id bytewise, stored as unpadded base64url with
+ * exactly one accepted form.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,8 +84,7 @@ final class PruneBitmap
             throw new \InvalidArgumentException('A prune bitmap must be base64url: letters, digits, hyphens and underscores.');
         }
 
-        // The alphabet is checked, so a strict decoding fails only on a length
-        // no group of base64 can end with
+        // With the alphabet checked, strict decoding fails only on a bad length
         $bytes = base64_decode(strtr($encoded, '-_', '+/'), true);
 
         if ($bytes === false) {

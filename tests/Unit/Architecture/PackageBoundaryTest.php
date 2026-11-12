@@ -9,17 +9,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Holds what the package ships to its contract, where the contract is not about
- * which class names which: no frontend (no route, view, component or asset
- * directory, and no provider that loads one), no other package of the suite
- * required, named or configured, the quality tools' dependencies in step with
- * the package's, every type tagged as public surface or internal with the
- * standard author and copyright lines, no branch on the console outside the
- * provider, no static property to outlive a request, and no call that makes a
- * guard load a user.
- *
- * Each scanner reads tokens or text rather than parsing, so each has a
- * self-test that feeds it a fixed source and pins exactly what it finds.
+ * Holds what the package ships to its contract where the rule is not which
+ * class names which. Each scanner has a self-test pinning what it finds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -132,9 +123,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The loader scanner finds each loader, whatever its case, and the Blade
-     * compiler's binding in either kind of quotes; and nothing for a comment,
-     * another loader, or a binding that only starts the same way.
+     * The loader scanner finds each loader in any case and the Blade compiler's
+     * binding in either quotes, and nothing else.
      *
      * @return void
      */
@@ -163,9 +153,7 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * No section of `composer.json` names another package of the suite: the
-     * package never requires, suggests, conflicts with, replaces or provides
-     * one.
+     * No section of `composer.json` names another package of the suite.
      *
      * @return void
      */
@@ -183,9 +171,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The quality tools' `composer.json` requires every runtime dependency of
-     * the package with the same constraint, so the analysers read the code
-     * against what it runs on, and requires no package of the suite either.
+     * The quality tools require every runtime dependency at the package's
+     * constraint, and no suite package.
      *
      * @return void
      */
@@ -205,9 +192,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The patterns tell this package from another of the suite, whatever the
-     * case, in a package name or a namespace (single or JSON escaped); a name
-     * that only starts with this package's is another package's.
+     * The patterns tell this package from another of the suite, a name merely
+     * prefixed by this one's included.
      *
      * @return void
      */
@@ -272,8 +258,7 @@ final class PackageBoundaryTest extends TestCase
 
     /**
      * No shipped class or configuration file reads a key of another package's
-     * configuration: every key read is the package's own or one of the
-     * framework's files.
+     * configuration.
      *
      * @return void
      */
@@ -291,12 +276,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The configuration scanner finds the key of each way of reading one: the
-     * helper (unqualified, fully qualified or in another case), the facade, an
-     * injected or resolved repository, the container's binding and the helper's
-     * repository, through each reader method; and nothing for a comment, a
-     * docblock, a write, a method of the same name, a non-literal key, or a
-     * reader method on something that is not configuration.
+     * The configuration scanner finds every way of reading a key, and nothing
+     * for a comment, a write, a non-literal key or another receiver.
      *
      * @return void
      */
@@ -366,9 +347,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * Every type a source file declares carries, in the docblock directly above
-     * it, exactly one of `@api` and `@internal` as a tag line, and the standard
-     * author and copyright lines.
+     * Every declared type's docblock has exactly one of `@api` and `@internal`
+     * as a tag line, and the author and copyright lines.
      *
      * @param  string  $file
      * @return void
@@ -383,11 +363,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The declaration scanner reads the docblock directly above each class,
-     * interface, trait and enum, past its modifiers and attributes, and not a
-     * member's docblock, an anonymous class or a `::class` constant; the tag
-     * check refuses a type without a docblock, with both tags or with a tag
-     * only in prose, and without the author and copyright lines.
+     * The declaration scanner reads the docblock directly above each type, past
+     * modifiers and attributes, and the tag check refuses each malformed one.
      *
      * @return void
      */
@@ -457,9 +434,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * Recording never branches on the console: only the provider asks, to
-     * publish its files and register its command, and the origin comes from the
-     * execution frames.
+     * Only the provider asks whether it runs in the console; recording takes
+     * its origin from the execution frames.
      *
      * @return void
      */
@@ -477,9 +453,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The scanner finds the call on an object, through a nullsafe operator and
-     * on a class, in any case; and nothing for a comment, a string or a
-     * declaration of the same name.
+     * The console scanner finds every form of the call, and nothing in a
+     * comment, a string or a declaration.
      *
      * @return void
      */
@@ -506,10 +481,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * No class of the package declares a static property, so nothing survives
-     * from one Octane request to the next outside the container. Each property
-     * is judged by its declaring class, so a parent's statics, such as those of
-     * Laravel's `Facade`, are not counted.
+     * No class declares a static property, so nothing outlives an Octane
+     * request outside the container; inherited statics are not counted.
      *
      * @return void
      */
@@ -531,9 +504,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * No class calls `user()` on anything, since it loads a user and dispatches
-     * `Authenticated`. And where a guard is touched, none calls the helpers
-     * that call it on a `GuardHelpers` guard.
+     * No class calls `user()`, which loads a user and dispatches
+     * `Authenticated`, nor its `GuardHelpers` callers where a guard is touched.
      *
      * @return void
      */
@@ -554,10 +526,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The scanner finds each form of the call: on a property, through a
-     * nullsafe operator, on a class, in any case, and as a first-class
-     * callable; and nothing for a comment, a string, a declaration, a read of a
-     * property of the same name, or a method with a longer name.
+     * The guard call scanner finds every form of the call, and nothing in a
+     * comment, a string, a declaration, a property read or a longer name.
      *
      * @return void
      */
@@ -595,10 +565,7 @@ final class PackageBoundaryTest extends TestCase
 
     /**
      * Rows of `[source, whether it resolves a guard]`: each form of resolving a
-     * guard by name, on the manager, through a nullsafe operator, on the
-     * facade, in any case and as a first-class callable; and nothing for a
-     * comment, a string, a declaration, a read of a property of the same name,
-     * or a method with a longer name.
+     * guard by name, and the near misses.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -635,8 +602,7 @@ final class PackageBoundaryTest extends TestCase
 
     /**
      * The core sign-in listener resolves the guard an event names, so it is
-     * held to the helpers' rule; a listener that never resolves a guard is held
-     * only to the rule on `user()`.
+     * held to the helpers' rule.
      *
      * @return void
      */
@@ -776,9 +742,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * Whether the token at the index calls something that reads configuration:
-     * the `config()` helper, or a reader method on a receiver that names
-     * configuration.
+     * Whether the token at the index calls `config()` or a reader method on a
+     * configuration receiver.
      *
      * @param  list<array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  int  $index
@@ -806,10 +771,8 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * Whether the receiver before the member operator at the index names
-     * configuration: walking back over its chain of names, variables, member
-     * operators and bracketed arguments, one of its tokens mentions `config` in
-     * any case.
+     * Whether the receiver chain before the member operator at the index
+     * mentions `config`, in any case.
      *
      * @param  list<array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  int  $operator

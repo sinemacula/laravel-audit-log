@@ -8,9 +8,9 @@ use Monolog\Handler\AbstractHandler;
 use Monolog\LogRecord;
 
 /**
- * A Monolog handler that hands every record it sees to a callback and lets it
- * pass on, whatever its level, so a test can read what reached a channel's own
- * handlers rather than what Laravel's wrapper told its listeners.
+ * A Monolog handler that hands every record to a callback and lets it pass on,
+ * so a test reads what reached a channel's handlers rather than Laravel's
+ * listeners.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

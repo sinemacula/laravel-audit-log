@@ -40,15 +40,8 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for reconciliation: every prune run that finished, hold,
- * release, import that finished, erasure, reinstatement and rewrap run within
- * the days looked back, and recorded by no entry of its code, is recorded again
- * with the properties its journal rows give, a rewrap run once for all its
- * batches; one already recorded is skipped, so a second run records nothing; a
- * row that does not verify, or an operation whose start does not, is never
- * recorded; a prune run that has not finished is counted apart; the window is
- * the days given; and the operation each entry names is read in PHP, never by a
- * JSON path query.
+ * Feature tests for recording again the lifecycle operations the journal holds
+ * and no entry records.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,9 +102,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Rows of `[what the journal holds, the code it is recorded under, its
-     * expected properties, the actor, the outcome and reason]`: a prune run, a
-     * hold, a release and an import, each journalled and unrecorded.
+     * Rows of `[journal, code, properties, actor, outcome and reason]` of
+     * unrecorded operations.
      *
      * @formatter:off
      *
@@ -134,9 +126,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * An operation the journal holds and no entry records is recorded again,
-     * under its code, with exactly the properties its journal rows give, by its
-     * operator or by no one for a prune, with its outcome.
+     * An unrecorded operation is recorded again with exactly the properties its
+     * journal rows give.
      *
      * @formatter:off
      *
@@ -170,9 +161,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * An operation an entry of its code already names is skipped, and nothing
-     * is written; an entry of another code naming the same operation does not
-     * count, since a held import records two codes under one operation.
+     * An operation already recorded under its own code is skipped.
      *
      * @return void
      */
@@ -201,8 +190,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A second run records nothing: every operation the first recorded is
-     * already recorded.
+     * A second run records nothing.
      *
      * @return void
      */
@@ -222,8 +210,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Only the days looked back are reconciled: an operation journalled before
-     * them is not examined, and once the window reaches it, it is.
+     * Only operations within the days looked back are reconciled.
      *
      * @return void
      */
@@ -247,8 +234,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * The window starts exactly the days given before the clock: a row
-     * journalled at that instant is in it, and one a microsecond before is not.
+     * The window starts exactly the days given before the clock.
      *
      * @return void
      */
@@ -311,9 +297,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Rows of `[what is done to the hold's stored row]`: its reason edited, its
-     * payload edited, its key one the ring does not hold, and its HMAC
-     * malformed.
+     * Rows of `[what is done to the hold's stored row]`.
      *
      * @return iterable<string, array{0: array<string, string>}>
      */
@@ -366,8 +350,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A verified hold row whose payload does not describe its hold is counted
-     * unverifiable and never recorded.
+     * A verified hold row whose payload is not a hold is counted unverifiable.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -384,8 +367,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * The record names the operation by the id its journal row carries, by the
-     * operator the row names.
+     * The record names the operation by its journal row's id, by the row's
+     * operator.
      *
      * @return void
      */
@@ -403,9 +386,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * The operation each entry names is read from its decoded properties in
-     * PHP: no statement uses a JSON path or a JSON function, and the entries
-     * are read by event and time.
+     * Entries are read by event and time and decoded in PHP, with no JSON path
+     * query.
      *
      * @return void
      */
@@ -435,8 +417,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A prune run that started and has not finished has nothing to record and
-     * is counted unfinished, never unverifiable or failed.
+     * An unfinished prune run is counted apart.
      *
      * @return void
      */
@@ -452,8 +433,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Rows of `[the kind of the start, its payload, the kind of the finish, its
-     * payload]`: a prune run and an import, each started before the window.
+     * Rows of `[start kind, start payload, finish kind, finish payload]`, each
+     * started early.
      *
      * @formatter:off
      *
@@ -474,9 +455,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * An operation that finished within the window but started before it is
-     * recorded from its start found behind the window, among other rows of its
-     * kind.
+     * An operation started before the window is recorded from its start behind
+     * it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind  $startKind
      * @param  array<string, bool|int|string|null>  $start
@@ -508,8 +488,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A finish whose start is not among the verified rows, there or tampered
-     * with, is counted unverifiable and never recorded.
+     * A finish without a verified start is counted unverifiable and never
+     * recorded.
      *
      * @return void
      */
@@ -547,9 +527,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A complete or partial prune run is recorded as a success and a failed one
-     * as a failure, with the reason its finish row keeps when it is one a
-     * failed prune gives.
+     * A prune run's status decides its record's outcome and reason.
      *
      * @param  string  $status
      * @param  ?string  $failure
@@ -572,10 +550,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A real prune run that fails after it deleted from a tenant, and whose own
-     * record was never written, is recorded again exactly as its own record
-     * would have been: a failure, with the reason it failed and the tenants it
-     * deleted from.
+     * A failed prune run is recorded with its reason and tenants, as its own
+     * record would have been.
      *
      * @return void
      */
@@ -628,10 +604,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * In outbox mode a second reconciliation before the outbox drains records
-     * nothing: the first run's record waits in the outbox under the id derived
-     * from its code and operation, which the second finds there, so a drain
-     * stores one record.
+     * In outbox mode a second run before the drain finds the first run's record
+     * in the outbox.
      *
      * @return void
      */
@@ -654,9 +628,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * In sync mode no record waits in the outbox, and the writer holds no grant
-     * on it, so the outbox is never read: an operation is recorded through the
-     * entries alone, and a second run finds its record there.
+     * In sync mode the outbox is never read.
      *
      * @return void
      */
@@ -683,9 +655,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A record written meanwhile by another run, under the same derived id, is
-     * never written twice: the second write meets the primary key and finds the
-     * record stored already, so one record is stored.
+     * A concurrent run never writes the record twice.
      *
      * @return void
      */
@@ -713,8 +683,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * The id derived for a record is a lower-case UUID of version 8, the same
-     * for one code and operation, and another for another code or operation.
+     * The derived record id is a stable lower-case UUID v8 per code and
+     * operation.
      *
      * @return void
      */
@@ -744,8 +714,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A complete or partial import is recorded as a success, a failed one as a
-     * failure, and one closed while running as interrupted.
+     * An import's status decides whether it is recorded a success, failure or
+     * interrupted.
      *
      * @param  string  $status
      * @param  array{0: string, 1: ?string}  $outcome
@@ -766,8 +736,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Rows of `[the kind, the payload]`: finish rows of a status no run or
-     * import ends with.
+     * Rows of `[the kind, the payload]`: finish rows of an unknown status.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind, 1: array<string, array<string, int>|int|string|null>}>
      */
@@ -780,8 +749,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A finish of a status no run or import ends with describes no operation,
-     * and is never recorded.
+     * A finish of an unknown status is never recorded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind  $kind
      * @param  array<string, array<string, int>|int|string|null>  $payload
@@ -801,8 +769,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A held import records the hold its start names, and its hold row is
-     * recorded under its own code with the same operation, each once.
+     * A held import records both its import and its hold, each once.
      *
      * @return void
      */
@@ -820,8 +787,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A record that cannot be written is counted failed and reported once, and
-     * the next run tries it again.
+     * A record that cannot be written is counted failed and tried again next
+     * run.
      *
      * @return void
      */
@@ -841,8 +808,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Rows of the journal and of the entries beyond a page are each read, so
-     * every operation is examined and found recorded.
+     * Journal rows and entries beyond a page are each read.
      *
      * @return void
      */
@@ -863,9 +829,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * An erasure whose record could not be written is recorded from its journal
-     * row, with exactly the properties the erasure itself would have recorded,
-     * by its operator; a second run records nothing.
+     * An erasure missing its record is recorded from its journal row.
      *
      * @return void
      */
@@ -910,8 +874,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A partial erasure journalled with kept keys is recorded `partial`, its
-     * kept keys counted and their reasons named once each.
+     * A partial erasure is recorded `partial` with its kept keys and reasons.
      *
      * @return void
      */
@@ -933,9 +896,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * A rewrap run and a reinstatement whose records could not be written are
-     * recorded from their journal rows, as they would have been, and an erasure
-     * already recorded is skipped.
+     * Rewraps and reinstatements missing their records are recorded.
      *
      * @return void
      */
@@ -983,8 +944,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * An erasure, a reinstatement or a rewrap row whose payload does not
-     * describe its operation is counted unverifiable and never recorded.
+     * A privacy row that describes no operation is counted unverifiable.
      *
      * @return void
      */
@@ -1022,8 +982,8 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Record the activity with the properties given, by an operator, as the
-     * operation's own record would be.
+     * Record the activity with the properties given, as the operation's own
+     * record would be.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  array<string, int|string|null>  $properties
@@ -1066,8 +1026,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Journal a prune run, its start and its complete finish, and give what it
-     * is recorded as.
+     * Journal a complete prune run and return what it is recorded as.
      *
      * @formatter:off
      *
@@ -1153,8 +1112,7 @@ final class ReconcilerTest extends TestCase
     }
 
     /**
-     * Journal an import, its start and its partial finish, and give what it is
-     * recorded as.
+     * Journal a partial import and return what it is recorded as.
      *
      * @formatter:off
      *

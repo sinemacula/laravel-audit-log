@@ -12,24 +12,9 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * What an application watches of one model class: the exact class, the code
- * segment its changes are stored under, and the fields kept, each with its
- * handling.
- *
- * A watch is checked from the class alone, by reflection, and no model is
- * built. The class must be a concrete Eloquent model outside the package's own
- * namespace, so the package's read model is never watched. The segment is one
- * code segment, short enough that its longest code fits the code column, and
- * none the package's own codes are stored under. The fields are 1 to 64 names
- * of columns, each once, never `changes`, which an update's record keeps its
- * changes under, and never beginning `_audit`; a field given without a handling
- * is retained.
- *
- * Each of the five changes is recorded under its own definition, in the
- * `change` category at version 1, with every field the watch does not name
- * dropped: a snapshot rules each field at its name, an update rules each
- * field's value before and after the change, and a restore rules both. A field
- * encrypted is encrypted under the key of the model, the record's subject.
+ * What an application watches of one model class, checked by reflection alone:
+ * the exact class, the code segment its changes are stored under and the fields
+ * kept, each with its handling.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,16 +26,16 @@ final readonly class ModelWatch
     /** @var int Most fields one watch keeps. */
     public const int MAX_FIELDS = 64;
 
-    /** @var list<string> The segments the package's own codes are stored under, which no watched model's changes are. */
+    /** @var list<string> Segments reserved for the package's own codes. */
     public const array RESERVED_SEGMENTS = ['authentication', 'session', 'account', 'authorization', 'mfa', 'sso', 'audit_log'];
 
     /** @var string The category every watched model's changes are stored under. */
     public const string CATEGORY = 'change';
 
-    /** @var string Pattern of the segment: a lower-case letter, then up to 176 lower-case letters, digits or underscores, so its longest code fits 191 bytes. */
+    /** @var string Pattern of the segment, short enough that its longest code fits 191 bytes. */
     private const string SEGMENT_PATTERN = '/\A[a-z][a-z0-9_]{0,176}\z/';
 
-    /** @var string Pattern of a field: a letter or underscore, then up to 63 letters, digits or underscores. */
+    /** @var string Pattern of a watched field's name. */
     private const string FIELD_PATTERN = '/\A[A-Za-z_][A-Za-z0-9_]{0,63}\z/';
 
     /** @var string The key an update's record keeps its changes under, which no field may be. */
@@ -85,9 +70,8 @@ final readonly class ModelWatch
     ) {}
 
     /**
-     * A watch of the model class under the segment, keeping the fields: a name
-     * given alone is retained, and a name given as a key is handled as its
-     * value says.
+     * A watch of the model class under the segment; a field given alone is
+     * retained, and one given as a key is handled as its value says.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -134,8 +118,7 @@ final readonly class ModelWatch
     }
 
     /**
-     * How the field is handled: as the watch names it, or dropped, as every
-     * field it does not name is.
+     * How the field is handled: as the watch names it, else dropped.
      *
      * @param  string  $field
      * @return \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling
@@ -146,8 +129,8 @@ final readonly class ModelWatch
     }
 
     /**
-     * Whether the field is handled explicitly: by any handling but retaining it
-     * as it is, so its value is never kept in plaintext as read.
+     * Whether the field has any handling but retain, so its value is never kept
+     * in plaintext as read.
      *
      * @param  string  $field
      * @return bool
@@ -158,8 +141,8 @@ final readonly class ModelWatch
     }
 
     /**
-     * Whether the other watch is of the same class, under the same segment,
-     * keeping the same fields with the same handlings, in any order.
+     * Whether the other watch has the same class, segment and fields with
+     * handlings, in any order.
      *
      * @param  self  $other
      * @return bool
@@ -176,8 +159,8 @@ final readonly class ModelWatch
     }
 
     /**
-     * The definition of a change: the snapshot's fields for a change that keeps
-     * one, and each field before and after for a change that keeps the changes.
+     * The definition of a change: rules for the snapshot's fields, for each
+     * field's value before and after, or both for a restore.
      *
      * @param  \SineMacula\Laravel\AuditLog\Capture\Enums\ModelEvent  $change
      * @return \SineMacula\Laravel\AuditLog\Definitions\EventDefinition
@@ -223,8 +206,8 @@ final readonly class ModelWatch
     }
 
     /**
-     * The model class as PHP names it, refusing one that does not exist, is not
-     * an Eloquent model, is abstract, or is the package's own.
+     * The model class as PHP names it, refusing a missing, abstract or
+     * non-Eloquent class and the package's own.
      *
      * @param  string  $class
      * @return class-string<\Illuminate\Database\Eloquent\Model>
@@ -274,9 +257,8 @@ final readonly class ModelWatch
     }
 
     /**
-     * The fields, each with its handling, in the order given: a name given
-     * alone is retained. Refused unless there are 1 to 64, each a name a watch
-     * can keep, given once, with a handling.
+     * The fields, each with its handling, in the order given; a name given
+     * alone is retained.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

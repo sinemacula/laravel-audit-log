@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityKey;
 
 /**
- * Unit tests for the secret reader every settings class shares: a raw secret, a
- * `base64:` secret, what it refuses, and the value it keeps out of a stack
- * trace.
+ * Unit tests for the secret reader every settings class shares.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -148,9 +146,8 @@ final class SecretSettingTest extends TestCase
     }
 
     /**
-     * The reader's minimum is a literal, since `Config` names nothing of the
-     * integrity layer, so this holds it to an integrity key's and it cannot
-     * drift.
+     * The minimum is a literal, since `Config` names nothing of the integrity
+     * layer, so it is held to an integrity key's here.
      *
      * @return void
      */

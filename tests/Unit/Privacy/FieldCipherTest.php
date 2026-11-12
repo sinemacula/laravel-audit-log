@@ -11,15 +11,8 @@ use SineMacula\Laravel\AuditLog\Privacy\FieldCipher;
 use SineMacula\Laravel\AuditLog\Privacy\TypedPlaintext;
 
 /**
- * Unit tests for the field cipher: the golden envelope opened and its field
- * key, additional data and ciphertext recomputed, a round trip, a fresh nonce
- * on every seal that no method takes, every authenticated part binding the
- * envelope, a field key per entry, the strict ciphertext, and canonical
- * additional data.
- *
- * The golden envelope is never sealed again with its fixed nonce through the
- * cipher, which takes none: it is opened, and its ciphertext is recomputed here
- * with `openssl_encrypt()` directly.
+ * Unit tests for the field cipher, pinned by a golden envelope that is opened
+ * rather than resealed, since the cipher takes no nonce.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,9 +47,8 @@ final class FieldCipherTest extends TestCase
     private const array PATH = ['properties', 'items', 0, 'iban'];
 
     /**
-     * The golden envelope opens to its plaintext under its data key, and its
-     * field key, additional data and ciphertext are what the pinned derivation,
-     * encoding and cipher give.
+     * The golden envelope opens to its plaintext, and its field key, additional
+     * data and ciphertext match the pinned derivation.
      *
      * @return void
      *
@@ -101,9 +93,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * A sealed plaintext opens to itself, in an envelope of exactly the
-     * version, the key id and a base64url ciphertext of the nonce, the
-     * plaintext's length and the tag.
+     * A sealed plaintext opens to itself, in an envelope of the version, the
+     * key id and a base64url nonce, ciphertext and tag.
      *
      * @param  string  $plaintext
      * @return void
@@ -194,9 +185,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * An envelope opens only with every authenticated part as it was sealed:
-     * any change of the entry, the path, the key id, the version, the log or
-     * the data key fails, naming nothing.
+     * An envelope opens only with every authenticated part as it was sealed: a
+     * change to any one fails, naming nothing.
      *
      * @param  string  $dataKey
      * @param  string  $keyId
@@ -242,9 +232,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * The field key is HKDF-SHA256 of the data key with the entry id as its
-     * salt under its own info: one per entry, never the data key, and the same
-     * for the same entry.
+     * The field key is HKDF-SHA256 of the data key salted with the entry id:
+     * one per entry, never the data key, stable for an entry.
      *
      * @return void
      */
@@ -333,8 +322,7 @@ final class FieldCipherTest extends TestCase
 
     /**
      * Rows of `[how the ciphertext is made from a valid one]`: padding, the
-     * standard alphabet, a length out of range, trailing bits that do not
-     * re-encode, whitespace and nothing at all.
+     * standard alphabet, a bad length, stray bits, whitespace, nothing.
      *
      * @return iterable<string, array{0: \Closure(string): string}>
      */
@@ -353,9 +341,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * A ciphertext that is not strict base64url of a nonce, a plaintext of 1 to
-     * 1024 bytes and a tag, in the one form its bytes encode to, is refused
-     * before anything is decrypted, naming nothing.
+     * A ciphertext that is not strict base64url of a nonce, 1 to 1024 bytes and
+     * a tag is refused before decryption, naming nothing.
      *
      * @param  \Closure(string): string  $malform
      * @return void
@@ -394,9 +381,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * Rows of `[plaintext, version]`: envelopes that authenticate under their
-     * data key and additional data but that the cipher never seals, an empty
-     * plaintext, one over the typed limit and another version.
+     * Rows of `[plaintext, version]`: envelopes that authenticate but the
+     * cipher never seals: empty, over the typed limit, another version.
      *
      * @return iterable<string, array{0: string, 1: int}>
      */
@@ -411,8 +397,7 @@ final class FieldCipherTest extends TestCase
 
     /**
      * An envelope outside what version 1 seals is refused even when it
-     * authenticates, made here with `openssl_encrypt()` under the field key and
-     * the additional data it names.
+     * authenticates.
      *
      * @param  string  $plaintext
      * @param  int  $version
@@ -433,9 +418,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * The additional data is the canonical JSON of the domain, the entry, the
-     * key id, the log, the path and the version, its keys sorted and a list
-     * index kept an integer.
+     * The additional data is canonical JSON of the domain, entry, key id, log,
+     * path and version, keys sorted and list indexes integers.
      *
      * @return void
      */
@@ -490,9 +474,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * `FieldCipher` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * `FieldCipher` cannot be instantiated: its constructor is private, and is
+     * invoked here by reflection so the line is covered.
      *
      * @return void
      *
@@ -547,9 +530,8 @@ final class FieldCipherTest extends TestCase
     }
 
     /**
-     * The last character of a base64url text of 32 bytes with its lowest bit, a
-     * spare bit no byte holds, flipped: the bytes it decodes to are the same,
-     * but it is not the form they encode to.
+     * A base64url text of 32 bytes with its spare lowest bit flipped: it
+     * decodes to the same bytes but is not their canonical form.
      *
      * @param  string  $character
      * @return string

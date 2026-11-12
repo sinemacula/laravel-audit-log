@@ -10,9 +10,8 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
 
 /**
- * Unit tests for the event dispatched when a write fails: it carries the
- * record's id and code and the classes of the store and the exception, and
- * nothing that could leak a value of the record to a listener.
+ * Unit tests for the write failure event, which carries ids and class names and
+ * no value of the record.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

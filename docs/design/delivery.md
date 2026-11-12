@@ -3,10 +3,9 @@
 ## Purpose
 
 This note records how a finalised record reaches its store and what is left when it does not: the pipeline, the outbox
-and its drain, the receipts each destination keeps, the spill channel and the replay that reads it, the stores the
-package ships and what each can promise, the path a record captured from an event takes and the bundle a bulk
-operation travels as, and the formatters that project a record as one line. A delivery mechanism that loses, repeats or
-invents a record changes what the log is evidence of, so each of those limits is stated here.
+and its drain, the receipts, the spill channel and its replay, the stores the package ships and what each can promise,
+the path of a captured record, the bundle a bulk operation travels as, and the formatters. A delivery mechanism that
+loses, repeats or invents a record changes what the log is evidence of, so each of those limits is stated here.
 `outcomes.md` holds the table of what each timing, mode and failure guarantees; this note holds the machinery behind it.
 
 ## Invariants

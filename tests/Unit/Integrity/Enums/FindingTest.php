@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 
 /**
- * Unit tests for the finding enum: its cases and their values in order of
- * precedence, the integrity status each gives, the journal's and the key
- * store's findings among them, and the order within each status.
+ * Unit tests for the finding enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,9 +22,8 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 final class FindingTest extends TestCase
 {
     /**
-     * The cases, in order of precedence, with their values, so a renamed,
-     * reordered or added case fails: the order decides which of several
-     * findings of one status a segment reports.
+     * The cases and their values in precedence order, which decides the finding
+     * a segment reports.
      *
      * @return void
      */
@@ -81,16 +78,8 @@ final class FindingTest extends TestCase
     }
 
     /**
-     * Each finding gives its status: a seal, entry, journal row or key row that
-     * cannot be read or whose key is unknown, or an artifact that cannot be
-     * decrypted, is `unverifiable`, a missing entry, an unsealed one overdue or
-     * far ahead of the clock, or a pruned one present again, is `incomplete`,
-     * and every other finding, an artifact that is missing, mismatched,
-     * swapped, of the wrong kind, malformed or tampered, a journal that is
-     * gapped, forged, uncommitted or out of its transitions, and a key use or a
-     * key that is missing, substituted, destroyed unjournalled or restored
-     * among them, shows the log was altered. The whole map is compared at once,
-     * so a finding moved to another status fails.
+     * Each finding gives its status, compared as one map so a finding moved to
+     * another status fails.
      *
      * @return void
      */
@@ -181,9 +170,7 @@ final class FindingTest extends TestCase
     }
 
     /**
-     * Rows of `[finding, the status it gives]`: the key store's findings, each
-     * showing the log was altered but a key row signed or wrapped under a key
-     * that is not held.
+     * Rows of `[finding, the status it gives]`: the key store's findings.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: \SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus}>
      */
@@ -214,11 +201,8 @@ final class FindingTest extends TestCase
     }
 
     /**
-     * Within each status the findings keep their order of precedence, each
-     * added group after every finding its status already had: the journal's
-     * findings and the resurrected member, then the key store's, so none of
-     * them outranks an earlier finding when a segment fails several checks of
-     * one status.
+     * Within each status, each added group of findings follows every finding
+     * the status already had.
      *
      * @return void
      */
@@ -247,10 +231,8 @@ final class FindingTest extends TestCase
     }
 
     /**
-     * The key store's findings are the last of their statuses: every other
-     * tampered finding precedes the five that show a key or a key use was
-     * altered, and every other unverifiable one precedes a key whose secret is
-     * not held, so a key finding never hides a finding of the log itself.
+     * The key store's findings are the last of their statuses, so a key finding
+     * never hides a finding of the log.
      *
      * @return void
      */

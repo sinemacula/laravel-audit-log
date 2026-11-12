@@ -15,28 +15,16 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
  * An audit store for tests: keeps every finalised record it is given instead of
- * writing it, so a test can read what the database would have been asked to
- * store. It runs no query.
+ * writing it, and runs no query.
  *
- * `FakeAuditStore::fake()` binds a fresh instance as the application's store
- * and returns it; `FakeAuditStore::failing()` binds one that throws the
- * exception given from every call and holds nothing. Assert on what it holds
- * with the test framework's own assertions, or with
- * `Concerns\InteractsWithAuditLog`.
+ * Deferral stays in the real delivery, so an after-commit record arrives only
+ * when its transaction commits, but an immediate or transactional record stays
+ * held if the host rolls back afterwards. Under `delivery.mode = outbox` a
+ * record arrives only when drained.
  *
- * It observes successful store calls and is not a transaction engine. Deferral
- * stays in the real delivery, so an after-commit record arrives when its
- * transaction commits and never when it is rolled back, but a record an
- * immediate or a transactional write stored stays held here if the host rolls
- * back afterwards; rollback and atomicity are for tests against a real
- * database. Under `delivery.mode = outbox` a record reaches the fake only when
- * it is drained. The store contract's clause that an implementation keeps no
- * state is expressly waived for this test double, whose state is the point.
- *
- * It says it is durable, joins a transaction on any connection and keeps
- * attachments, so a fail-closed, a transactional or a bulk record is never
- * refused for want of a store that could keep it. A bulk record keeps its
- * attachment, the sealed manifest, on the record `recorded()` returns.
+ * It claims to be durable, to join any connection's transaction and to keep
+ * attachments, so no record is refused for want of a store that could keep it.
+ * The store contract's no-state clause is waived for this test double.
  *
  * @api
  *
@@ -143,8 +131,8 @@ final class FakeAuditStore implements AcceptsAttachments, DurableAuditStore
     }
 
     /**
-     * The records stored, oldest first, or those of them the filter accepts;
-     * a bulk record carries its attachment.
+     * The records stored, oldest first, or those of them the filter accepts; a
+     * bulk record carries its attachment.
      *
      * @param  (\Closure(\SineMacula\Laravel\AuditLog\Records\AuditRecord): bool)|null  $filter
      * @return list<\SineMacula\Laravel\AuditLog\Records\AuditRecord>

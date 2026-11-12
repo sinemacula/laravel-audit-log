@@ -8,23 +8,8 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 
 /**
- * The engine checks of `audit-log:check`: the storage connection's driver is
- * one the package supports (SQLite, MySQL 8.4 or later, PostgreSQL), the
- * connection opens, and on MySQL it runs in strict mode and keeps the entries
- * table on InnoDB.
- *
- * The driver is read from the connection's configuration before anything is
- * opened, so an unsupported driver is reported without a connection. A
- * connection that cannot be opened is reported by the class of what was thrown
- * and never by its message, which can hold a host, a user or a statement.
- * MariaDB is not supported, whether it is configured with its own driver or
- * reached through the `mysql` one: the version is the one the server reports,
- * read from the connection's PDO, because Laravel's `getServerVersion()` strips
- * the MariaDB markers from it on the `mysql` driver. On MySQL the checks read
- * the session's SQL mode and the table's engine, one statement each, whatever
- * the table holds, on the connection's writer, which is the one the store
- * writes through and whose mode decides whether a value that does not fit is
- * refused.
+ * The engine checks of `audit-log:check`: a supported driver and server, a
+ * connection that opens and, on MySQL, strict mode and an InnoDB entries table.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,10 +27,7 @@ final readonly class EngineChecks
     /** @var list<string> The SQL modes, either of which makes MySQL refuse a value that does not fit. */
     private const array STRICT_MODES = ['STRICT_TRANS_TABLES', 'STRICT_ALL_TABLES'];
 
-    /** @var string The storage engine the entries table must use on MySQL. */
-    private const string ENGINE = 'InnoDB';
-
-    /** @var string Why a connection that cannot be built or opened is a problem, named by the class of what was thrown. */
+    /** @var string The problem of a connection that cannot be built or opened. */
     private const string UNOPENED = 'The %s connection [%s] could not be opened (%s).';
 
     /** @var string Why a driver the package does not support is a problem. */
@@ -82,9 +64,8 @@ final readonly class EngineChecks
     }
 
     /**
-     * Every engine problem of the connection, or none when it is supported: the
-     * problem that stops it being checked at all, or on MySQL the strict mode
-     * and the entries table's engine.
+     * Every engine problem of the connection: the blocking one, or on MySQL the
+     * strict mode and the entries table's engine.
      *
      * @param  string  $connection
      * @param  string  $table
@@ -104,10 +85,8 @@ final readonly class EngineChecks
     }
 
     /**
-     * The problem that stops anything else being checked on the connection: a
-     * driver the package does not support, a connection that cannot be built or
-     * opened, or a MySQL server older than 8.4 or MariaDB; `null` when there is
-     * none. The message names the connection by its role.
+     * The problem that stops anything else being checked on the connection, or
+     * `null`; the message names the connection by its role.
      *
      * @param  string  $connection
      * @param  'outbox'|'storage'  $role
@@ -115,9 +94,8 @@ final readonly class EngineChecks
      */
     public function blockingProblem(string $connection, string $role = 'storage'): ?string
     {
-        // The framework declares nothing for building or opening a connection,
-        // though both throw: for a driver it has no connection for, a missing
-        // database file or a server that refuses the connection
+        // Building or opening a connection throws undeclared exceptions whose
+        // message can hold a host or user, so only the class is reported
         try {
             $database = $this->database->connection($connection);
             $driver   = $database->getDriverName();
@@ -134,9 +112,8 @@ final readonly class EngineChecks
     }
 
     /**
-     * The version the connection's server reports, as it reports it: MariaDB
-     * keeps its markers (`5.5.5-10.11.6-MariaDB`), which Laravel's
-     * `getServerVersion()` strips on the `mysql` driver.
+     * The version as the server reports it; Laravel's `getServerVersion()`
+     * strips the MariaDB markers on the `mysql` driver.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return string
@@ -149,11 +126,8 @@ final readonly class EngineChecks
     }
 
     /**
-     * The MySQL problems of a connection that opens: a session that is not in
-     * strict mode, and an entries table on another engine than InnoDB; a
-     * missing table is left to the schema checks. Both are read on the writer,
-     * never a replica, whose mode and table can differ from those the store
-     * writes to.
+     * The MySQL strict mode and engine problems, read on the writer since a
+     * replica's can differ; a missing table is left to the schema checks.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $table
@@ -175,7 +149,7 @@ final readonly class EngineChecks
             false,
         );
 
-        if (is_string($engine) && strcasecmp($engine, self::ENGINE) !== 0) {
+        if (is_string($engine) && strcasecmp($engine, 'InnoDB') !== 0) {
             $problems[] = sprintf('The entries table uses the %s engine; it must use InnoDB.', $engine);
         }
 

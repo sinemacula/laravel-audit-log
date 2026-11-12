@@ -7,13 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Privacy;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 
 /**
- * What one capture removed from a record: how many branches, and the masked
- * paths of the first 32 in sorted order, so the list stays small enough to fit
- * the byte budget and does not depend on the order paths were added.
- *
- * It holds masked paths only, never a value. It trusts what it is given to be
- * masked already, and bounds only its length: a path of more than 128 bytes
- * once encoded is remembered as `*`.
+ * What one capture removed from a record: a count, and the first 32
+ * already-masked paths in sorted order so the list is order-independent.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +32,7 @@ final class OmissionLog
     /** @var int How many branches were removed. */
     private int $count = 0;
 
-    /** @var array<array-key, string> The paths, as a set, each its own value: PHP makes a numeric key an integer, and the value stays a string. */
+    /** @var array<array-key, string> The paths as a set, each its own value since PHP makes a numeric key an integer. */
     private array $paths = [];
 
     /**
@@ -60,9 +55,8 @@ final class OmissionLog
     }
 
     /**
-     * Count removed branches that have no path to remember, such as the
-     * collisions past those carried. The count stops at the largest integer, so
-     * a diagnostic can never overflow into a float and fail the write.
+     * Count removed branches with no path to remember; the count saturates so
+     * it never overflows into a float.
      *
      * @param  int  $branches
      * @return void
@@ -79,8 +73,8 @@ final class OmissionLog
     }
 
     /**
-     * What was removed, as a count and the first 32 paths sorted bytewise, each
-     * a string; `null` when nothing was.
+     * What was removed, as a count and the first 32 paths sorted bytewise;
+     * `null` when nothing was.
      *
      * @return ?array{count: int, paths: list<string>}
      */

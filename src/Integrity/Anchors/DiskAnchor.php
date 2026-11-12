@@ -12,35 +12,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 
 /**
- * An anchor that keeps each seal's summary as a file on a filesystem disk,
- * written once and never replaced.
- *
- * Each summary is written in its canonical encoding to
- * `{path}/{log_id}/{sequence}-{seal_digest}.json`, the sequence padded to 20
- * digits, after a marker at `{path}/{log_id}/by-sequence/{sequence}` that holds
- * the digest. The marker comes first, so another digest for a sequence is found
- * with one read, even after a crash between the two writes; the next anchoring
- * of the same summary completes the object. A path that exists is read and
- * compared, never written again, and nothing is ever deleted, so anchoring is
- * idempotent and two digests for one sequence are a conflict. A path that holds
- * a partial write, one another anchorer is still making, is read as an anchor
- * unavailable for now, never as a conflict: only a whole marker or summary that
- * differs is one. The receipt is the object's path and the SHA-256 of its
- * bytes. The anchor holds one log, the one it is made for, and refuses a
- * summary of another, so no path ever leaves `{path}/{log_id}`.
- *
- * Discovery reads the markers, which are authoritative: the anchorer writes
- * them in sequence order from 1 and stops at its first failure, so they run
- * unbroken from 1 to the head. The highest is found by probing whether markers
- * exist at doubling sequences and then halving the gap, in about two existence
- * checks per doubling of the log, with memory that does not grow with the log,
- * and the head is the highest marker whose object is there.
- *
- * Its guarantees are conditional on the disk itself refusing to replace or
- * delete what was written (S3 Object Lock in compliance mode with a retention
- * period and a bucket policy denying version deletion, or an equivalent write
- * once store): a disk the application can overwrite is evidence only against
- * someone who cannot reach it.
+ * An anchor that writes each seal's summary to a filesystem disk once and never
+ * replaces it. It is only as tamper-evident as the disk is write-once.
  *
  * @api
  *
@@ -52,7 +25,7 @@ final readonly class DiskAnchor implements CheckpointAnchor
     /** @var string The refusal of a newest object that is not a seal's summary. */
     private const string MALFORMED = 'The anchor\'s newest object is malformed.';
 
-    /** @var string The refusal of a path that holds a partial write, which the next run reads again. */
+    /** @var string The refusal of a path that holds a partial write. */
     private const string PARTIAL = 'The anchor holds a partial write; it is read again on the next run.';
 
     /** @var string The anchor's name: its location, so moving it anchors every seal again. */
@@ -98,8 +71,7 @@ final readonly class DiskAnchor implements CheckpointAnchor
 
     /**
      * The anchor's name: `disk:` and the first 16 hex of the SHA-256 of the
-     * disk's name and the path, so one location always has one name and another
-     * location another.
+     * disk's name and the path.
      *
      * @return string
      */
@@ -110,8 +82,8 @@ final readonly class DiskAnchor implements CheckpointAnchor
     }
 
     /**
-     * Write the summary's marker, then its object, each only when it is not
-     * there yet, and return the object's path and the SHA-256 of its bytes.
+     * Write the marker, then the object, each only when not there yet; the
+     * marker goes first so a conflict is one read, even after a crash.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealSummary  $seal
      * @return array{path: string, sha256: string}
@@ -168,12 +140,8 @@ final readonly class DiskAnchor implements CheckpointAnchor
     }
 
     /**
-     * The highest sequence the anchor holds and its digest, or `null` when the
-     * log has none: the highest marker whose object is there, so a marker a
-     * crash left without its object is never the head and the one before it is.
-     * A marker that is not a digest is a partial write, and an object whose
-     * bytes are not the canonical summary of its sequence and digest in this
-     * log is malformed; each fails, never reads as an absence.
+     * The head: the highest marker whose object is there, or `null` for none. A
+     * partial or malformed write throws instead of reading as absent.
      *
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead
      *
@@ -217,9 +185,7 @@ final readonly class DiskAnchor implements CheckpointAnchor
     }
 
     /**
-     * The head at the sequence, from its marker, or `null` when the marker's
-     * object is not there; a marker that is not a digest is a partial write,
-     * and an object that is not the canonical summary is malformed.
+     * The head at the sequence, or `null` when its marker or object is missing.
      *
      * @param  int  $sequence
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead
@@ -252,10 +218,8 @@ final readonly class DiskAnchor implements CheckpointAnchor
     }
 
     /**
-     * The highest sequence that has a marker, or 0 when none has: markers are
-     * probed at 1 and then at doubling sequences until one is missing, and the
-     * gap between the last there and the first missing is then halved until it
-     * closes.
+     * The highest sequence with a marker, or 0 for none. Markers run unbroken
+     * from 1, so it probes doubling sequences, then bisects the gap.
      *
      * @return int
      */
@@ -316,11 +280,8 @@ final readonly class DiskAnchor implements CheckpointAnchor
     }
 
     /**
-     * Write the contents to the path when nothing is there; when the path
-     * already holds exactly the contents, write nothing. When it holds a whole
-     * marker or summary that differs, the anchor holds another digest for the
-     * sequence; when what it holds is not whole, another anchorer is still
-     * writing it, and the anchor is unavailable for now.
+     * Write the contents unless the path holds them. A different whole value is
+     * a conflict; a partial one is another anchorer still writing.
      *
      * @param  string  $path
      * @param  string  $contents
@@ -394,7 +355,7 @@ final readonly class DiskAnchor implements CheckpointAnchor
     }
 
     /**
-     * The bytes of the summary's object: its canonical encoding.
+     * The summary's canonical encoding.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealSummary  $seal
      * @return string

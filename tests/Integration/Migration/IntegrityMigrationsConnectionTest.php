@@ -13,16 +13,7 @@ use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use Tests\TestCase;
 
 /**
- * Integration tests for where the shipped integrity migrations, run by
- * Laravel's own `migrate` and `migrate:rollback` commands, create the
- * checkpoints, the checkpoint members and the integrity state tables: always on
- * the storage connection, beside the entries they describe, wherever the outbox
- * goes.
- *
- * The storage and the outbox connections are further connections to the test
- * database, each with a table prefix of its own: a database of its own on
- * SQLite, where each in-memory connection has one, and prefixed tables beside
- * the default connection's on PostgreSQL and MySQL.
+ * Integration tests for the connection `migrate` puts the integrity tables on.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +36,7 @@ final class IntegrityMigrationsConnectionTest extends TestCase
     private const array TABLES = ['audit_log_checkpoints', 'audit_log_checkpoint_members', 'audit_log_integrity_state'];
 
     /**
-     * The integrity tables are created on the storage connection, beside the
-     * entries, and on no other.
+     * The integrity tables are created on the storage connection alone.
      *
      * @return void
      */
@@ -62,8 +52,7 @@ final class IntegrityMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Moving the outbox leaves the integrity tables on the storage connection,
-     * and puts none of them on the outbox connection.
+     * Moving the outbox leaves the integrity tables on the storage connection.
      *
      * @return void
      */
@@ -85,8 +74,7 @@ final class IntegrityMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Rolling the migrations back drops each integrity table from the storage
-     * connection, and running them again creates each there once more.
+     * A rollback drops each integrity table from the storage connection.
      *
      * @return void
      */
@@ -115,9 +103,8 @@ final class IntegrityMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Put the package's tables on a second connection to the test database,
-     * with a prefix of its own, and register the outbox connection the same
-     * way.
+     * Prefix the other connections to the test database, each a database of its
+     * own on in-memory SQLite, and put the package's tables on one.
      *
      * @param  mixed  $app
      * @return void
@@ -140,8 +127,7 @@ final class IntegrityMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Roll the migrations back from where the test case ran them, then run them
-     * again with the outbox on its own connection.
+     * Migrate again with the outbox on its own connection.
      *
      * @return void
      */

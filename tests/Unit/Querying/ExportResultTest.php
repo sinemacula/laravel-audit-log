@@ -11,8 +11,7 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\Acknowledgement;
 use SineMacula\Laravel\AuditLog\Querying\ExportResult;
 
 /**
- * Unit tests for the result of a published export: it keeps each field as
- * given.
+ * Unit tests for the result of a published export.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,8 +22,7 @@ use SineMacula\Laravel\AuditLog\Querying\ExportResult;
 final class ExportResultTest extends TestCase
 {
     /**
-     * The journal entry's id, the paths, the format, the line count, the file's
-     * digest and the acknowledgement are kept as given.
+     * Every field is kept as given.
      *
      * @return void
      */

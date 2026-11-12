@@ -5,23 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * Signs an owner's key row, and verifies one, under the key row's version 1.
- *
- * The key row key is HKDF-SHA256 over the secret of a ring key, with an empty
- * salt and an info string of its own, so it is never the key that signs
- * entries, seals or the journal, and a key row's HMAC is never another's
- * signature. A row's HMAC is HMAC-SHA256, as lower-case hex, under the key row
- * key of the ring key the row names, over the key row's label and the digest of
- * its signed fields: the fields that never change, so a row moved to another
- * owner, unit or generation, or given another creation time, no longer
- * verifies.
- *
- * A row is signed under the ring's signing key. Verification selects the key by
- * the id the row stores, never the current key, so a row signed before a
- * rotation verifies while its key stays in the ring. It answers `false` only
- * when the HMAC does not match: a key the ring no longer holds is an
- * `UnknownKeyException`, and an unsigned row an `UnexpectedValueException`. The
- * key row key is derived on every call and never kept.
+ * Signs and verifies an owner's key row under a key derived from a ring key by
+ * HKDF, so its HMAC is never another structure's signature.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,17 +78,15 @@ final readonly class SubjectKeySigner
     {
         $key = $this->keys->signingKey();
 
-        // The key id is a signed field, so the row names it before its digest
-        // is taken; the HMAC is not one, so its placeholder changes nothing
+        // The key id is signed, so the row names it before the digest is taken
         $named = $draft->withSignature($key->id, self::UNSIGNED);
 
         return $draft->withSignature($key->id, self::hmac($named, $key));
     }
 
     /**
-     * Whether the row's HMAC is its own, under the key the row names. `false`
-     * means only that it does not match; an unsigned row and a key the ring
-     * does not hold are refused instead.
+     * Whether the row's HMAC is its own, under the key the row names; an
+     * unsigned row or an unknown key is refused instead.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $signed
      * @return bool
@@ -134,8 +117,8 @@ final readonly class SubjectKeySigner
     }
 
     /**
-     * Refuse an HMAC that is not 64 lower-case hex: an unsigned row's is empty,
-     * and no key could have made one of another form.
+     * Refuse an HMAC that is not 64 lower-case hex, such as an unsigned row's
+     * empty one.
      *
      * @param  string  $hmac
      * @return void

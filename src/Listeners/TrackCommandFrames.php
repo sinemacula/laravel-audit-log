@@ -11,13 +11,7 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 
 /**
  * Enters an execution frame when an Artisan command starts and leaves it when
- * the command finishes, which it does when the command throws too.
- *
- * The frame is owned by the command's input, the one object both events share.
- * The frames are reached through the current container on every event, since a
- * dispatcher built with the booted application outlives the request a command
- * runs in under Octane. Only the package's own state changes: neither Context
- * nor the guards are touched.
+ * it finishes or throws, resolving the frames per event for Octane.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

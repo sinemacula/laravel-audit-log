@@ -31,13 +31,7 @@ use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
 /**
- * Feature tests for which of an owner's keys an erasure must keep, on whichever
- * engine the suite runs against: a key is blocked by each hold that matches an
- * entry it encrypted, by preservation decided per entry from its occurrence,
- * and as `unverified` by an entry that fails its HMAC, edited or signed under a
- * key the ring does not hold; a key use whose entry was pruned blocks and
- * counts nothing; the entries are read in pages of 1,000 led by the key and
- * seeking on the entry; and the entries of every key nothing blocks are summed.
+ * Feature tests for which of an owner's keys an erasure must keep.
  *
  * Keys are made through the key creator and entries stored through the database
  * store, which writes each envelope's key use, so the eraser is not relied on.
@@ -91,9 +85,8 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * A hold that matches one entry of a key blocks that key, naming the hold,
-     * and leaves a key whose entries it does not match unblocked; a second hold
-     * matching the same key is named too.
+     * A hold matching one entry of a key blocks that key and names each
+     * matching hold.
      *
      * @return void
      */
@@ -140,10 +133,8 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * Preservation is decided per entry from its occurrence: an entry that
-     * occurred at or after the erasure's midnight less the days preserved
-     * blocks its key, `preserved:<category>`, and one that occurred before that
-     * does not.
+     * Preservation is decided per entry from its occurrence against the
+     * erasure's midnight.
      *
      * @return void
      */
@@ -186,8 +177,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * Preservation is the key's own category and tenant's: another category's
-     * preservation blocks nothing.
+     * Another category's preservation blocks nothing.
      *
      * @return void
      */
@@ -204,7 +194,7 @@ final class ErasureBlocksTest extends TestCase
 
     /**
      * A policy that keeps a category for less than it preserves it refuses the
-     * erasure, as it refuses a prune.
+     * erasure.
      *
      * @return void
      */
@@ -257,8 +247,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * A key use whose entry was pruned blocks nothing and counts nothing, even
-     * under a hold of every entry.
+     * A key use whose entry was pruned blocks and counts nothing.
      *
      * @return void
      */
@@ -283,10 +272,8 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * The entries are read in pages of 1,000 key uses, led by the key's id and
-     * seeking on the entry's id, so a held entry after the first page is still
-     * found, another key's key uses are never read, and a key with fewer key
-     * uses than a page is read in one statement.
+     * Entries are read in pages of 1,000 key uses, led by the key and seeking
+     * on the entry.
      *
      * @return void
      */
@@ -318,9 +305,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * Rows of `[the columns an entry is edited to]`: an entry that fails its
-     * HMAC, edited or signed under a key the ring does not hold, or of an
-     * integrity version the signer does not support.
+     * Rows of `[the columns an entry is edited to]`.
      *
      * @return iterable<string, array{0: array<string, int|string>}>
      */
@@ -335,9 +320,8 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * An entry that does not authenticate blocks the key that encrypted it,
-     * `unverified`, and nothing else it says is believed: not even a hold that
-     * would match it.
+     * An entry that does not authenticate blocks its key `unverified`, whatever
+     * else it says.
      *
      * @param  array<string, int|string>  $columns
      * @return void
@@ -363,8 +347,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * An entry edited so a hold no longer matches it still blocks its key: the
-     * edit fails its HMAC, so it is `unverified`, never released.
+     * An entry edited to leave a hold still blocks its key as `unverified`.
      *
      * @return void
      */
@@ -383,8 +366,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * The entries affected are summed over the keys nothing blocks, each key's
-     * present entries once; a blocked key's entries are not counted.
+     * The entries affected are summed over the keys nothing blocks.
      *
      * @return void
      */
@@ -408,9 +390,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * Store an entry holding a card under the key, with the fields given in
-     * place of its own, occurring at the instant given or the factory's, and
-     * return its id. The database store writes its key use.
+     * Store an entry holding a card under the key and return its id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $key
      * @param  array<string, string>  $fields
@@ -426,8 +406,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * Insert key uses of the key for entries that are not stored, their ids
-     * starting with the prefix and numbered from 1.
+     * Insert key uses of the key for entries that are not stored.
      *
      * @param  string  $keyId
      * @param  int  $count
@@ -470,7 +449,7 @@ final class ErasureBlocksTest extends TestCase
 
     /**
      * The blocks of the keys under the holds, decided now by the configured
-     * policy on the storage connection.
+     * policy.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow>  $keys
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\Hold>  $holds
@@ -484,8 +463,7 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
-     * The storage connection, where the keys, the key uses and the entries
-     * live.
+     * The storage connection, where the keys, key uses and entries live.
      *
      * @return \Illuminate\Database\Connection
      */

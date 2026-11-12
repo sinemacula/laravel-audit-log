@@ -7,20 +7,13 @@ namespace SineMacula\Laravel\AuditLog\Contracts;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * Audit formatter contract: how a finalised record is projected as one line of
- * text for a log, a file or a security tool.
+ * Audit formatter contract: a finalised record projected as one line of text
+ * for a log, a file or a security tool, never the integrity artefact.
  *
- * The package ships `Export\NdjsonFormatter`, the canonical JSON envelope,
- * `Export\OcsfFormatter`, a pinned version of the Open Cybersecurity Schema
- * Framework, and `Export\CefFormatter`, the Common Event Format. A projection
- * is never the integrity artefact: only the stored row, with its HMAC, is
- * evidence. An implementation must be deterministic, so the same record gives
- * the same bytes, must return exactly one physical line, with no carriage
- * return or line feed in it and none after it, must escape whatever a record
- * holds so that no value can forge a field of its own, and must keep no state
- * between calls. It should mark its own record parameter
- * `#[\SensitiveParameter]`, since an attribute on this contract does not reach
- * it.
+ * An implementation is deterministic, returns one line with no line break in or
+ * after it, escapes values so none can forge a field, keeps no state, and
+ * should mark its record parameter `#[\SensitiveParameter]`, which this
+ * contract cannot pass on.
  *
  * @api
  *

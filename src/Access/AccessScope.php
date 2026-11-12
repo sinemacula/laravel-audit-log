@@ -12,25 +12,9 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  * The entries a viewer may see, as an access policy answers for one read: which
  * tenants, whether entries of no tenant, which categories, and whose activity.
  *
- * A scope starts from `none()`, which sees nothing, `all()`, which sees every
- * entry, or `tenants()`, which sees the entries of exactly those tenants, each
- * matched as its type and id together, never as a type and an id apart. It is
- * then narrowed: `onlyCategories()`, `exceptCategories()` and `onlyAbout()`
- * only ever intersect with what the scope already holds, so repeating one never
- * widens it, and a list left empty denies, never means unrestricted.
- * `withTenantless()` is the one way to add entries, and only those whose tenant
- * type and tenant id are both `null`, still under every other restriction.
- *
- * Every scope starts without revealing the entries' encrypted fields, each
- * shown as its marker; `revealingEncryptedFields()` grants it, every narrowing
- * keeps the grant, and the grant is part of the normalised form, so it changes
- * the fingerprint and binds a cursor to it.
- *
- * A denied scope absorbs every operation: whatever is done to it, it stays
- * denied and reveals nothing. It is immutable; each operation returns a new
- * scope. Its normalised form sorts every list bytewise, so two scopes that see
- * the same entries by the same rules have the same form and fingerprint, and
- * every denied scope has the one form of `none()`.
+ * Narrowing only intersects and an empty list denies; `withTenantless()` is the
+ * only way to add entries, and a denied scope stays denied. Each operation
+ * returns a new scope, and equal scopes share one normalised form.
  *
  * @api
  *
@@ -88,10 +72,6 @@ final readonly class AccessScope implements Arrayable
     /**
      * A scope that sees nothing.
      *
-     * PHP lets a static factory be reached through an instance
-     * (`$scope->none()`); that starts a fresh scope and discards the instance's
-     * restrictions.
-     *
      * @return self
      */
     public static function none(): self
@@ -103,9 +83,8 @@ final readonly class AccessScope implements Arrayable
      * A scope that sees every entry: every tenant, the entries of no tenant,
      * every category and anyone's activity.
      *
-     * PHP lets a static factory be reached through an instance
-     * (`$scope->all()`); that starts a fresh scope and discards the instance's
-     * restrictions, so narrow a scope only through its instance methods.
+     * Called on an instance, it starts a fresh scope and discards that
+     * instance's restrictions.
      *
      * @return self
      */
@@ -119,8 +98,7 @@ final readonly class AccessScope implements Arrayable
      * its type and id together, and not the entries of no tenant. Each tenant
      * counts once; given none, the scope sees nothing.
      *
-     * PHP lets a static factory be reached through an instance
-     * (`$scope->tenants(...)`); that starts a fresh scope and discards the
+     * Called on an instance, it starts a fresh scope and discards that
      * instance's restrictions.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  ...$tenants
@@ -208,9 +186,7 @@ final readonly class AccessScope implements Arrayable
      * The scope seeing only the activity of these references, as the actor or
      * the subject of an entry, each matched as its type and id together: the
      * intersection with any earlier list. Given none, or left with none, the
-     * scope sees nothing. It selects entries by who acted and who was acted on,
-     * and is not on its own a complete disclosure policy: an entry about one of
-     * them may name others.
+     * scope sees nothing. An entry about one of them may still name others.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  ...$references
      * @return self
@@ -234,12 +210,9 @@ final readonly class AccessScope implements Arrayable
     }
 
     /**
-     * The scope with the encrypted fields of the entries it sees revealed: each
-     * read through the field reader, from rows whose signature verifies, in
-     * place of its `[ENCRYPTED]` marker. It reveals every encrypted field of
-     * every entry the scope sees, whoever owns it, so it is not on its own a
-     * projection of one owner's data. A denied scope stays denied, and reveals
-     * nothing.
+     * The scope with the encrypted fields of the entries it sees revealed
+     * through the field reader, from rows whose signature verifies, whoever
+     * owns them. A denied scope stays denied.
      *
      * @return self
      */

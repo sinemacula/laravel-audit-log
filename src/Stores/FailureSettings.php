@@ -8,15 +8,8 @@ use Illuminate\Contracts\Config\Repository;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 
 /**
- * The failure settings, read from configuration on every call and validated as
- * they are read: what a failed write does to the code that recorded it
- * (`audit-log.failure.mode`) and the log channel its spill line is written to
- * (`audit-log.failure.log_channel`).
- *
- * A missing setting takes its default. A `null` mode set explicitly is
- * malformed, while a `null` or empty channel, which an empty environment line
- * gives, is the default channel. Every malformed value fails closed with an
- * `InvalidArgumentException` naming the key and never the value.
+ * The failure settings, read and validated on every call; a malformed one fails
+ * closed naming its key, never its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,8 +39,7 @@ final readonly class FailureSettings
     ) {}
 
     /**
-     * What a failed write does to the code that recorded it: `report` unless
-     * configured otherwise.
+     * What a failed write does to the recording code, `report` by default.
      *
      * @return \SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode
      *
@@ -62,8 +54,7 @@ final readonly class FailureSettings
     }
 
     /**
-     * The log channel a spill line is written to, or `null` for the default
-     * channel.
+     * The spill line's log channel, or `null` for the default channel.
      *
      * @return ?string
      *

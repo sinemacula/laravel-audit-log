@@ -8,15 +8,11 @@ use Illuminate\Auth\GuardHelpers;
 use Illuminate\Contracts\Auth\Guard;
 
 /**
- * Reads the user a guard already holds, without ever calling its `user()`,
- * which loads a user through the provider and dispatches `Authenticated`.
+ * Reads the user a guard already holds without calling `user()`, which loads a
+ * user and dispatches `Authenticated`.
  *
- * `hasUser()` says only whether a guard holds a user, and Laravel exposes no
- * way to read that user without `user()`, so it is read from the guard's own
- * scope. That is sound only for a guard using Laravel's `GuardHelpers`, which
- * declares the property, so the guard is recognised by that trait, never by its
- * class or package; any other guard gives nothing, and an application fills the
- * actor with a contributor or `by()`.
+ * Laravel exposes no other way, so the user is read from the guard's own scope,
+ * which is sound only for a guard using `GuardHelpers`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

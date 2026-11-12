@@ -12,27 +12,13 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The one place a statement that reads entries for a viewer is narrowed: an
- * access scope and a caller's filters compiled onto a query of the entries
- * table, then a page's cursor or an export's keyset.
+ * Narrows a statement that reads entries for a viewer: an access scope and a
+ * caller's filters, then a page's cursor or an export's keyset, compiled onto a
+ * query of the entries table.
  *
- * The compiled form is tenant AND category AND about AND the caller's filters
- * AND the cursor, each a grouped condition of its own, so no `or` within one
- * can reach past it and a caller's filter can never widen the scope. A
- * reference matches as its type and id together; the entries of no tenant are
- * those whose tenant type and tenant id are both `null`. The entries holding an
- * owner's data are those with a key use of one of the owner's keys, an `exists`
- * over the key uses joined to the subject keys and correlated on the entry's
- * id, so the scope still narrows them like any other filter. Column names,
- * operators and the `like` escape character are the compiler's own, and every
- * value is bound, so nothing a caller gives becomes SQL text. Times are bound
- * in UTC with six fractional digits, and no collation is ever applied, so ids
- * compare in the type each engine's migration gives them, a native `uuid` on
- * PostgreSQL.
- *
- * Whether a scope and filters can match nothing at all is answered without a
- * query, so a denied or disjoint read runs no statement that could tell an
- * entry exists.
+ * Each part is its own grouped condition, so a filter can never widen the
+ * scope. Every value is bound, and no collation is applied, so ids compare in
+ * each engine's own type.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,11 +55,8 @@ final readonly class ScopeCompiler
 
     /**
      * Whether the scope and the filters can match no entry, answered without a
-     * query: the scope is denied; the filters name a tenant a scope of listed
-     * tenants does not hold; every category the filters name is outside the
-     * scope's only categories, or excepted; or the scope selects activity about
-     * some references and the filters name an actor and a subject that are
-     * neither of them.
+     * query so a denied or disjoint read runs no statement that could tell an
+     * entry exists.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -122,12 +105,9 @@ final readonly class ScopeCompiler
      * with a lower id, as one grouped condition. The caller orders by
      * `occurred_at` then `id`, both descending.
      *
-     * The group leads with the bound `occurred_at <= t` the strict predicate
-     * implies, so the time is a range every engine reads its index by after the
-     * scope's equalities. Without it SQLite and PostgreSQL read the index from
-     * the newest entry and filter out every entry the pages before have shown,
-     * or PostgreSQL splits the `or` across two indexes and sorts what they
-     * match.
+     * The leading `occurred_at <= t` gives every engine an index range after
+     * the scope's equalities; without it SQLite and PostgreSQL scan from the
+     * newest entry, or PostgreSQL splits the `or` across two indexes.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  \SineMacula\Laravel\AuditLog\Querying\Position  $position
@@ -349,12 +329,9 @@ final readonly class ScopeCompiler
     }
 
     /**
-     * Narrow the query to the entries holding a fragment sealed under one of
-     * the owner's keys the filters name: an `exists` over the key uses of the
-     * entry's id joined to the subject keys of the owner, by its type and id,
-     * every key of every unit and generation, erased or not. Every column is
-     * qualified by its table, the entries by the name the query reads them
-     * under, so no column of one table is read as another's.
+     * Narrow the query to the entries with a key use of any of the owner's
+     * keys, erased or not, every column qualified by its table so none is read
+     * as another's.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters

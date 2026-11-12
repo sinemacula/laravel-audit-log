@@ -10,9 +10,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\RewrapStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\RewrapResult;
 
 /**
- * Unit tests for what a rewrap returns: its counts, its status, which is
- * partial exactly when a key was skipped, the skipped keys it names, sorted and
- * bounded, whether it committed and was recorded, and its array form.
+ * Unit tests for what a rewrap returns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,8 +24,7 @@ final class RewrapResultTest extends TestCase
     private const string OPERATION = '01932b4e-9000-7000-8000-0000000000a1';
 
     /**
-     * A run that skipped nothing is complete, keeps its counts, is committed
-     * unless it was a dry run, and is not recorded until it is told so.
+     * A run that skipped nothing is complete, committed unless dry, unrecorded.
      *
      * @return void
      */
@@ -61,8 +58,7 @@ final class RewrapResultTest extends TestCase
     }
 
     /**
-     * The skipped keys are named sorted bytewise and at most 100 of them, while
-     * the count keeps them all.
+     * At most 100 skipped keys are named, sorted; the count keeps them all.
      *
      * @return void
      */

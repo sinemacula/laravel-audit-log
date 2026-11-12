@@ -9,12 +9,10 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
+use Tests\Concerns\RaisesWarningsAsExceptions;
 
 /**
- * Unit tests for the sealing settings: the default of each, the values each
- * accepts, the exact message each malformed value fails closed with, the log id
- * that falls back to the source id and holds it to the same grammar, the
- * schedules that `null` or empty turn off, and the reader of every setting.
+ * Unit tests for the sealing settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,6 +22,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 #[CoversClass(SealSettings::class)]
 final class SealSettingsTest extends TestCase
 {
+    use RaisesWarningsAsExceptions;
+
     /** @var string The refusal of a malformed log id. */
     private const string LOG_ID = '`audit-log.integrity.log_id` must be 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or a digit.';
 
@@ -50,36 +50,6 @@ final class SealSettingsTest extends TestCase
         'seal.sweep_schedule' => ['sweepSchedule', '15 3 * * *'],
         'verify.schedule'     => ['verifySchedule', '45 3 * * *'],
     ];
-
-    /**
-     * Raise every PHP warning as an exception, so each setting is also read
-     * quietly: inside a Laravel application a warning becomes an exception,
-     * which would turn reading the settings into an error.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        set_error_handler(static function (int $level, string $message): never {
-            throw new \ErrorException($message, 0, $level);
-        });
-    }
-
-    /**
-     * Restore the error handler after each test.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        restore_error_handler();
-
-        parent::tearDown();
-    }
 
     /**
      * With nothing set, or none of the package's configuration at all, each
@@ -195,9 +165,7 @@ final class SealSettingsTest extends TestCase
     }
 
     /**
-     * With no log id, a `null` one, or an empty one, which an empty environment
-     * line gives, the log id is the source id: the configured one, or a slug of
-     * the application's name.
+     * A missing, `null` or empty log id falls back to the source id.
      *
      * @return void
      */
@@ -317,8 +285,7 @@ final class SealSettingsTest extends TestCase
     }
 
     /**
-     * A schedule set to `null`, or empty, which an empty environment line
-     * gives, schedules nothing; any cron expression, an alias included, is kept
+     * A `null` or empty schedule schedules nothing; any cron expression is kept
      * as given.
      *
      * @return void
@@ -443,9 +410,7 @@ final class SealSettingsTest extends TestCase
     }
 
     /**
-     * Every refusal names the key and never quotes the value: a log id, a
-     * source id, a number and a schedule holding a planted text each fail
-     * without it.
+     * Every refusal names the key and never quotes the value.
      *
      * @return void
      */

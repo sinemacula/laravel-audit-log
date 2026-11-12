@@ -11,26 +11,11 @@ use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * An audit store that delivers each record to several destinations, in order,
- * each under a stable id: the database and a log, say.
+ * An audit store that delivers each record to every destination in order, each
+ * under a stable id, then throws one `StackDeliveryException` if any failed.
  *
- * Every destination is tried, and receives the same finalised record, a bulk
- * record's attachment included, so a database destination keeps the bundle. One
- * that fails does not stop the others or undo what they kept: its failure's
- * class is kept and the next is tried, and once all have been tried a single
- * `StackDeliveryException` names each destination that failed. A destination id
- * is 1 to 64 lower-case letters, digits, dots, underscores or hyphens, starting
- * with a letter or a digit; it names the destination in receipts and
- * diagnostics, so it must stay the same while records are being delivered.
- *
- * The stack is durable when its first destination is, since a return of the
- * first is the acknowledgement. It joins a transaction only when every
- * destination does on that connection: a stack of the database and a log writes
- * its line for a business change that may then roll back, so it is not atomic,
- * and a transactional record needs the outbox to use it. It keeps attachments
- * only when every destination says it does, so a bulk record is never handed to
- * a stack of which one destination would lose its manifest. A stack cannot hold
- * another stack.
+ * Durable when the first destination is; transactional and keeping attachments
+ * only when every destination is.
  *
  * @api
  *
@@ -99,8 +84,7 @@ final readonly class StackAuditStore implements AcceptsAttachments, DurableAudit
     }
 
     /**
-     * Whether a return is a durable acknowledgement: whatever the first
-     * destination says, and never when it does not say.
+     * Whether a return is durable: as the first destination says, else never.
      *
      * @return bool
      */
@@ -114,7 +98,7 @@ final readonly class StackAuditStore implements AcceptsAttachments, DurableAudit
 
     /**
      * Whether a write joins a transaction on the connection: only when every
-     * destination says it does.
+     * destination does.
      *
      * @param  string  $connection
      * @return bool
@@ -132,8 +116,7 @@ final readonly class StackAuditStore implements AcceptsAttachments, DurableAudit
     }
 
     /**
-     * Whether the stack keeps a record's attachment with its entry: only when
-     * every destination implements `Contracts\AcceptsAttachments` and says it
+     * Whether the stack keeps attachments: only when every destination says it
      * does.
      *
      * @return bool
@@ -151,8 +134,8 @@ final readonly class StackAuditStore implements AcceptsAttachments, DurableAudit
     }
 
     /**
-     * The exception naming each destination that failed, keeping of each
-     * failure only its class and what it was: the failure can hold the record.
+     * The exception naming each failed destination, keeping only each failure's
+     * class and kind, since a failure can hold the record.
      *
      * @param  string  $id
      * @param  non-empty-array<string, \Throwable>  $caught
@@ -185,9 +168,8 @@ final readonly class StackAuditStore implements AcceptsAttachments, DurableAudit
     }
 
     /**
-     * The destinations given, once each has been checked: a map, not empty and
-     * not a list, whose every id matches the pattern and whose every member is
-     * an audit store that is not itself a stack.
+     * The destinations, refused unless a non-empty map of valid ids to audit
+     * stores that are not stacks.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -218,9 +200,8 @@ final readonly class StackAuditStore implements AcceptsAttachments, DurableAudit
     }
 
     /**
-     * The destination id, refused unless it is a string matching the pattern. A
-     * decimal integer is refused too: PHP keys an array by it as a number, so
-     * it could never come back as the string it was given.
+     * The destination id, refused unless a string matching the pattern; PHP
+     * turns a decimal key into an integer, so one is refused.
      *
      * @param  int|string  $id
      * @return string
@@ -240,8 +221,7 @@ final readonly class StackAuditStore implements AcceptsAttachments, DurableAudit
     }
 
     /**
-     * The destination, refused unless it is an audit store that is not itself a
-     * stack.
+     * The destination, refused unless an audit store that is not a stack.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

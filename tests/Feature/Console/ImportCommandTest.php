@@ -22,22 +22,14 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:import`: it imports a file from a source and
- * prints the batch, its status, its counts, the rejections per reason, the
- * conflicting source record ids, the values dropped, a warning about lines
- * past retention on arrival and the hold; plans with `--dry-run` and writes
- * nothing; reads export lines with `--from-export`; places a hold with
- * `--hold` of the basis `--hold-basis` names; closes a running batch with
- * `--close`; writes one JSON object with `--json`; refuses every malformed
- * argument and option with exit 2 before any statement; exits 1 when the
- * import fails or is refused at run time, naming the class; warns when its
- * record could not be written; and prints nothing of a line's content.
+ * Feature tests for `audit-log:import`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(ImportCommand::class)]
 final class ImportCommandTest extends TestCase
 {
-    use ReadsTheTrail, WritesTheJournal;
+    use CountsStatements, ReadsTheTrail, WritesTheJournal;
 
     /** @var array<string, string> The options of the authority every import is made on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.review'];
@@ -71,10 +63,7 @@ final class ImportCommandTest extends TestCase
     private array $files = [];
 
     /**
-     * Freeze the clock, name this installation's source, bind the configured
-     * retention policy, report to a recording handler, and register the command
-     * with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, name the source, bind services, register the command.
      *
      * @return void
      */
@@ -118,8 +107,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * An import prints its batch, status and counts and the rejections per
-     * reason, is recorded, and exits 0.
+     * An import prints its batch, status, counts and rejections, and exits 0.
      *
      * @return void
      */
@@ -140,8 +128,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * A dry run prints what it would import and writes nothing: no batch, no
-     * journal row, no entry, no record.
+     * A dry run prints its plan and writes nothing.
      *
      * @return void
      */
@@ -166,8 +153,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * `--from-export` reads the file as this package's export lines, so a line
-     * of the import format is not read as one.
+     * `--from-export` reads the file as this package's export lines.
      *
      * @return void
      */
@@ -179,8 +165,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * `--hold` places a hold on the batch with its start, of the basis
-     * `--hold-basis` names, printed and recorded as held.
+     * `--hold` places a hold of the `--hold-basis` basis on the batch.
      *
      * @return void
      */
@@ -222,9 +207,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * The source record ids of the lines that conflict with what was imported
-     * already are printed, and the values shaped as an encrypted envelope that
-     * were dropped are counted.
+     * Conflicting source record ids are printed and dropped envelopes counted.
      *
      * @return void
      */
@@ -267,8 +250,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * `--close` marks a running batch `interrupted`, journals its finish,
-     * records it, prints it and exits 0.
+     * `--close` marks a running batch `interrupted` and journals its finish.
      *
      * @return void
      */
@@ -288,8 +270,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * Closing a batch that is not running is refused at run time, exits 1, and
-     * is named by its class.
+     * Closing a batch that is not running exits 1, named by its class.
      *
      * @return void
      */
@@ -304,8 +285,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * An import that fails once it started exits 1, named by the class of the
-     * failure alone.
+     * An import that fails once started exits 1, named by its class alone.
      *
      * @return void
      */
@@ -325,8 +305,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * An import whose record could not be written still imports, says so, and
-     * exits 0.
+     * An import whose record could not be written still imports and warns.
      *
      * @return void
      */
@@ -339,8 +318,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[whether a file is given, options, message]`: every malformed
-     * argument and option, and the refusal it prints.
+     * Rows of `[whether a file is given, options, message]`.
      *
      * @return iterable<string, array{0: bool, 1: array<string, bool|string|null>, 2: string}>
      */
@@ -386,8 +364,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * A file that does not exist is refused by its path's problem, printed with
-     * nothing in it read as a style, and exits 2.
+     * A missing file is refused with exit 2, its path printed unstyled.
      *
      * @return void
      */
@@ -398,8 +375,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * Nothing printed, as lines or as JSON, holds a value of a line: its
-     * properties, its actor or its subject.
+     * Nothing printed holds a line's properties, actor or subject.
      *
      * @return void
      */
@@ -425,8 +401,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * Start a batch as an import whose process was then killed leaves it: its
-     * row `running` and its journal's `import_started`, and nothing after.
+     * Leave a batch as a killed import would: `running`, with only its start.
      *
      * @return void
      */
@@ -483,8 +458,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * A line of the import format, of the record id given and with the fields
-     * given over its own.
+     * A line of the import format, with the fields given over its own.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -525,26 +499,7 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
-    }
-
-    /**
-     * Run the command on the file, with the options given over the source's and
-     * the authority's, an option given as `null` left out, keep what it
-     * printed, and return its exit code.
+     * Run the command on the file and return its exit code; `null` is omitted.
      *
      * @param  ?string  $file
      * @param  array<string, bool|string|null>  $options

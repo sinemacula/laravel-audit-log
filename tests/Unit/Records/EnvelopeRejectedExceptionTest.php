@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeRejectedException;
 
 /**
- * Unit tests for the exception that refuses an envelope: the failure it keeps,
- * the id it keeps only when it is a lower-case UUID, the fixed message of each
- * failure that holds nothing of the envelope, and that it has no previous
- * exception.
+ * Unit tests for the exception that refuses an envelope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -133,9 +130,8 @@ final class EnvelopeRejectedExceptionTest extends TestCase
     }
 
     /**
-     * The exception has no previous exception, whatever the failure, so the
-     * parser's or the signer's exception, and what it holds, never reaches a
-     * handler.
+     * The exception has no previous exception, so what the parser or signer
+     * held never reaches a handler.
      *
      * @return void
      */

@@ -19,10 +19,7 @@ use Tests\Fixtures\Export\GoldenExport;
 use Tests\TestCase;
 
 /**
- * Feature tests for the golden version 1 export: its files are exactly the ones
- * generated once, pinned by their digests so a regeneration shows in review,
- * and once its journal's rows are stored, an export made by an earlier release
- * verifies through the trail, every line by its own versions.
+ * Feature tests for the golden version 1 export, pinned by its file digests.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,8 +76,7 @@ final class GoldenExportTest extends TestCase
     }
 
     /**
-     * Each line of the golden export is a stored entry's 37 columns, the source
-     * digest among them, `null` on these captured entries.
+     * Each golden line holds a stored entry's 37 columns, source digest too.
      *
      * @return void
      *
@@ -103,10 +99,7 @@ final class GoldenExportTest extends TestCase
     }
 
     /**
-     * With its journal's entry and artifact stored as an earlier release stored
-     * them, the golden export verifies through the trail: the entry's HMAC, its
-     * descriptor, the artifact, the manifest, the file, its membership and
-     * every line.
+     * With its journal stored, the golden export verifies through the trail.
      *
      * @return void
      */
@@ -125,10 +118,7 @@ final class GoldenExportTest extends TestCase
     }
 
     /**
-     * The golden export's manifest names the scope it was made under by the
-     * keyed fingerprint of that scope's normalised form, the grant to reveal
-     * the encrypted fields included: an auditor who sees every entry and
-     * reveals nothing.
+     * The golden manifest names its scope's fingerprint, grant included.
      *
      * @return void
      *
@@ -147,8 +137,7 @@ final class GoldenExportTest extends TestCase
     }
 
     /**
-     * Without its journal stored, the golden export's entry is missing, and its
-     * file still matches the bundle's manifest.
+     * Without its journal the entry is missing, though the file still matches.
      *
      * @return void
      */
@@ -161,8 +150,7 @@ final class GoldenExportTest extends TestCase
     }
 
     /**
-     * Store the journal's entry and artifact rows, as the golden journal holds
-     * them, and return the entry's id.
+     * Store the golden journal's entry and artifact rows, and return the id.
      *
      * @return string
      */

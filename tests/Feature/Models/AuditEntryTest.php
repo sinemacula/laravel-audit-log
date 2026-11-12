@@ -20,11 +20,7 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\TestCase;
 
 /**
- * Feature tests for the read model: the table and connection it reads, its key,
- * the casts it reads columns through, and every write through Eloquent refused
- * before an event fires or a statement runs, with a drift guard over the
- * installed model's write methods; only the query builder writes, as
- * documented.
+ * Feature tests for the read model, which refuses every write through Eloquent.
  *
  * Rows are seeded with literal `DB::table()` inserts, never through the store.
  *
@@ -127,9 +123,8 @@ final class AuditEntryTest extends TestCase
     ];
 
     /**
-     * The entry lives in the table `entries.table` names, on the connection
-     * `storage.connection` names, and in the default table on the default
-     * connection when neither is set.
+     * The entry reads the configured table on the storage connection, or the
+     * defaults when neither is set.
      *
      * @return void
      */
@@ -207,8 +202,7 @@ final class AuditEntryTest extends TestCase
 
     /**
      * Rows of `[write through a stored entry, the method the refusal names]`:
-     * every write path of the model, and the builder paths that build a model
-     * to save; a path that funnels into a refused method names that method.
+     * every model and builder write path.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -264,7 +258,9 @@ final class AuditEntryTest extends TestCase
     #[DataProvider('provideRefusedWrites')]
     public function testRefusesEveryWriteThroughTheModel(\Closure $write, string $method): void
     {
-        self::skipUnlessAModelMethod($method);
+        if (!self::isAModelMethod($method)) {
+            self::markTestSkipped('On Laravel 12, `incrementEach()` on an entry is a query-builder write, not a model method.');
+        }
 
         $entry = $this->seedEntry();
 
@@ -275,9 +271,8 @@ final class AuditEntryTest extends TestCase
     }
 
     /**
-     * A write that fills an attribute is refused by mass assignment before it
-     * reaches a refused method, so it too writes nothing: no row is added and
-     * the stored one is unchanged.
+     * A mass-assigned write is refused before it reaches a refused method, and
+     * writes nothing.
      *
      * @return void
      *
@@ -310,10 +305,8 @@ final class AuditEntryTest extends TestCase
     }
 
     /**
-     * An entry that was never stored is never saved either: saving it,
-     * inserting it while ignoring conflicts, and incrementing a column on it,
-     * which would otherwise update every row, are each refused, and no row is
-     * added or changed.
+     * An entry never stored cannot be saved, inserted or incremented, which
+     * would otherwise update every row.
      *
      * @return void
      */
@@ -346,11 +339,8 @@ final class AuditEntryTest extends TestCase
     }
 
     /**
-     * Every method of the installed model whose name says it may write is
-     * either declared on the read model or accounted for as funnelling into one
-     * that is, or as writing nothing, so a Laravel release that adds a write
-     * path fails here; and the read model declares exactly the refused methods,
-     * its constructor and its casts.
+     * Every write method of the installed model is refused or accounted for, so
+     * a Laravel release adding one fails here.
      *
      * @return void
      */
@@ -456,10 +446,8 @@ final class AuditEntryTest extends TestCase
     }
 
     /**
-     * Query-builder writes bypass the model, as documented: an update and a
-     * delete through the builder change and remove the row, which is why
-     * append-only access rests on the database's grants, and how pruning will
-     * delete.
+     * Query-builder writes bypass the model, which is why append-only access
+     * rests on the database's grants.
      *
      * @return void
      */
@@ -475,9 +463,8 @@ final class AuditEntryTest extends TestCase
     }
 
     /**
-     * The versions read as integers, the JSON columns as arrays and the times
-     * as UTC instants with their microseconds; every other column reads as it
-     * is stored.
+     * The versions read as integers, JSON columns as arrays and times as UTC
+     * instants with microseconds.
      *
      * @return void
      */
@@ -512,8 +499,7 @@ final class AuditEntryTest extends TestCase
 
     /**
      * The model's docblock names every column of the entries table as a
-     * property, in table order, the source digest included, and no other, and
-     * says pruning never deletes through it.
+     * property, in table order, and no other.
      *
      * @return void
      */
@@ -604,9 +590,8 @@ final class AuditEntryTest extends TestCase
     }
 
     /**
-     * Whether the refused method is a write path of the installed model: on
-     * Laravel 12, `incrementEach()` and its kin are builder writes, not model
-     * methods.
+     * Whether the method is a write path of the installed model; on Laravel 12
+     * `incrementEach()` is a builder write.
      *
      * @param  string  $method
      * @return bool
@@ -614,20 +599,5 @@ final class AuditEntryTest extends TestCase
     private static function isAModelMethod(string $method): bool
     {
         return $method !== 'incrementOrDecrementEach' || (new \ReflectionClass(Model::class))->hasMethod($method);
-    }
-
-    /**
-     * Skip a row whose method the installed model lacks.
-     *
-     * @param  string  $method
-     * @return void
-     */
-    private static function skipUnlessAModelMethod(string $method): void
-    {
-        if (self::isAModelMethod($method)) {
-            return;
-        }
-
-        self::markTestSkipped('On Laravel 12, `incrementEach()` on an entry is a query-builder write, not a model method.');
     }
 }

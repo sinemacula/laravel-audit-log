@@ -25,11 +25,7 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:keys`: `--rebuild-uses` adds the key uses
- * missing from the verified entries, prints what it read and added, never an
- * owner, and exits 0; with `--dry-run` it adds nothing; a failure exits 1
- * printing its class and never its message; and without `--rebuild-uses` it
- * exits 2 before any statement.
+ * Feature tests for `audit-log:keys`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,9 +44,7 @@ final class KeysCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Bind the package's key wrapper and encrypter, define the card charge, and
-     * register the command with the console kernel, which keeps the test
-     * independent of the provider.
+     * Bind the key services, define the card charge, register the command.
      *
      * @return void
      */
@@ -82,8 +76,7 @@ final class KeysCommandTest extends TestCase
     }
 
     /**
-     * The missing key uses are added from the verified entries, printed, and it
-     * exits 0; nothing printed names an owner.
+     * Missing key uses are added from the verified entries, naming no owner.
      *
      * @return void
      */
@@ -131,8 +124,7 @@ final class KeysCommandTest extends TestCase
     }
 
     /**
-     * Without `--rebuild-uses`, a dry run or not, it exits 2 before any
-     * statement runs.
+     * Without `--rebuild-uses` it exits 2 before any statement runs.
      *
      * @return void
      */
@@ -154,8 +146,7 @@ final class KeysCommandTest extends TestCase
     }
 
     /**
-     * Capture as many charges of a card the owner owns, each encrypted under
-     * the owner's key.
+     * Capture as many card charges, each encrypted under the owner's key.
      *
      * @param  int  $count
      * @return void
@@ -168,8 +159,7 @@ final class KeysCommandTest extends TestCase
     }
 
     /**
-     * Run the command with the options given, keep what it printed, and return
-     * its exit code.
+     * Run the command, keep what it printed, and return its exit code.
      *
      * @param  array<string, bool>  $options
      * @return int

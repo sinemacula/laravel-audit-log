@@ -21,14 +21,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for a bulk record's bundle in the database store, on the
- * engine the suite runs against: its artifact and its entry written together,
- * artifact first, in one transaction outside a host and one savepoint inside
- * one, so a failure between the inserts or a host's rollback leaves neither; a
- * duplicate resolved to a success only when its entry is the record's and its
- * artifact the bundle's, by everything but the sealed members, and to a
- * conflict when either is missing or different; and the ids and the time the
- * artifact is stored with.
+ * Integration tests for a bundle's atomic writes and duplicates in the store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,10 +60,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * A bundle is stored as its entry, which verifies, and its artifact, which
-     * holds the attachment as it was sealed, naming the entry; the artifact is
-     * inserted first, and outside a host the store opens one transaction of its
-     * own for both.
+     * A bundle stores its artifact then its entry in one transaction.
      *
      * @return void
      */
@@ -104,8 +94,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * A failure of the entry's insert, after the artifact's succeeded, rolls
-     * the artifact back: the failure propagates, and neither row is kept.
+     * A failed entry insert rolls back the artifact and propagates.
      *
      * @return void
      *
@@ -129,9 +118,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * Inside a host transaction a failure between the inserts rolls back the
-     * bundle's savepoint alone: the host is at its own level, neither row is
-     * kept, and the host goes on to store a record and commit it.
+     * Inside a host a failed entry insert rolls back the savepoint alone.
      *
      * @return void
      *
@@ -166,9 +153,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * Inside a host transaction the bundle is one savepoint: both inserts run
-     * one level deeper, no other transaction begins, and the host is back at
-     * its own level with both rows its to commit.
+     * Inside a host transaction the bundle is one savepoint.
      *
      * @return void
      */
@@ -224,9 +209,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The same bundle stored again, outside a transaction and inside one, is a
-     * success that writes nothing: one entry and one artifact, as first stored,
-     * and the host left usable.
+     * The same bundle stored again, in or out of a transaction, writes nothing.
      *
      * @return void
      */
@@ -252,9 +235,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * An artifact is told by its description, never by its sealed members: an
-     * artifact stored with other ciphertext but the bundle's id, entry, kind,
-     * count and digest is the bundle's, so storing the bundle is a no-op.
+     * An artifact is compared by its description, never its sealed members.
      *
      * @return void
      */
@@ -272,8 +253,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * Rows of `[columns]`: the bundle's own entry stored beside an artifact
-     * that differs from its own in one of the columns that tell it.
+     * Rows of `[columns]`: an artifact differing in one telling column.
      *
      * @return iterable<string, array{0: array<string, int|string>}>
      */
@@ -289,8 +269,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The bundle's entry stored with an artifact other than its own is a
-     * conflict naming the record, and what is stored is kept as it is.
+     * The bundle's entry beside another artifact is a conflict; both are kept.
      *
      * @param  array<string, int|string>  $columns
      * @return void
@@ -312,9 +291,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The bundle's entry stored without any artifact is a conflict: the
-     * artifact the store inserted is rolled back with the entry's failed
-     * insert, and only the entry is kept.
+     * The bundle's entry alone is a conflict, and only the entry is kept.
      *
      * @return void
      */
@@ -331,8 +308,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The bundle's artifact stored without its entry is a conflict, and no
-     * entry is written beside it.
+     * The bundle's artifact alone is a conflict, and no entry is written.
      *
      * @return void
      */
@@ -349,8 +325,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * An entry under the bundle's id with other captured content is the entry's
-     * own conflict, as for any record, before its artifact is asked about.
+     * Other content under the bundle's id is the entry's own conflict.
      *
      * @return void
      */
@@ -369,9 +344,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * A violation of another index, with neither the entry nor the artifact
-     * stored under the bundle's ids, propagates the original exception: an
-     * artifact of another id naming the bundle's entry, which is not stored.
+     * A violation with nothing under the bundle's ids propagates as thrown.
      *
      * @return void
      *
@@ -396,9 +369,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * Inside a host transaction a conflict rolls back the bundle's savepoint
-     * alone: the host is at its own level and goes on to store a record and
-     * commit it.
+     * Inside a host a conflict rolls back the bundle's savepoint alone.
      *
      * @return void
      */
@@ -425,9 +396,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * A duplicate's two reads, of the entry and of the artifact, take MySQL's
-     * shared lock inside a transaction, and no lock outside one or on another
-     * engine.
+     * A duplicate's reads take MySQL's shared lock in a transaction, else none.
      *
      * @return void
      */
@@ -469,8 +438,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The artifact's id and its entry's are stored and read back as the
-     * lower-case UUIDs they were written as, on every engine.
+     * The artifact's and entry's ids round-trip as lower-case UUIDs.
      *
      * @return void
      */
@@ -490,8 +458,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The artifact is stored with its entry's recorded time, to the
-     * microsecond, never the time the activity occurred.
+     * The artifact takes its entry's recorded time, never the occurred time.
      *
      * @return void
      */
@@ -509,8 +476,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * Assert that storing the bundle is a conflict of its artifact, naming its
-     * record.
+     * Assert storing the bundle is an artifact conflict naming its record.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $bundle
      * @return void
@@ -530,8 +496,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * Make the next inserts of the entries table fail before they run, or only
-     * the next one.
+     * Make the next entries inserts fail before they run, or only the next.
      *
      * @param  bool  $once
      * @return void
@@ -563,8 +528,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * Insert the bundle's artifact row directly, without its entry, with the
-     * columns given in place of its own, and return the row as it is read back.
+     * Insert the bundle's artifact alone with the columns; the row read back.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $bundle
      * @param  array<string, int|string>  $columns
@@ -580,8 +544,7 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The artifact stored under the id, with its count as an integer and its
-     * time in the package's form, whatever the engine returns.
+     * The artifact under the id, count as int and time in the package's form.
      *
      * @param  string  $id
      * @return array<string, int|string>
@@ -603,16 +566,6 @@ final class BundleAtomicityTest extends TestCase
             'members'      => (string) $row['members'],
             'created_at'   => StoredTime::fromStorage((string) $row['created_at']),
         ];
-    }
-
-    /**
-     * The number of rows in the artifacts table.
-     *
-     * @return int
-     */
-    private function artifactCount(): int
-    {
-        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
     }
 
     /**

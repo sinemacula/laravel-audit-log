@@ -8,13 +8,8 @@ use Illuminate\Contracts\Support\Arrayable;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 
 /**
- * An entry of the trail as a sentence-sized summary for a person: the title of
- * its code, the code itself, how the activity ended, why it failed or was
- * denied unless its record concealed that, and its properties for display.
- *
- * The title is plain text from the translations, never a sentence with stored
- * values put into it; the properties are the entry's display view, in which
- * every encrypted fragment is a value or a marker, never a ciphertext.
+ * An entry summarised for a person; its properties are the display view, where
+ * an encrypted fragment is a value or a marker, never a ciphertext.
  *
  * @api
  *
@@ -42,7 +37,7 @@ final readonly class Description implements Arrayable
      */
     public function __construct(
 
-        /** The code's title in the locale asked for, the fallback locale's, or the code itself. */
+        /** The code's title, or the code itself when untranslated. */
         public string $title,
 
         /** The event code naming what happened. */
@@ -51,7 +46,7 @@ final readonly class Description implements Arrayable
         /** How the activity ended. */
         public Outcome $outcome,
 
-        /** Why it failed or was denied; `null` when none was given or its record concealed it. */
+        /** Why it failed or was denied; `null` when none or concealed. */
         public ?string $reason,
 
         /** The entry's properties, for display. */

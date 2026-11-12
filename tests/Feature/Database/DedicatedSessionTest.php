@@ -15,14 +15,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for when a session of its own could not see or write what the
- * storage connection does, the question the export's snapshot and the key
- * session both ask: an in-memory SQLite database in each form it is named, and
- * the base transaction Laravel's testing manager wraps a test in, judged by the
- * manager the container holds and never by any other open transaction.
- *
- * The in-memory forms are SQLite connections of their own, so they read the
- * same on every engine the suite runs against; the testing transaction is
- * opened on the storage connection itself, whichever engine it is.
+ * storage connection does.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,8 +63,7 @@ final class DedicatedSessionTest extends TestCase
 
     /**
      * An in-memory SQLite database is known by each form it is named in, and
-     * nothing else is taken for one: a file, a file whose name mentions memory,
-     * and another engine whose database is named as SQLite's memory is.
+     * nothing else is taken for one.
      *
      * @param  string  $driver
      * @param  string  $database
@@ -87,10 +79,8 @@ final class DedicatedSessionTest extends TestCase
     }
 
     /**
-     * Only the base transaction the testing manager wraps a test in is the
-     * testing transaction: not a connection with no transaction, not a
-     * transaction under the framework's own manager, not one nested in the
-     * testing manager's base, and none at all with no manager bound.
+     * Only the base transaction the testing manager wraps a test in counts as
+     * the testing transaction.
      *
      * @return void
      */
@@ -134,9 +124,8 @@ final class DedicatedSessionTest extends TestCase
     }
 
     /**
-     * A session's configuration forces a handle of its own, never a persistent
-     * one the storage connection shares, keeps every other PDO option and every
-     * other setting, and gains options when it had none.
+     * A session forces a handle of its own, never a shared persistent one, and
+     * keeps every other setting.
      *
      * @return void
      */

@@ -21,9 +21,7 @@ use Tests\Concerns\InteractsWithAuditStore;
 use Tests\TestCase;
 
 /**
- * End-to-end tests for what `AuditRecorded` says and when: dispatched once the
- * store has accepted a record, with nothing of it but its id, code and
- * category; accepted, not always durable; a listener's failure contained.
+ * End-to-end tests for when `AuditRecorded` is dispatched and what it carries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -81,8 +79,7 @@ final class AuditRecordedDispatchTest extends TestCase
     }
 
     /**
-     * The event has the record's id, code and category, and no other property,
-     * so no value of the record can reach a listener.
+     * The event carries only the record's id, code and category.
      *
      * @return void
      */
@@ -126,8 +123,7 @@ final class AuditRecordedDispatchTest extends TestCase
     }
 
     /**
-     * A synchronous listener's failure never reaches the code that recorded: it
-     * gets its record.
+     * A synchronous listener's failure never reaches the recording code.
      *
      * @return void
      */
@@ -143,9 +139,7 @@ final class AuditRecordedDispatchTest extends TestCase
     }
 
     /**
-     * The event means the store accepted the record, not that it is durable: an
-     * immediate write inside a transaction says so before the rollback takes it
-     * away.
+     * The event means accepted, not durable: it fires before a rollback.
      *
      * @return void
      */
@@ -168,8 +162,7 @@ final class AuditRecordedDispatchTest extends TestCase
     }
 
     /**
-     * An after-commit record dropped by a rollback never reached the store, so
-     * nothing is said.
+     * An after-commit record dropped by a rollback dispatches nothing.
      *
      * @return void
      */
@@ -206,8 +199,7 @@ final class AuditRecordedDispatchTest extends TestCase
     }
 
     /**
-     * A queued listener is queued as Laravel queues any other, and does not run
-     * inside the write: whatever becomes of it is the queue's.
+     * A queued listener is queued as usual and does not run inside the write.
      *
      * @return void
      */

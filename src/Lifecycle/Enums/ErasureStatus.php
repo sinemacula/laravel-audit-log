@@ -5,10 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle\Enums;
 
 /**
- * How an erasure that was not refused ended: every key of the owner destroyed,
- * some destroyed and the rest kept because holds or preservation block them, or
- * nothing to do because the owner was already erased and holds no key. The
- * erasure's `audit_log.subject_erased` record carries it.
+ * How an erasure that was not refused ended; its `audit_log.subject_erased`
+ * record carries it.
  *
  * @api
  *
@@ -21,8 +19,8 @@ enum ErasureStatus: string
     // marked erased
     case COMPLETE = 'complete';
 
-    // An erasure asked to go ahead in part destroyed the keys nothing blocks,
-    // kept the rest with their reasons, and marked the owner erased
+    // A partial erasure destroyed the unblocked keys, kept the rest with their
+    // reasons, and marked the owner erased
     case PARTIAL = 'partial';
 
     // The owner was already erased and holds no key, so nothing was written

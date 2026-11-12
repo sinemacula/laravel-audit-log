@@ -10,9 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the checkpoint members table: one row per entry a seal holds, with the
- * entry's HMAC when it was sealed. A member is written once with its seal and
- * never changed.
+ * Create the checkpoint members table: one row per entry a seal holds, written
+ * once with its seal and never changed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,7 +35,6 @@ return new class extends Migration {
         $mysql = $schema->getConnection()->getDriverName() === 'mysql';
 
         $schema->create($table, static function (Blueprint $blueprint) use ($table, $mysql): void {
-            // The seal and the entry it holds.
             $blueprint->uuid('checkpoint_id');
             $blueprint->uuid('entry_id');
 
@@ -52,8 +50,7 @@ return new class extends Migration {
             }
 
             // An entry belongs to at most one seal, and the sealer's anti-join
-            // probes the entry alone. Named short, so each fits PostgreSQL's 63
-            // characters at the longest table name.
+            // probes the entry alone.
             $blueprint->primary(['checkpoint_id', 'entry_id'], $table . '_primary');
             $blueprint->unique(['entry_id'], $table . '_entry_unique');
         });
@@ -72,8 +69,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * a member is beside the entry it names.
+     * The storage connection, so a member is beside the entry it names.
      *
      * @return ?string
      *

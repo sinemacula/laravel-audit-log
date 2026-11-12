@@ -19,12 +19,7 @@ use Tests\Fixtures\Export\ApprovedInvoiceMapper;
 use Tests\Fixtures\Export\MisclassifyingMapper;
 
 /**
- * Unit tests for the event definition: its defaults, the versions and
- * categories it keeps and refuses, its immutability, the rules its shorthands
- * add, the duplicate and unreachable rules it refuses in either order, the
- * order it keeps its rules in, which rule decides a field, which rule lies
- * beneath a path, the OCSF mapper it names and keeps, equality, and how a
- * definition of one of the package's own codes is made.
+ * Unit tests for the event definition and the rules it holds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -347,9 +342,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * Paths are ordered as strings, never as numbers, so a definition of digit
-     * keys keeps `10` before `9`; the rules still decide those keys. Protects
-     * against a mutation that drops the string ordering flag.
+     * Paths are ordered as strings, so digit keys keep `10` before `9` and the
+     * rules still decide them.
      *
      * @return void
      */
@@ -363,9 +357,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * The same version, category, unlisted handling and rules, given in any
-     * order, make equal definitions, and no fluent method loses what another
-     * set.
+     * The same settings in any order make equal definitions, and no fluent
+     * method loses what another set.
      *
      * @return void
      */
@@ -437,8 +430,8 @@ final class EventDefinitionTest extends TestCase
 
     /**
      * Rows of `[first path, its handling, second path, its handling, the
-     * descendant, the ancestor]`: pairs where a rule that decides its whole
-     * branch may cover the other, in each order.
+     * descendant, the ancestor]`: a rule deciding its whole branch may cover
+     * the other.
      *
      * @formatter:off
      *
@@ -470,9 +463,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * A rule that a rule deciding its whole branch may cover could never apply,
-     * and is refused whichever is added first, naming the descendant and then
-     * the ancestor.
+     * A rule covered by one deciding its whole branch is refused in either
+     * order, naming the descendant and then the ancestor.
      *
      * @param  string  $firstPath
      * @param  \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling  $firstHandling
@@ -590,9 +582,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * The chain a package definition is made with takes each of its rules: the
-     * permissive default of the minted code, unlisted fields dropped, the
-     * `audit` category and the retained fields, with nothing else changed.
+     * The chain a package definition is made with takes each of its rules and
+     * changes nothing else.
      *
      * @return void
      */
@@ -677,10 +668,9 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * Of the rules matching a prefix of the concrete path, the most specific
-     * decides it: more segments first, then, at equal length, compared left to
-     * right, a literal over `*`. A field no rule decides is handled as unlisted
-     * fields are.
+     * The most specific matching rule decides a path: more segments first, then
+     * a literal over `*` left to right; otherwise the unlisted handling
+     * applies.
      *
      * @param  list<int|string>  $path
      * @param  ?string  $winner
@@ -706,9 +696,7 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * Rules added in the opposite order decide every field the same way, so the
-     * winner never depends on which rule came first: a longer rule beats a
-     * shorter one, and a literal beats `*` at equal length.
+     * Rules added in the opposite order decide every field the same way.
      *
      * @return void
      */
@@ -733,9 +721,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * One rule makes a registered code drop every other field, at any depth;
-     * retaining unlisted fields keeps them, and a field a rule names always
-     * takes its rule's handling.
+     * One rule drops every other field at any depth unless unlisted fields are
+     * retained; a named field takes its rule's handling.
      *
      * @return void
      */
@@ -759,9 +746,7 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * Rows of `[concrete path, the rule found beneath it]`: over one
-     * definition, a literal, a wildcard in the pattern, a list index, a rule
-     * more than one level down, and paths with nothing beneath them.
+     * Rows of `[concrete path, the rule found beneath it]`.
      *
      * @return iterable<string, array{0: list<int|string>, 1: ?string}>
      */
@@ -839,9 +824,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * The rule beneath a path says nothing about the path's own handling: a
-     * branch holding a rule-governed field is still handled as unlisted fields
-     * are until the walker reaches that field.
+     * The rule beneath a path says nothing of the path's own handling, which
+     * stays unlisted.
      *
      * @return void
      */
@@ -855,9 +839,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * A definition names no OCSF mapper until `ocsf()` names one, and then
-     * keeps its class name, never an instance; the permissive default names
-     * none.
+     * A definition names no OCSF mapper until `ocsf()` names one, and keeps its
+     * class name, never an instance.
      *
      * @return void
      */
@@ -957,9 +940,8 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * Two definitions alike but for the mapper they name are different
-     * definitions, so registering a code twice with different mappers
-     * conflicts.
+     * Definitions differing only in their mapper are different, so registering
+     * both conflicts.
      *
      * @return void
      */
@@ -999,8 +981,7 @@ final class EventDefinitionTest extends TestCase
     }
 
     /**
-     * Two definitions are equal only when their code, version, category,
-     * unlisted handling, OCSF mapper and every rule are, and equality is
+     * Two definitions are equal only when every part is, and equality is
      * symmetric.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $one

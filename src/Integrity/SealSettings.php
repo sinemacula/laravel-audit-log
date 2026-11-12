@@ -10,22 +10,8 @@ use SineMacula\Laravel\AuditLog\Config\ScheduleSetting;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 
 /**
- * The sealing and verification settings, read from configuration on every call
- * and validated as they are read: the log id every seal names
- * (`audit-log.integrity.log_id`), how sealing works through the entries
- * (`audit-log.integrity.seal.*`), how old an unsealed entry may grow before
- * verification calls it overdue, and when the package schedules sealing, the
- * sweep and verification.
- *
- * The log id is a path segment of an anchor, so it is 1 to 64 letters, digits,
- * dots, underscores or hyphens, starting with a letter or a digit. With none
- * set, or an empty one, which an empty environment line gives, it is the
- * source id, which must then fit the same grammar. A missing number takes its
- * default; a number is an integer, or the canonical digit string an
- * environment line gives, within its range. A missing schedule takes its
- * default, `null` or an empty one schedules nothing, and anything else must be
- * a cron expression. Every malformed value fails closed with an
- * `InvalidArgumentException` naming the key and never the value.
+ * The sealing and verification settings under `audit-log.integrity`, read on
+ * every call. A malformed value fails closed, naming only the key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

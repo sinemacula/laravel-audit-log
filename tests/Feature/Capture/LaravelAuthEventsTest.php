@@ -18,13 +18,11 @@ use Illuminate\Auth\SessionGuard;
 use Illuminate\Auth\TokenGuard;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
@@ -33,22 +31,15 @@ use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Listeners\RecordLaravelAuthEvent;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
+use Tests\Concerns\CreatesSigningInUsers;
 use Tests\Fixtures\Capture\Mappers\PortalMapper;
 use Tests\Fixtures\Capture\Models\SigningInUser;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the capture of Laravel's own authentication events through
- * the provider's wiring and the real dispatcher, each written as a row: one per
- * sign-in, restore, failure, lockout, sign-out and account event, a failure
- * keeping only its identifier's hash; none for the events never recorded, for
- * `Auth::once()`, `onceUsingId()` and a token guard that fires no event; the
- * guards configured out skipped, the wildcard turning core capture off; and an
- * application's mapping of `Login` beside the core listener writing one row per
- * event object.
- *
- * The guards sign a real user in: its table is created for each test.
+ * Feature tests for the capture of Laravel's authentication events through the
+ * provider's wiring.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,6 +50,8 @@ use Tests\TestCase;
 #[CoversClass(CaptureCoordinator::class)]
 final class LaravelAuthEventsTest extends TestCase
 {
+    use CreatesSigningInUsers;
+
     /** @var string The key identifiers are hashed under. */
     private const string REDACTION_KEY = '0123456789abcdef0123456789abcdef';
 
@@ -78,8 +71,7 @@ final class LaravelAuthEventsTest extends TestCase
     private array $failures = [];
 
     /**
-     * Create the users' table, bind the reporter, and hear each capture
-     * failure.
+     * Create the users' table, bind the reporter and hear capture failures.
      *
      * @return void
      */
@@ -100,9 +92,8 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A sign-in through `attempt()` writes one row: the sign-in code, the user
-     * as actor and subject, the guard, and whether it was remembered; the
-     * attempt, the validation and the authentication around it write none.
+     * A sign-in through `attempt()` writes one row and its surrounding events
+     * none.
      *
      * @return void
      */
@@ -123,8 +114,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A user the session guard restores from a remember-me cookie writes one
-     * session-restored row, read from that guard.
+     * A remember-me restore writes one session-restored row.
      *
      * @return void
      */
@@ -142,10 +132,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * Whether a sign-in was restored is the guard's state, so an explicit
-     * sign-in on the same guard after a restore is recorded as a restore too,
-     * as the documentation says; the same sign-in on another guard is a
-     * sign-in.
+     * A sign-in after a restore on the same guard is recorded as a restore too.
      *
      * @return void
      */
@@ -171,9 +158,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A failed sign-in keeps only its identifier's hash: neither the email
-     * address, the password, a one-time code nor a PIN reaches the row, whether
-     * `attempt()` fired the failure or a flow checking a second factor did.
+     * A failed sign-in keeps only its identifier's hash, never a credential.
      *
      * @return void
      */
@@ -202,9 +187,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A failed sign-in of an identifier no user has any more is the same
-     * failure with no subject, under the same hash its user's failures had; an
-     * identifier no user ever had hashes otherwise.
+     * A failure of a since-deleted user's identifier keeps the same hash.
      *
      * @return void
      */
@@ -229,8 +212,8 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A failed sign-in and a lockout inside a transaction that rolls back keep
-     * their rows.
+     * A failed sign-in and a lockout in a rolled-back transaction keep their
+     * rows.
      *
      * @return void
      */
@@ -252,9 +235,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A lockout writes one denied row with no actor, subject or guard, the
-     * client the request came from, and its identifier's hash, the one a failed
-     * sign-in of the same identifier has.
+     * A lockout writes one denied row with the client and identifier hash.
      *
      * @return void
      */
@@ -278,8 +259,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * Signing out, out of this device and out of the other devices each write
-     * one row naming the user as actor and subject, and the guard.
+     * Each kind of sign-out writes one row naming the user and the guard.
      *
      * @return void
      *
@@ -315,8 +295,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A registration, a verified email address and a password reset each write
-     * one row naming the user as actor and subject, with no guard.
+     * A registration, verification and password reset write one row each.
      *
      * @return void
      */
@@ -342,8 +321,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A reset link sent writes one row naming the user as subject and no one as
-     * actor, even while another user is signed in.
+     * A reset link writes one row with the user as subject and no actor.
      *
      * @return void
      */
@@ -365,8 +343,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * An ambient user never becomes the actor of a failure: a failed sign-in on
-     * another guard while a user is signed in still has no actor.
+     * A signed-in user never becomes the actor of a failure.
      *
      * @return void
      */
@@ -385,8 +362,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * `Attempting`, `Validated` and `Authenticated` are never recorded, each
-     * dispatched on its own.
+     * `Attempting`, `Validated` and `Authenticated` are never recorded.
      *
      * @return void
      */
@@ -402,8 +378,8 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * `Auth::once()` and `onceUsingId()` sign the user in for the request
-     * without firing `Login`, so they write nothing: a gap of core capture.
+     * `Auth::once()` and `onceUsingId()` fire no `Login`, so they write
+     * nothing.
      *
      * @return void
      */
@@ -421,9 +397,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * A token guard finds its user by the request's token and fires neither
-     * `Login` nor `Failed`, so it writes nothing, whether or not the token is
-     * known: a gap of core capture.
+     * A token guard fires no `Login` or `Failed`, so it writes nothing.
      *
      * @return void
      */
@@ -450,8 +424,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * An event under a guard `except_guards` lists writes nothing, a failure
-     * included; the same events under any other guard are recorded.
+     * An event under a guard `except_guards` lists writes nothing.
      *
      * @return void
      */
@@ -475,8 +448,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * Under `['*']` no core event writes anything, whatever its guard and
-     * whether it names one.
+     * Under `['*']` no core event writes anything.
      *
      * @return void
      */
@@ -498,9 +470,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * An event with no guard is skipped only when every guard is: a list of
-     * every configured guard leaves the lockout and the account events
-     * recorded, and `['*']` skips them.
+     * An event with no guard is skipped only under the wildcard.
      *
      * @return void
      */
@@ -536,11 +506,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * An application's mapping of `Login` and the core listener write one row
-     * per event object: the core listener's, since it hears the event first,
-     * and the mapping is never asked for it; a sign-in the core listener skips
-     * for its guard is left for the mapping, which records it with the context
-     * the contributors fill, the signed-in guard's included.
+     * An app mapping of `Login` and the core listener write one row per event.
      *
      * @return void
      */
@@ -571,9 +537,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * Sign users in on the session guards without waiting, with a cheap hash,
-     * from the test's users' table, add a second session guard, and set the key
-     * identifiers are hashed under.
+     * Configure the session guards, a cheap hash and the identifier hash key.
      *
      * @param  mixed  $app
      * @return void
@@ -593,8 +557,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * Map `Login` to the portal mapper while the application boots, as an
-     * application's provider would.
+     * Map `Login` to the portal mapper while the application boots.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -607,8 +570,7 @@ final class LaravelAuthEventsTest extends TestCase
     }
 
     /**
-     * The web session guard, about to read the request, holding a remember-me
-     * cookie for the user, as a returning browser sends it.
+     * The web session guard holding a remember-me cookie for the user.
      *
      * @param  \Tests\Fixtures\Capture\Models\SigningInUser  $user
      * @return \Illuminate\Auth\SessionGuard
@@ -737,41 +699,5 @@ final class LaravelAuthEventsTest extends TestCase
     private static function config(): ConfigRepository
     {
         return app(ConfigRepository::class);
-    }
-
-    /**
-     * Create the users' table on the test's connection, and drop it before the
-     * application is destroyed.
-     *
-     * @return void
-     */
-    private function createUsersTable(): void
-    {
-        $schema = Schema::connection(self::CONNECTION);
-
-        $schema->dropIfExists(SigningInUser::TABLE);
-        $schema->create(SigningInUser::TABLE, static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('email', 191)->unique();
-            $table->string('password', 191);
-            $table->rememberToken();
-        });
-
-        $this->beforeApplicationDestroyed(static function (): void {
-            Schema::connection(self::CONNECTION)->dropIfExists(SigningInUser::TABLE);
-        });
-    }
-
-    /**
-     * A saved user of the email address, with the password every user is made
-     * with and the remember token given.
-     *
-     * @param  string  $email
-     * @param  ?string  $rememberToken
-     * @return \Tests\Fixtures\Capture\Models\SigningInUser
-     */
-    private static function newUser(string $email, #[\SensitiveParameter] ?string $rememberToken = null): SigningInUser
-    {
-        return SigningInUser::query()->create(['email' => $email, 'password' => SigningInUser::PASSWORD, 'remember_token' => $rememberToken]);
     }
 }

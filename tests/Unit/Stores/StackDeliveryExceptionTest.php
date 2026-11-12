@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Stores\StackDeliveryException;
 
 /**
- * Unit tests for the exception a stack store throws when not every destination
- * took a record: the message naming each failed destination and its failure's
- * class, the fields it keeps, and that it has no previous exception.
+ * Unit tests for the exception a stack throws when a destination fails.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,8 +24,7 @@ final class StackDeliveryExceptionTest extends TestCase
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
 
     /**
-     * The message names the record, then each failed destination with its
-     * failure's class, in order.
+     * The message names the record, then each failed destination and its class.
      *
      * @return void
      */
@@ -74,8 +71,7 @@ final class StackDeliveryExceptionTest extends TestCase
     }
 
     /**
-     * It has no previous exception and no code, so nothing of a failure is
-     * chained to it.
+     * It has no previous exception and no code.
      *
      * @return void
      */

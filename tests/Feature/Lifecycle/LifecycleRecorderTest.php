@@ -34,14 +34,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the writer of the records of the lifecycle's activity:
- * written through the package write, fail-closed and immediate; the operator's
- * record, or no one's for a prune, in explicitly no tenant, in the `audit`
- * category; its evidence kept exactly or nothing written; refused while a
- * transaction is open on the connection that would acknowledge it, before the
- * write and after it; a committed outbox row as the acknowledgement; and every
- * failure reported once as a payload-free `LifecycleRecordFailedException` and
- * answered `false`, never rethrown.
+ * Feature tests for the writer of the lifecycle's own records.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,8 +73,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, and put the entries table and
-     * the outbox back.
+     * Roll back any open transaction, and restore the entries table and the
+     * outbox.
      *
      * @return void
      */
@@ -101,8 +94,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * The record goes through the package write, fail-closed and so immediate,
-     * never as a capture, and is acknowledged.
+     * The record goes through the package write, fail-closed and immediate.
      *
      * @return void
      */
@@ -118,10 +110,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Under the `report` failure mode, where an application's record would go
-     * on, a failed write is spilled and fails the attempt as under `throw`: the
-     * failure the attempt reports is the write's own, not an unacknowledged
-     * return.
+     * A failed write fails the attempt under the `report` failure mode as under
+     * `throw`.
      *
      * @return void
      */
@@ -143,9 +133,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * The record is the operator's, by its reference, whoever a contributor
-     * would name, in explicitly no tenant even with a contributor that fills
-     * the tenant of every record, with the outcome and its reason.
+     * The record is the operator's, in explicitly no tenant, whatever a
+     * contributor names.
      *
      * @return void
      */
@@ -163,8 +152,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A prune is asked for by no one, so its record names explicitly no actor,
-     * which a contributor never fills.
+     * A prune's record names explicitly no actor.
      *
      * @return void
      */
@@ -181,8 +169,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * The record keeps the evidence exactly: the stored properties are the
-     * evidence's, and no metadata.
+     * The record keeps the evidence exactly, with no metadata.
      *
      * @return void
      */
@@ -196,9 +183,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A redaction key that names an evidence property would store the record
-     * without it, so the record is refused before anything is written or
-     * spilled, reported once, and answered `false`.
+     * Evidence a redaction key would drop refuses the record before anything is
+     * written.
      *
      * @return void
      */
@@ -218,9 +204,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A failed write is reported once, through the report latch, as the
-     * payload-free failure naming the operation, the code and the class of the
-     * write's failure, with no previous exception, and is answered `false`.
+     * A failed write is reported once as a payload-free failure and answered
+     * `false`.
      *
      * @return void
      */
@@ -239,8 +224,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A failure met while a report is already running further up the stack is
-     * not reported again, and is still answered `false`.
+     * A failure inside a running report is not reported again.
      *
      * @return void
      */
@@ -259,9 +243,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A write that returns without the delivery acknowledging it is never taken
-     * as written: it is reported once as never acknowledged, and answered
-     * `false`.
+     * A write never acknowledged is reported and answered `false`.
      *
      * @return void
      */
@@ -293,8 +275,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Rows of `[delivery mode]`: the store acknowledges on the storage
-     * connection, or the outbox does on its own connection.
+     * Rows of `[delivery mode]`.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -307,10 +288,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A transaction open on the connection that would acknowledge the record,
-     * the storage connection in sync mode and the outbox connection in outbox
-     * mode, refuses the record before anything is written: reported once,
-     * naming the connection, and answered `false`.
+     * A transaction open on the acknowledging connection refuses the record
+     * before it is written.
      *
      * @param  string  $mode
      * @return void
@@ -336,9 +315,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * In outbox mode, with the outbox on a connection of its own, a transaction
-     * open on the storage connection holds nothing the record's acknowledgement
-     * depends on, so the record is written.
+     * A transaction on another connection does not refuse the record.
      *
      * @return void
      */
@@ -357,11 +334,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A contributor that leaves a transaction open on the acknowledging
-     * connection has the record inserted inside it: that acknowledgement could
-     * still roll back, so it is never accepted, and the attempt is reported
-     * once and answered `false`. Once the transaction rolls back, nothing is
-     * left.
+     * An acknowledgement inside a contributor's open transaction is never
+     * accepted.
      *
      * @return void
      */
@@ -385,9 +359,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * In outbox mode the committed outbox row is the acknowledgement: the
-     * record is answered written once it is inserted, before any drain stores
-     * it.
+     * In outbox mode the committed outbox row is the acknowledgement.
      *
      * @return void
      */
@@ -402,9 +374,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Nothing the attempt meets is rethrown: a delivery that throws and a
-     * reporter that fails too leave the answer `false`, with the failure still
-     * handed to the reporter.
+     * Nothing the attempt meets is rethrown.
      *
      * @return void
      */
@@ -434,8 +404,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * A malformed delivery mode fails the attempt as it is read, and is
-     * reported and answered `false` like any failure.
+     * A malformed delivery mode is reported and answered `false` like any
+     * failure.
      *
      * @return void
      */
@@ -468,8 +438,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Every lifecycle code is recorded under itself in the `audit` category,
-     * with every property of its evidence kept.
+     * Every lifecycle code is recorded in the `audit` category with all its
+     * evidence.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @return void
@@ -509,8 +479,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Record a release the operator asked for, as the outcome with the reason,
-     * and say whether it was acknowledged.
+     * Record a release as the outcome with the reason, and say whether it was
+     * acknowledged.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
      * @param  ?string  $reason
@@ -532,8 +502,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * The evidence of the activity, with every property its code keeps, in the
-     * order its code gives them.
+     * The evidence of the activity, with every property its code keeps, in its
+     * code's order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
@@ -587,9 +557,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Put the application in the delivery mode, with the outbox on a connection
-     * of its own in outbox mode, and return the name of the connection that
-     * would acknowledge a record.
+     * Put the application in the delivery mode and return the acknowledging
+     * connection's name.
      *
      * @param  string  $mode
      * @return string
@@ -617,8 +586,7 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Bind a registry of the contributors given, as an application registers
-     * them while it boots.
+     * Bind a registry of the contributors given.
      *
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\ContextContributor>  ...$contributors
      * @return void
@@ -635,10 +603,8 @@ final class LifecycleRecorderTest extends TestCase
     }
 
     /**
-     * Bind a delivery that keeps what each record was delivered with, its
-     * timing, its connection, whether it was fail-closed, whether it came with
-     * a capture's signal and whether it came with a package write, and hands it
-     * to the container's own delivery.
+     * Bind a delivery that keeps what each record was delivered with and passes
+     * it on.
      *
      * @return object{delivered: list<array{0: \SineMacula\Laravel\AuditLog\Records\Enums\Timing, 1: ?string, 2: bool, 3: bool, 4: bool}>}
      */

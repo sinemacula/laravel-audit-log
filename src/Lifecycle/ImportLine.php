@@ -8,18 +8,10 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * One line of an import file as it was read and validated, in either format:
- * the source that asserted it and the record's id there, what the line asserts
- * happened, and how many values shaped as encrypted envelopes, or descriptors
- * of artifacts not imported, were removed from it.
+ * One validated line of an import file, in either format.
  *
- * Its source assertion is what the line asserts, exactly as given and before
- * anything is minimised or encrypted: the code, the occurrence time, the
- * outcome, the references as their type and id, the reason, the correlation id,
- * the properties, the context, the origin and the IP address. The keyed digest
- * of the assertion tells a repeated import of the line from one that conflicts
- * with it; the category and the source's region are not asserted, since a
- * definition decides the one and the import the other.
+ * Its source assertion excludes the category and region, which a definition and
+ * the import decide rather than the line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,7 +60,7 @@ final readonly class ImportLine
      */
     public function __construct(
 
-        /** The line's number in its file, from 1. */
+        /** The line number, from 1. */
         public int $number,
 
         /** The source that first asserted the record. */
@@ -80,16 +72,16 @@ final readonly class ImportLine
         /** The record's id at that source. */
         public string $sourceRecordId,
 
-        /** The event code, validated and outside the reserved prefix. */
+        /** The event code, outside the reserved prefix. */
         public string $event,
 
-        /** When the activity happened, as an instant in the package's form. */
+        /** When the activity happened, in the package's instant form. */
         public string $occurredAt,
 
         /** How the activity ended. */
         public Outcome $outcome,
 
-        /** Why it failed or was denied, as a machine-readable code, if given. */
+        /** The machine-readable reason of a failure or denial, if given. */
         public ?string $reason,
 
         /** Who acted, if anyone. */
@@ -114,29 +106,28 @@ final readonly class ImportLine
         /** The correlation id, if given. */
         public ?string $correlationId,
 
-        /** The properties, as given less what was dropped, or `null`. */
+        /** The properties less what was dropped, or `null`. */
         #[\SensitiveParameter]
         public ?array $properties,
 
-        /** The context, as given less what was dropped, or `null`. */
+        /** The context less what was dropped, or `null`. */
         #[\SensitiveParameter]
         public ?array $context,
 
-        /** Where the activity ran, as one of this package's origins, or `null` when the source does not know. */
+        /** One of this package's origins, or `null` when the source does not know. */
         public ?string $origin,
 
         /** The client's IP address as given, or `null`. */
         #[\SensitiveParameter]
         public ?string $ip,
 
-        /** How many envelope-shaped values and descriptors were removed from the line. */
+        /** Envelope-shaped values and descriptors removed from the line. */
         public int $dropped = 0,
     ) {}
 
     /**
-     * The line's source assertion: what it asserts, exactly as given and before
-     * minimisation or encryption, with each reference as its type and id or
-     * `null`.
+     * What the line asserts, exactly as given and before minimisation or
+     * encryption.
      *
      * @formatter:off
      *
@@ -171,7 +162,7 @@ final readonly class ImportLine
     }
 
     /**
-     * The reference as its type and id, or `null` for none.
+     * The reference as its type and id.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $reference
      * @return ?array{0: string, 1: string}

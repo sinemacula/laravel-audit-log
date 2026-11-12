@@ -14,10 +14,7 @@ use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the offline bundle published beside an export: the bytes it is
- * written as, the descriptor, signed columns and manifest it holds, a round
- * trip that keeps the columns' bytes, and the contents it refuses to read,
- * every one of them anything but exactly what it writes.
+ * Unit tests for the offline bundle published beside an export.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,9 +28,7 @@ final class ExportBundleTest extends TestCase
     private const int LINES = 2;
 
     /**
-     * The bundle is the canonical encoding of exactly its version, the
-     * descriptor, the entry's signed columns and the manifest as a string, keys
-     * sorted, then one line feed.
+     * The bundle is the canonical encoding of its fields plus a line feed.
      *
      * @return void
      */
@@ -49,10 +44,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * A bundle decodes to the descriptor and the manifest it was written with,
-     * and to every column, in the bundle's sorted order, whose canonical
-     * encoding is the bytes the entry was signed over, so it encodes again to
-     * the same bundle.
+     * A bundle round trips, each column encoding to its signed bytes.
      *
      * @return void
      */
@@ -72,8 +64,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * An entry's empty JSON object stays an object through the round trip, so
-     * the columns still encode to the bytes they were signed over.
+     * An empty JSON object stays an object, so the signed bytes still match.
      *
      * @return void
      */
@@ -91,9 +82,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * The fields the malformed rows below are built from encode to the very
-     * bundle the export gives, so each row differs from a bundle only as it
-     * says.
+     * The malformed rows' fields encode to the export's own bundle.
      *
      * @return void
      */
@@ -108,8 +97,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * Rows of `[contents]`: anything that is not exactly a bundle this release
-     * writes.
+     * Rows of `[contents]`: anything but exactly a bundle this release writes.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -171,10 +159,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * A bundle of exactly the envelope's bound is written and decodes, one byte
-     * more is refused as it is written, and contents one byte over the bound
-     * are refused before they are parsed, whatever they hold (protects against
-     * an off-by-one mutation of the bound).
+     * A bundle at the bound is written and read, and one byte more is refused.
      *
      * @return void
      */
@@ -209,8 +194,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * Rows of `[descriptor]`: descriptors that are not exactly the four keys,
-     * each of its kind.
+     * Rows of `[descriptor]`: anything but the four keys, each of its kind.
      *
      * @return iterable<string, array{0: array<string, int|string>}>
      */
@@ -228,8 +212,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * A bundle is never written with a descriptor that is not exactly its four
-     * keys, each of its kind.
+     * A bundle is never written with a malformed descriptor.
      *
      * @param  array<string, int|string>  $descriptor
      * @return void
@@ -258,8 +241,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * The descriptor, the signed columns and the canonical manifest of an
-     * export of two lines.
+     * The descriptor, columns and canonical manifest of a two-line export.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -283,9 +265,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * Run the test with room for bundles at their bound, then restore the
-     * memory limit, as far as what the process still holds allows. An unlimited
-     * process stays so.
+     * Run the test with memory for bundles at their bound, then restore it.
      *
      * @param  \Closure(): void  $test
      * @return void
@@ -308,8 +288,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * The fields of the bundle of the descriptor, the columns and the manifest,
-     * as it is written.
+     * The bundle's fields as written.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -324,8 +303,7 @@ final class ExportBundleTest extends TestCase
     }
 
     /**
-     * The canonical encoding of the fields and one line feed, as a bundle is
-     * written.
+     * The canonical encoding of the fields plus a line feed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

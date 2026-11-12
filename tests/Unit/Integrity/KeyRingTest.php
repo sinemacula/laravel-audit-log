@@ -14,11 +14,7 @@ use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 
 /**
- * Unit tests for the key ring: the keys it derives from the application keys,
- * pinned byte for byte, the previous keys that verify but never sign, the
- * explicit ring that signs with its current key and never falls back to
- * `app.key`, the malformed rings that fail closed on every call, and the key
- * ids it reports as unknown.
+ * Unit tests for the key ring.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,9 +71,8 @@ final class KeyRingTest extends TestCase
     }
 
     /**
-     * The key derived from a fixed application key is pinned: HKDF-SHA256 with
-     * the version 1 info and no salt, and its id the fingerprint of its secret,
-     * for the test `app.key` and for 32 zero bytes.
+     * The key derived from a fixed application key is pinned: HKDF-SHA256,
+     * version 1 info, no salt.
      *
      * @return void
      */
@@ -267,9 +262,8 @@ final class KeyRingTest extends TestCase
     }
 
     /**
-     * A malformed explicit ring signs nothing and verifies nothing: the signing
-     * key, a well-formed entry's key and the derived key each fail closed,
-     * never returning a derived key, though `app.key` is valid.
+     * A malformed explicit ring fails closed on every call, never returning a
+     * derived key.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -401,9 +395,7 @@ final class KeyRingTest extends TestCase
     }
 
     /**
-     * Settings that `validate()` accepts always give a key that signs, which is
-     * why `audit-log:check` has nothing to check for its `[integrity]` subject
-     * once they pass.
+     * Settings that `validate()` accepts always give a signing key.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

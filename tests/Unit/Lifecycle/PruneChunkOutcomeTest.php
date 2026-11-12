@@ -14,10 +14,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay;
 use SineMacula\Laravel\AuditLog\Lifecycle\PruneChunkOutcome;
 
 /**
- * Unit tests for what one prune chunk did: the ids it deleted and the counts it
- * kept, as given, with the replay it ended with; and the outcome of a chunk a
- * candidate of which failed verification, which deleted nothing and skips its
- * seal.
+ * Unit tests for what one prune chunk did.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,8 +40,7 @@ final class PruneChunkOutcomeTest extends TestCase
     }
 
     /**
-     * A chunk a candidate of which failed verification deleted nothing, kept
-     * nothing it counted, and skips its seal, with the replay it ended with.
+     * A chunk whose candidate fails verification deletes nothing.
      *
      * @return void
      */

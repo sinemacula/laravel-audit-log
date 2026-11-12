@@ -20,6 +20,7 @@ use SineMacula\Laravel\AuditLog\Integrity\ArtifactInspector;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
+use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
@@ -31,43 +32,11 @@ use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * Verifies an export for a viewer, through the whole chain from the bundle to
- * each line of the file, and records the verification before anything it found
- * leaves the package.
+ * Verifies an export through the whole chain, from the bundle to each line of
+ * the file, and records the verification before returning what it found.
  *
- * The gate lets the verification in or refuses it, and everything after runs
- * inside the read guard's window. The access policy is asked for the viewer's
- * scope for `verify`. The bundle beside the file is read, and must be exactly
- * one this release writes. The export entry it names is looked up in one
- * statement on the storage connection's writer, as its artifact is, since a
- * verification often runs in a fresh process before a replica has caught up,
- * through the scope compiler, so an entry outside the scope is missing, and a
- * viewer the policy denies runs no statement and sees the entry missing exactly
- * as one outside the scope does. A found entry's HMAC is checked by its own
- * versions, its code and its columns against the bundle's, and the descriptor
- * it signed against the bundle's and as an export's. The artifact that
- * descriptor names is read in one statement, its columns classified, its
- * members decrypted and read as an export manifest, which must be the very
- * manifest the bundle carries. The file is then read a line at a time, its
- * digest, its line count, the membership digest of each line's id, which is
- * NDJSON's `id`, OCSF's `metadata.uid` and CEF's `externalId`, and NDJSON's
- * first and last positions checked against the manifest the journal holds, or
- * the bundle's when the artifact was not read; each NDJSON line's HMAC is
- * checked by its own versions.
- *
- * Each step that fails is its own finding, listed once, in the order the chain
- * checks them; a later step runs whenever what it checks exists, and no step
- * that reads the database runs once the entry is missing. The verification is
- * recorded as `audit_log.export_verified`, `success` whenever the chain ran,
- * whatever it found, or `denied` with `no_scope`, naming the findings and
- * disclosing the export entry when it was found; the result is returned only
- * once that record is acknowledged. A policy that throws is recorded as a
- * failure with `policy_failed`, and what it threw propagates unchanged; a
- * statement that fails is recorded as a failure with `query_failed`, and
- * `AuditReadRefusedException` names the class that failed.
- *
- * It resolves everything from the container on every call, so it outlives
- * requests safely.
+ * A denied viewer runs no statement and sees the entry missing, exactly as one
+ * outside the scope does.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,22 +45,19 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  */
 final readonly class ExportVerifier
 {
-    /** @var string Why a verification whose scope the policy denied found the entry missing. */
+    /** @var string The reason of a denied verification. */
     private const string NO_SCOPE = 'no_scope';
 
-    /** @var string Why a verification whose policy threw failed. */
+    /** @var string The reason of a verification whose policy threw. */
     private const string POLICY_FAILED = 'policy_failed';
 
-    /** @var string Why a verification whose statement failed failed. */
+    /** @var string The reason of a verification whose statement failed. */
     private const string QUERY_FAILED = 'query_failed';
 
-    /** @var string A lower-case UUID, the one form an entry's id takes. */
-    private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
-
-    /** @var string The id a CEF line carries as the first field of its extension, after an unescaped pipe. */
+    /** @var string A CEF line's id: its extension's first field, after an unescaped pipe. */
     private const string CEF_ID_PATTERN = '/(?<!\\\)\|externalId=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?: |\z)/';
 
-    /** @var int How deep a line is decoded: one more than a stored JSON column, for the envelope's own object. */
+    /** @var int One more than a stored JSON column's depth, for the envelope's own object. */
     private const int LINE_DEPTH = 513;
 
     /** @var list<string> The columns of the artifact a verification reads. */
@@ -104,13 +70,12 @@ final readonly class ExportVerifier
      */
     public function __construct(
 
-        /** The container everything a verification needs is resolved from on every call. */
+        /** Resolved from on every call, so the verifier outlives requests safely. */
         private Container $container,
     ) {}
 
     /**
-     * Verify the export at the path, with its bundle beside it, for the viewer,
-     * and return what the chain found once the verification is recorded.
+     * Verify the export at the path and return what the chain found.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  string  $path
@@ -130,8 +95,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * Authorise, run the chain and record the verification, inside the read
-     * guard's window.
+     * Authorise, run the chain and record the verification.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  string  $path
@@ -179,9 +143,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * The scope the policy gives the viewer as the application gave it, for
-     * `verify`; a policy that throws is recorded as a failure with no scope,
-     * and what it threw propagates unchanged.
+     * The viewer's scope for `verify`; a policy that throws is recorded as a
+     * failure and what it threw propagates unchanged.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy  $policy
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
@@ -204,9 +167,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * The chain, under the scope, or with no statement for a denied viewer:
-     * what it found in order, the export entry it found, the lines of the file
-     * it read, and the id of the entry the bundle names.
+     * The chain's findings, the entry found, the file's lines and the bundle's
+     * entry id; a `null` scope runs no statement.
      *
      * @formatter:off
      *
@@ -235,7 +197,7 @@ final readonly class ExportVerifier
         }
 
         $id     = $bundle['entry']['id'] ?? null;
-        $id     = is_string($id) && preg_match(self::UUID_PATTERN, $id) === 1 ? $id : null;
+        $id     = is_string($id) && preg_match(SealEnvelope::UUID_PATTERN, $id) === 1 ? $id : null;
         $lookup = fn (string $id, AccessScope $scope): ?array => $this->row(EntrySettings::table(), array_keys(RowCodec::COLUMNS), $id, $scope);
         $row    = $scope === null || $id === null ? null : $this->attempt(static fn (): ?array => $lookup($id, $scope), $recordFailure);
 
@@ -247,9 +209,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * What the found export entry, its descriptor and its artifact show: the
-     * findings, the entry once it decodes, and the artifact's plaintext when it
-     * is exactly the manifest the entry signed.
+     * The findings of the entry, its descriptor and its artifact, the entry,
+     * and the artifact's plaintext when it is the manifest the entry signed.
      *
      * @formatter:off
      *
@@ -275,8 +236,7 @@ final readonly class ExportVerifier
         try {
             $entry = StoredEntry::fromRow($row, $this->container->make(RowCodec::class));
         } catch (\UnexpectedValueException) {
-            // A row that does not decode cannot be verified, nor anything it
-            // names
+            // A row that does not decode cannot be verified, nor what it names
             return [[ExportFinding::ENTRY_UNVERIFIABLE], null, null];
         }
 
@@ -295,10 +255,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * What the artifact the signed descriptor names shows, read in one
-     * statement: the finding of its columns, of its decryption or of its
-     * plaintext, or none and the plaintext, which is then exactly the manifest
-     * the descriptor signed.
+     * The artifact's finding, or none and its plaintext, which is then the
+     * manifest the descriptor signed.
      *
      * @param  string  $entryId
      * @param  array{artifact_id: string, count: int, digest: string, kind: string}  $descriptor
@@ -330,8 +288,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * What the file and its lines show against the manifest's fields, and how
-     * many lines it holds: a file that cannot be read matches nothing.
+     * The file's findings against the manifest's fields, and its line count.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -364,10 +321,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * Read the file a line at a time, holding no more than one: the SHA-256 of
-     * its bytes, how many lines it holds, the membership digest of their ids,
-     * NDJSON's first and last positions, and what its lines show; or `null`
-     * when it cannot be opened.
+     * Read the file a line at a time, or `null` when it cannot be opened.
      *
      * @formatter:off
      *
@@ -428,10 +382,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * What one line shows: its position, its recorded instant, NDJSON's alone,
-     * and its id, or `null` when it names no id, and its finding, a line that
-     * names no id being malformed and an NDJSON line's signature checked by its
-     * own versions.
+     * A line's position, or `null` when it names no id, and its finding.
      *
      * @param  string  $line
      * @param  \SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat  $format
@@ -456,10 +407,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * The finding of the envelope's signature, checked by its own integrity
-     * version and key: none when it matches, the tampered finding when it does
-     * not, and the unverifiable finding when its key or version cannot be read,
-     * or a column is missing or malformed.
+     * The finding of the envelope's signature, or `null` when it matches.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -481,10 +429,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * The columns of the one row of the table with the id on the storage
-     * connection's writer, never a replica, so a lagging replica is never taken
-     * for an entry or an artifact that was not stored, narrowed by the scope
-     * compiler to the scope when one is given, or `null` when there is none.
+     * The row with the id, within the scope if given, read on the writer as a
+     * fresh process may run before a replica catches up.
      *
      * @param  string  $table
      * @param  list<string>  $columns
@@ -506,8 +452,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * What the statement returns; a statement that fails is recorded as a
-     * failure, then refused, naming the class that failed and nothing it held.
+     * What the statement returns; a failure is recorded, then refused naming
+     * only its class.
      *
      * @template TResult
      *
@@ -529,8 +475,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * Record the refusal, then throw it; a recording that fails is reported
-     * once, through the report latch, and the refusal is thrown all the same.
+     * Record the refusal, then throw it, even when the recording fails.
      *
      * @param  \Closure(): void  $record
      * @param  \Throwable  $refusal
@@ -550,8 +495,7 @@ final readonly class ExportVerifier
                     $handler->report($failure);
                 });
             } catch (\Throwable) {
-                // The verification is refused all the same; a broken reporter
-                // has nowhere left to say so, and must not replace the refusal
+                // A broken reporter must not replace the refusal
             }
         }
 
@@ -559,11 +503,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * The findings of the manifest the file is checked against, and its fields:
-     * the artifact's plaintext when it was read, which the bundle's manifest
-     * must be exactly, and otherwise the bundle's manifest, which must be an
-     * export manifest of the digest the entry signed, or the bundle's own
-     * descriptor names when the entry was not found.
+     * The manifest's findings and fields: the artifact's when read, else the
+     * bundle's, checked against the signed digest.
      *
      * @formatter:off
      *
@@ -593,9 +534,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * The position a JSON line names: its recorded instant, NDJSON's alone, and
-     * its id, which is NDJSON's `id` and OCSF's `metadata.uid`; or `null` when
-     * it names no id.
+     * A JSON line's recorded instant (NDJSON only) and id, or `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -615,8 +554,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * The members of a line that is a JSON object, decoded as a stored row is,
-     * its own objects kept as objects, or none for any other line.
+     * The members of a JSON object line, objects kept as objects, or none.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -635,8 +573,8 @@ final readonly class ExportVerifier
     }
 
     /**
-     * Whether the file's lines are the manifest's: as many, their ids giving
-     * its membership digest, and, for NDJSON, its first and last positions.
+     * Whether the file's lines match the manifest's count, membership and, for
+     * NDJSON, positions.
      *
      * @formatter:off
      *
@@ -672,8 +610,7 @@ final readonly class ExportVerifier
     }
 
     /**
-     * Whether the two values have the same canonical encoding; a value with
-     * none is never alike.
+     * Whether the two values have the same canonical encoding.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 
 /**
- * Unit tests for the failed operation enum: its cases and the values a failed
- * write's diagnostics name.
+ * Unit tests for the failed operation enum's cases and values.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,9 +20,7 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 final class FailedOperationTest extends TestCase
 {
     /**
-     * The cases, in order, with their values, so a renamed, reordered or added
-     * case fails: the values are what a failure's message and an application's
-     * handling of it read.
+     * The cases and their values are pinned, in order.
      *
      * @return void
      */

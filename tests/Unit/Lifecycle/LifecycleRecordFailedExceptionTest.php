@@ -10,10 +10,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecordFailedException;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 
 /**
- * Unit tests for the exception reported when a committed lifecycle operation's
- * record could not be written: each message names the operation, the code and
- * why, and points at reconciliation; the exception keeps those three, and
- * carries no previous exception and no code.
+ * Unit tests for the exception reported when a lifecycle record is not written.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,8 +76,7 @@ final class LifecycleRecordFailedExceptionTest extends TestCase
     }
 
     /**
-     * The exception carries no previous exception, so nothing a failed write
-     * held reaches whoever reads it, and no code.
+     * It carries no previous exception or code, so no failed write leaks.
      *
      * @return void
      */

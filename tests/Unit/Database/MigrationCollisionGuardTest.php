@@ -13,11 +13,7 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 
 /**
- * Unit tests for the migration collision guard on its own: it asks the schema
- * builder it is given whether the table exists, throws naming the table, the
- * builder's connection and the setting that renames the table when it does,
- * names an unnamed connection the default one, and returns silently when the
- * table is missing.
+ * Unit tests for the migration collision guard on its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,9 +26,8 @@ final class MigrationCollisionGuardTest extends TestCase
     use MockeryPHPUnitIntegration;
 
     /**
-     * The guard throws when the table already exists on the builder's
-     * connection, naming the table, the connection and the configuration key
-     * that renames the table.
+     * The guard throws when the table exists, naming the table, the connection
+     * and the configuration key that renames it.
      *
      * @return void
      */
@@ -82,16 +77,13 @@ final class MigrationCollisionGuardTest extends TestCase
 
         $guard = new MigrationCollisionGuard($schema);
 
-        // ensureNotExists is `void` and the assertion lives in the Mockery
-        // expectations: if hasTable was not called exactly once, or the
-        // connection was asked for, Mockery fails the test in tearDown
+        // The Mockery expectations, checked in tearDown, are the assertion
         $guard->ensureNotExists('audit_log_entries', 'entries.table');
     }
 
     /**
-     * The exception message echoes the table name and configuration key given
-     * at runtime, and names the default connection when the connection has no
-     * name, which the database manager never builds.
+     * The message names the table and key given, and the default connection
+     * when the connection has no name.
      *
      * @return void
      */

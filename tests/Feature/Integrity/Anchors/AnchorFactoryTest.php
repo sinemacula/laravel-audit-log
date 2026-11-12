@@ -16,10 +16,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 use Tests\TestCase;
 
 /**
- * Feature tests for the anchor factory: the null anchor by default, a disk
- * anchor on the named disk or the default one, under the configured path, for
- * the configured log; a malformed setting that fails closed before any disk is
- * resolved; and settings read again on every anchor made.
+ * Feature tests for the anchor factory and the settings it reads on every
+ * anchor made.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -21,14 +21,8 @@ use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\TestCase;
 
 /**
- * Integration tests for the tombstones of pruned records, on whichever engine
- * the suite runs against: a sealed member whose entry is gone and whose prune a
- * valid record covers is pruned; a present member, an id no seal holds, and an
- * absent member no valid record covers are not; ids are answered each once in
- * the order given, an id that is not a record id is never queried, and the ids
- * are read 500 to a statement on the storage connection's writer.
- *
- * Every test starts from one seal of three entries, sealed at a fixed instant.
+ * Integration tests for pruned-record tombstones on every engine, each starting
+ * from one seal of three entries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,8 +58,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * A member of a seal whose entry is gone, and whose prune a valid record of
-     * the seal covers, is pruned.
+     * A sealed member whose entry is gone under a valid prune record is pruned.
      *
      * @return void
      */
@@ -78,9 +71,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * An absent member no valid record covers was removed by something other
-     * than retention, and is never taken for pruned: with no record, with a
-     * record of another member, or with a record whose signature fails.
+     * An absent member no valid record covers is never taken for pruned.
      *
      * @return void
      */
@@ -120,8 +111,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * An id no seal holds is never pruned, whether an entry holds it or not: a
-     * record missing before it was sealed was never pruned.
+     * An id no seal holds is never pruned.
      *
      * @return void
      */
@@ -140,8 +130,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * The pruned ids are answered each once, in the order they were given,
-     * however often and in whatever order they were asked.
+     * Pruned ids are answered once each, in the order given.
      *
      * @return void
      */
@@ -155,10 +144,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * An id that is not a lower-case UUID is never a record's, so it is never
-     * pruned and costs no statement: an upper-case form of a pruned id is not
-     * that id, and a value PostgreSQL could not compare with a UUID is never
-     * sent.
+     * An id that is no lower-case UUID is never sent to the engine.
      *
      * @return void
      */
@@ -174,9 +160,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * Ids are read 500 to a statement, so 1,001 ids cost three, and a pruned id
-     * in the last of them is still found, at the cost of its seal's row and
-     * members, once.
+     * Ids are read 500 to a statement.
      *
      * @return void
      */
@@ -192,9 +176,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * The tombstones are read on the storage connection's writer, joining the
-     * members to the entries, then the seal and its members, so a lagging
-     * replica never reads a pruned entry as present.
+     * Tombstones are read on the storage writer, never a lagging replica.
      *
      * @return void
      */
@@ -230,8 +212,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * Delete the entry outside retention, keeping its seal and its member, and
-     * recording no prune of it.
+     * Delete the entry outside retention, recording no prune of it.
      *
      * @param  string  $id
      * @return void
@@ -242,8 +223,7 @@ final class PruneTombstonesTest extends TestCase
     }
 
     /**
-     * The number of statements the storage connection runs while the work runs,
-     * and the ids the work answers.
+     * Count the storage connection's statements while the work runs.
      *
      * @param  \Closure(): list<string>  $work
      * @return array{0: int, 1: list<string>}

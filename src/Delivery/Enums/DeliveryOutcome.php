@@ -5,9 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Delivery\Enums;
 
 /**
- * How one attempt to deliver an outbox row's record to every destination of the
- * store ended: every destination has it, at least one does not yet, or the
- * drain lost its claim on the row part way and stopped.
+ * How one attempt to deliver an outbox row's record to every destination ended.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -10,10 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationRange;
 
 /**
- * Unit tests for the range of seals one verification covers: only the whole log
- * is complete, each end defaults to the end of the chain, and a range is
- * validated against the head the run observed, with the messages the verify
- * command prints.
+ * Unit tests for the range of seals one verification covers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -81,8 +78,7 @@ final class VerificationRangeTest extends TestCase
     }
 
     /**
-     * A range may end at the head and may hold one seal: neither is refused,
-     * which protects against off-by-one mutations of either comparison.
+     * A range may end at the head and may hold one seal.
      *
      * @return void
      */
@@ -122,8 +118,7 @@ final class VerificationRangeTest extends TestCase
 
     /**
      * A first seal beyond the head, with no last seal given, is refused naming
-     * the head, rather than as a first seal after a last one the caller never
-     * gave.
+     * the head.
      *
      * @return void
      */

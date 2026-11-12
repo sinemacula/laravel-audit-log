@@ -47,14 +47,7 @@ use Tests\Fixtures\Querying\ClosurePolicy;
 use Tests\TestCase;
 
 /**
- * Feature tests for the writer of the records of the package's own reads: the
- * viewer's record in the `audit` category, fail-closed whatever the failure
- * mode, its disclosure attachment, the tenant of a scope of exactly one or
- * explicitly none, its evidence kept exactly or the read refused, a failed
- * write spilled with its attachment, reported once and refused, a committed
- * outbox row as the acknowledgement, the acknowledged record returned, and a
- * store that cannot keep it, a write never acknowledged and a transaction the
- * policy opened each refusing the read.
+ * Feature tests for the fail-closed recorder of the package's own reads.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,8 +72,7 @@ final class AccessRecorderTest extends TestCase
     private ?RecordingExceptionHandler $reporter = null;
 
     /**
-     * Bind the read path, report to a recording handler, and capture every line
-     * logged.
+     * Bind the read path, report to a recording handler and capture logs.
      *
      * @return void
      */
@@ -98,8 +90,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, and put the entries table
-     * back.
+     * Roll back any open transaction and restore the entries table.
      *
      * @return void
      */
@@ -118,9 +109,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * The record is the viewer's, by its reference, whoever a contributor would
-     * name, under the read's code, in the `audit` category, with the evidence's
-     * properties in their order and its outcome.
+     * The record is the viewer's, in the `audit` category, with the evidence.
      *
      * @return void
      */
@@ -177,9 +166,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * The record is fail-closed whatever the failure mode: under `report`,
-     * where an application's record would go on, a failed write refuses the
-     * read as under `throw`.
+     * Under either failure mode, a failed write refuses the read.
      *
      * @param  string  $mode
      * @return void
@@ -198,9 +185,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * The record carries a disclosure attachment holding the read's normalised
-     * filters, its whole scope and the id and HMAC of each entry it showed, in
-     * the order shown, described by the signed descriptor.
+     * The attachment holds the filters, scope and each returned id and HMAC.
      *
      * @return void
      */
@@ -232,9 +217,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * The disclosure attachment keeps the owner whose data the read's entries
-     * hold among its normalised filters, and the record's own properties hold
-     * only the keyed fingerprint of them, never the owner.
+     * The attachment holds the owner; the record only its keyed fingerprint.
      *
      * @return void
      */
@@ -267,8 +250,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * Rows of `[scope]`: every scope that is not exactly one tenant, and no
-     * scope at all, as a policy that failed gives.
+     * Rows of `[scope]`: every scope but exactly one tenant, and none.
      *
      * @return iterable<string, array{0: ?\SineMacula\Laravel\AuditLog\Access\AccessScope}>
      */
@@ -284,9 +266,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * Any other scope records the read in explicitly no tenant, even with a
-     * contributor that fills the tenant of every record, which an application's
-     * record does take.
+     * Any other scope records no tenant, even with an ambient one contributed.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @return void
@@ -309,9 +289,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * A redaction key that names an evidence property would store the record
-     * without that evidence, so the read is refused as altering its evidence,
-     * before anything is written, spilled or reported.
+     * Redacting an evidence property by configuration refuses the read.
      *
      * @return void
      */
@@ -331,8 +309,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * A failed write is spilled, reported once as the store's sanitised
-     * failure, and refuses the read as unrecorded, carrying nothing of it.
+     * A failed write is spilled, reported once, and refuses the read.
      *
      * @return void
      */
@@ -350,8 +327,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * The spilled record is the whole bundle, its disclosure attachment
-     * included, so a replay restores both.
+     * A spilled read record keeps its disclosure attachment.
      *
      * @return void
      */
@@ -369,9 +345,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * In outbox mode the committed outbox row is the acknowledgement: the
-     * finalised record is returned once it is inserted, before any drain stores
-     * it.
+     * In outbox mode the committed outbox row acknowledges the record.
      *
      * @return void
      */
@@ -386,8 +360,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * Rows of `[delivery mode]`: the store writes the record, or the outbox
-     * does on the storage connection.
+     * Rows of `[delivery mode]`: the store or the outbox.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -400,11 +373,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * A contributor that leaves a transaction open on the acknowledging
-     * connection, after the check made before the write, has the record
-     * inserted inside it: that acknowledgement could still roll back, so it is
-     * never accepted, and the read is refused naming the connection, reported
-     * once. Once the transaction rolls back, nothing of the read is left.
+     * An acknowledgement that could still roll back refuses the read.
      *
      * @param  string  $mode
      * @return void
@@ -441,9 +410,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * The finalised record returned is the one the store acknowledged: its id,
-     * recorded time, key and HMAC are the stored row's, and it carries its
-     * attachment.
+     * The returned record is the stored row, with its attachment.
      *
      * @return void
      */
@@ -457,8 +424,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * A record without an artifact, as a failed publication's, is written and
-     * returned with no attachment.
+     * A record without a manifest is written and returned with no attachment.
      *
      * @return void
      */
@@ -473,9 +439,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * In sync mode a store that does not say a return is durable cannot keep
-     * the record fail-closed, so the delivery refuses it, the refusal is
-     * reported once, and the read is refused as unrecorded.
+     * In sync mode a store that is not durable refuses the read.
      *
      * @return void
      */
@@ -493,9 +457,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * A write that returns without the delivery acknowledging it, whatever let
-     * it, is never taken as written: the refusal is reported once and the read
-     * is refused as unrecorded.
+     * A write the delivery never acknowledges refuses the read.
      *
      * @return void
      */
@@ -527,8 +489,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * A reporter that fails is ignored: the read is refused as unrecorded all
-     * the same.
+     * A failing reporter is ignored and the read is still refused.
      *
      * @return void
      */
@@ -542,10 +503,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * A policy that opens a transaction on the storage connection, after the
-     * gate let the read in, has the read refused just before its record is
-     * written: nothing is returned, and once the transaction rolls back no
-     * record of the read is left.
+     * A transaction opened by the policy refuses the read before the write.
      *
      * @return void
      */
@@ -587,9 +545,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * Record a page read by the viewer as the outcome with the reason, under
-     * every tenant, or no scope for a failure, showing the two returned entries
-     * when it succeeded, and return the acknowledged record.
+     * Record a page read as the outcome, and return the acknowledged record.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
      * @param  ?string  $reason
@@ -603,9 +559,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * Record a page read by the viewer under the scope and the filters, as the
-     * outcome with the reason, showing the two returned entries when it
-     * succeeded, and return the acknowledged record.
+     * Record a page read under the scope and filters, and return the record.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -646,8 +600,7 @@ final class AccessRecorderTest extends TestCase
     }
 
     /**
-     * Bind a registry of the default contributors and the one given, as an
-     * application registers it while it boots, and return it.
+     * Bind a registry of the default contributors plus the one given.
      *
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\ContextContributor>  $contributor
      * @return \SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry

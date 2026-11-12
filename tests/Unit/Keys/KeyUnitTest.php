@@ -12,9 +12,8 @@ use SineMacula\Laravel\AuditLog\Keys\KeyUnit;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for a key unit: the owner, the tenant and the category it keeps,
- * its digest as the key rows store it, a tenantless unit apart, and the
- * categories it refuses.
+ * Unit tests for a key unit: what it keeps, its digest and the categories it
+ * refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

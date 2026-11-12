@@ -7,17 +7,11 @@ namespace SineMacula\Laravel\AuditLog\Delivery;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 
 /**
- * The tally of one replay: the records replayed, those a dry run would replay,
- * those retention has already pruned, which are never stored again, those the
- * store or a destination did not take, those another drain has in hand, and the
- * lines skipped, counted apart by why, since an altered record is never to be
- * confused with one whose key was removed.
+ * The tally of one replay, skipped lines counted apart by why, with a bounded
+ * list of events.
  *
- * It also holds a bounded list of what happened, one event per outcome, saying
- * where, what and which record. An event holds a record's id only when that id
- * is a lower-case UUID, and the class of a failure, and nothing else, so a
- * console never reaches what a record held and hostile bytes never reach a
- * console.
+ * An event holds a record's id only when it is a lower-case UUID, so hostile
+ * bytes never reach a console.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,16 +23,16 @@ final class ReplayResult
     /** @var int The most events listed; the rest are only counted. */
     public const int MAX_EVENTS = 1000;
 
-    /** @var string A UUID in the one form every record id takes. */
+    /** @var string The one form every record id takes. */
     private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
-    /** @var int Records the store has, or every destination has, because of this replay. */
+    /** @var int Records the store, or every destination, has because of this replay. */
     private int $replayed = 0;
 
     /** @var int Records a dry run found it would replay. */
     private int $wouldReplay = 0;
 
-    /** @var int Records retention has already pruned, which are not stored again, a dry run's included. */
+    /** @var int Records retention already pruned, a dry run's included. */
     private int $pruned = 0;
 
     /** @var int Records the store refused, or a drain could not deliver this time. */
@@ -130,11 +124,8 @@ final class ReplayResult
     }
 
     /**
-     * Map a drain's tally across: a row delivered is replayed; a row whose
-     * record was pruned is pruned; a row failed, or released for a later
-     * attempt because a destination failed again, is one this replay did not
-     * deliver; and a row another drain took over or claimed first is that
-     * drain's. A drain does not say which row ended how, so it lists no event.
+     * Add a drain's tally: delivered rows are replayed, failed or retried ones
+     * failed, and taken over or missed ones deferred; it lists no event.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\DrainResult  $drain
      * @return void
@@ -198,8 +189,7 @@ final class ReplayResult
     }
 
     /**
-     * The lines skipped, by the value of the failure that refused each, in the
-     * order each failure was first met.
+     * The lines skipped, by failure value, in the order each was first met.
      *
      * @return array<string, int>
      */
@@ -209,9 +199,8 @@ final class ReplayResult
     }
 
     /**
-     * What happened, oldest first, up to the bound: where, then the outcome,
-     * then the record's id when it has a printable one, then the class of a
-     * failure.
+     * What happened, oldest first, up to the bound: where, the outcome, a
+     * printable id and a failure's class.
      *
      * @return list<string>
      */
@@ -231,10 +220,8 @@ final class ReplayResult
     }
 
     /**
-     * Whether any line was skipped or any record failed, which is what makes a
-     * replay unsuccessful: a dry run counts the lines it would skip too, a row
-     * another drain has in hand is still to come, and a pruned record is
-     * complete.
+     * Whether any line was skipped or any record failed; a deferred row is
+     * still to come and a pruned record is complete.
      *
      * @return bool
      */

@@ -10,8 +10,7 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerification;
 
 /**
- * Unit tests for the result of an export's verification: it keeps each field as
- * given, and is verified only when nothing was found.
+ * Unit tests for the result of an export's verification.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,8 +24,7 @@ final class ExportVerificationTest extends TestCase
     private const string ENTRY_ID = '01932b4e-a000-7000-8000-000000000001';
 
     /**
-     * A verification that found nothing is verified, and one that found
-     * anything, even one finding, is not.
+     * A verification is verified only when it found nothing.
      *
      * @return void
      */
@@ -38,8 +36,7 @@ final class ExportVerificationTest extends TestCase
     }
 
     /**
-     * The entry's id, the line count and the findings are kept as given, in
-     * order.
+     * The entry's id, line count and findings are kept as given, in order.
      *
      * @return void
      */

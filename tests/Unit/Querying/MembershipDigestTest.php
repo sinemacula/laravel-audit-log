@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Querying\MembershipDigest;
 
 /**
- * Unit tests for the streaming membership digest: the SHA-256 of each id and a
- * line feed in the order given, the digest of the empty set, the order bound
- * into it, and a digest taken once.
+ * Unit tests for the streaming membership digest.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,9 +26,7 @@ final class MembershipDigestTest extends TestCase
     private const string SECOND = '01932b4e-a000-7000-8000-000000000002';
 
     /**
-     * The digest is the lower-case hex SHA-256 of each id followed by a line
-     * feed, in the order the ids were added, so an auditor recomputes it from
-     * the file's ids alone.
+     * The digest is hex SHA-256 of each id and a line feed, in the order added.
      *
      * @return void
      */
@@ -55,8 +51,7 @@ final class MembershipDigestTest extends TestCase
     }
 
     /**
-     * The same ids in another order digest differently, so the order of the
-     * file is bound.
+     * The same ids in another order digest differently.
      *
      * @return void
      */
@@ -74,8 +69,7 @@ final class MembershipDigestTest extends TestCase
     }
 
     /**
-     * The digest is taken once and kept, so asking again gives the same digest
-     * rather than the digest of nothing.
+     * The digest is taken once and kept, never recomputed over nothing.
      *
      * @return void
      */
@@ -92,8 +86,7 @@ final class MembershipDigestTest extends TestCase
     }
 
     /**
-     * An id added once the digest is taken is refused, since it could never be
-     * part of it.
+     * An id added after the digest is refused.
      *
      * @return void
      */

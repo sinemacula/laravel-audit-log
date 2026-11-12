@@ -13,18 +13,10 @@ use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 
 /**
- * Where an import batch stands in the lifecycle journal: the `import_started`
- * row that names it, if any, and its `import_finished` row, if any, read inside
- * a lifecycle transaction once its replay has verified the chain to its head,
- * so no other operation journals the batch between the read and what the caller
- * appends.
+ * Where an import batch stands in the lifecycle journal, read inside a
+ * lifecycle transaction so no other operation journals it meanwhile.
  *
- * The rows of each kind are read by kind and time, from the time the batch
- * started, which no row of its import precedes, a page at a time in sequence
- * order, by the kind's index; each row read must verify under the key it names
- * and hold the payload its digest signs, or the operation fails closed with a
- * `JournalBrokenException`. The payload's `batch_id` names the batch, so what
- * is read grows with the imports started and finished since the batch started,
+ * Reads start at the batch's start time, so they grow with recent imports,
  * never with the rest of the journal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -44,13 +36,13 @@ final readonly class ImportJournal
      */
     public function __construct(
 
-        /** The signer each row read is verified with. */
+        /** Verifies each row read. */
         private JournalSigner $signer,
     ) {}
 
     /**
-     * The batch's start row, or `null` when no `import_started` names it, and
-     * its finish row with its decoded payload, or `null` while it is open.
+     * The batch's start row and its finish row with payload, each `null` when
+     * absent.
      *
      * @formatter:off
      *
@@ -81,8 +73,7 @@ final readonly class ImportJournal
     }
 
     /**
-     * The first row of the kind since the time given whose payload names the
-     * batch, with its decoded payload, or `null` when none does.
+     * The first row of the kind since `$since` whose payload names the batch.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -124,8 +115,7 @@ final readonly class ImportJournal
     }
 
     /**
-     * The stored row and its decoded payload, once its signature and its
-     * payload's digest verify.
+     * The stored row and its decoded payload, once both verify.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

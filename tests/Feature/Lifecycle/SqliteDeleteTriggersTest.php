@@ -16,10 +16,7 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Feature tests for the delete triggers a prune drops and recreates on SQLite:
- * the text it recreates is the storage note's, word for word; only the triggers
- * installed are dropped and created again; a rollback restores them; and on any
- * other engine nothing runs.
+ * Feature tests for the delete triggers a prune drops and recreates on SQLite.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,9 +56,7 @@ final class SqliteDeleteTriggersTest extends TestCase
     }
 
     /**
-     * The text recreated for the entries and the artifacts is the storage
-     * note's text of their delete triggers, in the triggers block and in the
-     * prune block alike.
+     * The recreated trigger text is the storage note's, word for word.
      *
      * @return void
      */
@@ -83,9 +78,7 @@ final class SqliteDeleteTriggersTest extends TestCase
     }
 
     /**
-     * Only the delete triggers installed are dropped, named in the order of the
-     * entries and then the artifacts, and only those are created again; a
-     * trigger that is not installed is neither dropped nor created.
+     * Only the installed delete triggers are dropped and recreated.
      *
      * @return void
      */
@@ -115,8 +108,7 @@ final class SqliteDeleteTriggersTest extends TestCase
     }
 
     /**
-     * Both triggers dropped inside a transaction that rolls back are installed
-     * again, and refuse a delete as before.
+     * A rollback restores both triggers.
      *
      * @return void
      */
@@ -178,8 +170,8 @@ final class SqliteDeleteTriggersTest extends TestCase
     }
 
     /**
-     * The delete triggers of the entries and the artifacts installed on the
-     * connection, in that order.
+     * The delete triggers of the entries and the artifacts installed, in that
+     * order.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<string>
@@ -193,7 +185,7 @@ final class SqliteDeleteTriggersTest extends TestCase
     }
 
     /**
-     * The maintenance connection, when it is SQLite; the test is skipped on any
+     * The maintenance connection when it is SQLite; the test is skipped on any
      * other engine.
      *
      * @return \Illuminate\Database\Connection

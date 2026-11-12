@@ -27,11 +27,7 @@ use Tests\Fixtures\Stores\ThrowingLogHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the store that writes each record as a log line: one line
- * at `info` through the formatter, after the marker, with any line break a
- * formatter left escaped, on the channel named; that Monolog never expands the
- * line again; that a failed channel propagates; and that it is neither durable
- * nor joins a transaction, and keeps no attachment.
+ * Feature tests for the store that writes each record as a log line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -166,10 +162,8 @@ final class LogAuditStoreTest extends TestCase
     }
 
     /**
-     * Through a `LineFormatter` that allows inline line breaks, the marked line
-     * is written back as it was, one line, its escaped line feeds intact; the
-     * same formatter turns them back into real ones in a line that starts with
-     * a brace, which is what the marker prevents.
+     * Through a `LineFormatter` allowing inline line breaks the marked line
+     * stays one line; a line starting with a brace would not.
      *
      * @return void
      *
@@ -217,9 +211,8 @@ final class LogAuditStoreTest extends TestCase
     }
 
     /**
-     * A record value holding a formatter's token, with a shared log context
-     * built to forge a line and a field, leaves one physical line, a CEF line
-     * with its own fields and nothing of the shared context.
+     * A formatter token in a value and a forging shared log context leave one
+     * CEF line with only its own fields.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -279,9 +272,8 @@ final class LogAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[what a formatter left, what is written]`: each token the
-     * `LineFormatter` substitutes, a dotted one included, and a percent sign
-     * that opens none.
+     * Rows of `[what a formatter left, what is written]`: each `LineFormatter`
+     * token and a lone percent sign.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -479,9 +471,8 @@ final class LogAuditStoreTest extends TestCase
     }
 
     /**
-     * It keeps no attachment: its line is a projection of the record, which
-     * would lose a bulk operation's members, so it says so, whatever its
-     * formatter or channel.
+     * It keeps no attachment, since its line is a projection that would lose a
+     * bulk operation's members.
      *
      * @return void
      */

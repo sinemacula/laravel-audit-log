@@ -20,10 +20,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for what the database store says of itself: it is durable,
- * it keeps attachments, and it joins a transaction on the storage connection
- * and on no other, which follows the storage setting; and, through a read/write
- * split whose replica refuses every write, that its insert goes to the writer.
+ * Integration tests for what the database store reports of itself.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,8 +39,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     private const string AUDIT_CONNECTION = 'audit';
 
     /**
-     * Close the split's connections and delete their files, when a test made
-     * one.
+     * Close the split's connections and delete their files, if a test made one.
      *
      * @return void
      */
@@ -73,8 +69,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * It keeps attachments, whatever the configuration, and is the bound store
-     * the delivery finds keeping them by default.
+     * It keeps attachments and is the bound store delivery finds keeping them.
      *
      * @return void
      */
@@ -92,9 +87,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * With no storage connection configured, it joins a transaction on the
-     * default connection, which is the storage connection; and a record it
-     * stores inside one rolls back with it.
+     * With no storage connection set, it joins transactions on the default one.
      *
      * @return void
      *
@@ -122,9 +115,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * Rows of `[connection]`: names that are not the storage connection, one
-     * differing only in case and a selector Laravel would normalise among them,
-     * since the name is compared exactly.
+     * Rows of `[connection]`: names other than the storage connection.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -152,9 +143,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * With a storage connection configured, it joins a transaction on that
-     * connection, and no longer on the default one; an empty setting means the
-     * default connection again.
+     * It follows a configured storage connection; empty means the default.
      *
      * @return void
      */
@@ -174,8 +163,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * A malformed storage setting fails closed rather than naming a connection
-     * the store would not write to.
+     * A malformed storage setting is refused.
      *
      * @return void
      */
@@ -192,9 +180,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * Through a read/write split whose replica opens read-only, a write to the
-     * replica is refused, and the store's insert still succeeds, on the primary
-     * alone, because it goes to the writer.
+     * A replica refuses writes, yet the store's insert reaches the primary.
      *
      * @return void
      */
@@ -221,8 +207,7 @@ final class DatabaseAuditStoreCapabilitiesTest extends TestCase
     }
 
     /**
-     * Make a second connection to the worker's database, configured as the test
-     * connection is, the storage connection.
+     * Make a second connection to the worker's database the storage connection.
      *
      * @return void
      */

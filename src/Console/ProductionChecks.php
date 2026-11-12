@@ -11,17 +11,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 
 /**
- * The production checks of `audit-log:check`, made only when the application's
- * environment is `production`: the problem of the testing fake store bound as
- * the store, or as a destination of a stack, which keeps records in memory and
- * loses them; and the note on each of the seal, sweep and verification
- * schedules that is disabled, whose run must then be run elsewhere and watched
- * with `--freshness`.
- *
- * The note is no problem and leaves the exit code as it is, and a schedule that
- * is malformed is left to `config`. The checks read configuration and resolve
- * the bound store; they write nothing, and a store that cannot be resolved is
- * named by the class of what was thrown, never its message.
+ * The production checks of `audit-log:check`: the testing fake store bound in
+ * production, and notes on disabled seal, sweep and verification schedules.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,8 +54,7 @@ final readonly class ProductionChecks
     ) {}
 
     /**
-     * The production subject's checks, by its name, in production; otherwise
-     * none.
+     * The production subject's checks in production; otherwise none.
      *
      * @return array<string, list<\Closure(): list<string>>>
      */
@@ -74,9 +64,8 @@ final readonly class ProductionChecks
     }
 
     /**
-     * Every production problem: the testing fake store bound as the store, or
-     * as each destination of a stack that it is, named by the destination's id,
-     * or a store that cannot be resolved.
+     * Every production problem: the testing fake store bound as the store or a
+     * stack destination, by its id, or a store that cannot be resolved.
      *
      * @return list<string>
      */
@@ -94,9 +83,8 @@ final readonly class ProductionChecks
     }
 
     /**
-     * The notes, in production, which are no problems: one for each of the
-     * seal, sweep and verification schedules that is disabled, in that order,
-     * leaving out one that is malformed.
+     * The note on each disabled seal, sweep or verification schedule, in
+     * production; a malformed one is left to `config`.
      *
      * @return list<string>
      */

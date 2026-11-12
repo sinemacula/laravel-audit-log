@@ -39,12 +39,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for what the trail shows as it is read, through the read API
- * alone: a deleted user's history unchanged; an encrypted property sealed, and
- * an erased one erased through the field-reading seam; the reader of a
- * read/write split read, not the writer; a described page never showing a
- * concealed reason; and a bulk entry showing its manifest's descriptor and
- * nothing of its members.
+ * Feature tests for what the trail shows as it is read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,9 +86,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * A user's history reads exactly as before once the user is deleted: the
-     * entries keep the reference they were recorded with, and the deleted
-     * model, still holding its key, selects them as it did.
+     * A deleted user's history reads exactly as before.
      *
      * @return void
      */
@@ -119,9 +112,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * A property the application encrypted under its owner's key reads as
-     * `[ENCRYPTED]` through the sealed field reader, and its ciphertext is
-     * nowhere in the entry shown.
+     * An encrypted property reads as `[ENCRYPTED]`, its ciphertext nowhere.
      *
      * @return void
      */
@@ -140,12 +131,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * A field whose owner's keys were destroyed reads as `[ERASED]` through the
-     * field reader the application binds, under a scope that reveals the
-     * encrypted fields, from the row the store signed: a property and an
-     * address alike, each read at its own path in the page's one call; without
-     * the grant the same entry reads `[ENCRYPTED]` and the reader is never
-     * asked.
+     * An erased field reads `[ERASED]` through the bound field reader.
      *
      * @return void
      */
@@ -172,10 +158,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * The trail reads the reader of a read/write split, never the writer, so a
-     * read does not see its own writes until the replica has them: an entry
-     * written to the primary alone is not shown, and the same entry once on the
-     * replica is; each read's record is written to the primary.
+     * The trail reads the replica of a read/write split, never the writer.
      *
      * @return void
      */
@@ -200,8 +183,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * A described page never shows a reason its record concealed, in the entry
-     * or its description, while a reason that was not concealed is shown.
+     * A described page never shows a concealed reason.
      *
      * @return void
      */
@@ -222,10 +204,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * A bulk entry shows its manifest's descriptor, its kind, count and digest,
-     * and nothing else of the artifact: no member, no artifact id and no
-     * descriptor left among the properties, and the artifacts table is never
-     * read.
+     * A bulk entry shows its manifest's descriptor and nothing else.
      *
      * @return void
      */
@@ -276,9 +255,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * Record an approved invoice through a recorder that encrypts its card
-     * under the actor's key, by user 42, from an address encrypted as the
-     * `encrypt` mode stores it.
+     * Record an approved invoice with an encrypted card and address.
      *
      * @return void
      */
@@ -299,9 +276,7 @@ final class TrailReadingTest extends TestCase
     }
 
     /**
-     * Create the artifacts table on the primary and the replica of the split,
-     * as the shipped migration would with the storage connection on each, then
-     * put the split back as the storage connection.
+     * Create the artifacts table on both sides of the split.
      *
      * @return void
      */

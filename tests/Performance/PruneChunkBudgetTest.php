@@ -34,14 +34,9 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Statement-budget contract for a prune chunk: a chunk costs exactly its budget
- * of reads and writes whatever the entries it deletes, up to 500, and never
- * begins a savepoint or rolls back; each further 500 ids cost one more
- * statement per list of ids it names (the candidates, the outbox, the receipts
- * and the three deletes), never one per entry; a whole run over one entry and
- * over hundreds costs the same; and a dry run writes nothing. Every budget
- * counts statements, fixed or measured against another measured in the same
- * process, never a clock.
+ * Statement budget for a prune chunk: a fixed budget up to 500 entries, one
+ * more statement per id list for each further 500, never one per entry, and no
+ * write on a dry run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,7 +67,7 @@ final class PruneChunkBudgetTest extends PerformanceContractTestCase
     /** @var int The reads a run spends on a seal it pruned before: the seal, its members and its present members. */
     private const int EMPTIED_SEAL_READS = 3;
 
-    /** @var int The reads of a chunk of at most 500 ids, on every engine: the journal head reread and the rows after it, the candidates, the seal's prune records, the outbox, the receipts, the journal head the prune row is appended onto, and one of each engine's own (SQLite's trigger catalogue, MySQL's isolation level set, PostgreSQL's isolation level read). */
+    /** @var int The reads of a chunk of at most 500 ids on every engine, one of them the engine's own. */
     private const int CHUNK_READS = 8;
 
     /** @var int The writes of a chunk of at most 500 ids: the lock row, the three deletes and the prune row. */
@@ -83,8 +78,7 @@ final class PruneChunkBudgetTest extends PerformanceContractTestCase
 
     /**
      * Keep every category thirty days, bind the configured policy, seal at the
-     * test's time, and start the journal with a policy row, so every chunk
-     * advances from a head.
+     * test's time and journal a policy row for chunks to advance from.
      *
      * @return void
      */
@@ -101,8 +95,8 @@ final class PruneChunkBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A chunk of 100 entries and one of 500 cost the same statements, exactly
-     * the chunk's budget: its reads and its writes, and no savepoint.
+     * Chunks of 100 and 500 entries cost the same fixed budget, with no
+     * savepoint.
      *
      * @return void
      */
@@ -137,9 +131,8 @@ final class PruneChunkBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A whole run over a seal of one entry and one over a seal of 300 cost the
-     * same statements but for the reads of the first seal, which the second run
-     * walks again with nothing left in it: nothing is issued per entry.
+     * A run over a seal of one entry and one over 300 cost the same, but for
+     * rereading the emptied first seal: nothing is issued per entry.
      *
      * @return void
      */
@@ -210,11 +203,9 @@ final class PruneChunkBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * How many statements one chunk of every member of the seal costs, from its
-     * lock to its commit, how many entries it deleted, and how many of the
-     * statements wrote, once it is known to have begun no savepoint and rolled
-     * nothing back; the replay it starts from is verified first, outside the
-     * count.
+     * The statements of one chunk over every member of the seal, from lock to
+     * commit, with its deletions and writes; its replay is verified first,
+     * uncounted.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneSeal  $seal
      * @return array{0: int, 1: int, 2: int}
@@ -250,8 +241,8 @@ final class PruneChunkBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Insert the number of captured records past their retention, as the store
-     * writes them, twenty rows to a statement.
+     * Insert captured records past their retention as the store writes them,
+     * twenty rows to a statement.
      *
      * @param  int  $count
      * @return void

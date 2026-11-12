@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\RetentionConflictException;
 
 /**
- * Unit tests for the refusal of a policy that keeps a category for less than it
- * must be preserved: the message naming the policy's class, and the class a
- * caller catches it as.
+ * Unit tests for refusing a retention shorter than its preservation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionConflictException;
 final class RetentionConflictExceptionTest extends TestCase
 {
     /**
-     * The message names the policy's class and nothing of a category or a
-     * tenant, and the exception carries no other.
+     * The message names the policy's class, never a category or a tenant.
      *
      * @return void
      */
@@ -40,9 +37,7 @@ final class RetentionConflictExceptionTest extends TestCase
     }
 
     /**
-     * The conflict is an answer that came back wrong, so it is caught as an
-     * `UnexpectedValueException`, like every other malformed answer of a
-     * policy.
+     * A conflict is an `UnexpectedValueException`, like any malformed answer.
      *
      * @return void
      */

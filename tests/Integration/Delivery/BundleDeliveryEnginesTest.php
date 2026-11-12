@@ -44,15 +44,9 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
- * Integration tests for bundles, records with their attachment, delivered on
- * the engine the suite runs against: an outbox row drained to one entry and one
- * artifact, whether the row was written inside the host's transaction on the
- * outbox connection or at the commit of one on another; a bundle a real failed
- * write spilled replays whole; two replays racing one bundle leave one entry
- * and one artifact; a drain killed between the store and the receipt
- * redelivers without a duplicate; a destination that keeps no attachments
- * keeps the row; and each receipt follows its destination's write. On SQLite,
- * MySQL and PostgreSQL alike.
+ * Integration tests for bundles, records with their attachment, delivered
+ * through the outbox, spill replay and drain recovery on SQLite, MySQL and
+ * PostgreSQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -87,10 +81,10 @@ final class BundleDeliveryEnginesTest extends TestCase
     /** @var string The gate that starts the racing child. */
     private const string START = 'start';
 
-    /** @var int How long the first replay holds its transaction open once the second has started, in microseconds. */
+    /** @var int How long the first replay holds its transaction once the second has started, in microseconds. */
     private const int HOLD_MICROSECONDS = 1000000;
 
-    /** @var float The least time, in seconds, the second replay must have waited to show it waited on the first. */
+    /** @var float The least wait, in seconds, that shows the second replay waited on the first. */
     private const float LEAST_WAIT_SECONDS = 0.5;
 
     /** @var int The members of every bundle. */
@@ -100,7 +94,7 @@ final class BundleDeliveryEnginesTest extends TestCase
     private array $steps = [];
 
     /**
-     * Stop the clock and keep what a report would say out of the output.
+     * Stop the clock and keep report output quiet.
      *
      * @return void
      */
@@ -115,9 +109,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a failed test left open, undo what the test
-     * changed, put the clock back, and remove what the children shared once the
-     * migrations have rolled back.
+     * Roll back any open transaction, undo the test's changes, reset the clock,
+     * and remove the children's shared files after the migrations roll back.
      *
      * @return void
      */
@@ -141,9 +134,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * A bundle written to the outbox, encrypted as its whole envelope, is
-     * drained to one entry, which verifies, and one artifact, whose members
-     * open to the manifest's canonical form; the row goes.
+     * An encrypted outbox bundle is drained to one verifying entry and one
+     * artifact matching the manifest, and the row goes.
      *
      * @return void
      */
@@ -166,9 +158,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * A bundle written inside the host's transaction on the outbox connection
-     * goes with it: a rollback leaves no row, and a commit keeps the row, which
-     * is then drained whole.
+     * A bundle written on the outbox connection inside the host's transaction
+     * is kept on commit and dropped on rollback.
      *
      * @return void
      */
@@ -201,10 +192,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * With the outbox on a connection of its own, a bundle recorded inside a
-     * host's transaction on another waits for its commit: no row while it is
-     * open or once it rolls back, and a row once it commits, which is then
-     * drained whole.
+     * With the outbox on its own connection, a bundle recorded in a host
+     * transaction on another is written only when that commits.
      *
      * @return void
      */
@@ -240,10 +229,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * A bundle whose write the engine really refused, its entry's insert
-     * failing after its artifact's inside one transaction, leaves neither row
-     * and one line in the documented channel's file, which replays to one entry
-     * and one artifact; a second replay adds nothing.
+     * A bundle whose real write failed spills one line that replays to one
+     * entry and one artifact; a second replay adds nothing.
      *
      * @return void
      */
@@ -271,12 +258,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * Two replays of one spilled bundle race, each in a process and on a
-     * connection of its own: the first holds its rows uncommitted inside its
-     * lifecycle transaction, the second waits on the lifecycle lock that
-     * transaction holds, or on SQLite on the file's one write lock, and, once
-     * both of the first's rows are committed, finds the bundle stored already,
-     * so both are replayed and one entry and one artifact are left.
+     * Two concurrent replays of one spilled bundle leave one entry and one
+     * artifact, the second waiting on the first's lock.
      *
      * @return void
      */
@@ -304,7 +287,7 @@ final class BundleDeliveryEnginesTest extends TestCase
             }
 
             // Both rows are written and uncommitted: let the second replay
-            // start, and hold them a while before the transaction commits
+            // start, and hold them before committing
             $held = true;
 
             $this->openGate(self::START);
@@ -329,12 +312,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * A drain killed after a destination that joins no transaction stored the
-     * bundle, both of its rows committed, and before its receipt was marked
-     * delivered, leaves the row and both rows; once the lease has passed the
-     * next drain hands the destination the bundle again, which the database
-     * finds stored already, so one entry and one artifact are left and the
-     * receipt is delivered.
+     * A drain killed between storing a bundle and marking its receipt
+     * redelivers after the lease without a duplicate.
      *
      * @return void
      */
@@ -342,7 +321,7 @@ final class BundleDeliveryEnginesTest extends TestCase
     {
         $database = app(DatabaseAuditStore::class);
 
-        $this->bindStore($this->storeKeepingAttachments(function (FinalisedRecord $record) use ($database): void {
+        app()->instance(AuditStore::class, $this->storeKeepingAttachments(function (FinalisedRecord $record) use ($database): void {
             $this->appendToChildFile(self::CALLS, 'database');
 
             $database->store($record);
@@ -372,14 +351,13 @@ final class BundleDeliveryEnginesTest extends TestCase
 
     /**
      * A drain killed inside the transaction a database destination shares with
-     * its receipt, after both inserts and before the receipt, leaves neither
-     * row; the next drain stores the bundle once.
+     * its receipt leaves neither row; the next drain stores the bundle once.
      *
      * @return void
      */
     public function testADrainKilledInsideTheSharedTransactionLeavesNeitherRow(): void
     {
-        $this->bindStore(app(DatabaseAuditStore::class));
+        app()->instance(AuditStore::class, app(DatabaseAuditStore::class));
 
         $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled(self::MEMBERS)));
 
@@ -400,16 +378,14 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * A stack whose log destination keeps no attachments keeps the bundle's
-     * row: retried with the refusal's class while the database has both rows,
-     * then failed and kept at its last attempt, the database never called
-     * again; a replay to the database alone then removes it.
+     * A stack whose log destination keeps no attachments fails and keeps the
+     * bundle's row, and a replay to the database alone removes it.
      *
      * @return void
      */
     public function testADrainToAStoreKeepingNoAttachmentsKeepsTheRow(): void
     {
-        $this->bindStore(new StackAuditStore([
+        app()->instance(AuditStore::class, new StackAuditStore([
             'database' => app(DatabaseAuditStore::class),
             'log'      => new LogAuditStore(app(LogManager::class), new NdjsonFormatter, 'null'),
         ]));
@@ -434,7 +410,7 @@ final class BundleDeliveryEnginesTest extends TestCase
         self::assertSame(1, $this->entryCount());
         self::assertSame(1, $this->artifactCount());
 
-        $this->bindStore(new StackAuditStore(['database' => app(DatabaseAuditStore::class)]));
+        app()->instance(AuditStore::class, new StackAuditStore(['database' => app(DatabaseAuditStore::class)]));
 
         self::assertSame(1, app(Replayer::class)->outbox(false)->replayed());
 
@@ -443,10 +419,7 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * Each destination's receipt is marked delivered only after its own write:
-     * the database's after its artifact and its entry, which its transaction
-     * holds when the receipt is written, and the next destination's after it
-     * was handed the bundle.
+     * Each destination's receipt is marked delivered only after its own write.
      *
      * @return void
      */
@@ -457,7 +430,7 @@ final class BundleDeliveryEnginesTest extends TestCase
             $this->steps[] = 'call other';
         });
 
-        $this->bindStore(new StackAuditStore(['database' => app(DatabaseAuditStore::class), 'other' => $other]));
+        app()->instance(AuditStore::class, new StackAuditStore(['database' => app(DatabaseAuditStore::class), 'other' => $other]));
 
         $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled(self::MEMBERS)));
 
@@ -499,8 +472,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * Deliver a bulk record as the recorder does, with the timing given and no
-     * connection named, and give back its id.
+     * Deliver a bulk record as the recorder does, with the given timing and no
+     * connection, and return its id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @return string
@@ -515,9 +488,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * Assert the bundle is stored whole and once: one entry, which verifies,
-     * and one artifact under it, whose members open to the canonical form of
-     * the bundle's members.
+     * Assert the bundle is stored once: one verifying entry and one artifact
+     * whose members match the bundle's canonical form.
      *
      * @param  string  $id
      * @return void
@@ -539,18 +511,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * The rows of the artifacts table.
-     *
-     * @return int
-     */
-    private function artifactCount(): int
-    {
-        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
-    }
-
-    /**
-     * A store that keeps attachments and joins no transaction, handing each
-     * record to the work given.
+     * A store that keeps attachments, joins no transaction and hands each
+     * record to the work.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\FinalisedRecord): void  $work
      * @return \SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments
@@ -595,8 +557,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * Spill to the documented channel, in a file of the test's own, and give
-     * back its path.
+     * Spill to the documented channel in a file of the test's own, and return
+     * its path.
      *
      * @return string
      */
@@ -615,10 +577,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * On SQLite, move the moved outbox on again, to a file of its own. Two
-     * connections to one file share its one write lock, so a renewal on the
-     * outbox connection, inside the transaction the storage connection holds,
-     * would wait on itself; a separate database server has no such lock.
+     * On SQLite, give the moved outbox a file of its own: two connections to
+     * one file share its write lock, so a renewal would wait on itself.
      *
      * @return void
      */
@@ -637,17 +597,6 @@ final class BundleDeliveryEnginesTest extends TestCase
         DB::purge(self::MOVED_OUTBOX_CONNECTION);
 
         self::runMigration(self::OUTBOX_MIGRATION);
-    }
-
-    /**
-     * Bind the store.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
-     * @return void
-     */
-    private function bindStore(AuditStore $store): void
-    {
-        app()->instance(AuditStore::class, $store);
     }
 
     /**
@@ -693,7 +642,7 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * The spill line of the finalised bulk record: its whole bundle.
+     * The spill line of the finalised bulk record, holding its whole bundle.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return string
@@ -704,8 +653,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * The bundle version of the envelope an outbox payload holds, decrypted and
-     * decoded, or `null` when it holds none.
+     * The bundle version of the envelope in an outbox payload, or `null` when
+     * it holds none.
      *
      * @param  string  $payload
      * @return ?int
@@ -722,9 +671,8 @@ final class BundleDeliveryEnginesTest extends TestCase
     }
 
     /**
-     * What the statement does to a bundle's delivery: inserts its artifact,
-     * inserts its entry, or marks a destination's receipt delivered, by the
-     * destination's name; otherwise nothing.
+     * What the statement does to a bundle's delivery, by destination name, or
+     * `null`.
      *
      * @param  string  $query
      * @param  array<int, int|string|null>  $bindings
@@ -745,26 +693,5 @@ final class BundleDeliveryEnginesTest extends TestCase
             str_contains($query, EntrySettings::table())          => 'insert entry',
             default                                               => null,
         };
-    }
-
-    /**
-     * The rows of the table whose column holds the id, counted over the
-     * connection's own PDO, so the count is seen inside its open transaction
-     * and is not itself a statement the connection reports.
-     *
-     * @param  \Illuminate\Database\Connection  $connection
-     * @param  string  $table
-     * @param  string  $column
-     * @param  string  $id
-     * @return int
-     */
-    private static function rawCount(Connection $connection, string $table, string $column, string $id): int
-    {
-        $grammar   = $connection->getQueryGrammar();
-        $statement = $connection->getPdo()->prepare(sprintf('select count(*) from %s where %s = ?', $grammar->wrapTable($table), $grammar->wrap($column)));
-
-        $statement->execute([$id]);
-
-        return (int) $statement->fetchColumn();
     }
 }

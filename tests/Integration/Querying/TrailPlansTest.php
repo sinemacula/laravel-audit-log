@@ -23,35 +23,8 @@ use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
 /**
- * Integration tests for the plans each engine chooses for a page of the trail,
- * on whichever engine the suite runs against: a read narrowed on one dimension
- * reads that dimension's index in the page's order, `occurred_at` then `id`,
- * both descending, and sorts nothing, the first page and a page after a cursor
- * alike, which reads the index from the cursor's time; a read that combines
- * conditions uses an index of the table and filters the rest of its conditions
- * row by row. A read of the entries holding an owner's data seeks the key uses
- * through one of their indexes and never reads them whole.
- *
- * Each plan is of the very statement the trail runs: a page of 50 is read
- * through `AuditTrail` for a viewer the policy gives the scope, after a page
- * read the same way when a cursor is wanted, and its one select of the entries
- * table is captured as the engine ran it, with its bindings, so a change to the
- * columns, the order, the limit or the clauses the reader adds is a change to
- * what is explained. The plan is the engine's own: `EXPLAIN QUERY PLAN` on
- * SQLite, `EXPLAIN
- * FORMAT=JSON` on MySQL and `EXPLAIN (FORMAT JSON)` on PostgreSQL, read after
- * 5,000 rows over 20 tenants, 10 actors and 30 codes are stored in the order
- * they occurred and the table is analysed, so the planner chooses from the
- * table's own statistics.
- *
- * The table is that large because MySQL reads a page of the whole trail by its
- * index only when the table spans more pages of storage than the page reads
- * rows: 2,000 rows fit in 32 pages, so MySQL scans and sorts them for a limit
- * of 51, which it does not do for a trail of any real size. 5,000 rows span
- * well over a hundred pages.
- *
- * Marked `#[CoversNothing]` because a migration's indexes and the planner's
- * choices are not code PHPUnit can attribute.
+ * Integration tests for the plans each engine chooses for a trail page; covers
+ * nothing, as planner choices are not code PHPUnit attributes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,7 +36,7 @@ final class TrailPlansTest extends TestCase
 {
     use ReadsTheTrail;
 
-    /** @var int How many rows are stored. */
+    /** @var int How many rows are stored; with fewer, MySQL scans and sorts. */
     private const int ROWS = 5000;
 
     /** @var int How many entries a page shows; the read asks for one more. */
@@ -72,7 +45,7 @@ final class TrailPlansTest extends TestCase
     /** @var int The instant the first row occurred at, as a Unix timestamp: 2026-11-01T00:00:00Z. */
     private const int FIRST = 1793491200;
 
-    /** @var int The seed the rows' actors, subjects, principals and codes are drawn with, so every run stores the same rows. */
+    /** @var int The seed the rows are drawn with, so every run stores the same rows. */
     private const int SEED = 2026;
 
     /** @var array<string, array{0: int, 1: string}> How many of each reference the rows are spread over, with the reference's type. */
@@ -91,7 +64,7 @@ final class TrailPlansTest extends TestCase
     /** @var int The owner whose entries the read of an owner's data finds. */
     private const int OWNER = 7;
 
-    /** @var list<int> The numbers of the owner's rows modulo the owners: the first of each owner's two, and the one seven times which plus three is the owner's. */
+    /** @var list<int> The numbers of the owner's rows, modulo the owners. */
     private const array OWNER_ROWS = [6, 429];
 
     /** @var list<string> The accesses of a table MySQL's plan names that seek it by a key value or a range of its index. */
@@ -124,8 +97,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * A page of one tenant's entries reads the tenant index, and the read is a
-     * full page with its look-ahead row.
+     * A tenant's page reads the tenant index, full with its look-ahead row.
      *
      * @return void
      */
@@ -139,8 +111,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * A page of one actor's entries, under a scope of every tenant, reads the
-     * actor index, and the read is a full page with its look-ahead row.
+     * An actor's page reads the actor index, full with its look-ahead row.
      *
      * @return void
      */
@@ -154,8 +125,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * A page of one code's entries, under a scope of every tenant, reads the
-     * event index, and the read is a full page with its look-ahead row.
+     * A code's page reads the event index, full with its look-ahead row.
      *
      * @return void
      */
@@ -169,10 +139,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * Rows of `[the scope, what narrows the trail, whether the page is read
-     * after a first one's cursor, the suffix of the index the read uses]`: each
-     * read narrowed on one dimension, the first page and a page after a
-     * cursor.
+     * Rows of `[scope, narrow, afterAPage, suffix]`: single-dimension reads.
      *
      * @formatter:off
      *
@@ -208,12 +175,8 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * A page narrowed on one dimension reads that dimension's own index in its
-     * order and is never sorted: MySQL uses no filesort, PostgreSQL has no
-     * `Sort` node and SQLite builds no temporary B-tree for the order, the page
-     * after a cursor included. A page after a cursor reads the index from the
-     * cursor's time, a range of it, never from the newest entry, filtering out
-     * every entry it has already shown.
+     * A single-dimension page reads its index in order without sorting, from
+     * the cursor's time when after one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
@@ -237,15 +200,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * A page of one actor's entries under a scope of three tenants and the
-     * entries of no tenant uses an index of the table, and returns only that
-     * actor's entries in those tenants.
-     *
-     * No index covers both the tenants and the actor, so the planner reads one
-     * index, the actor's, the tenant's over each pair, or the time's, and
-     * filters the rest of the conditions row by row: the read costs the rows
-     * that index matches, not the rows the page returns, and an engine may sort
-     * what it matched. That is the documented cost of a combined read.
+     * A multi-tenant actor read uses one index and filters the rest by row.
      *
      * @return void
      */
@@ -268,14 +223,8 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * A page of one code's entries under a scope of one tenant uses an index of
-     * the table, and returns only that code's entries in that tenant.
-     *
-     * Both the tenant index and the event index match, so the planner reads
-     * one, whichever its statistics make cheaper, and filters the other's
-     * conditions row by row; PostgreSQL may instead combine the two in a bitmap
-     * and sort the few rows both match. Either way the read costs the rows one
-     * index matches, not the rows the page returns.
+     * A code read under one tenant uses one index and filters the rest by row;
+     * PostgreSQL may combine both in a bitmap and sort.
      *
      * @return void
      */
@@ -292,15 +241,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * A page of the entries holding one owner's data seeks the key uses through
-     * one of their indexes, by the entry when the engine reads the entries in
-     * the page's order and probes each, or by the key when it starts from the
-     * owner's keys, and never reads them whole; the page holds exactly the
-     * owner's entries, newest first.
-     *
-     * The key uses hold two rows for each of the 5,000 entries, over a thousand
-     * owners, so the owner's ten entries are a sliver of them and a scan of the
-     * table costs every engine far more than a seek.
+     * An owner's-data read seeks the key uses through an index, never scans.
      *
      * @return void
      */
@@ -323,10 +264,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The one select of the entries table the trail runs for a page of 50, as
-     * the engine ran it with its bindings: read for a viewer the policy gives
-     * the scope, narrowed as given, and, when asked, after the cursor of a
-     * first page read the same way.
+     * The entries select the trail runs for a page of 50, with its bindings.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
@@ -362,8 +300,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The rows the statement returns, run again as it was run, each as an
-     * array.
+     * The rows the statement returns when run again, each as an array.
      *
      * @param  array{sql: string, bindings: array<array-key, scalar|null>}  $statement
      * @return list<array<string, scalar|null>>
@@ -375,10 +312,8 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The plan the engine chooses for the statement: the indexes it reads,
-     * whether it sorts, whether it reads an index from a bound on
-     * `occurred_at`, and the plan as the engine gave it, for a failure's
-     * message.
+     * The engine's plan: the indexes read, whether it sorts, whether it bounds
+     * `occurred_at`, and the raw plan.
      *
      * @param  array{sql: string, bindings: array<array-key, scalar|null>}  $statement
      * @return array{indexes: list<string>, sorted: bool, bounded: bool, text: string}
@@ -402,12 +337,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The plan MySQL or PostgreSQL gives as JSON: each index a node names, as
-     * MySQL's `key` or `index_name` or PostgreSQL's `Index Name`; whether a
-     * node sorts, as MySQL's `using_filesort` or a sort access, or a `Sort` or
-     * `Incremental Sort` node of PostgreSQL's; and whether a node reads an
-     * index from a bound on `occurred_at`, as a key part MySQL's range uses or
-     * a column PostgreSQL's `Index Cond` names.
+     * The plan facts from MySQL's or PostgreSQL's JSON plan.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -440,9 +370,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * Whether the node of a JSON plan reads an index from a bound on
-     * `occurred_at`: MySQL's `used_key_parts` naming it, or PostgreSQL's `Index
-     * Cond` naming it.
+     * Whether a JSON plan node reads an index from a bound on `occurred_at`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -459,10 +387,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The plan SQLite gives as the details of its steps: each index a step
-     * searches or scans, whether a step builds a temporary B-tree for the
-     * order, all of it or a part, and whether a step searches an index by a
-     * bound on `occurred_at`.
+     * The plan facts from SQLite's step details.
      *
      * @param  array<array-key, string>  $details
      * @return array{indexes: list<string>, sorted: bool, bounded: bool, text: string}
@@ -488,12 +413,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * How the statement's plan reads the table: whether a step seeks it through
-     * an index, by SQLite's `SEARCH`, a MySQL access of one key value or range,
-     * or a PostgreSQL index scan with a condition or bitmap scan; whether a
-     * step reads it whole, by SQLite's `SCAN`, MySQL's `ALL` or `index` access,
-     * or a PostgreSQL sequential scan or index scan with no condition; and the
-     * plan as the engine gave it, for a failure's message.
+     * Whether the plan seeks or scans the table, and the raw plan.
      *
      * @param  array{sql: string, bindings: array<array-key, scalar|null>}  $statement
      * @param  string  $table
@@ -530,9 +450,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * Whether the node of a MySQL or PostgreSQL plan that reads a table seeks
-     * it: a MySQL access of a key value or a range, or a PostgreSQL bitmap scan
-     * or index scan with a condition.
+     * Whether a MySQL or PostgreSQL plan node seeks its table by key or range.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -551,8 +469,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The JSON plan MySQL or PostgreSQL gives for the statement, decoded, and
-     * as the engine gave it.
+     * The decoded and raw JSON plan MySQL or PostgreSQL gives the statement.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -577,9 +494,8 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * Store a key for each owner and two key uses for each row, of the owners
-     * its number gives modulo the owners and seven times it plus three modulo
-     * the owners, which are never the same owner, then analyse both tables.
+     * Store a key per owner and two key uses per row, for owners n and 7n + 3
+     * modulo the owners, then analyse both tables.
      *
      * @return void
      */
@@ -645,10 +561,7 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The row of the number: the tenant its number gives, an actor, a subject,
-     * a principal and a code drawn from the seeded generator, and a time one
-     * second and a fraction after the row before, so the rows are stored in the
-     * order they occurred.
+     * The row of the number, drawn from the seeded generator, in time order.
      *
      * @param  int  $number
      * @param  \Random\Randomizer  $randomizer

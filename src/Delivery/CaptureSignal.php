@@ -5,16 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Delivery;
 
 /**
- * One capture's failure channel: how a record captured from an event says,
- * once, that it could not be written, to the capture that made it, including
- * when its write waits for a commit and runs long after the capture returned.
- *
- * The delivery marks it deferred before it queues the write, so the failure
- * path knows a failure fatal to an open transaction cannot be thrown to the
- * capture, which has already returned, and is reported instead. The first
- * failure is kept with whether it was fatal, and passed on once; any later one
- * changes nothing. The capture's callback contains its own failures, so one
- * that throws regardless stops nothing here.
+ * Tells the capture that made a record, once, that the record could not be
+ * written, even when the write ran at a later commit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,7 +18,7 @@ final class CaptureSignal
     /** @var bool Whether the write waits for a commit. */
     private bool $deferred = false;
 
-    /** @var ?string The class of the first failure, as `get_debug_type()` names it, or `null` while none has been signalled. */
+    /** @var ?string Class of the first failure, or `null` while none has been signalled. */
     private ?string $exceptionClass = null;
 
     /** @var bool Whether the first failure ended a transaction and is thrown to the capture. */
@@ -39,7 +31,7 @@ final class CaptureSignal
      */
     public function __construct(
 
-        /** What the capture does with the class of the first failure, once. */
+        /** Receives the class of the first failure, once. */
         #[\SensitiveParameter]
         private readonly \Closure $onFailure,
     ) {}
@@ -65,8 +57,8 @@ final class CaptureSignal
     }
 
     /**
-     * Keep the first failure, with whether it is fatal, and pass its class on
-     * to the capture once; a later failure changes nothing.
+     * Keep the first failure and pass its class to the capture once; a later
+     * failure changes nothing.
      *
      * @param  string  $exceptionClass
      * @param  bool  $fatal
@@ -84,8 +76,8 @@ final class CaptureSignal
         try {
             ($this->onFailure)($exceptionClass);
         } catch (\Throwable) {
-            // The capture's callback contains its own failures, and one that
-            // escapes regardless must not stop the failure path it was told by
+            // The capture's callback contains its own failures; one that
+            // escapes must not stop the failure path
         }
     }
 
@@ -100,8 +92,7 @@ final class CaptureSignal
     }
 
     /**
-     * Whether the first failure ended a transaction and is thrown to the
-     * capture.
+     * Whether the first failure is fatal and thrown to the capture.
      *
      * @return bool
      */

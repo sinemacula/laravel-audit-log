@@ -15,27 +15,8 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * `audit-log:prune`: deletes the entries retention no longer keeps, seal by
- * seal and chunk by chunk behind the lifecycle lock, journalling every
- * deletion, then records the run; with `--dry-run` it plans the run and writes
- * nothing, and with `--max-seconds` it stops between chunks once that many
- * seconds, from 60 to 86400, have passed, leaving the rest to the next run.
- *
- * It prints the run's id, how it ended, what it deleted from how many seals,
- * what a hold or a pending delivery kept, the seals it skipped by id, the
- * cursor the next run resumes after and how many seals remain, and with
- * `--dry-run` the plan per category and tenant pair and per seal; `--json`
- * writes the result as one JSON object instead. A plan names each tenant by the
- * first 12 hexadecimal characters of the SHA-256 of its canonical type and id,
- * never by the reference itself, as `audit-log:holds` never prints one. A run
- * whose record could not be written says so, since `audit-log:reconcile` writes
- * it from the journal. Nothing printed holds a value of an entry, a statement
- * or a binding.
- *
- * It exits 0 for a dry run and a complete or partial run, 1 for a failed run, a
- * run that skipped a seal it could not authenticate, and anything that stops
- * the command, which is named by its class alone, and 2 for a time budget it
- * refuses, before anything runs.
+ * `audit-log:prune`: deletes the entries retention no longer keeps, journalling
+ * each deletion; `--dry-run` only plans, and `--max-seconds` bounds the run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,8 +39,7 @@ final class PruneCommand extends Command
     protected $description = 'Prune the audit entries retention no longer keeps';
 
     /**
-     * Run the prune, or plan it, once the time budget is known to be well
-     * formed, then print what it did.
+     * Run or plan the prune, then print what it did.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @return int
@@ -140,9 +120,8 @@ final class PruneCommand extends Command
     }
 
     /**
-     * Print a dry run's plan: what it would delete from how many seals, each
-     * category and tenant pair, with its cut-off and the entries eligible under
-     * it, then each seal and the entries it would lose.
+     * Print a dry run's plan: the totals, each category and tenant pair with
+     * its cut-off, then each seal.
      *
      * @formatter:off
      *

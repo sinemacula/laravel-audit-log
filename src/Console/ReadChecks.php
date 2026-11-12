@@ -9,8 +9,7 @@ use SineMacula\Laravel\AuditLog\Querying\ReadSettings;
 
 /**
  * The read checks of `audit-log:check`: a reader for each read and export
- * setting, so one run reports every malformed setting. The checks read
- * configuration only, and print no setting's value.
+ * setting.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -20,13 +19,12 @@ use SineMacula\Laravel\AuditLog\Querying\ReadSettings;
 final class ReadChecks
 {
     /**
-     * Disallow instantiation; utility container only.
+     * Disallow instantiation.
      */
     private function __construct() {}
 
     /**
-     * A reader for each read and export setting, in the order the settings are
-     * listed; each throws when its setting is malformed.
+     * A reader for each read and export setting; each throws when malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

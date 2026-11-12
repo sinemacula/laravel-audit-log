@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Querying;
 
 /**
- * One page of the trail, newest first: the entries shown, at most the page
- * size, and the cursor that opens the next page when there is one. A page never
- * says how many entries there are in all.
+ * One page of the trail, newest first; it never says how many entries there are
+ * in all.
  *
  * @api
  *
@@ -45,8 +44,7 @@ final readonly class TrailPage
     }
 
     /**
-     * A page showing nothing, with no next page: a denied read's, or one whose
-     * filters no entry can match.
+     * A page showing nothing, with no next page.
      *
      * @param  int  $perPage
      * @return self

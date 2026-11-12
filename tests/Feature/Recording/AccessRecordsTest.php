@@ -25,11 +25,7 @@ use Tests\Unit\Stubs\StubAuthUser;
 use Tests\Unit\Stubs\StubDocument;
 
 /**
- * End-to-end tests for access records: a completed disclosure is recorded where
- * it happens, whether it came from a cache, a download or a list, with its
- * purpose and channel and never its content, while a denied attempt has a code
- * of its own and hydrating a model or passing an authorisation check records
- * nothing.
+ * End-to-end tests for recording disclosures and denied access.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -81,8 +77,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * A read served from a cache is still a disclosure, so each request records
-     * one, though only the first reached the source.
+     * A read served from a cache is still recorded on every request.
      *
      * @return void
      */
@@ -136,8 +131,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * A list result is one disclosure of the list it is, with how many rows it
-     * disclosed and not the rows.
+     * A list result is one disclosure with its row count, not its rows.
      *
      * @return void
      */
@@ -163,8 +157,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * A denied attempt is not a disclosure: it has a code of its own, through
-     * `event()`, and its outcome and reason.
+     * A denied attempt has its own code, outcome and reason through `event()`.
      *
      * @return void
      */
@@ -181,8 +174,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * Hydrating a model, which fires `retrieved`, is no evidence of disclosure
-     * and writes nothing.
+     * Hydrating a model, which fires `retrieved`, writes nothing.
      *
      * @return void
      */
@@ -202,8 +194,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * A successful authorisation check is permission, not disclosure, and
-     * writes nothing.
+     * A successful authorisation check writes nothing.
      *
      * @return void
      */
@@ -236,8 +227,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * A registered disclosure definition that retains the purpose is accepted,
-     * and the row has the definition's category and the purpose.
+     * A registered definition retaining the purpose stores it and its category.
      *
      * @return void
      */
@@ -254,8 +244,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * Where disclosure must wait for evidence, an access record can be fail
-     * closed: it is written at once inside a transaction.
+     * An access record can be fail closed, written at once in a transaction.
      *
      * @return void
      */
@@ -271,9 +260,7 @@ final class AccessRecordsTest extends TestCase
     }
 
     /**
-     * A failed fail-closed write reaches the caller at the call, inside the
-     * transaction, in time to stop the disclosure. A default record would only
-     * fail when the transaction commits, so it would fail this test.
+     * A failed fail-closed write throws at the call, before the disclosure.
      *
      * @return void
      */

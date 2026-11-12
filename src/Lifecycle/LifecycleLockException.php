@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 /**
- * Thrown when a lifecycle operation cannot take the lifecycle lock as the
- * protocol needs it: the lock's one row is missing, so its update would lock
- * nothing, or the maintenance connection's transactions do not run at `read
- * committed`, so a read after the lock could miss a row committed while it
- * waited. The operation is rolled back and never retried.
- *
- * Its message names no statement and no value of a row, and the package never
- * gives it another exception.
+ * Thrown when the lifecycle lock row is missing or the maintenance connection
+ * is not at `read committed`; never retried.
  *
  * @api
  *
@@ -32,8 +26,7 @@ final class LifecycleLockException extends \RuntimeException
     }
 
     /**
-     * The maintenance connection's transactions run at another isolation level
-     * than `read committed`.
+     * The maintenance connection's transactions are not at `read committed`.
      *
      * @param  string  $level
      * @return self

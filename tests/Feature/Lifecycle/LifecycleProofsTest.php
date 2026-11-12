@@ -40,18 +40,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests that prove the lifecycle end to end through
- * `AuditLog::lifecycle()` and the commands alone, as the package ships them
- * bound and registered: everything is kept forever by default and no prune is
- * scheduled; an invalid setting prunes nothing and `audit-log:check` names it;
- * two categories are pruned each by its own retention and the policy's version
- * is journalled once per change; the cut-off falls at the run's UTC midnight;
- * held and unsealed entries survive a prune that verification passes; the
- * holds projection rebuilt is the one the operations kept; no entry is ever
- * updated; overlapping holds each keep what they cover until both are
- * released; an edited journal row is found by `audit-log:verify`; an export
- * still verifies once every other entry is pruned; and a record that could not
- * be written is written by `audit-log:reconcile`.
+ * Feature tests that prove the lifecycle end to end through the facade and
+ * commands as shipped.
  *
  * Entries are stored through the database store, as the application's records
  * are, at the times each test chooses; everything after that goes through the
@@ -94,8 +84,7 @@ final class LifecycleProofsTest extends TestCase
 
     /**
      * Freeze the clock, name this installation's source and report to a
-     * recording handler. Nothing is bound or registered by hand: the provider's
-     * defaults and commands are what each test uses.
+     * recording handler.
      *
      * @return void
      */
@@ -114,8 +103,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, put the clock back and remove
-     * the files this test wrote.
+     * Roll back any open transaction, restore the clock and remove the files
+     * written.
      *
      * @return void
      */
@@ -142,9 +131,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * With the shipped settings everything is kept forever: a prune of entries
-     * long past any retention completes and deletes nothing, and the schedule
-     * holds no prune at all.
+     * The shipped settings keep everything forever and schedule no prune.
      *
      * @return void
      */
@@ -166,8 +153,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Rows of `[settings, the key the refusal names]`: a malformed retention,
-     * and a category kept for less than it must be preserved.
+     * Rows of `[settings, the key the refusal names]`.
      *
      * @return iterable<string, array{0: array<string, array<string, int>|int|string>, 1: string}>
      */
@@ -182,9 +168,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * An invalid retention setting prunes nothing: the run is refused before
-     * any delete, exits non-zero and is recorded as a failure, and
-     * `audit-log:check` names the setting and fails.
+     * An invalid retention setting prunes nothing, and `audit-log:check` names
+     * it.
      *
      * @param  array<string, array<string, int>|int|string>  $settings
      * @param  string  $key
@@ -216,10 +201,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Two categories in one seal are pruned each by its own retention, a
-     * category with none is kept forever, and the configured policy's version
-     * is journalled once: a second run under the same settings adds no policy
-     * row, and a change of the settings journals the new version.
+     * Two categories are pruned each by its own retention, and each policy
+     * version journalled once.
      *
      * @return void
      */
@@ -257,10 +240,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Under a frozen clock the cut-off is the run's UTC midnight less the
-     * retention: an entry a microsecond before it is pruned and one at it is
-     * kept, the same at the last microsecond of the day, and the next day's
-     * first run takes it.
+     * The cut-off is the run's UTC midnight less the retention.
      *
      * @return void
      */
@@ -290,9 +270,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * A held entry and an unsealed one survive the prune that takes the entry
-     * beside them, the run ends `partial`, and `audit-log:verify` then passes
-     * with the seal `pruned`.
+     * Held and unsealed entries survive a prune, and `audit-log:verify` then
+     * passes.
      *
      * @return void
      */
@@ -321,9 +300,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * The holds projection rebuilt from the journal holds exactly the rows the
-     * holds and releases kept as they went, and `audit-log:holds` lists the
-     * same active holds.
+     * The rebuilt holds projection equals the one kept live.
      *
      * @return void
      */
@@ -353,9 +330,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * No statement of a whole lifecycle, sealing, holds, a prune, a release, an
-     * import, a reconciliation and a verification, ever updates an entry or a
-     * journal row, or deletes a journal row, a seal or a member.
+     * No lifecycle statement ever updates an entry or journal row, or deletes
+     * from the journal or seals.
      *
      * @return void
      */
@@ -403,9 +379,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Two holds covering one entry each keep it: releasing one leaves it held
-     * by the other while the entry only the released one held is pruned, and
-     * releasing the second lets the next run take it.
+     * Overlapping holds each keep an entry until both are released.
      *
      * @return void
      */
@@ -449,9 +423,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * A journal row edited in the database, below the package, is a
-     * `journal_signature` finding of `audit-log:verify`, which fails, and every
-     * lifecycle operation then refuses to build on the broken chain.
+     * An edited journal row is found by `audit-log:verify` and every operation
+     * then refuses.
      *
      * @return void
      */
@@ -481,10 +454,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * An export's `audit_log.trail_exported` record is never pruned, so once
-     * every other entry, the exported ones included, is past retention and
-     * pruned, `audit-log:export --verify` still verifies the file, and
-     * `audit-log:verify` passes.
+     * An export still verifies once every other entry is pruned.
      *
      * @return void
      */
@@ -526,9 +496,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * A hold whose `audit_log.held` record could not be written stays placed,
-     * the command warns, and `audit-log:reconcile` writes the record from the
-     * journal, once.
+     * A missing `audit_log.held` record is written once by
+     * `audit-log:reconcile`.
      *
      * @return void
      */
@@ -559,8 +528,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Store a captured record with the fields given over its own, happening at
-     * the instant given and recorded at the time given, and return its id.
+     * Store a captured record with the fields given over its own and return its
+     * id.
      *
      * @param  string  $occurredAt
      * @param  array<string, ?string>  $fields
@@ -588,8 +557,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Place a hold through `audit-log:hold` with the options given, as the
-     * operator, and return its id.
+     * Place a hold through `audit-log:hold` as the operator and return its id.
      *
      * @param  array<string, bool|list<string>|string>  $options
      * @return string
@@ -605,9 +573,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Run `audit-log:verify --json` and return its exit code, the integrity of
-     * each segment, in order, and the first id of each finding of the run, by
-     * its finding.
+     * Run `audit-log:verify --json` and return its exit code, segment integrity
+     * and findings.
      *
      * @return array{exit: int, segments: list<string>, findings: array<string, ?string>}
      *
@@ -640,8 +607,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Run the command with `--json` and the parameters given, assert it exits
-     * as expected, and return the object it wrote.
+     * Run the command with `--json`, assert its exit code and return the object
+     * it wrote.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -668,8 +635,7 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Run the command with the parameters given and return its exit code and
-     * what it printed.
+     * Run the command and return its exit code and what it printed.
      *
      * @param  string  $command
      * @param  array<string, bool|list<string>|string>  $parameters
@@ -771,8 +737,8 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
-     * Where an export is written: a path of its own, which the test removes
-     * with the bundle beside it.
+     * A path of its own for an export, which the test removes with the bundle
+     * beside it.
      *
      * @return string
      */

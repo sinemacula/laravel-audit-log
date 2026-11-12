@@ -11,9 +11,9 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * A queued job that records one activity, optionally after signing a user in on
- * the `web` guard and leaving it signed in, or after failing itself and
- * carrying on, which are the two things a job can do that outlive its frame.
+ * A queued job that records one activity, optionally after leaving a user
+ * signed in on the `web` guard or failing itself, the two things a job can do
+ * that outlive its frame.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

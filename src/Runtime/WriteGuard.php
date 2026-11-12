@@ -5,22 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Runtime;
 
 /**
- * Marks the window in which the package is writing a record or handling a
- * failed write, so a record made from inside that window, by a store, a
- * reporter, a spill channel or a listener of a failed write, is refused rather
- * than written: such a record would fail or be refused the same way, and
- * without the guard would recurse until the process ran out of memory.
+ * Marks the window in which the package writes a record or handles a failed
+ * write, refusing a record made inside it, which would otherwise recurse.
  *
- * Windows nest: the guard is active from the start of the outermost window to
- * its end, however that work ends, and a window inside another changes nothing.
- * Only the first refusal in a window is to be reported, so a recursion that is
- * refused many times is diagnosed once; the refusal is forgotten when the
- * outermost window ends.
- *
- * A contributor and a listener of a written record run outside the window, so
- * one that records unconditionally still recurses, and it is the application's
- * to stop. The guard is scoped, so it holds nothing from one request or job to
- * the next, and only a shared instance guards anything.
+ * Windows nest, and only the first refusal per window is reported. A
+ * contributor and a listener of a written record run outside it. Scoped per
+ * request or job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,9 +36,8 @@ final class WriteGuard
     }
 
     /**
-     * Run the work inside a window and return what it returns, closing the
-     * window however the work ends; the outermost window's end forgets the
-     * refusal.
+     * Run the work inside a window, closing it however the work ends; the
+     * outermost window's end forgets the refusal.
      *
      * @template TResult
      *
@@ -73,10 +62,8 @@ final class WriteGuard
     }
 
     /**
-     * Whether this is the first refusal in the open window, so the caller says
-     * it: `true` once per outermost window, and `false` after that until the
-     * window ends. Outside a window nothing is refused, so it is `false` and
-     * nothing is remembered.
+     * Whether this is the first refusal in the open window, so the caller
+     * reports it; always `false` outside a window.
      *
      * @return bool
      */

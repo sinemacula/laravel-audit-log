@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\SealCursor;
 
 /**
- * Unit tests for the seal cursor: a position from an instant, after an entry,
- * and as progress keeps it; the malformed progress it reads as none; the
- * position of a malformed row it keeps as given; and the lengths it refuses.
+ * Unit tests for the seal cursor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,8 +21,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealCursor;
 final class SealCursorTest extends TestCase
 {
     /**
-     * A position from an instant starts at it: its time is the instant as the
-     * database stores it, and it names no entry, so the row at the instant is
+     * A position from an instant names no entry, so the row at the instant is
      * read too.
      *
      * @return void
@@ -35,7 +32,7 @@ final class SealCursorTest extends TestCase
 
         self::assertSame('2026-11-01 12:00:00.250000', $cursor->recordedAt);
         self::assertSame('', $cursor->id);
-        self::assertTrue($cursor->startsAtItsTime());
+        self::assertTrue($cursor->fromItsTime);
     }
 
     /**
@@ -62,7 +59,7 @@ final class SealCursorTest extends TestCase
 
         self::assertSame('2026-11-01 12:00:00.2', $cursor->recordedAt);
         self::assertSame('01932b4e-8a40-7000-8000-000000000001', $cursor->id);
-        self::assertFalse($cursor->startsAtItsTime());
+        self::assertFalse($cursor->fromItsTime);
     }
 
     /**
@@ -80,7 +77,7 @@ final class SealCursorTest extends TestCase
         self::assertSame(['recorded_at' => '2026-11-01 12:00:00.000000', 'id' => '', 'from_its_time' => true], $from->toProgress());
         self::assertEquals($after, SealCursor::fromProgress($after->toProgress()));
         self::assertEquals($from, SealCursor::fromProgress($from->toProgress()));
-        self::assertTrue(SealCursor::fromProgress($from->toProgress())?->startsAtItsTime());
+        self::assertTrue(SealCursor::fromProgress($from->toProgress())?->fromItsTime);
     }
 
     /**
@@ -94,10 +91,10 @@ final class SealCursorTest extends TestCase
         foreach ([null, 1, 'true', false] as $flag) {
             $cursor = SealCursor::fromProgress(['recorded_at' => '2026-11-01 12:00:00', 'id' => '', 'from_its_time' => $flag]);
 
-            self::assertFalse($cursor?->startsAtItsTime(), var_export($flag, true));
+            self::assertFalse($cursor?->fromItsTime, var_export($flag, true));
         }
 
-        self::assertFalse(SealCursor::fromProgress(['recorded_at' => '2026-11-01 12:00:00', 'id' => ''])?->startsAtItsTime());
+        self::assertFalse(SealCursor::fromProgress(['recorded_at' => '2026-11-01 12:00:00', 'id' => ''])?->fromItsTime);
     }
 
     /**
@@ -132,10 +129,7 @@ final class SealCursorTest extends TestCase
     }
 
     /**
-     * Rows of `[time, id]`: the stored keys of rows the sealer skips as
-     * malformed, which a position must still name exactly: an empty time, a
-     * time that is no instant, an id longer than a UUID, an empty id, and
-     * multibyte text.
+     * Rows of `[time, id]`: stored keys of rows the sealer skips as malformed.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -152,10 +146,8 @@ final class SealCursorTest extends TestCase
     }
 
     /**
-     * The position of a malformed row is kept exactly as the database returned
-     * it, never checked, bounded or cut, and still names the row after it, an
-     * empty id included, so a cursor always moves past a row the sealer skipped
-     * and a malformed key at the end of a batch never stops sealing.
+     * A malformed row's position is kept as returned, so a cursor always moves
+     * past a skipped row.
      *
      * @param  string  $recordedAt
      * @param  string  $id
@@ -168,7 +160,7 @@ final class SealCursorTest extends TestCase
 
         self::assertSame($recordedAt, $cursor->recordedAt);
         self::assertSame($id, $cursor->id);
-        self::assertFalse($cursor->startsAtItsTime());
+        self::assertFalse($cursor->fromItsTime);
         self::assertEquals($cursor, SealCursor::fromProgress($cursor->toProgress()));
     }
 }

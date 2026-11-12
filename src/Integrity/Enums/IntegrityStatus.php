@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
 
 /**
- * What verification established about a segment of the log, the entries one
- * seal covers: every check passed, its entries were removed under a valid prune
- * record, some are missing or still unsealed, a check could not be made, or the
- * log was altered.
- *
- * The cases are in order of severity, and a segment reports the most severe
- * status any of its checks found. Whether the segment is anchored is a separate
- * answer, so a pruned segment can never hide an anchor that contradicts it.
+ * What verification established about a segment, the entries one seal covers,
+ * in order of severity: a segment reports the most severe its checks found.
  *
  * @api
  *
@@ -41,8 +35,7 @@ enum IntegrityStatus: string
     case TAMPERED = 'tampered';
 
     /**
-     * How severe the status is, from 0 for `valid` to 4 for `tampered`, so the
-     * most severe of several statuses is the one with the greatest severity.
+     * How severe the status is, from 0 for `valid` to 4 for `tampered`.
      *
      * @return int
      */
@@ -58,8 +51,7 @@ enum IntegrityStatus: string
     }
 
     /**
-     * Whether the status fails a verification: `incomplete`, `unverifiable` and
-     * `tampered` do; `valid` and `pruned` do not.
+     * Whether the status fails a verification.
      *
      * @return bool
      */

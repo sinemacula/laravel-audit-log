@@ -33,15 +33,9 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Integration tests for a PostgreSQL transaction aborted by a failure the
- * application swallowed. PostgreSQL ends it with a rollback while reporting the
- * commit a success, so Laravel runs its commit callbacks for work that was
- * undone: a deferred write must then write nothing, and a bound spill must
- * leave no replayable line, or the log would hold evidence of what never
- * happened.
- *
- * Only PostgreSQL has this state, so the rest of these skip elsewhere, and one
- * test holds on every engine that a healthy commit is not affected.
+ * Integration tests for a PostgreSQL transaction aborted by a swallowed
+ * failure, whose commit PostgreSQL reports a success: no deferred write and no
+ * replayable spill may follow.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,18 +58,18 @@ final class AbortedCommitTest extends TestCase
     /** @var string A second connection, whose commit a pinned record waits for. */
     private const string SECOND = 'audit_second';
 
-    /** @var string The spill channel, which writes nowhere; the lines are captured as they are logged. */
+    /** @var string The spill channel, which writes nowhere; lines are captured as logged. */
     private const string SPILL_CHANNEL = 'audit-spill';
 
-    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter is asked to report. */
+    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler The application's reporter. */
     private RecordingExceptionHandler $reporter;
 
     /** @var list<object> Every `AuditRecorded` and `AuditWriteFailed` heard. */
     private array $events = [];
 
     /**
-     * Create the table the host writes to, bind the reporter, capture the spill
-     * lines and hear the package's events.
+     * Create the host's table, bind the reporter, capture spill lines and hear
+     * the package's events.
      *
      * @return void
      */
@@ -124,8 +118,7 @@ final class AbortedCommitTest extends TestCase
     }
 
     /**
-     * A healthy commit is not affected, on any engine: the record is written,
-     * and only PostgreSQL pays one statement to ask.
+     * A healthy commit writes the record on every engine.
      *
      * @return void
      */
@@ -150,10 +143,8 @@ final class AbortedCommitTest extends TestCase
     }
 
     /**
-     * A sync after-commit record in a transaction whose failure was swallowed
-     * writes nothing: the business change is gone, so a verifying row would be
-     * evidence of work that was undone. It spills nothing and dispatches
-     * nothing, as any rollback does, and is reported by its id.
+     * A sync after-commit record of a transaction whose failure was swallowed
+     * is not written, spilled or dispatched, and is reported.
      *
      * @return void
      */
@@ -186,8 +177,8 @@ final class AbortedCommitTest extends TestCase
     }
 
     /**
-     * Every record waiting on that commit is dropped, a nested transaction's
-     * included, and each is reported.
+     * Every record waiting on an aborted commit is dropped and reported, a
+     * nested transaction's included.
      *
      * @return void
      */
@@ -210,8 +201,7 @@ final class AbortedCommitTest extends TestCase
     }
 
     /**
-     * An outbox on another connection would insert a row after that commit; it
-     * inserts nothing, so a drain cannot store a record of undone work.
+     * An outbox on another connection inserts no row for an aborted commit.
      *
      * @return void
      */
@@ -237,9 +227,8 @@ final class AbortedCommitTest extends TestCase
     }
 
     /**
-     * A failed outbox insert in a transaction that is aborted afterwards bound
-     * a spill to its commit, which proves a rollback, so no replayable line
-     * exists.
+     * A spill bound to a commit that is later aborted leaves no replayable
+     * line.
      *
      * @return void
      */
@@ -266,10 +255,8 @@ final class AbortedCommitTest extends TestCase
     }
 
     /**
-     * A stack hides the failure of its database destination, and still does not
-     * keep a replayable spill for an aborted host: with only that transaction
-     * open, a record pinned to another connection's commit is written into it,
-     * refused, and its spill discarded.
+     * A stack over an aborted host discards the spill of its refused database
+     * destination.
      *
      * @return void
      */
@@ -326,8 +313,7 @@ final class AbortedCommitTest extends TestCase
     }
 
     /**
-     * Run a statement that fails, and carry on as an application that swallowed
-     * it would.
+     * Run a failing statement and swallow it, as an application might.
      *
      * @return void
      */
@@ -336,8 +322,7 @@ final class AbortedCommitTest extends TestCase
         try {
             $this->host()->select('select 1/0');
         } catch (QueryException) { // @phpstan-ignore catch.neverThrown
-            // The application swallows it, which is what leaves the transaction
-            // aborted with a commit still to come
+            // Swallowed, leaving the transaction aborted with a commit to come
         }
     }
 

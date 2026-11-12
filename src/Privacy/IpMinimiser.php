@@ -9,21 +9,8 @@ use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * What a record keeps of the client's IP address, under the configured mode:
- * the canonical form, its network, a keyed hash, nothing, or an envelope under
- * the actor's key.
- *
- * Every mode starts from the canonical form, in which an IPv4-mapped address is
- * its IPv4 address, so one client has one form, one hash and one network. An
- * address that is not valid, whatever a contributor filled, is stored in no
- * mode, not even in full, and is diagnosed without its value, so it never
- * reaches the column or a report and never costs the record. An encrypted
- * address is sealed as the typed plaintext of the canonical form, its JSON
- * string, for the path `["ip"]`, and is stored as the envelope's canonical
- * JSON. When there is no actor, no key, a failed encrypter or more JSON than
- * the column holds, it is dropped and diagnosed, never truncated. The `drop`
- * mode is configuration rather than loss, so dropping a valid address adds
- * nothing to the diagnostics.
+ * What a record keeps of the client's IP address under the configured mode; an
+ * invalid address is stored in no mode and diagnosed without its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,10 +62,8 @@ final readonly class IpMinimiser
     ) {}
 
     /**
-     * What the record stores of the address, or `null` when it stores nothing.
-     * The mode is read first, so a malformed mode fails even a record with no
-     * address. No address is not a loss and adds nothing to the log; an invalid
-     * one adds its path in every mode.
+     * What the record stores of the address, or `null`; the mode is read first
+     * so a malformed one fails even without an address.
      *
      * @param  ?string  $ip
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor
@@ -124,10 +109,8 @@ final readonly class IpMinimiser
     }
 
     /**
-     * The address in its one canonical form, an IPv4-mapped address as its IPv4
-     * address, or `null` when it is not a valid address. The address is
-     * validated before it is parsed, because `inet_pton()` warns on anything
-     * invalid.
+     * The address in its canonical form, an IPv4-mapped address as IPv4, or
+     * `null` when invalid; validated first since `inet_pton()` warns.
      *
      * @param  string  $ip
      * @return ?string
@@ -144,9 +127,8 @@ final readonly class IpMinimiser
     }
 
     /**
-     * The canonical address's network, with the rest of its bytes zeroed: a /24
-     * for IPv4, a /40 for 6to4, whose /48 would keep the client's whole IPv4
-     * address, and a /48 for any other IPv6 address.
+     * The canonical address's network: a /24 for IPv4, a /40 for 6to4, whose
+     * /48 would keep the client's IPv4 address, and a /48 otherwise.
      *
      * @param  string  $canonicalIp
      * @return string
@@ -164,10 +146,8 @@ final readonly class IpMinimiser
     }
 
     /**
-     * The canonical JSON of the canonical address's envelope under the actor's
-     * key, sealed as its JSON string for the path `["ip"]`, or `null` with its
-     * path added to the log when there is no actor, no envelope, or more JSON
-     * than the column holds. It is never truncated, since a cut envelope could
+     * The canonical JSON of the address's envelope under the actor's key, or
+     * `null` with its path logged; never truncated, since a cut envelope could
      * not be decrypted.
      *
      * @param  string  $canonicalIp
@@ -190,8 +170,7 @@ final readonly class IpMinimiser
         OmissionLog $omissions,
         SealingScope $scope,
     ): ?string {
-        // An address is far shorter than the limit, so its typed plaintext is
-        // always its whole JSON string
+        // An address is far under the plaintext limit, so encoding never fails
         $envelope = $actor    === null ? null : $sealer->seal($actor, (string) TypedPlaintext::encode($canonicalIp), $scope->at([self::COLUMN]));
         $encoded  = $envelope === null ? null : CanonicalEncoder::encode($envelope);
 

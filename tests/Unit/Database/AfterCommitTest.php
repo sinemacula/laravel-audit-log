@@ -11,10 +11,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Database\AfterCommit;
 
 /**
- * Unit tests for the after-commit adapter, driven directly against Laravel's
- * transaction manager and the one its testing traits install: which transaction
- * it selects, that it resolves the manager on every call, and that it catches
- * nothing.
+ * Unit tests for the after-commit adapter against Laravel's transaction manager
+ * and the one its testing traits install.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -8,21 +8,8 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Contracts\EventMapper;
 
 /**
- * The event mappers an application registers while it boots, each for an event
- * class or for a parent class or interface of the events it translates, with
- * the subtypes it leaves unmapped.
- *
- * An event is resolved to the mapping of its exact class, or else to the one
- * mapping of a parent class or interface it has; more than one is an ambiguity,
- * never a choice. A mapping skips an event that is any of its excepted subtypes
- * or a subtype of one. The answer for a class is worked out once and kept, so a
- * capture costs one lookup.
- *
- * The package's own events are never mapped: neither the marker they implement
- * nor any class implementing it is accepted. An identical registration changes
- * nothing, and any other second registration of a class or interface is
- * refused. It holds class names only and instantiates nothing, and once the
- * application has booted it is frozen and refuses any further registration.
+ * The event mappers registered at boot, each for an event class, parent class
+ * or interface, with the subtypes it leaves unmapped.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,19 +18,18 @@ use SineMacula\Laravel\AuditLog\Contracts\EventMapper;
  */
 final class MapperRegistry
 {
-    /** @var array<class-string, array{mapper: class-string<\SineMacula\Laravel\AuditLog\Contracts\EventMapper>, except: list<class-string>}> Each mapping by the class or interface it is for, with its mapper and excepted subtypes. */
+    /** @var array<class-string, array{mapper: class-string<\SineMacula\Laravel\AuditLog\Contracts\EventMapper>, except: list<class-string>}> Each mapping by the class or interface it is for. */
     private array $mappings = [];
 
-    /** @var array<class-string, list<class-string>> The mappings that apply to each class resolved so far: the exact one alone, or every broad one. */
+    /** @var array<class-string, list<class-string>> The mappings that apply to each class resolved so far. */
     private array $resolved = [];
 
     /** @var bool Whether the application has booted, after which nothing more is registered. */
     private bool $frozen = false;
 
     /**
-     * Register the mapper for an event class or interface, leaving the subtypes
-     * excepted unmapped. Registering the same mapper with the same subtypes, in
-     * any order, changes nothing.
+     * Register the mapper for an event class or interface; an identical
+     * registration changes nothing.
      *
      * @param  string  $classOrInterface
      * @param  string  $mapper
@@ -56,7 +42,7 @@ final class MapperRegistry
     public function map(string $classOrInterface, string $mapper, array $except = []): void
     {
         if ($this->frozen) {
-            self::refuse('Event mappers are registered while the application boots, and it has already booted.');
+            throw new \LogicException('Event mappers are registered while the application boots, and it has already booted.');
         }
 
         $mapped = self::mappable($classOrInterface);
@@ -70,7 +56,7 @@ final class MapperRegistry
         }
 
         if ($existing !== null) {
-            self::refuse(sprintf('`%s` is already mapped differently; an event class or interface has one mapper.', $mapped));
+            throw new \LogicException(sprintf('`%s` is already mapped differently; an event class or interface has one mapper.', $mapped));
         }
 
         $this->mappings[$mapped] = ['mapper' => $mapper, 'except' => $except];
@@ -78,9 +64,7 @@ final class MapperRegistry
     }
 
     /**
-     * The mapper for an event of the class: its exact class's mapping, else the
-     * one mapping of a parent class or interface that applies, and `null` when
-     * none does.
+     * The mapper for an event of the class, or `null` when no mapping applies.
      *
      * @param  class-string  $class
      * @return ?class-string<\SineMacula\Laravel\AuditLog\Contracts\EventMapper>
@@ -111,8 +95,7 @@ final class MapperRegistry
     }
 
     /**
-     * Refuse any further registration: the application has booted. Freezing
-     * again changes nothing.
+     * Refuse any further registration; freezing again changes nothing.
      *
      * @return void
      */
@@ -132,9 +115,8 @@ final class MapperRegistry
     }
 
     /**
-     * The mappings that apply to the class: its exact class's alone when it
-     * applies, else every parent class or interface mapping that applies,
-     * sorted.
+     * The mappings that apply to the class: its exact class's alone, else every
+     * applicable parent or interface mapping, sorted.
      *
      * @param  class-string  $class
      * @return list<class-string>
@@ -156,8 +138,7 @@ final class MapperRegistry
     }
 
     /**
-     * Whether the mapping registered for the class or interface applies to an
-     * event of the class: it exists and excepts none of the class's types.
+     * Whether the mapping exists and excepts none of the class's types.
      *
      * @param  string  $mapping
      * @param  class-string  $class
@@ -179,8 +160,8 @@ final class MapperRegistry
     }
 
     /**
-     * The class or interface as PHP names it, refusing one that does not exist
-     * and the package's own events.
+     * The class or interface as PHP names it, refusing a missing one and the
+     * package's own events.
      *
      * @param  string  $classOrInterface
      * @return class-string
@@ -204,8 +185,8 @@ final class MapperRegistry
     }
 
     /**
-     * The mapper class as PHP names it, refusing one that is not a class the
-     * container can make that implements `EventMapper`.
+     * The mapper class as PHP names it, refusing one the container cannot make
+     * or that does not implement `EventMapper`.
      *
      * @param  string  $mapper
      * @return class-string<\SineMacula\Laravel\AuditLog\Contracts\EventMapper>
@@ -224,9 +205,8 @@ final class MapperRegistry
     }
 
     /**
-     * The excepted subtypes as PHP names them, each once and sorted, refusing
-     * one that does not exist or is not a subtype of the mapped class or
-     * interface.
+     * The excepted subtypes as PHP names them, deduplicated and sorted,
+     * refusing any that is not a subtype of the mapping.
      *
      * @param  class-string  $mapped
      * @param  list<string>  $except
@@ -258,8 +238,8 @@ final class MapperRegistry
     }
 
     /**
-     * The class or interface's name as it was declared, so a name given in
-     * another case is the same mapping, or `null` when it does not exist.
+     * The name as declared, so another case is the same mapping, or `null` when
+     * it does not exist.
      *
      * @param  string  $name
      * @return ?class-string
@@ -271,18 +251,5 @@ final class MapperRegistry
         }
 
         return (new \ReflectionClass($name))->getName();
-    }
-
-    /**
-     * Refuse the registration.
-     *
-     * @param  string  $message
-     * @return never
-     *
-     * @throws \LogicException
-     */
-    private static function refuse(string $message): never
-    {
-        throw new \LogicException($message);
     }
 }

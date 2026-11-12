@@ -11,18 +11,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * One owner marker, as its row stores it: the id of the journal row that
- * records the transition, the owner, whether the owner was erased or
- * reinstated, the generation every later key of the owner is created above, the
- * journal row's sequence and when the marker was written.
- *
- * The owner's latest marker, by journal sequence, decides whether a key may be
- * created for it: none is while the latest records an erasure. A marker is not
- * verified on its own, since its journal row is: a forged or missing marker can
- * only refuse or allow a creation, and a key created for an erased owner is
- * reported as restored. Every field is checked as the marker is built, and a
- * stored row read through `fromRow()` is refused with an
- * `UnexpectedValueException` naming the column and never its value.
+ * An owner's erasure or reinstatement as its row stores it; it is not signed,
+ * since the journal row it points to is.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,10 +24,10 @@ final readonly class OwnerMarker
     /** @var string A lower-case UUID: the journal row's id. */
     private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
-    /** @var string Why a generation floor is refused. */
+    /** @var string Refusal for a generation floor out of range. */
     private const string FLOOR_OUT_OF_RANGE = 'An owner marker\'s generation floor must be from 0 to 2147483647.';
 
-    /** @var string Why a stored column is refused, by the column it names. */
+    /** @var string Refusal for a stored column, by the column it names. */
     private const string STORED_MALFORMED = 'A stored owner marker\'s `%s` is malformed.';
 
     /**
@@ -81,10 +71,8 @@ final readonly class OwnerMarker
     }
 
     /**
-     * The marker a decoded stored row holds: integers are read as an integer or
-     * its decimal string and the time in any form an engine returns. A missing
-     * or malformed column is refused naming the column, never quoting its
-     * value.
+     * The marker a decoded stored row holds; a malformed column is refused
+     * naming the column, never its value.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -114,8 +102,8 @@ final readonly class OwnerMarker
     }
 
     /**
-     * Whether the marker records an erasure, so no key may be created for the
-     * owner while it is the latest.
+     * Whether the marker records an erasure, which blocks key creation while it
+     * is the latest.
      *
      * @return bool
      */
@@ -125,8 +113,7 @@ final readonly class OwnerMarker
     }
 
     /**
-     * The row that stores the marker, in table order, with its time in the form
-     * the database stores.
+     * The row that stores the marker.
      *
      * @return array{id: string, owner_type: string, owner_id: string, transition: string, generation_floor: int, journal_sequence: int, created_at: string}
      *
@@ -166,8 +153,7 @@ final readonly class OwnerMarker
     }
 
     /**
-     * The stored column as text, refused naming the column when it is missing
-     * or not a string.
+     * The stored column as text, refused naming the column otherwise.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -185,7 +171,7 @@ final readonly class OwnerMarker
     }
 
     /**
-     * The stored column as an integer, from an integer or its decimal string,
+     * The stored column as an integer, from an integer or decimal string,
      * refused naming the column otherwise.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
@@ -203,7 +189,7 @@ final readonly class OwnerMarker
 
     /**
      * The stored creation time in the package's form, from any form an engine
-     * returns, refused naming the column.
+     * returns.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

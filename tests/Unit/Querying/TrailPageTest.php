@@ -22,9 +22,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for a page of the trail: the entries and cursor it holds, whether
- * there is a next page, the empty page of a denied or disjoint read, and the
- * page sizes and entry counts it refuses.
+ * Unit tests for a page of the trail.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,8 +53,7 @@ final class TrailPageTest extends TestCase
     }
 
     /**
-     * An empty page shows nothing, has no next page and keeps the page size of
-     * the read.
+     * An empty page shows nothing, has no next page and keeps the page size.
      *
      * @return void
      */
@@ -71,8 +68,7 @@ final class TrailPageTest extends TestCase
     }
 
     /**
-     * Rows of `[entries, page size]`: pages that cannot be: a page size under
-     * 1, and more entries than the page size.
+     * Rows of `[entries, page size]`: a size under 1, or more entries than it.
      *
      * @return iterable<string, array{0: int, 1: int}>
      */

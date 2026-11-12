@@ -15,7 +15,6 @@ indent_size = unset
 [*.{yml,yaml}]
 indent_size = 2
 
-# The OCSF licence, copied from its tag: the licence text keeps its own
-# indentation.
+# The OCSF licence keeps its own indentation.
 [tests/Fixtures/Export/ocsf/1.9.0/LICENSE]
 indent_size = unset

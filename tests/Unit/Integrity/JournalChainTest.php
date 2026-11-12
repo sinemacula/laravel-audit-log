@@ -17,13 +17,7 @@ use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 
 /**
- * Unit tests for the journal's chain: a contiguous chain with no finding, each
- * gap (a missing, reordered or relinked row, or one of another log), a forged
- * row and an edited payload as signature findings, an unknown key as
- * unverifiable, a malformed row, each transition the chain refuses (releases,
- * hold ids placed again, prune rows of another seal, and, with payloads, runs
- * and batches finished without their start or twice), a bad row that is never
- * applied and counts once, the active holds, and a clone that is independent.
+ * Unit tests for the journal's chain.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -99,9 +93,8 @@ final class JournalChainTest extends TestCase
     }
 
     /**
-     * A first row that is not at sequence 1 is a gap, and so is a row whose
-     * predecessor is missing; the row after the gap follows it, so a deleted
-     * row is one finding.
+     * A missing first row or predecessor is a gap, and a deleted row is one
+     * finding.
      *
      * @return void
      *
@@ -208,9 +201,8 @@ final class JournalChainTest extends TestCase
     }
 
     /**
-     * A row whose signed column was edited, its HMAC kept, is a signature
-     * finding: it is never applied, the head stays the last good row, and the
-     * row after it still follows it as stored, so it is one finding.
+     * A row edited under its HMAC is one signature finding and is never
+     * applied.
      *
      * @return void
      *
@@ -287,9 +279,8 @@ final class JournalChainTest extends TestCase
     }
 
     /**
-     * A row that cannot be read is one malformed finding, by the id given: the
-     * row after it has nothing to link to and is held only to a later sequence,
-     * and a row before the last read is still a gap.
+     * An unreadable row is one malformed finding; the next is held only to a
+     * later sequence.
      *
      * @return void
      *
@@ -397,9 +388,8 @@ final class JournalChainTest extends TestCase
     }
 
     /**
-     * A prune row whose record covers another seal than the one it names is a
-     * transition, and so is one that names no seal or holds no record; read
-     * without its payload, only the seal it names is checked.
+     * A prune row naming another seal, or no seal or record, is a transition;
+     * without a payload only the named seal is checked.
      *
      * @return void
      *
@@ -434,9 +424,8 @@ final class JournalChainTest extends TestCase
     }
 
     /**
-     * Rows of `[the rows, the index of the one refused]`: a prune run's finish
-     * with no start, an import's finish with no start, and a prune chunk of no
-     * open run.
+     * Rows of `[the rows, the index of the one refused]`: finishes and chunks
+     * with no open start.
      *
      * @formatter:off
      *
@@ -495,9 +484,8 @@ final class JournalChainTest extends TestCase
     }
 
     /**
-     * A second finish of one run or one batch is a transition, and so is a
-     * second start of a run or a batch still open: each is dropped at its
-     * finish.
+     * A second finish, or a second start while open, of a run or a batch is a
+     * transition.
      *
      * @return void
      *

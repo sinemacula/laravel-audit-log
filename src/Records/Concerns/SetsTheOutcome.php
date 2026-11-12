@@ -8,16 +8,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
 
 /**
- * The pending record's outcome: it succeeded, which is the default, it failed,
- * or a policy denied it, each failure or denial with an optional reason.
- *
- * A reason is a machine-readable code, never words: 1 to 64 lower-case letters,
- * digits, `_`, `.`, `:` or `-`, starting with a letter or a digit, given as a
- * string or as a string-backed enum case. It is validated, never cleaned or
- * cut. The last outcome given wins, its reason with it.
- *
- * The methods sit in a trait only so the builder stays within the number of
- * methods one class may declare; they are `PendingRecord`'s public surface.
+ * The pending record's outcome and optional reason; a trait only to keep
+ * `PendingRecord` within the method-count limit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,8 +25,7 @@ trait SetsTheOutcome
     private ?string $reason = null;
 
     /**
-     * Say that the activity happened as asked, clearing any reason given with
-     * an earlier outcome.
+     * Say that the activity happened as asked, clearing any earlier reason.
      *
      * @return self
      *
@@ -51,8 +42,7 @@ trait SetsTheOutcome
     }
 
     /**
-     * Say that the activity was attempted and did not complete, with an
-     * optional machine-readable reason.
+     * Say that the activity was attempted and did not complete.
      *
      * @param  \BackedEnum|string|null  $reason
      * @return self
@@ -66,8 +56,7 @@ trait SetsTheOutcome
     }
 
     /**
-     * Say that a policy refused the activity before it was attempted, with an
-     * optional machine-readable reason.
+     * Say that a policy refused the activity before it was attempted.
      *
      * @param  \BackedEnum|string|null  $reason
      * @return self

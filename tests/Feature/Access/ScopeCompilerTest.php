@@ -20,19 +20,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\TestCase;
 
 /**
- * Feature tests for the one compiler of every read: the statement it builds on
- * the storage connection, read with `toSql()` and `getBindings()`, with the
- * grammar's identifier quotes taken out so it reads the same on every engine.
- *
- * The compiled form is tenant AND category AND about AND the caller's filters
- * AND the cursor, every internal `or` grouped, references as exact pairs, the
- * tenantless rows as both columns `null`, times bound with six fractional
- * digits, the prefix through an explicit `like` with its own escape, no
- * collation, and nothing the caller gives in the SQL text. The entries holding
- * an owner's data are an `exists` over the key uses joined to the owner's keys,
- * correlated on the entry's id and inside the scope. A denied scope is refused,
- * an empty one is known without a query, and an entry is looked up under the
- * scope like any other read.
+ * Feature tests for the statement the scope compiler builds for every read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,7 +45,7 @@ final class ScopeCompilerTest extends TestCase
     /** @var string A key id of another owner. */
     private const string OTHER_KEY_ID = '0192f5a0-7c1e-7000-8000-0000000000f2';
 
-    /** @var string The exists the entries holding an owner's data are found by, with the grammar's quotes taken out. */
+    /** @var string The exists that finds an owner's entries, unquoted. */
     private const string HOLDING = 'exists (select 1 from audit_log_key_uses inner join audit_log_subject_keys on audit_log_subject_keys.id = audit_log_key_uses.key_id'
         . ' where audit_log_key_uses.entry_id = audit_log_entries.id and audit_log_subject_keys.owner_type = ? and audit_log_subject_keys.owner_id = ?)';
 
@@ -65,10 +53,8 @@ final class ScopeCompilerTest extends TestCase
     private const string HOSTILE = 'x\' or 1=1 -- ) or (';
 
     /**
-     * A scope of tenants and the tenantless rows, only some categories and one
-     * about-reference, with filters on every dimension and a cursor, compiles
-     * to tenant AND category AND about AND the filters AND the cursor, in that
-     * order, with every value bound in the same order.
+     * A full scope compiles to tenant, category, about, filters and cursor, in
+     * order.
      *
      * @return void
      */
@@ -112,11 +98,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * The entries holding an owner's data are those with a key use of one of
-     * the owner's keys: an `exists` over the key uses joined to the subject
-     * keys by the key's id, correlated on the entry's id, every column
-     * qualified by its table and the owner's type and id bound; an entry
-     * holding only another owner's data, or none, is not found.
+     * An owner's entries are an exists over the key uses joined to its keys.
      *
      * @return void
      */
@@ -140,10 +122,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * The owner's entries are found only inside the scope: the exists follows
-     * the tenant, category and about groups and the caller's other filters as
-     * one more condition, so no entry the scope leaves out is found, however
-     * much of the owner's data it holds.
+     * The owner's entries are found only inside the scope.
      *
      * @return void
      */
@@ -176,9 +155,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * An owner's erased keys still find its entries, and so does every
-     * generation and unit of its keys: the filter reads the key uses and the
-     * owner's columns, never a key's state.
+     * Every key of the owner finds its entries, erased ones included.
      *
      * @return void
      */
@@ -200,8 +177,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * A query that reads the entries under an alias correlates the exists on
-     * the alias, so the entry's id is never read from the key uses.
+     * An aliased query correlates the exists on its alias.
      *
      * @return void
      */
@@ -222,8 +198,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * A query that names no table is refused before anything is added to it,
-     * since the exists could not be correlated on the entry's id.
+     * A query naming no table is refused, as the exists cannot be correlated.
      *
      * @return void
      */
@@ -238,9 +213,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * The owner whose data the entries hold never makes a read empty without a
-     * query: whether an owner holds data anywhere is a question only the key
-     * uses can answer.
+     * An owner filter never makes a read empty without a query.
      *
      * @return void
      */
@@ -255,8 +228,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * A scope of every row and filters that narrow nothing add no condition at
-     * all.
+     * A scope of every row and filters that narrow nothing add no condition.
      *
      * @return void
      */
@@ -269,9 +241,8 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * Every `or` the compiler writes is inside a group of its own, so a caller
-     * filter after a scope of several tenants and several about-references sits
-     * outside the tenant group and cannot widen it.
+     * Every `or` the compiler writes is grouped so a caller filter cannot widen
+     * it.
      *
      * @return void
      */
@@ -298,8 +269,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * The tenantless rows are those with both tenant columns `null`, as one
-     * pair inside the tenant group.
+     * Tenantless rows are those with both tenant columns `null`.
      *
      * @return void
      */
@@ -312,8 +282,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * The page cursor takes the entries strictly after the position in
-     * newest-first order, as one group led by the bound on the time it implies.
+     * The page cursor takes the entries strictly after it, as one group.
      *
      * @return void
      */
@@ -326,9 +295,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * An export's keyset takes the entries strictly after the position when
-     * there is one, and always those up to the bound inclusive, each as one
-     * group, in recording order.
+     * An export's keyset is strictly after its position and up to its bound.
      *
      * @return void
      */
@@ -355,8 +322,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * Every time is bound in UTC with six fractional digits, a whole second and
-     * a time zone's offset included.
+     * Every time is bound in UTC with six fractional digits.
      *
      * @return void
      */
@@ -377,9 +343,8 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * A prefix is bound as its escaped pattern in an explicit `like` with the
-     * `!` escape, never the framework's `like`, which a case-sensitive SQLite
-     * turns into `glob`.
+     * A prefix uses an explicit `like`, which case-sensitive SQLite would make
+     * `glob`.
      *
      * @return void
      */
@@ -394,8 +359,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * Rows of `[prefix, pattern]`: each character `like` treats specially, the
-     * escape character itself among them, escaped, then `%`.
+     * Rows of `[prefix, pattern]`: each character `like` treats specially.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -413,8 +377,8 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * The pattern escapes `!`, `%` and `_` with `!`, the escape character first
-     * so an escape is never read as another's.
+     * The pattern escapes `!`, `%` and `_` with `!`, the escape character
+     * first.
      *
      * @param  string  $prefix
      * @param  string  $pattern
@@ -427,7 +391,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * No collation is ever applied, whatever the scope, filters and cursor.
+     * No collation is ever applied.
      *
      * @return void
      */
@@ -447,8 +411,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * A denied scope is never compiled, nor an entry looked up under one: the
-     * caller checks `isEmpty()` first.
+     * A denied scope is never compiled nor used to look up an entry.
      *
      * @return void
      */
@@ -471,8 +434,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * Rows of `[scope, filters, whether nothing can match]`: each way a scope
-     * and filters are disjoint, and the controls that are not.
+     * Rows of `[scope, filters, whether nothing can match]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Access\AccessScope, 1: \SineMacula\Laravel\AuditLog\Querying\TrailFilters, 2: bool}>
      */
@@ -507,8 +469,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * Whether nothing can match is answered from the scope and the filters
-     * alone, and no statement is run to answer it.
+     * Whether nothing can match is answered without running a statement.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -528,9 +489,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * What a caller gives, in a reference or a correlation id, is bound and
-     * never written into the SQL text; only the compiler's own columns,
-     * operators and escape character are.
+     * Nothing a caller gives is written into the SQL text.
      *
      * @return void
      */
@@ -557,8 +516,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * An entry is looked up by its id under the scope, so an entry outside the
-     * scope is never found, and one inside it is.
+     * An entry is looked up by its id under the scope.
      *
      * @return void
      */
@@ -597,8 +555,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * An entry's id must be a lower-case UUID, refused before anything is added
-     * to the query.
+     * An entry id that is not a lower-case UUID is refused.
      *
      * @param  string  $id
      * @return void
@@ -630,8 +587,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * The query's SQL with the grammar's identifier quotes taken out, so it
-     * reads the same on every engine.
+     * The query's SQL with identifier quotes removed, the same on every engine.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @return string
@@ -667,8 +623,7 @@ final class ScopeCompilerTest extends TestCase
     }
 
     /**
-     * Insert a key of the owner, by its id, in the state and at the generation
-     * given; only the columns the filter reads mean anything.
+     * Insert a key of the owner; only the columns the filter reads matter.
      *
      * @param  string  $id
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner

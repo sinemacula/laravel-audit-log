@@ -13,9 +13,8 @@ use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 
 /**
- * Unit tests for the one key matcher: every key it must redact and every key it
- * must keep, the order of its steps, the units a configuration adds, and what
- * becomes of a matching key's value at any depth.
+ * Unit tests for the key matcher: the keys it redacts and keeps, the order of
+ * its steps, added units, and a matching key's value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,8 +32,7 @@ final class RedactorTest extends TestCase
 
     /**
      * Rows of `[key, sensitive?]`: the table of `docs/design/redaction.md`,
-     * every key on it, then keys that pin each step of the matcher against its
-     * neighbours.
+     * then keys pinning each step of the matcher.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -659,9 +657,8 @@ final class RedactorTest extends TestCase
     }
 
     /**
-     * The same key in every element of a long list is judged alike each time,
-     * both ways, once a decision is held for it: a decision to keep is not
-     * mistaken for no decision yet.
+     * The same key in every element of a long list is judged alike each time, a
+     * held decision to keep not mistaken for none.
      *
      * @return void
      */
@@ -722,11 +719,8 @@ final class RedactorTest extends TestCase
     }
 
     /**
-     * A decision once held for a key is what every later occurrence takes, so
-     * the key is split once however often it repeats: a held decision to keep
-     * is not asked again, and neither is a held decision to redact. Protects
-     * against a mutation that decides each occurrence afresh, which gives the
-     * same output and costs a pass over the key every time.
+     * A held decision for a key is reused, so the key is split once however
+     * often it repeats, whether the decision keeps or redacts.
      *
      * @SuppressWarnings("php:S3011")
      *

@@ -8,20 +8,11 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Query\Builder;
 
 /**
- * The integrity state table, on the storage connection's writer: the
- * operational progress of sealing, anchoring, verification and pruning, one
- * named map of scalars per row, for the health snapshot, for monitoring missed
- * runs and for resuming a sweep.
+ * Operational progress of sealing, anchoring, verification and pruning, kept in
+ * the integrity state table and always read and written on the writer.
  *
- * Progress is never evidence: verification reads none of it, and any row may be
- * lost or rewritten without hiding a change to the log. Sealing and anchoring
- * read it only to start where they left off, and fall back to the log itself
- * when it is missing; pruning only writes it, since a run resumes from the
- * lifecycle journal. A row that is missing, or whose value is not a JSON object
- * of scalars, reads as absent, and the next write replaces it. Only the
- * package's own names are read or written, each row is written whole with the
- * time it was written, in UTC to the microsecond, and every statement reads and
- * writes the writer, so a replica's lag never reads as stale progress.
+ * Progress is never evidence: verification reads none of it, and a missing or
+ * malformed row reads as absent.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,7 +71,7 @@ final readonly class IntegrityProgress
      */
     public function __construct(
 
-        /** The connections the storage connection is resolved from on every call. */
+        /** Resolves the storage connection on every call. */
         private DatabaseManager $database,
     ) {}
 
@@ -109,8 +100,7 @@ final readonly class IntegrityProgress
     }
 
     /**
-     * Write the progress under the name, replacing any there, as written at the
-     * given time.
+     * Write the progress under the name, replacing any, as at the given time.
      *
      * @param  string  $name
      * @param  array<string, scalar|null>  $value
@@ -145,8 +135,8 @@ final readonly class IntegrityProgress
     }
 
     /**
-     * A query of the state table on the storage connection's writer, once the
-     * name is known to be one of the package's own.
+     * A writer query of the state table, refused for a name that is not one of
+     * the package's own.
      *
      * @param  string  $name
      * @return \Illuminate\Database\Query\Builder

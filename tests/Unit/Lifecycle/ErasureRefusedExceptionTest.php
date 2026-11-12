@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal;
 use SineMacula\Laravel\AuditLog\Lifecycle\ErasureRefusedException;
 
 /**
- * Unit tests for the exception an erasure is refused with: its refusal, its
- * reasons each once and sorted bytewise, the owner's fingerprint and its key, a
- * message that names the refusal and how many reasons it has and nothing of the
- * owner, a reason or a fingerprint, and no previous exception.
+ * Unit tests for the exception an erasure is refused with.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,8 +25,7 @@ final class ErasureRefusedExceptionTest extends TestCase
     private const string FINGERPRINT = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
 
     /**
-     * The refusal, its reasons each once and sorted bytewise, and the owner's
-     * fingerprint and its key are carried.
+     * The refusal, its sorted distinct reasons and the fingerprint are carried.
      *
      * @return void
      */
@@ -44,8 +40,7 @@ final class ErasureRefusedExceptionTest extends TestCase
     }
 
     /**
-     * Rows of `[refusal, reasons, message]`: the message names the refusal and
-     * how many distinct reasons it has, in the singular for one.
+     * Rows of `[refusal, reasons, message]`, singular for one reason.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal, 1: list<string>, 2: string}>
      */
@@ -61,8 +56,7 @@ final class ErasureRefusedExceptionTest extends TestCase
     }
 
     /**
-     * The message names the refusal and how many reasons it has, and never a
-     * reason, the owner or the fingerprint.
+     * The message names the refusal and its count, never a reason or the owner.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal  $refusal
      * @param  list<string>  $reasons

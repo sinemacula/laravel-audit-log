@@ -10,22 +10,8 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 
 /**
- * What one verification run established: the exact range of seals it checked
- * and the head it observed, the anchor's head and how it compared, whether the
- * run covered the whole log, the segments in each integrity and anchoring
- * status, the findings of the run as a whole, the unsealed entries, what it
- * read of the lifecycle journal and, on a run of the whole log, of the owners'
- * key store, and the first failure. A journal or key finding is a finding of
- * the run, and fails it as any other does.
- *
- * A run fails on any integrity failure, of a segment or of the run. A strict
- * run with an anchor configured also fails on any segment short of `anchored`,
- * except one awaiting its first anchoring, on any `unavailable` or
- * `contradicted` segment, on an anchor that cannot report its head, and on an
- * anchor's head that is not `anchored`; an anchor that holds no seal is excused
- * only while every seal from the first is still awaiting its first anchoring.
- * With no anchor configured, `strict` changes nothing, and `unanchored` is
- * informational.
+ * What one verification run established, and whether it passes. A strict run
+ * with an anchor also fails on a segment not anchored or awaiting anchoring.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -149,8 +135,7 @@ final readonly class VerificationSummary
     }
 
     /**
-     * The summary with what the run read of the lifecycle journal, everything
-     * else as it is.
+     * The summary with what the run read of the lifecycle journal.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalSummary  $journal
      * @return self
@@ -162,7 +147,7 @@ final readonly class VerificationSummary
 
     /**
      * The summary with what the run established of the owners' key store, or
-     * none for a run of a range, everything else as it is.
+     * none for a ranged run.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary  $keys
      * @return self
@@ -189,10 +174,7 @@ final readonly class VerificationSummary
     }
 
     /**
-     * The summary as the last line of output: the range checked and the heads
-     * observed, how the anchor compared, the counts, what was read of the
-     * journal and of the key store, the first failure, and whether the run
-     * passed.
+     * The summary as the last line of output.
      *
      * @formatter:off
      *
@@ -230,9 +212,7 @@ final readonly class VerificationSummary
     }
 
     /**
-     * The event that tells listeners the run failed, from the command given:
-     * the counts in every status, the first failure, the heads observed and
-     * whether the run covered the whole log.
+     * The event that tells listeners the run failed, from the command given.
      *
      * @param  string  $command
      * @return \SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed
@@ -245,8 +225,7 @@ final readonly class VerificationSummary
     }
 
     /**
-     * The summary with the journal's and the key store's sections given,
-     * everything else as it is.
+     * The summary with the journal's and the key store's sections given.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\JournalSummary  $journal
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary  $keys
@@ -294,10 +273,7 @@ final readonly class VerificationSummary
     }
 
     /**
-     * Whether the run falls short of what a strict run requires of the anchor:
-     * a segment unanchored and not awaiting its first anchoring, one
-     * unavailable or contradicted, an anchor that cannot report its head, or an
-     * anchor's head that is not accepted.
+     * Whether the run falls short of what a strict run requires of the anchor.
      *
      * @return bool
      */
@@ -310,9 +286,8 @@ final readonly class VerificationSummary
     }
 
     /**
-     * Whether the anchor's head is accepted by a strict run: it is `anchored`,
-     * or the anchor holds no seal while every seal from the first awaits its
-     * first anchoring.
+     * Whether a strict run accepts the anchor's head: it is `anchored`, or the
+     * anchor holds none while every seal awaits its first anchoring.
      *
      * @return bool
      */

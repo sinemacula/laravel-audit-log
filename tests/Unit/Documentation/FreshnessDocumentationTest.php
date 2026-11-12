@@ -11,15 +11,8 @@ use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\FreshnessSignal;
 
 /**
- * Unit tests that keep the documentation in step with the operations checks:
- * the operations guide's section on monitoring names each option of
- * `audit-log:check`, every freshness signal and status, every field `--json`
- * writes and every monitoring setting with its range, and says what a clock
- * must run; its section on scale says that partitioning is not supported; and
- * the README's usage names `audit-log:check --freshness` and has a row for each
- * monitoring setting with the env var the shipped file reads.
- *
- * A drift guard: it catches an omission or a rename, not wrong prose.
+ * A drift guard for the freshness check in the operations guide and the README:
+ * it catches an omission or a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,8 +36,7 @@ final class FreshnessDocumentationTest extends TestCase
     ];
 
     /**
-     * Rows of `[text]`: each option `audit-log:check` declares, each signal,
-     * each status, each field and each monitoring setting, in code type.
+     * Rows of `[text]`: every option, signal, status, field and setting.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -72,9 +64,7 @@ final class FreshnessDocumentationTest extends TestCase
     }
 
     /**
-     * The options are read from what the command declares, which are exactly
-     * `--freshness` and `--json`, and the statuses from the signal's constants,
-     * so the check above is not empty by construction.
+     * The rows come from the command and the signal, so the check is not empty.
      *
      * @return void
      */
@@ -85,9 +75,7 @@ final class FreshnessDocumentationTest extends TestCase
     }
 
     /**
-     * The section on monitoring leads with the freshness check, gives each
-     * monitoring setting's range, and says that clocks run NTP and that an
-     * entry far ahead is `future_unsealed`.
+     * The monitoring section leads with the freshness check, ranges and clocks.
      *
      * @return void
      */
@@ -106,9 +94,7 @@ final class FreshnessDocumentationTest extends TestCase
     }
 
     /**
-     * The section on scale says what one table holds, that pruning is batched,
-     * where hundreds of millions of rows go, and that partitioning is not
-     * supported because the primary key is `id` alone.
+     * The scale section rules out partitioning: the key is `id` alone.
      *
      * @return void
      */
@@ -124,9 +110,7 @@ final class FreshnessDocumentationTest extends TestCase
     }
 
     /**
-     * The README's usage names the freshness check, and its configuration table
-     * has a row for each monitoring setting naming the env var the shipped file
-     * reads it from.
+     * The README names the freshness check and each monitoring env var.
      *
      * @return void
      */

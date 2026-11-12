@@ -222,9 +222,8 @@ DB::transaction(function () use ($invoices): void {
 - A manifest is bounded by `capture.bulk.max_members` (`AUDIT_LOG_CAPTURE_BULK_MAX_MEMBERS`, 100,000 by default, from 1
   to 1,000,000) and `capture.bulk.max_bytes` (`AUDIT_LOG_CAPTURE_BULK_MAX_BYTES`, 4,194,304 by default, from 65,536 to
   8,388,608), the size of its canonical form. A larger one is refused, never truncated, with an
-  `\InvalidArgumentException` from `covering()`, and nothing is written; record a larger operation as
-  several. At most four times `max_members` subjects are read, duplicates included, so an input that never ends is
-  refused too.
+  `\InvalidArgumentException` from `covering()`, and nothing is written; record a larger operation as several. At most
+  four times `max_members` subjects are read, duplicates included, so an input that never ends is refused too.
 - Only a store that keeps attachments can take one. `DatabaseAuditStore`, the fake and `NullAuditStore` do;
   `LogAuditStore` does not, since its line would lose the members; a stack does only when every destination does; and a
   store that does not implement `Contracts\AcceptsAttachments` does not. With any other store bound, `covering()` is a

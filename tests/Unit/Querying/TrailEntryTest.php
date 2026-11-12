@@ -26,11 +26,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for an entry as a viewer is shown it: its snake-case array, with
- * references as pairs, enums as values and times as instants; times in UTC to
- * the microsecond, whatever the default time zone; an imported entry's source
- * digest; and an artifact shown by its descriptor alone, never its id or its
- * members.
+ * Unit tests for an entry as a viewer is shown it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -82,9 +78,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * The array has every field under its snake-case key, in order: the
-     * references as `type` and `id` pairs or `null`, the enums as their values,
-     * the times as instants and the display arrays as they are.
+     * The array uses snake-case keys in order, references as pairs.
      *
      * @return void
      */
@@ -129,8 +123,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * An entry with no references, origin, source digest or manifest gives
-     * `null` for each.
+     * An entry without references, origin, digest or manifest gives `null`.
      *
      * @return void
      */
@@ -147,9 +140,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * Times a stored entry holds are read as instants in UTC to the
-     * microsecond, whatever the default time zone, and an instant given in
-     * another zone is given in the array in UTC.
+     * Times are UTC instants to the microsecond, whatever the time zone.
      *
      * @return void
      */
@@ -173,8 +164,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * A stored imported entry is projected with its source digest, and a stored
-     * captured entry with none.
+     * An imported entry carries its source digest, a captured one none.
      *
      * @return void
      */
@@ -194,9 +184,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * An entry with an artifact shows its kind, count and digest alone: not its
-     * artifact id, which only the stored descriptor holds, and never its
-     * members, which are not loaded.
+     * An artifact shows only its kind, count and digest.
      *
      * @return void
      */
@@ -222,8 +210,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * The credential id is kept out of a stack trace's frames, and so are the
-     * display arrays.
+     * The credential id and display arrays are kept out of stack frames.
      *
      * @return void
      */
@@ -235,8 +222,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * An entry of every field, with the fields given in place of the defaults,
-     * by name.
+     * An entry of every field, with the named fields given.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -287,9 +273,7 @@ final class TrailEntryTest extends TestCase
     }
 
     /**
-     * The projector of the package's own field reader, which reads nothing of a
-     * page that does not reveal its fields, with a signer no entry here
-     * reaches.
+     * A projector over the package's field reader and an unused signer.
      *
      * @return \SineMacula\Laravel\AuditLog\Querying\EntryProjector
      */

@@ -11,10 +11,8 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use Tests\TestCase;
 
 /**
- * Feature tests for the names of the entries table and of the artifacts table
- * beside it: the defaults, the names each accepts up to the longest one every
- * index name fits, and the message naming its own key any other value fails
- * with.
+ * Feature tests for the names of the entries table and the artifacts table
+ * beside it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -102,10 +100,8 @@ final class EntrySettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[table]`: values that cannot name every index the migration
-     * derives from the table, or are not a name at all; a capital anywhere is
-     * refused, since every engine reports index names in lower case (protects
-     * against a mutation that widens either character class).
+     * Rows of `[table]`: values refused as a table name; a capital is refused
+     * because every engine reports index names in lower case.
      *
      * @return iterable<string, array{0: int|list<string>|string|null}>
      */
@@ -200,8 +196,7 @@ final class EntrySettingsTest extends TestCase
 
     /**
      * The artifacts table takes every name the entries table takes, up to 47
-     * characters, and is read on every call from its own key, never from the
-     * entries table's.
+     * characters, read from its own key.
      *
      * @return void
      */
@@ -222,9 +217,8 @@ final class EntrySettingsTest extends TestCase
     }
 
     /**
-     * Each value the entries table refuses is refused for the artifacts table
-     * too, with a message naming the artifacts table's key, while the entries
-     * table, configured well, is unaffected.
+     * A value the entries table refuses is refused for the artifacts table too,
+     * naming the artifacts table's key.
      *
      * @param  int|list<string>|string|null  $table
      * @return void
@@ -243,9 +237,7 @@ final class EntrySettingsTest extends TestCase
     }
 
     /**
-     * `EntrySettings` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it so the line is covered.
      *
      * @return void
      *

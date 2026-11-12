@@ -48,9 +48,8 @@ final class FailureRuleTest extends TestCase
     }
 
     /**
-     * A record that is not transactional and does not ask to fail closed
-     * follows the mode: spilled and reported under `report`, spilled and thrown
-     * under `throw`.
+     * A non-transactional record not asking to fail closed is spilled, then
+     * reported or thrown by the mode.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  \SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode  $mode
@@ -95,9 +94,8 @@ final class FailureRuleTest extends TestCase
     }
 
     /**
-     * A transactional record is thrown and never spilled, whatever else is set,
-     * so a record of work that has not committed never becomes a replayable
-     * line.
+     * A transactional record is thrown and never spilled, so uncommitted work
+     * never becomes a replayable line.
      *
      * @param  bool  $failClosed
      * @param  \SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode  $mode

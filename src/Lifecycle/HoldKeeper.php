@@ -14,29 +14,10 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Places and releases holds, and rebuilds their projection, each decided from
- * the journal's verified chain under the lifecycle lock and never from the
- * projection.
+ * Places and releases holds and rebuilds their projection, each decided from
+ * the verified journal under the lifecycle lock, never from the projection.
  *
- * Every operation confirms the installation first, once, then runs in one
- * `MaintenanceTransaction`: the lock, a fresh replay of the whole journal
- * verified, the journal row appended onto its head and the projection changed
- * with it, so the row and the projection commit together or not at all. A
- * replay lives for its operation only.
- *
- * A hold is placed under a fresh UUID v7, or the one an import minted for it;
- * an id the chain ever placed, active or released, is refused, since hold ids
- * are never reused. `placeIn()` places one inside a transaction a caller's own
- * `MaintenanceTransaction::run()` opened, after it verified or advanced its
- * replay there, so an import's start and its hold commit together. A release is
- * refused with an `UnknownHoldException`, writing nothing, unless the verified
- * chain holds the hold active: a hold never placed, one released already, and
- * one the projection alone holds are each unknown. A hold or a release on a
- * journal that fails verification is refused with a `JournalBrokenException`.
- *
- * A hold keeps entries from the package's own pruning; whoever holds the
- * maintenance credentials can still delete them, and the journal and the seals
- * make that detectable, not impossible.
+ * Hold ids are never reused, so an id the chain ever placed is refused.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,7 +26,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class HoldKeeper
 {
-    /** @var string Pattern of a hold id the package mints: a lower-case UUID v7. */
+    /** @var string A hold id the package mints: a lower-case UUID v7. */
     private const string UUID_V7_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/';
 
     /**
@@ -60,29 +41,28 @@ final readonly class HoldKeeper
      */
     public function __construct(
 
-        /** The frame every operation runs in, behind the lifecycle lock. */
+        /** Runs every operation behind the lifecycle lock. */
         private MaintenanceTransaction $transaction,
 
         /** The journal every hold and release is appended to. */
         private Journal $journal,
 
-        /** The signer each replay verifies the journal with. */
+        /** Verifies the journal for each replay. */
         private JournalSigner $signer,
 
-        /** The settings the journal's log id is read from. */
+        /** Gives the journal's log id. */
         private SealSettings $settings,
 
         /** The projection changed with each hold and release. */
         private HoldProjection $projection,
 
-        /** The time a fresh hold id and an operation's own id are drawn at. */
+        /** Mints fresh hold and operation ids. */
         private Clock $clock,
     ) {}
 
     /**
-     * Place a hold of the scope, on the basis and with the review date given,
-     * under the hold id given or a fresh one, in one lifecycle transaction, and
-     * return it.
+     * Place a hold of the scope in one lifecycle transaction, under the hold id
+     * given or a fresh one.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $scope
@@ -118,11 +98,8 @@ final readonly class HoldKeeper
     }
 
     /**
-     * Place a hold inside the lifecycle transaction the connection holds, onto
-     * the head of the replay verified or advanced in it: the hold row appended
-     * and its projection row inserted. The hold and the replay that accepted
-     * its row are returned; the caller keeps the replay once its transaction
-     * has committed.
+     * Place a hold inside the caller's lifecycle transaction, so an import's
+     * start and its hold commit together.
      *
      * @formatter:off
      *
@@ -181,10 +158,8 @@ final readonly class HoldKeeper
     }
 
     /**
-     * Release the active hold of the id, in one lifecycle transaction, and
-     * return it as it was: the release row appended and its projection row
-     * deleted. A hold the verified chain does not hold active is refused, and
-     * nothing is written.
+     * Release the active hold and return it as it was; a hold the verified
+     * chain does not hold active is refused.
      *
      * @param  string  $operationId
      * @param  string  $holdId
@@ -216,8 +191,8 @@ final readonly class HoldKeeper
     }
 
     /**
-     * Rebuild the projection from the verified chain, in one lifecycle
-     * transaction, and return how many holds it now holds.
+     * Rebuild the projection from the verified chain, returning how many holds
+     * it now holds.
      *
      * @param  string  $operationId
      * @return int
@@ -238,8 +213,7 @@ final readonly class HoldKeeper
     }
 
     /**
-     * The active holds, in the order they were placed, replayed from the
-     * verified chain under the lifecycle lock in an operation of their own.
+     * The active holds in placement order, replayed from the verified chain.
      *
      * @return list<\SineMacula\Laravel\AuditLog\Lifecycle\Hold>
      *
@@ -259,7 +233,7 @@ final readonly class HoldKeeper
     }
 
     /**
-     * A fresh replay of nothing yet, of the configured log, for one operation.
+     * A fresh replay of the configured log.
      *
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay
      *
@@ -271,8 +245,7 @@ final readonly class HoldKeeper
     }
 
     /**
-     * Refuse a hold id that is not a lower-case UUID v7, the form of every hold
-     * id the package mints.
+     * Refuse a hold id that is not a lower-case UUID v7.
      *
      * @param  string  $holdId
      * @return void
@@ -289,9 +262,7 @@ final readonly class HoldKeeper
     }
 
     /**
-     * Refuse to place a hold under an id that is not a lower-case UUID v7, or
-     * that the chain ever placed, active or released: hold ids are never
-     * reused.
+     * Refuse a malformed hold id or one the chain ever placed.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
      * @param  string  $holdId
@@ -311,8 +282,7 @@ final readonly class HoldKeeper
     }
 
     /**
-     * The hold the replay accepted under the id, which accepting its row always
-     * gives it.
+     * The hold the replay accepted under the id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
      * @param  string  $holdId

@@ -22,13 +22,7 @@ use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
 /**
- * Feature tests for reading the trail with the package's field reader: under a
- * scope that reveals the encrypted fields each fragment shows its typed value,
- * `[ERASED]` once its owner's erasure destroyed the key, or `[UNREADABLE]`, and
- * the read's record counts each; under any other scope every fragment shows
- * `[ENCRYPTED]` and no key is read; and an owner's erasure turns its fragments
- * to `[ERASED]` from the next read on, leaving every other owner's revealed,
- * and a reinstatement never brings them back.
+ * Feature tests for reading the trail through the package's field reader.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,12 +65,7 @@ final class RevealedReadingTest extends TestCase
     }
 
     /**
-     * Under a scope that reveals the encrypted fields, an entry shows each
-     * marker where it applies: the typed values of a live key, an address as
-     * its text, `[ERASED]` for an erased owner's fragment, and `[UNREADABLE]`
-     * for a fragment of an unknown key and for an envelope its rules refuse;
-     * the read's record counts each state. Under a scope that does not reveal
-     * them, every well-formed envelope shows `[ENCRYPTED]`.
+     * Each marker shows where it applies under a revealing scope.
      *
      * @return void
      *
@@ -113,9 +102,7 @@ final class RevealedReadingTest extends TestCase
     }
 
     /**
-     * Under a scope that does not reveal the encrypted fields the reader is
-     * never asked: no key and no erasure row is read, and every envelope shows
-     * `[ENCRYPTED]`.
+     * A non-revealing scope never asks the reader and shows `[ENCRYPTED]`.
      *
      * @return void
      *
@@ -142,9 +129,7 @@ final class RevealedReadingTest extends TestCase
     }
 
     /**
-     * An owner's erasure turns each of its fragments to `[ERASED]` from the
-     * next read on, while another owner's fragment in the same entry stays
-     * revealed; reinstating the owner never brings an erased fragment back.
+     * Erasure marks only the owner's fragments `[ERASED]`, and for good.
      *
      * @return void
      */
@@ -182,10 +167,7 @@ final class RevealedReadingTest extends TestCase
     }
 
     /**
-     * Seed one entry holding a fragment in each state: a card and an address
-     * under a live key, a count in the context under it, a PIN under an erased
-     * owner's key, a token under a key no row has, and an envelope whose
-     * version its rules refuse; and return its id.
+     * Seed one entry holding a fragment in each state, and return its id.
      *
      * @return string
      *
@@ -217,8 +199,7 @@ final class RevealedReadingTest extends TestCase
     }
 
     /**
-     * The statements captured that name the table, quoted as an engine's
-     * grammar quotes it, as their SQL.
+     * The captured statements that name the table, as the grammar quotes it.
      *
      * @param  string  $table
      * @return list<string>

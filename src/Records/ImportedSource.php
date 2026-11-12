@@ -7,15 +7,7 @@ namespace SineMacula\Laravel\AuditLog\Records;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * Where an imported record came from: the source that first asserted it, that
- * source's region, the record's id there, the batch it came in, and the keyed
- * digest of the assertion as it was read, which tells a repeated import of it
- * from a conflicting one.
- *
- * Every field is checked as it is given and never trimmed, case-folded or
- * repaired: the source id, its region and the record's id are clean text that
- * fits its column, the batch id is a lower-case UUID, the one form every engine
- * stores and returns, and the digest is 64 lower-case hexadecimal characters. A
+ * Where an imported record came from, each field checked and never repaired; a
  * refusal names the field, never its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -70,8 +62,7 @@ final readonly class ImportedSource
     }
 
     /**
-     * Refuse a text field, when it is given, that is empty, longer than its
-     * column, or not already clean text.
+     * Refuse a given text field that is empty, too long or not clean text.
      *
      * @param  string  $field
      * @param  ?string  $value

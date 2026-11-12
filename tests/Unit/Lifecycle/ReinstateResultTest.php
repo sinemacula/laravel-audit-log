@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\ReinstateResult;
 
 /**
- * Unit tests for what reinstating an owner returns: the operation, the
- * reinstatement's id, the owner's fingerprint and its key, the floor, that it
- * committed, whether it was recorded, and its array form.
+ * Unit tests for what reinstating an owner returns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,9 +29,7 @@ final class ReinstateResultTest extends TestCase
     private const string FINGERPRINT = 'a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1';
 
     /**
-     * A result keeps what it is given, is not recorded until it is told so, and
-     * says it committed, since a reinstatement that did not commit throws
-     * instead.
+     * A result keeps what it is given, is committed and is not yet recorded.
      *
      * @return void
      */
@@ -51,8 +47,7 @@ final class ReinstateResultTest extends TestCase
     }
 
     /**
-     * Whether it was recorded is set on a copy, every other field kept, and the
-     * result it was called on is left as it was.
+     * Recording is set on a copy, leaving the original unchanged.
      *
      * @return void
      */

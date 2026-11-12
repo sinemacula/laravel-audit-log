@@ -14,10 +14,7 @@ use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the terms a read's record names: the filters and the scope as
- * given, their fingerprints keyed under a key HKDF derives from the ring key's
- * secret with an info string of the fingerprints' own, never a plain digest of
- * the canonical forms anyone could compute, and the key's id.
+ * Unit tests for the terms a read's record names and their fingerprints.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,11 +28,7 @@ final class ReadTermsTest extends TestCase
     private const string SECRET = 'a-ring-key-secret-of-thirty-two-bytes-or-more';
 
     /**
-     * Each fingerprint is the lower-case hex HMAC-SHA256 of the canonical
-     * encoding of the normalised filters, or the scope, under its own label,
-     * keyed by the HKDF-SHA256 of the ring key's secret with an empty salt and
-     * the info `sinemacula/audit-log:fingerprint:v1`; the terms keep the
-     * filters, the scope and the key's id.
+     * Each fingerprint is a hex HMAC-SHA256 under an HKDF key of its own info.
      *
      * @return void
      */
@@ -53,9 +46,7 @@ final class ReadTermsTest extends TestCase
     }
 
     /**
-     * No fingerprint is the plain SHA-256 of a canonical form, which a reader
-     * of the record could compute for candidate tenants and ids until one
-     * matched, and the scope's is not the unkeyed one a cursor binds.
+     * No fingerprint is a plain SHA-256 a reader could match by guessing.
      *
      * @return void
      */
@@ -69,8 +60,7 @@ final class ReadTermsTest extends TestCase
     }
 
     /**
-     * Another key gives other fingerprints of the same terms, and the same key
-     * the same ones, so reads under one key compare and nothing else does.
+     * The same key gives the same fingerprints, and another key others.
      *
      * @return void
      */
@@ -87,8 +77,7 @@ final class ReadTermsTest extends TestCase
     }
 
     /**
-     * With no scope answered the scope's fingerprint is `null`; the filters are
-     * still fingerprinted.
+     * With no scope answered, the scope's fingerprint is `null`.
      *
      * @return void
      */
@@ -102,10 +91,7 @@ final class ReadTermsTest extends TestCase
     }
 
     /**
-     * The owner holding data in the entries is part of the normalised filters
-     * the query is fingerprinted from: reads of two owners have two
-     * fingerprints, a read of none a third, and a read of the same owner given
-     * again the same one.
+     * The data owner is part of the fingerprinted filters.
      *
      * @return void
      */

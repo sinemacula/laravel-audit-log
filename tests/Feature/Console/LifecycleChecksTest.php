@@ -28,13 +28,7 @@ use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
 /**
- * Feature tests for the lifecycle checks of `audit-log:check`: a reader for
- * every lifecycle, retention and import setting; the four tables' shapes, the
- * lock's row, the bound policy's version, the installation's identity through
- * both connections, the journal's verification and the projection's drift as
- * problems, each named and never a value; holds past their review date and
- * import batches that stopped moving as notes, bounded and never a problem; and
- * nothing written, not even an installation id that is missing.
+ * Feature tests for the lifecycle checks of `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,8 +62,7 @@ final class LifecycleChecksTest extends TestCase
     private const string STALE_NOTE = '; close an interrupted one with `audit-log:import --close=<batch>`.';
 
     /**
-     * Freeze the clock, and bind the policy the package binds by default,
-     * whether or not the provider has bound it yet.
+     * Freeze the clock and bind the default policy, whether or not it is bound.
      *
      * @return void
      */
@@ -84,8 +77,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Put the clock back, drop the other installation's state table and forget
-     * the connections a test configured.
+     * Put the clock back and drop the other installation's state.
      *
      * @return void
      */
@@ -105,8 +97,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the leaf under audit-log, a value it refuses]`: every
-     * lifecycle, retention and import setting the readers read.
+     * Rows of `[the leaf under audit-log, a value it refuses]`.
      *
      * @return iterable<string, array{0: string, 1: array<string, int>|int|string}>
      */
@@ -131,10 +122,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Each lifecycle, retention and import setting is read by a reader that
-     * refuses it, naming it, when it is malformed, a retention shorter than its
-     * preservation among them; with the shipped defaults no reader refuses
-     * anything.
+     * Each lifecycle setting has a reader that refuses it when malformed.
      *
      * @param  string  $leaf
      * @param  array<string, int>|int|string  $bad
@@ -159,8 +147,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * An install the shipped migrations created, with a hold placed and its
-     * projection in step, has no problem and no note.
+     * A healthy install with a hold in step has no problem and no note.
      *
      * @return void
      */
@@ -188,9 +175,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Each lifecycle table that does not exist is a problem named by its label,
-     * and nothing that reads the tables is checked while one is missing:
-     * neither the lock's row, the installation, nor the journal.
+     * A missing lifecycle table is named by its label and skips what reads it.
      *
      * @param  string  $setting
      * @param  string  $table
@@ -209,8 +194,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A table of the wrong shape is a problem too: a column the package does
-     * not write on the holds table, and a missing index on the journal.
+     * An extra holds column and a missing journal index are each a problem.
      *
      * @return void
      */
@@ -231,8 +215,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A lock table without its one row is a problem, since no lifecycle
-     * operation could lock it.
+     * A lock table without its one row is a problem, since nothing could lock.
      *
      * @return void
      */
@@ -244,8 +227,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the version a policy gives]`: empty, longer than 64 characters,
-     * and holding a control character.
+     * Rows of `[the version a policy gives]` that are invalid.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -259,9 +241,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A bound policy whose version is not 1 to 64 characters of clean text is a
-     * problem naming the policy's class and what the version must be, never the
-     * version.
+     * An invalid policy version is a problem that never prints the version.
      *
      * @param  string  $version
      * @return void
@@ -279,9 +259,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A policy that cannot be resolved, and one whose version throws, are each
-     * a problem named by the class of what was thrown, never its message; a
-     * version of 64 characters is no problem.
+     * An unreadable policy is named by its exception class, never its message.
      *
      * @return void
      *
@@ -308,9 +286,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * While the retention settings are malformed, which `config` reports, the
-     * policy the package binds is not asked, so no lifecycle problem repeats
-     * them.
+     * Malformed retention settings leave the policy unasked.
      *
      * @return void
      */
@@ -322,8 +298,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A maintenance connection that reaches another installation is a problem,
-     * and so is one that reaches no installation id at all.
+     * A maintenance connection to another or no installation is a problem.
      *
      * @return void
      */
@@ -339,8 +314,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A maintenance connection of its own that reaches the storage connection's
-     * database reads the same installation id, so it is no problem.
+     * A maintenance connection to the storage database is no problem.
      *
      * @return void
      */
@@ -351,8 +325,7 @@ final class LifecycleChecksTest extends TestCase
         $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . self::CONNECTION));
         $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
 
-        // On SQLite a second in-memory connection is another database, so it
-        // shares the worker's
+        // A second SQLite in-memory connection is another database: share it
         if (DB::connection(self::CONNECTION)->getDriverName() === 'sqlite') {
             DB::connection(self::MAINTENANCE)->setPdo(DB::connection(self::CONNECTION)->getPdo());
         }
@@ -361,9 +334,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A maintenance connection that is not configured, or uses another driver,
-     * is left to the `connections` subject, which reports it, so the
-     * installation is not read through it.
+     * A maintenance connection `connections` reports is not read through.
      *
      * @return void
      */
@@ -382,8 +353,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A stored installation id that is malformed is the package's own refusal,
-     * which names no id.
+     * A malformed installation id is the package's refusal, naming no id.
      *
      * @return void
      */
@@ -395,8 +365,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[what is done to the journal, giving the row the finding is
-     * found at, the finding]`.
+     * Rows of `[how the journal is broken, the finding]`.
      *
      * @return iterable<string, array{0: \Closure(\Tests\Feature\Console\LifecycleChecksTest): string, 1: string}>
      */
@@ -429,8 +398,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A journal that fails verification is a problem naming the finding and the
-     * row it was found at.
+     * A broken journal is a problem naming the finding and its row.
      *
      * @param  \Closure(self): string  $break
      * @param  string  $finding
@@ -448,8 +416,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A journal is verified read-only and outside any lock: the lock's row is
-     * left as it was.
+     * The journal is verified read-only, outside any lock.
      *
      * @return void
      */
@@ -464,8 +431,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A projection that drifted from the verified journal is a problem naming
-     * each hold that drifted: a hold the projection lost, and a row of no hold.
+     * A drifted projection is a problem naming each drifted hold.
      *
      * @return void
      */
@@ -488,8 +454,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A drifted row whose hold id is not a lower-case UUID is counted, never
-     * printed, so no byte a table holds reaches a console.
+     * A drifted hold id that is no lower-case UUID is counted, never printed.
      *
      * @return void
      */
@@ -511,8 +476,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A hold past its review date is a note, not a problem: it names the hold,
-     * and a hold due later, or of no review date, is left out.
+     * A hold past its review date is a note naming it, not a problem.
      *
      * @return void
      */
@@ -530,8 +494,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A note lists at most 100 ids, oldest review date first, and counts the
-     * rest.
+     * A note lists at most 100 ids, oldest first, and counts the rest.
      *
      * @return void
      */
@@ -552,9 +515,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * An import batch still running that has not moved for over an hour is a
-     * note naming it; one that moved within the hour, and one that finished,
-     * are left out.
+     * A running import batch idle for over an hour is a note naming it.
      *
      * @return void
      */
@@ -590,8 +551,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Notes that cannot be read are left out, since the problems name what is
-     * wrong: here the holds table is missing.
+     * Unreadable notes are left out, since the problems name what is wrong.
      *
      * @return void
      */
@@ -607,8 +567,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A storage connection that cannot be opened is left to the `schema`
-     * subject, which reports it, so the lifecycle checks report nothing.
+     * An unopenable storage connection is left to the `schema` subject.
      *
      * @return void
      */
@@ -626,9 +585,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A missing installation id is a problem, which the checks report rather
-     * than write: the state table is left as it was, and a second run reports
-     * it again.
+     * A missing installation id is reported on every run, never written.
      *
      * @return void
      */
@@ -644,8 +601,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * The checks leave the installation id the migrations seed as it is, run
-     * after run.
+     * The seeded installation id is only read.
      *
      * @return void
      */
@@ -674,8 +630,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Place a hold of everything under the operation given, by an operator, on
-     * a legal claim, with the review date given or none.
+     * Place a hold of everything on a legal claim, with the review date given.
      *
      * @param  string  $operation
      * @param  ?\DateTimeInterface  $reviewBy
@@ -687,8 +642,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Configure `OTHER`, a connection to another installation's state table,
-     * holding the installation id given, as the maintenance connection.
+     * Make `OTHER`, another installation of the id given, the maintenance one.
      *
      * @param  string  $id
      * @return void
@@ -741,8 +695,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A policy that keeps everything forever, whose version is what the closure
-     * gives.
+     * A keep-forever policy whose version the closure gives.
      *
      * @param  \Closure(): string  $version
      * @return \SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy
@@ -801,8 +754,7 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * An import batch row of the status given, last written at the stored time
-     * given.
+     * An import batch row of the status given, last written at the time given.
      *
      * @param  string  $id
      * @param  string  $status

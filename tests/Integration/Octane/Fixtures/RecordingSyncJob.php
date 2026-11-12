@@ -10,9 +10,8 @@ use Illuminate\Support\Facades\Auth;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 
 /**
- * A queued job a request dispatches onto the sync queue, which records an
- * activity. It can forget the guards first, as nothing else in a request would,
- * so its record has only the actor it carried from whoever dispatched it.
+ * A sync-queued job that records an activity; it can forget the guards first,
+ * so its record has only the actor it carried.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

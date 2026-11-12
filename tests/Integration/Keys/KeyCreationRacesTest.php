@@ -30,18 +30,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for an owner's first key racing the owner's erasure, in
- * processes of their own, on whichever engine the suite runs against and on a
- * file database on SQLite: whichever commits first, no key of the owner
- * survives the erasure live. A creation that waits for the owner's lock while
- * an erasure holds it sees the erasure's marker and makes no key, or on SQLite
- * fails closed as busy; and a key committed before the erasure's lock is
- * destroyed by it.
- *
- * SQLite runs on a file in WAL mode, as the operations guidance advises. The
- * processes meet on file gates rather than on timing; a pause inside a held
- * lock only makes an overtaking likely should the lock fail, and no assertion
- * measures time.
+ * Integration tests for an owner's first key racing the owner's erasure in
+ * processes of their own: no key survives the erasure live.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -125,10 +115,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * An owner's first key racing the owner's erasure never survives it: in
-     * every round, whichever commits first, the owner holds no live key once
-     * both are done and is marked erased, and a key the creation made is erased
-     * by the erasure.
+     * An owner's first key racing an erasure never survives it, whichever
+     * commits first.
      *
      * @return void
      *
@@ -168,10 +156,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * A creation that asks for the owner's lock while an erasure holds it sees
-     * the erasure once it commits, and makes no key; on SQLite, which has no
-     * owner's lock, its insert fails closed as busy instead. Either way no key
-     * of the owner is live.
+     * A creation waiting on the owner's lock sees the erasure and makes no key;
+     * on SQLite its insert fails closed as busy.
      *
      * @return void
      */
@@ -201,12 +187,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * A creation on a session whose transactions default to `repeatable read`,
-     * as a server, a role or the connection's own settings may make them, still
-     * sees an erasure that committed while it waited for the owner's lock: on
-     * PostgreSQL its transaction is set to `read committed` before any snapshot
-     * is taken, and on MySQL the owner's lock is taken before it begins. No key
-     * of the owner is live.
+     * A creation under `repeatable read` still sees an erasure committed while
+     * it waited for the owner's lock.
      *
      * @return void
      */
@@ -274,10 +256,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * Put the database on a file SQLite can share across a fork, in WAL mode,
-     * as the operations guidance advises: a creation that read before an
-     * erasure's commit then fails its insert as busy, and a reader never holds
-     * back a writer's commit.
+     * Put the database on a file in WAL mode, which SQLite can share across a
+     * fork.
      *
      * @param  mixed  $app
      * @return void
@@ -300,11 +280,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * Create the owner's key in the category through the key creator, and say
-     * what came of it: a key made or found, none, or one of the two documented
-     * ways a creation fails closed, which drop the field it was for: SQLite's
-     * busy insert, and a wait for the owner's lock that ran out. Anything else
-     * thrown is a fault, rethrown so the test fails.
+     * Create the owner's key and say what came of it, a documented fail-closed
+     * busy or lock wait included; anything else is rethrown.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return string
@@ -341,9 +318,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * Whether the failed statement found SQLite's database busy: its driver
-     * code `SQLITE_BUSY` or `SQLITE_BUSY_SNAPSHOT`, or its message saying the
-     * database is locked.
+     * Whether the statement found SQLite busy: `SQLITE_BUSY`,
+     * `SQLITE_BUSY_SNAPSHOT` or a locked-database message.
      *
      * @param  \Illuminate\Database\QueryException  $exception
      * @return bool
@@ -360,9 +336,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * Make every connection the parent establishes from now on, the key session
-     * among them, default its transactions to `repeatable read`, as a server or
-     * role setting would.
+     * Make every connection the parent opens from now on default to `repeatable
+     * read`.
      *
      * @param  string  $driver
      * @return void
@@ -390,9 +365,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * In a child: once the erasure's first statement after the owner's lock,
-     * the read of the owner's marker, has run, open the held gate, wait for the
-     * release gate, and keep the locks briefly after it.
+     * In a child: once the erasure reads the owner's marker, open the held
+     * gate, wait for release, then keep the locks briefly.
      *
      * @return void
      */
@@ -438,10 +412,8 @@ final class KeyCreationRacesTest extends TestCase
     }
 
     /**
-     * Open the release gate just before the creator's first statement that
-     * waits on the owner, on whichever connection its key session opens:
-     * MySQL's and PostgreSQL's owner's lock, or on SQLite, which takes none,
-     * its read of the owner's marker.
+     * Open the release gate just before the creator first waits on the owner:
+     * the owner's lock, or on SQLite the marker read.
      *
      * @return void
      */

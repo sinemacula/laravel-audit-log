@@ -10,9 +10,7 @@ use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 
 /**
  * Unit tests for the guard that refuses a record made while the package writes
- * one or handles a failed write: when it is active, what it returns, that it
- * lets go however the work ends, and that only the first refusal in a window is
- * said.
+ * or handles a failed write.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,9 +87,8 @@ final class WriteGuardTest extends TestCase
     }
 
     /**
-     * A window inside another leaves the guard active when it ends, until the
-     * outermost one ends too, and a nested window that throws does not release
-     * the outer one.
+     * A nested window leaves the guard active until the outermost ends, even
+     * when the nested one throws.
      *
      * @return void
      */
@@ -184,9 +181,8 @@ final class WriteGuardTest extends TestCase
     }
 
     /**
-     * Outside a window nothing is refused, so nothing is the first refusal and
-     * nothing is remembered for the next window, which would otherwise lose its
-     * own first refusal.
+     * Outside a window nothing is refused or remembered, so the next window
+     * still says its first refusal.
      *
      * @return void
      */
@@ -215,9 +211,8 @@ final class WriteGuardTest extends TestCase
     }
 
     /**
-     * An exception thrown from the work shows the guard's frame with the work
-     * withheld, so nothing the work captured reaches a trace, even with the
-     * arguments kept, as a development setting keeps them.
+     * A thrown exception shows the guard's frame with the work withheld, even
+     * with arguments kept.
      *
      * @return void
      */

@@ -12,22 +12,8 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
- * `audit-log:rewrap`: rewraps every owner's key onto the key wrapper's current
- * wrapping key, in bounded batches behind the lifecycle lock, each journalled,
- * then records the run; with `--rotate` it also supersedes every live key, so
- * the next write of each unit opens the unit's next generation, and with
- * `--dry-run` it counts what a run would do and writes nothing.
- *
- * It trusts the shell, as every maintenance command does: `--by-type` and
- * `--by-id` assert the operator and prove nothing of who runs it, and the
- * boundary is the maintenance connection's credentials. It prints the run's id,
- * how it ended, the wrapping key it rewrapped onto, how many keys it rewrapped,
- * superseded and skipped in how many batches, the ids of the keys it skipped,
- * which are opaque and name no owner, and a warning when the record could not
- * be written. A failure prints its class alone, never its message; the batches
- * the run committed stand. It exits 0 for a dry run and a run that ended
- * `complete` or `partial`, 1 for a failure, and 2 for an option it refuses,
- * before anything runs.
+ * `audit-log:rewrap`: rewraps every owner's key onto the current wrapping key
+ * in journalled batches; `--rotate` also supersedes live keys.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,8 +36,7 @@ final class RewrapCommand extends Command
     protected $description = 'Rewrap the owners\' keys onto the current wrapping key';
 
     /**
-     * Rewrap the keys, or count what a run would do, once the options are known
-     * to be well formed, and print what was done.
+     * Rewrap the keys, or count what a run would do, and print the result.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @return int

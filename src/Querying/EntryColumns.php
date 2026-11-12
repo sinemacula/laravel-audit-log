@@ -12,12 +12,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The columns of a stored entry as the entry a viewer is shown holds them:
- * references of both their columns or none, enums of their stored values,
- * versions, times, and a manifest descriptor the artifact inspector accepts,
- * with what was projected of the properties, the context and the IP address. A
- * column the shown entry cannot hold is refused, naming the column and never
- * its value.
+ * Reads a stored entry's columns into the entry a viewer is shown, refusing a
+ * column it cannot hold by name, never by value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +28,7 @@ final class EntryColumns
     private function __construct() {}
 
     /**
-     * The shown entry of the stored entry's columns, with what was projected of
-     * its properties, context and IP address.
+     * The shown entry, with the projected properties, context and IP address.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -95,8 +90,7 @@ final class EntryColumns
     }
 
     /**
-     * The entry's manifest descriptor as its kind, count and digest, when the
-     * artifact inspector accepts it as exactly a descriptor, or `null`.
+     * The entry's manifest descriptor when it is exactly one, or `null`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $stored
      * @return ?array{kind: string, count: int, digest: string}
@@ -161,7 +155,7 @@ final class EntryColumns
     {
         $value = $envelope[$column];
 
-        // The codec reads each of these columns as a string or refuses the row
+        // The codec reads these columns as a string or refuses the row
         assert(is_string($value));
 
         return $value;
@@ -180,8 +174,7 @@ final class EntryColumns
     {
         $value = $envelope[$column];
 
-        // The codec reads each of these columns as a string or null, or refuses
-        // the row
+        // The codec reads these columns as a string or null, or refuses the row
         assert($value === null || is_string($value));
 
         return $value;
@@ -200,16 +193,14 @@ final class EntryColumns
     {
         $value = $envelope[$column];
 
-        // The codec reads each of these columns as an integer or refuses the
-        // row
+        // The codec reads these columns as an integer or refuses the row
         assert(is_int($value));
 
         return $value;
     }
 
     /**
-     * The refusal of a column whose stored value the shown entry cannot hold,
-     * naming the column, never its value.
+     * The refusal of a column the shown entry cannot hold.
      *
      * @param  string  $column
      * @return \UnexpectedValueException

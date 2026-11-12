@@ -34,13 +34,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the records of the lifecycle's operations: each code is
- * written by the authority's operator, or by no one for a prune, in no tenant,
- * with exactly the properties its code retains; a refusal is `denied` with the
- * reason it names and a failure a `failure` with a code, never a message; an
- * erasure's `blocked` names each reason once, at most 50, with the rest counted
- * under `_other`; and a record that cannot be written is reported once and
- * answered `false`.
+ * Feature tests for the records of the lifecycle's operations.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -95,7 +89,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * A hold is recorded by its operator, with its id, basis, scope digest and
+     * A hold is recorded by its operator with its id, basis, scope digest and
      * review date.
      *
      * @return void
@@ -133,8 +127,8 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * A release is recorded a success with no reason, and a release refused
-     * `denied` with `unknown_hold`.
+     * A release is recorded a success, and a refused one `denied` with
+     * `unknown_hold`.
      *
      * @return void
      */
@@ -149,8 +143,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * Rows of `[status, failure, outcome, reason]`: a prune run's status and
-     * the outcome and reason its record carries.
+     * Rows of `[status, failure, outcome, reason]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus, 1: ?string, 2: string, 3: ?string}>
      */
@@ -164,8 +157,8 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * A prune run is recorded by no one: a success for a complete or partial
-     * run and a failure, with the run's own reason, for a failed one.
+     * A prune run is recorded by no one, a failed one as a failure with its
+     * reason.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus  $status
      * @param  ?string  $failure
@@ -188,8 +181,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * Rows of `[status, outcome and reason]`: an import's status and how its
-     * record ends.
+     * Rows of `[status, outcome and reason]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus, 1: string}>
      */
@@ -204,8 +196,8 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * An import is recorded by its operator with its source, format and counts,
-     * a failed or interrupted one as a failure.
+     * An import is recorded by its operator, a failed or interrupted one as a
+     * failure.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus  $status
      * @param  string  $ending
@@ -227,9 +219,8 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * An erasure is recorded by the authority's operator, of no subject and no
-     * tenant, with its row, the owner's fingerprint, its status, counts and
-     * blocks, each reason once, sorted.
+     * An erasure is recorded with its row, fingerprint, status, counts and
+     * sorted blocks.
      *
      * @return void
      */
@@ -261,8 +252,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * Rows of `[refusal, reasons, the blocked the record keeps]`: every
-     * refusal, only a block's reasons kept as blocks.
+     * Rows of `[refusal, reasons, the blocked the record keeps]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal, 1: list<string>, 2: array<string, int>}>
      */
@@ -278,8 +268,8 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * A refused erasure is recorded `denied` with its refusal, naming the
-     * fingerprint the refusal carries, no row, no status and nothing done.
+     * A refused erasure is recorded `denied`, naming the refusal's fingerprint
+     * and nothing done.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal  $refusal
      * @param  list<string>  $reasons
@@ -313,9 +303,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * A failed erasure is recorded a failure under the fingerprint given:
-     * `journal_broken` for a journal that does not verify, `erasure_failed` for
-     * anything else, and never the failure's message.
+     * A failed erasure is recorded by code, never by the failure's message.
      *
      * @return void
      */
@@ -339,9 +327,8 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * The erasure a closure makes is recorded: one that commits as it returned,
-     * marked recorded, and one that throws as a refusal under the fingerprint
-     * given, rethrown unchanged; the closure is given the operation.
+     * A closure's erasure is recorded whether it commits or throws, and a throw
+     * is rethrown.
      *
      * @return void
      *
@@ -384,7 +371,7 @@ final class LifecycleRecordsTest extends TestCase
 
     /**
      * A reinstatement is recorded with its row and floor, and a refused one
-     * `denied` with `not_erased`, naming neither.
+     * `denied`.
      *
      * @return void
      */
@@ -408,8 +395,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * A rewrap is recorded with its status and counts, and a failed one as a
-     * failure that counts nothing, `journal_broken` or `rewrap_failed`.
+     * A rewrap is recorded with its counts, and a failed one counting nothing.
      *
      * @return void
      */
@@ -459,8 +445,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * An erasure's blocks name each reason once, counted 1, sorted bytewise,
-     * and nothing when there is none.
+     * An erasure's blocks name each reason once, sorted bytewise.
      *
      * @return void
      */
@@ -471,9 +456,7 @@ final class LifecycleRecordsTest extends TestCase
     }
 
     /**
-     * At most 50 reasons are named, the first bytewise, and how many more there
-     * were is counted under `_other`; exactly 50 names all of them and counts
-     * nothing more.
+     * At most 50 reasons are named, the rest counted under `_other`.
      *
      * @return void
      */

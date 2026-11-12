@@ -10,9 +10,8 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The access policy the package binds until an application binds its own: it
- * denies every viewer for every purpose, so no entry is read, counted, exported
- * or verified by default, and each such read is recorded as denied.
+ * The access policy bound until an application binds its own: it denies every
+ * viewer for every purpose, and each such read is recorded as denied.
  *
  * @api
  *

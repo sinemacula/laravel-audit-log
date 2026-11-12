@@ -24,48 +24,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Prunes the entries retention no longer keeps, entry by entry, seal by seal,
- * each chunk in a lifecycle transaction of its own behind the lock, and
- * journals the run and every deletion. It never runs on the write path.
+ * Prunes the entries retention no longer keeps, seal by seal, each chunk in its
+ * own lifecycle transaction, journalling every deletion.
  *
- * A run has a run id, which every journal row of the run names. Its policy is
- * resolved once, and each category and tenant pair it meets is decided once,
- * against the UTC midnight of the run's start, so one cut-off holds for each
- * pair for the whole run. Its start is one lifecycle transaction: the lock, the
- * whole journal verified, then, from the verified chain, the cursor to resume
- * after and the boundary, the latest seal, both read after the lock; the
- * policy's row when its version is not yet journalled; and the start row. The
- * cursor is the last finished run's, and only when that run stopped on its time
- * budget before its boundary: after any other run the walk starts again at the
- * first seal, so an entry a released hold or a finished delivery frees is
- * reached by the next run. A run that crashed after its start row left no
- * finish row, and is passed over.
- *
- * The seals from the cursor to the boundary are walked oldest first, so a seal
- * made during the run is left to the next. A seal that fails authentication is
- * skipped and named. The present members of an authenticated seal that are past
- * their pair's cut-off and whose code is not protected are planned into chunks
- * of `audit-log.retention.batch`; the plan decides nothing, since each chunk
- * reads its candidates again under the lock. A chunk whose deletes mismatch is
- * retried once from a fresh read, then its seal is skipped; a chunk keeps only
- * the replay a committed transaction returned. The time budget is read from the
- * clock between seals and between chunks, and a run past it stops, leaving what
- * it did not walk to the next run.
- *
- * A policy that throws, answers out of range or retains a category for less
- * than it is preserved, a configuration that is malformed, a journal that fails
- * verification and any other failure stop the run, are reported by their class
- * alone, and end it `failed`; the chunks it committed stand. A run that
- * committed its start row writes its finish row whatever happened, with its
- * status, counts, cursor and bounded decisions, and every run that is not a dry
- * run then writes `retention.last_run`. A dry run takes no lock and writes
- * nothing: it verifies the journal read-only, reads the cursor and the boundary
- * the same way, and counts the entries per pair and per seal, counting as held
- * those the verified chain's holds keep, exactly as a chunk would.
- *
- * Pruning makes deletion accountable, never impossible: whoever holds the
- * maintenance credentials can still delete entries, and the seals and the
- * journal make that detectable.
+ * Any failure ends the run `failed`, reported by its class alone; the chunks it
+ * committed stand. A dry run takes no lock and writes nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,12 +39,6 @@ final readonly class Pruner
 {
     /** @var int The attempts a chunk whose deletes mismatch makes in all: the first and one retry. */
     private const int MISMATCH_ATTEMPTS = 2;
-
-    /** @var string The phase a run's first row names. */
-    private const string START = 'start';
-
-    /** @var string The refusal of a run inside a transaction. */
-    private const string IN_TRANSACTION = 'A prune runs in transactions of its own on the maintenance connection, and refuses to run inside one.';
 
     /** @var string What a run that stopped on a failure reports, by the run's id and the failure's class. */
     private const string STOPPED = 'The prune run `%s` stopped with %s; the chunks it committed stand.';
@@ -132,7 +89,7 @@ final readonly class Pruner
         /** The progress a run leaves when it ends. */
         private IntegrityProgress $progress,
 
-        /** The time a run starts, decides its cut-offs and its budget by, and ends at. */
+        /** The clock a run's cut-offs, budget and times are read from. */
         private Clock $clock,
 
         /** The handler a run's failures are reported to. */
@@ -182,10 +139,8 @@ final readonly class Pruner
     }
 
     /**
-     * Prepare the run: the installation confirmed, unless it is a dry run; the
-     * policy resolved and its decisions made against the start's midnight; its
-     * version read; and the run limited. A failure of the policy or of the
-     * configuration is noted as such before it propagates.
+     * Confirm the installation, resolve the policy and limit the run; a policy
+     * or configuration failure is noted before it propagates.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  ?int  $maxSeconds
@@ -216,10 +171,8 @@ final readonly class Pruner
     }
 
     /**
-     * Start the run in one lifecycle transaction: the journal verified, the
-     * cursor and the boundary read from the verified chain after the lock, the
-     * policy's row appended when its version is new, and the start row; the
-     * replay the commit returned, the cursor and the boundary are returned.
+     * Start the run in one lifecycle transaction, journalling a new policy
+     * version and the start row.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  \SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy  $policy
@@ -244,7 +197,7 @@ final readonly class Pruner
 
             $start = [
                 'run_id'            => $runId,
-                'phase'             => self::START,
+                'phase'             => 'start',
                 'policy_version'    => $version,
                 'boundary_sequence' => $boundary,
                 'cutoff_midnight'   => $decisions->midnight(),
@@ -256,11 +209,8 @@ final readonly class Pruner
     }
 
     /**
-     * The whole journal verified on the connection, and from the verified chain
-     * the cursor to resume after, then the boundary: the latest seal's
-     * sequence, or 0 when there is none. The cursor is the last finished run's
-     * when that run stopped on its time budget before its boundary, and 0, the
-     * first seal, otherwise.
+     * Verify the journal and read the cursor to resume after and the boundary,
+     * the latest seal's sequence or 0.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return array{0: \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay, 1: int, 2: int}
@@ -283,10 +233,7 @@ final readonly class Pruner
 
     /**
      * Walk the seals after the cursor up to the boundary, oldest first, and
-     * return the replay the last committed transaction returned: each seal
-     * authenticated or skipped, its eligible present members planned, and,
-     * unless it is a dry run, pruned chunk by chunk. A run past its budget
-     * stops before the next seal or chunk.
+     * return the last committed replay.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $decisions
@@ -340,9 +287,8 @@ final readonly class Pruner
     }
 
     /**
-     * The seal's present members that are eligible, by id: past their pair's
-     * cut-off and of a code that is not protected. A dry run counts each as
-     * planned, or as held when a hold keeps it, and plans nothing.
+     * The seal's eligible present members by id; a dry run counts them and
+     * plans nothing.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $decisions
@@ -378,11 +324,8 @@ final readonly class Pruner
     }
 
     /**
-     * Prune the planned members of the seal in chunks, and return the replay
-     * the last committed chunk returned and whether the seal was walked to its
-     * end: `false` when the budget stopped the run before a chunk. A chunk
-     * whose candidate fails verification, or whose deletes mismatch twice,
-     * skips the rest of the seal.
+     * Prune the seal's planned members in chunks, returning the last committed
+     * replay and whether the seal was walked to its end.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $decisions
@@ -417,10 +360,8 @@ final readonly class Pruner
     }
 
     /**
-     * Run one chunk of the ids in a lifecycle transaction from the replay the
-     * last commit returned, and return its outcome once it has committed. A
-     * chunk whose deletes mismatched rolled back, and is made once more from a
-     * fresh read; `null` when that mismatched too.
+     * Run one chunk in a lifecycle transaction, retried once when its deletes
+     * mismatch; `null` when both mismatch.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $decisions
@@ -442,8 +383,7 @@ final readonly class Pruner
             try {
                 return $this->transaction->run($runId, $work);
             } catch (PruneMismatchException) {
-                // The chunk rolled back whole; it is read afresh once, then its
-                // seal is skipped
+                // Rolled back whole; retried once, then the seal is skipped
             }
         }
 
@@ -451,11 +391,8 @@ final readonly class Pruner
     }
 
     /**
-     * End the run: once it committed its start row, its finish row in one
-     * lifecycle transaction, the replay advanced first, or the journal verified
-     * afresh when the run lost its replay to a failure; then its progress.
-     * Either failing is reported, and a finish row that could not be written
-     * fails the run.
+     * Write a started run's finish row, then its progress; either failing is
+     * reported, and a failed finish row fails the run.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  ?\SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $decisions
@@ -491,9 +428,8 @@ final readonly class Pruner
     }
 
     /**
-     * Report the failure that stopped the run, or that its end met, by its
-     * class alone, so nothing of an entry, a statement or a binding reaches a
-     * reporter.
+     * Report the failure by its class alone, so nothing of an entry, a
+     * statement or a binding reaches a reporter.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  \Throwable  $exception
@@ -505,8 +441,8 @@ final readonly class Pruner
     }
 
     /**
-     * Refuse to run while the maintenance or the storage connection is in a
-     * transaction, before anything is read or written.
+     * Refuse to run inside a transaction on either connection, before anything
+     * is read or written.
      *
      * @return void
      *
@@ -520,12 +456,11 @@ final readonly class Pruner
             return;
         }
 
-        throw new \LogicException(self::IN_TRANSACTION);
+        throw new \LogicException('A prune runs in transactions of its own on the maintenance connection, and refuses to run inside one.');
     }
 
     /**
-     * The maintenance connection, which every read and transaction of a run
-     * takes.
+     * The maintenance connection every read and transaction of a run takes.
      *
      * @return \Illuminate\Database\Connection
      *
@@ -537,10 +472,8 @@ final readonly class Pruner
     }
 
     /**
-     * The decision of the present member's pair when the member is eligible:
-     * its time strictly before the pair's cut-off, and its code not protected;
-     * `null` otherwise, and for a member whose time or tenant cannot be read. A
-     * failure of the policy is noted as such before it propagates.
+     * The member's pair decision when the member is eligible, else `null`; a
+     * policy failure is noted before it propagates.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTally  $tally
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions  $decisions
@@ -569,9 +502,8 @@ final readonly class Pruner
     }
 
     /**
-     * The present member's time, read from the engine's form, and its tenant,
-     * or `null` for a member of a protected code, and for one whose time or
-     * tenant cannot be read.
+     * The member's time and tenant, or `null` for a protected code or an
+     * unreadable time or tenant.
      *
      * @param  array<string, scalar|null>  $row
      * @return ?array{0: string, 1: ?\SineMacula\Laravel\AuditLog\Records\Reference}
@@ -610,9 +542,8 @@ final readonly class Pruner
     }
 
     /**
-     * The cursor a run resumes after, read from the last finished run's
-     * verified payload: its cursor when it stopped on its time budget, before
-     * its boundary, without failing; 0, the first seal, otherwise.
+     * The last finished run's cursor if it stopped on its budget before its
+     * boundary without failing, else 0.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -632,9 +563,8 @@ final readonly class Pruner
     }
 
     /**
-     * Why a failure of the policy or of the configuration stops the run: a
-     * retention shorter than its preservation, or a malformed setting, is
-     * refused configuration, and anything else the policy's failure.
+     * A retention conflict or malformed setting is refused configuration;
+     * anything else is the policy's failure.
      *
      * @param  \Throwable  $exception
      * @return 'configuration_refused'|'policy_failed'
@@ -645,8 +575,7 @@ final readonly class Pruner
     }
 
     /**
-     * The id of the stored seal at the sequence, or `null` when there is none
-     * or it is not text.
+     * The id of the stored seal at the sequence, or `null`.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  int  $sequence

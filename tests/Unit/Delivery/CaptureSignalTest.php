@@ -9,10 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 
 /**
- * Unit tests for one capture's failure channel: it starts clear, keeps the
- * first failure and whether it was fatal, passes that failure's class on once,
- * contains a callback that throws, and keeps the mark that its write was
- * deferred.
+ * Unit tests for one capture's failure channel.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -123,9 +120,7 @@ final class CaptureSignalTest extends TestCase
     }
 
     /**
-     * Whether the signal is fatal is the first failure's to say: a fatal
-     * failure after an ordinary one leaves it not fatal, and an ordinary one
-     * after a fatal one leaves it fatal.
+     * Whether the signal is fatal is the first failure's to say.
      *
      * @return void
      */

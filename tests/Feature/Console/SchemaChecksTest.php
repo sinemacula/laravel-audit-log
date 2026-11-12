@@ -20,17 +20,8 @@ use Tests\Fixtures\Database\EntriesTableShape;
 use Tests\TestCase;
 
 /**
- * Feature tests for the schema checks of `audit-log:check`: each table a
- * shipped migration creates, the entries, the artifacts, the outbox, the
- * deliveries, the checkpoints, the checkpoint members, the integrity state, the
- * lifecycle journal, the holds, the lifecycle lock and the import batches, has
- * no problem, and each way a table can differ from it, one at a time, is the
- * one problem reported.
- *
- * Each test runs the shipped migration under a table name of its own, then
- * changes the table in one way; Laravel rebuilds the table on SQLite for a
- * changed or dropped column. A change an engine cannot make is skipped there,
- * with the reason.
+ * Feature tests for the schema checks of `audit-log:check`. Each test alters a
+ * freshly migrated table one way; Laravel rebuilds it on SQLite.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -99,7 +90,7 @@ final class SchemaChecksTest extends TestCase
     /** @var string The table prefix of the prefixed connection. */
     private const string PREFIX = 'tenant_prefix_';
 
-    /** @var array<string, array<string, array{0: string, 1: string}>> The type name and full type MySQL and PostgreSQL report for each column that is not a string, by name. */
+    /** @var array<string, array<string, array{0: string, 1: string}>> The MySQL and PostgreSQL type name and full type of each non-string column. */
     private const array REPORTED = [
         'mysql' => [
             'id'                => ['char', 'char(36)'],
@@ -125,7 +116,7 @@ final class SchemaChecksTest extends TestCase
         ],
     ];
 
-    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The type name, full type and collation MySQL and PostgreSQL report for each outbox column, by name. */
+    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The MySQL and PostgreSQL type name, full type and collation of each outbox column. */
     private const array OUTBOX_REPORTED = [
         'mysql' => [
             'id'               => ['char', 'char(36)', 'utf8mb4_0900_bin'],
@@ -151,7 +142,7 @@ final class SchemaChecksTest extends TestCase
         ],
     ];
 
-    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The type name, full type and collation MySQL and PostgreSQL report for each artifacts column, by name. */
+    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The MySQL and PostgreSQL type name, full type and collation of each artifacts column. */
     private const array ARTIFACTS_REPORTED = [
         'mysql' => [
             'id'           => ['char', 'char(36)', 'utf8mb4_0900_bin'],
@@ -173,7 +164,7 @@ final class SchemaChecksTest extends TestCase
         ],
     ];
 
-    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The type name, full type and collation MySQL and PostgreSQL report for each checkpoints column, by name. */
+    /** @var array<string, array<string, array{0: string, 1: string, 2: ?string}>> The MySQL and PostgreSQL type name, full type and collation of each checkpoints column. */
     private const array CHECKPOINTS_REPORTED = [
         'mysql' => [
             'id'                 => ['char', 'char(36)', 'utf8mb4_0900_bin'],
@@ -276,8 +267,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A table that does not exist is the one problem, naming the table, the
-     * connection and how to create it.
+     * A missing table is the one problem, naming it and how to create it.
      *
      * @return void
      */
@@ -320,8 +310,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * On PostgreSQL a payload column of `jsonb`, which keeps no text, is a
-     * problem.
+     * On PostgreSQL a `jsonb` payload column, keeping no text, is a problem.
      *
      * @return void
      */
@@ -339,8 +328,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A column that may be null and must not, and one that must be nullable and
-     * is not, are each a problem.
+     * A column with the wrong nullability either way is a problem.
      *
      * @return void
      */
@@ -358,8 +346,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL a string column of another length is a problem;
-     * SQLite records no length.
+     * A string column of another length is a problem; SQLite records no length.
      *
      * @return void
      */
@@ -375,8 +362,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL a time kept to the second rather than the
-     * microsecond is a problem; SQLite records no precision.
+     * A time without microseconds is a problem; SQLite records no precision.
      *
      * @return void
      */
@@ -395,8 +381,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A column the package does not write is a problem, because no entry's HMAC
-     * covers it.
+     * An unexpected column is a problem, because no entry's HMAC covers it.
      *
      * @return void
      */
@@ -424,8 +409,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An index under the migration's name over other columns is a problem,
-     * naming both column lists.
+     * An index under the migration's name over other columns is a problem.
      *
      * @return void
      */
@@ -439,8 +423,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An index over the right columns in another order is a problem, since the
-     * order decides which lookups it serves.
+     * An index with its columns out of order is a problem.
      *
      * @return void
      */
@@ -456,8 +439,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A source identity index that is not unique is a problem, since it no
-     * longer keeps a source's record id once.
+     * A non-unique source identity index is a problem.
      *
      * @return void
      */
@@ -475,8 +457,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A lookup index made unique is a problem, since it would refuse entries
-     * that share an actor and a time.
+     * A unique lookup index is a problem: entries can share actor and time.
      *
      * @return void
      */
@@ -490,8 +471,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An index over other columns that is also unique when it must not be is
-     * two problems.
+     * An index wrong in columns and uniqueness is two problems.
      *
      * @return void
      */
@@ -526,9 +506,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * On MySQL a character column with a padding, case-insensitive collation is
-     * a problem, since ids that differ by case or a trailing space would
-     * compare equal.
+     * On MySQL a padded case-insensitive collation is a problem: ids collide.
      *
      * @return void
      */
@@ -546,9 +524,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A table name the setting accepts is a problem when the connection's
-     * prefix makes it longer than 47 characters, which no longer fits every
-     * index name.
+     * A prefixed table name over 47 characters overflows index names.
      *
      * @return void
      */
@@ -629,8 +605,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A column of the wrong type that is also not nullable when it must be is
-     * two problems.
+     * A column wrong in type and nullability is two problems.
      *
      * @return void
      */
@@ -659,10 +634,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The shipped table as MySQL and PostgreSQL report it, lengths, precisions
-     * and MySQL's collation included, has no problem; this runs on any engine
-     * the suite runs against, through a connection that reports the table as
-     * the engine would.
+     * The shipped table as MySQL and PostgreSQL report it has no problem.
      *
      * @param  string  $driver
      * @return void
@@ -676,9 +648,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[a driver, the column changed, its type name, its full type, its
-     * collation, the problem]`: what MySQL or PostgreSQL could report for a
-     * column the package writes, and how it is described.
+     * Rows of `[driver, column, type name, full type, collation, problem]`.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string, 3: string, 4: ?string, 5: string}>
      */
@@ -700,9 +670,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Each column MySQL or PostgreSQL could report otherwise is the one
-     * problem, described in the engine's own terms; a collation matters only on
-     * MySQL.
+     * Each column an engine reports otherwise is a problem in its own terms.
      *
      * @param  string  $driver
      * @param  string  $column
@@ -749,8 +717,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the table, its shape, how it is named]`: a delivery table that
-     * does not exist is named by its own label.
+     * Rows of `[the table, its shape, how it is named]`.
      *
      * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Console\TableShape, 2: string}>
      */
@@ -763,8 +730,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A delivery table that does not exist is the one problem, naming the table
-     * by its label, the connection and how to create it.
+     * A missing delivery table is the one problem, named by its label.
      *
      * @param  string  $table
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
@@ -813,8 +779,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A deliveries table keyed by the entry alone is a problem, since it would
-     * keep one receipt for a record however many destinations it has.
+     * A deliveries table keyed by the entry alone is a problem.
      *
      * @return void
      */
@@ -854,8 +819,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A column of the outbox the package does not write is a problem, in the
-     * outbox's own words, which say nothing of an HMAC.
+     * An unknown outbox column is a problem in the outbox's own words.
      *
      * @return void
      */
@@ -871,8 +835,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A receipt column the deliveries table lacks, and one made nullable that
-     * must not be, are each a problem.
+     * A missing or nullable receipt column is a problem.
      *
      * @return void
      */
@@ -895,8 +858,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The entries shape is what the checks use when none is given, so the
-     * outbox table checked without one is a table of the wrong shape.
+     * The checks default to the entries shape.
      *
      * @return void
      */
@@ -909,9 +871,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The shipped outbox table as MySQL and PostgreSQL report it, its long text
-     * and integer columns included, has no problem; this runs on any engine the
-     * suite runs against.
+     * The shipped outbox table as each engine reports it has no problem.
      *
      * @param  string  $driver
      * @return void
@@ -927,9 +887,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[a driver, the column changed, its type name, its full type, the
-     * problem]`: what MySQL or PostgreSQL could report for an outbox column of
-     * the long text or integer families, and how it is described.
+     * Rows of `[driver, column, type name, full type, problem]` for the outbox.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string, 3: string, 4: string}>
      */
@@ -944,8 +902,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Each outbox column of a new type family that MySQL or PostgreSQL could
-     * report otherwise is the one problem, in the engine's own terms.
+     * Each outbox column an engine reports otherwise is a problem in its terms.
      *
      * @param  string  $driver
      * @param  string  $column
@@ -983,9 +940,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An index under the recorded index's name over the time alone is a
-     * problem, since entries recorded in the same microsecond would have no
-     * order to page by.
+     * A recorded index without the id is a problem: ties have no page order.
      *
      * @return void
      */
@@ -999,8 +954,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[an index's suffix, the columns an install migrated before each
-     * lookup ended in the id gave it]`: the seven lookups of the trail.
+     * Rows of `[an index's suffix, its columns before it ended in the id]`.
      *
      * @return iterable<string, array{0: string, 1: non-empty-list<string>}>
      */
@@ -1018,9 +972,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A lookup index of the trail that does not end in the id is a problem,
-     * naming both column lists, since a keyset page could not read it in order
-     * and the engine would sort every match.
+     * A trail lookup index not ending in the id is a problem.
      *
      * @param  string  $suffix
      * @param  non-empty-list<string>  $columns
@@ -1041,10 +993,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An install migrated with every lookup index of the trail as it was before
-     * each ended in the id is reported once for each of the seven, in the
-     * migration's order, and for nothing else: the correlation, recorded and
-     * source indexes are unchanged.
+     * An install with the old lookup indexes reports each of the seven.
      *
      * @return void
      */
@@ -1101,8 +1050,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An artifacts table without a column the package writes is a problem,
-     * naming the column.
+     * A missing artifacts column is a problem naming it.
      *
      * @param  string  $column
      * @return void
@@ -1131,8 +1079,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A missing artifacts table is the one problem, naming the table by its
-     * label, the connection and how to create it.
+     * A missing artifacts table is the one problem, named by its label.
      *
      * @return void
      */
@@ -1145,8 +1092,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An artifacts table whose entry index is not unique is a problem, since an
-     * entry could then have two artifacts.
+     * A non-unique artifacts entry index is a problem.
      *
      * @return void
      */
@@ -1166,8 +1112,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Nullable members and a column the package does not write are each a
-     * problem, the latter in the artifacts' own words.
+     * Nullable members and an unknown artifacts column are each a problem.
      *
      * @return void
      */
@@ -1187,9 +1132,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The shipped artifacts table as MySQL and PostgreSQL report it, its
-     * unsigned count and its long encrypted members included, has no problem;
-     * this runs on any engine the suite runs against.
+     * The shipped artifacts table as each engine reports it has no problem.
      *
      * @param  string  $driver
      * @return void
@@ -1214,8 +1157,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Members MySQL reports as `text`, which holds 64 KiB and no more, are a
-     * problem, in the engine's own terms.
+     * MySQL `text` members, capped at 64 KiB, are a problem.
      *
      * @return void
      */
@@ -1250,8 +1192,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The checkpoint members table the shipped migration creates has no
-     * problem.
+     * The shipped checkpoint members table has no problem.
      *
      * @return void
      */
@@ -1275,8 +1216,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the table, its shape, how it is named]`: an integrity table
-     * that does not exist is named by its own label.
+     * Rows of `[the table, its shape, how it is named]`.
      *
      * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Console\TableShape, 2: string}>
      */
@@ -1290,8 +1230,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An integrity table that does not exist is the one problem, naming the
-     * table by its label, the connection and how to create it.
+     * A missing integrity table is the one problem, named by its label.
      *
      * @param  string  $table
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
@@ -1308,8 +1247,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A members table whose entry index is not unique is a problem, since an
-     * entry could then be held by two seals.
+     * A non-unique members entry index is a problem.
      *
      * @return void
      */
@@ -1329,8 +1267,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A members table keyed by the entry alone is a problem, in the order the
-     * key must take.
+     * A members table keyed by the entry alone is a problem.
      *
      * @return void
      */
@@ -1350,8 +1287,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A checkpoints table without its unique sequence is a problem, since two
-     * sealers could then both extend the head.
+     * A checkpoints table without its unique sequence is a problem.
      *
      * @return void
      */
@@ -1367,8 +1303,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A column of the checkpoints table the package does not write is a
-     * problem, in the seals' own words.
+     * An unknown checkpoints column is a problem in the seals' own words.
      *
      * @return void
      */
@@ -1402,9 +1337,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The shipped checkpoints table as MySQL and PostgreSQL report it, its big
-     * integer sequence and its receipt included, has no problem; this runs on
-     * any engine the suite runs against.
+     * The shipped checkpoints table as each engine reports it has no problem.
      *
      * @param  string  $driver
      * @return void
@@ -1420,9 +1353,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[a driver, the column changed, its type name, its full type, the
-     * problem]`: what MySQL or PostgreSQL could report for a checkpoints column
-     * of the big integer family or a digest, and how it is described.
+     * Rows of `[driver, column, type name, full type, problem]`.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string, 3: string, 4: string}>
      */
@@ -1437,8 +1368,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Each checkpoints column MySQL or PostgreSQL could report otherwise is the
-     * one problem, in the engine's own terms.
+     * Each checkpoints column an engine reports otherwise is a problem.
      *
      * @param  string  $driver
      * @param  string  $column
@@ -1462,8 +1392,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * An entries table without the source digest is a problem, since an
-     * imported record's digest would have nowhere to go.
+     * An entries table without the source digest is a problem.
      *
      * @return void
      */
@@ -1477,9 +1406,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A checkpoints table without the journal head a seal commits to is a
-     * problem for each of its two columns and for the index the highest
-     * commitment is read by.
+     * A missing journal head is a problem for each column and its index.
      *
      * @return void
      */
@@ -1501,8 +1428,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the table, its shape]`: each lifecycle table under the name a
-     * test migrates it as.
+     * Rows of `[the table, its shape]` for each lifecycle table.
      *
      * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Console\TableShape}>
      */
@@ -1532,8 +1458,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A lifecycle table that does not exist is the one problem, naming it by
-     * its label.
+     * A missing lifecycle table is the one problem, named by its label.
      *
      * @param  string  $table
      * @param  \SineMacula\Laravel\AuditLog\Console\TableShape  $shape
@@ -1549,8 +1474,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A journal whose sequence is not unique is a problem, since two operations
-     * could then both extend the head.
+     * A journal without its unique sequence is a problem.
      *
      * @return void
      */
@@ -1566,10 +1490,8 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * A journal whose payload is a JSON column is a problem on MySQL and
-     * PostgreSQL, since the engine may rewrite the text the digest covers;
-     * SQLite keeps JSON as text, so there it cannot be told apart. PostgreSQL
-     * casts the text column to JSON only when told how.
+     * A JSON journal payload is a problem since the engine may rewrite it;
+     * SQLite keeps JSON as text.
      *
      * @return void
      */
@@ -1595,9 +1517,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[a driver, the boolean's type name, its full type, the
-     * problem]`: what MySQL and PostgreSQL report for the import batches'
-     * boolean, and for an integer in its place.
+     * Rows of `[driver, type name, full type, problem]`.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string, 3: string}>
      */
@@ -1613,8 +1533,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The import batches' boolean, as MySQL and PostgreSQL report it, is no
-     * problem, and another type in its place is, in the engine's own terms.
+     * The batches boolean as each engine reports it passes; another type fails.
      *
      * @param  string  $driver
      * @param  string  $typeName
@@ -1633,8 +1552,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The problems the checks find on the connection's table, against the shape
-     * given or, when none is, the entries table's.
+     * The problems on the table against the shape given, entries by default.
      *
      * @param  string  $table
      * @param  string  $connection
@@ -1651,9 +1569,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The shipped outbox table's columns as the driver reports them: their
-     * names and nullability as the test's engine created them, their types and
-     * MySQL's collation as the driver would report them.
+     * The shipped outbox columns as the driver would report them.
      *
      * @param  string  $driver
      * @return list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>
@@ -1673,9 +1589,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The shipped checkpoints table's columns as the driver reports them: their
-     * names and nullability as the test's engine created them, their types and
-     * MySQL's collation as the driver would report them.
+     * The shipped checkpoints columns as the driver would report them.
      *
      * @param  string  $driver
      * @return list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>
@@ -1695,9 +1609,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The shipped table's columns as the driver reports them: their names and
-     * nullability as the test's engine created them, their types and MySQL's
-     * collation as the driver would report them.
+     * The shipped table's columns as the driver would report them.
      *
      * @param  string  $driver
      * @return list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>
@@ -1723,9 +1635,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Register a connection named `fake` that reports the driver and, for any
-     * table, the columns given and the indexes of the table the test migrated
-     * under the name given, with no server behind it.
+     * Register a serverless `fake` connection reporting the columns given.
      *
      * @param  string  $driver
      * @param  list<array{name: string, type: string, type_name: string, collation: ?string, nullable: bool}>  $columns
@@ -1804,8 +1714,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Run the shipped outbox and deliveries migrations under the tables' names
-     * of this test, on the test's connection.
+     * Run the shipped outbox and deliveries migrations under the test's names.
      *
      * @return void
      *
@@ -1832,8 +1741,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Run the shipped artifacts migration under the table's name of this test,
-     * on the test's connection.
+     * Run the shipped artifacts migration under the test's name.
      *
      * @return void
      *
@@ -1854,9 +1762,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Run the shipped checkpoints, checkpoint members and integrity state
-     * migrations under the tables' names of this test, on the test's
-     * connection.
+     * Run the shipped integrity migrations under the test's names.
      *
      * @return void
      *
@@ -1884,8 +1790,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Run the shipped lifecycle migrations under the tables' names of this
-     * test, on the test's connection.
+     * Run the shipped lifecycle migrations under the test's names.
      *
      * @return void
      *
@@ -1909,10 +1814,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * The import batches table's columns as the driver reports them, its
-     * boolean as the type name and full type given: the shape's own types for
-     * the rest, its nullability as the test's engine created it, and MySQL's
-     * collation on its character columns.
+     * The import batches columns as the driver would report them.
      *
      * @param  string  $driver
      * @param  array{0: string, 1: string}  $boolean
@@ -1948,7 +1850,7 @@ final class SchemaChecksTest extends TestCase
     }
 
     /**
-     * Run the shipped migration with the settings as the test has them.
+     * Run the shipped migration.
      *
      * @return void
      *

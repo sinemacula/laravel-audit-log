@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Feature\Querying;
 
 use Illuminate\Contracts\Encryption\StringEncrypter;
-use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Encryption\Encrypter;
@@ -30,19 +29,14 @@ use SineMacula\Laravel\AuditLog\Querying\ExportResult;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerification;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerifier;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\FailsEntryReads;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\TestCase;
 
 /**
- * Feature tests for the verification of an export: an untouched export of each
- * format verifies, the viewer is authorised for `verify` and the verification
- * recorded with what it found, a denied viewer sees the entry missing exactly
- * as one outside the scope does, the entry is looked up under the scope, every
- * tampering along the chain has its own finding, OCSF and CEF lines are checked
- * by their ids, a policy or a statement that fails is recorded as a failure, no
- * result is returned unrecorded, and the file is read a line at a time.
+ * Feature tests for verifying an export.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(ExportVerifier::class)]
 final class ExportVerifierTest extends TestCase
 {
-    use InteractsWithAuditStore, ReadsTheTrail, SeedsArtifacts;
+    use FailsEntryReads, InteractsWithAuditStore, ReadsTheTrail, SeedsArtifacts;
 
     /** @var string The code of a verification's record. */
     private const string EXPORT_VERIFIED = 'audit_log.export_verified';
@@ -63,12 +57,8 @@ final class ExportVerifierTest extends TestCase
     /** @var string The directory every test exports to, made for it alone. */
     private string $directory = '';
 
-    /** @var bool Whether a read of the entries table on the storage connection fails. */
-    private bool $failEntryReads = false;
-
     /**
-     * Bind the read path, let every viewer see everything and make the
-     * directory.
+     * Bind the read path, allow every viewer and make the directory.
      *
      * @return void
      */
@@ -86,8 +76,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * Remove the directory and everything in it, and put the entries table
-     * back.
+     * Remove the directory and restore the entries table.
      *
      * @return void
      */
@@ -126,8 +115,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * An untouched export verifies, in every format, naming its entry and its
-     * lines.
+     * An untouched export verifies in every format, naming its entry and lines.
      *
      * @param  \SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat  $format
      * @return void
@@ -145,10 +133,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * The export entry and its artifact are looked up on the storage
-     * connection's writer, never its reader, so a replica that has not caught
-     * up, here one that holds no table at all, is never taken for an entry that
-     * was not stored: the export still verifies.
+     * Lookups read the writer, so a lagging replica never hides the entry.
      *
      * @return void
      */
@@ -192,9 +177,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * The verification is recorded as `audit_log.export_verified`, a success
-     * naming the export entry, its verdict and no finding, and disclosing the
-     * export entry's id and HMAC.
+     * A verification is recorded as `audit_log.export_verified`, a success.
      *
      * @return void
      */
@@ -222,8 +205,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * A verification that finds anything is still a success, naming the
-     * findings in chain order and the verdict `not_verified`.
+     * A verification that finds anything is a success with its findings.
      *
      * @return void
      */
@@ -242,9 +224,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * A viewer the policy denies runs no statement on the entries table and
-     * sees the entry missing, exactly as a viewer whose scope leaves the entry
-     * out does; the denial is recorded as `denied` with `no_scope`.
+     * A denied viewer sees the entry missing, as one outside the scope does.
      *
      * @return void
      */
@@ -275,9 +255,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * The export entry is looked up under the viewer's scope: a scope of a
-     * tenant the tenantless journal is not in finds it missing, in one
-     * statement, and reads no artifact.
+     * The export entry is looked up under the viewer's scope.
      *
      * @return void
      */
@@ -297,8 +275,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * Rows of `[how the test tampers with the export, the findings]`: one per
-     * finding, each built by the test.
+     * Rows of `[how the test tampers with the export, the findings]`.
      *
      * @return iterable<string, array{0: \Closure(self): void, 1: list<\SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding>}>
      */
@@ -395,8 +372,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * Each tampering along the chain has its own finding, listed once and in
-     * chain order, and every finding is some tampering's.
+     * Each tampering has its own finding, listed once and in chain order.
      *
      * @param  \Closure(self): void  $tamper
      * @param  list<\SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding>  $findings
@@ -436,8 +412,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * Changing one line of an NDJSON export, even one byte of a value, fails
-     * its verification.
+     * Changing one byte of one NDJSON line fails verification.
      *
      * @return void
      */
@@ -453,8 +428,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * The entry found being the record of a read, not an export's journal, is
-     * swapped, and neither its descriptor nor its digest are the bundle's.
+     * A bundle naming a read record, not a journal, finds the entry swapped.
      *
      * @return void
      */
@@ -472,8 +446,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * A bundle naming an entry by something other than a lower-case UUID finds
-     * it missing, with no statement on the entries table.
+     * A bundle naming an entry by a non-UUID finds it missing, with no query.
      *
      * @return void
      */
@@ -528,8 +501,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * An OCSF export is checked by each line's `metadata.uid`: a changed uid
-     * changes the membership, and any other change the file's digest alone.
+     * An OCSF export is checked by each line's `metadata.uid`.
      *
      * @return void
      */
@@ -555,9 +527,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * A CEF export is checked by each line's `externalId`: a changed id changes
-     * the membership, a line without one is malformed, and any other change
-     * changes the file's digest alone.
+     * A CEF export is checked by each line's `externalId`.
      *
      * @return void
      */
@@ -582,8 +552,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * The file is read a line at a time: verifying a file of thousands of lines
-     * grows the process's peak memory by far less than the file.
+     * The file is read a line at a time, so memory stays far below its size.
      *
      * @return void
      */
@@ -618,8 +587,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * A policy that throws is recorded as a failure with `policy_failed`, and
-     * what it threw propagates unchanged.
+     * A throwing policy is recorded as `policy_failed` and rethrown unchanged.
      *
      * @return void
      *
@@ -648,9 +616,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * A statement that fails is recorded as a failure with `query_failed`, and
-     * the verification is refused naming the class that failed and nothing it
-     * held.
+     * A failing query is recorded and refused, naming only the failing class.
      *
      * @return void
      */
@@ -677,8 +643,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * A verification whose record cannot be written returns nothing: it is
-     * refused as unrecorded.
+     * A verification whose record cannot be written is refused unrecorded.
      *
      * @return void
      */
@@ -731,8 +696,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * The bundle of a second export, of the same entries in CEF, so its
-     * manifest is another, to another target, made once.
+     * The bundle of a second, CEF export of the same entries, made once.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -815,8 +779,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * Rewrite the target's bundle as the edit gives it, encoded as an export
-     * writes one.
+     * Rewrite the target's bundle as the edit gives it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -835,8 +798,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * Change the columns of the export entry, in the entries table and in the
-     * bundle alike, so the two still agree.
+     * Change the export entry's columns in the table and the bundle alike.
      *
      * @param  array<string, string>  $columns
      * @return void
@@ -871,8 +833,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * Rewrite one NDJSON line as the edit gives its envelope, in the canonical
-     * encoding an export writes.
+     * Rewrite one NDJSON line's envelope as the edit gives it, canonically.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -925,8 +886,7 @@ final class ExportVerifierTest extends TestCase
     }
 
     /**
-     * The statements run since capturing began that read the artifacts table,
-     * as their SQL, in order.
+     * The statements captured that read the artifacts table, in order.
      *
      * @return list<string>
      */
@@ -943,25 +903,5 @@ final class ExportVerifierTest extends TestCase
         }
 
         return $reads;
-    }
-
-    /**
-     * Make every read of the entries table on the storage connection fail with
-     * the engine's exception, which holds the statement and its bindings, until
-     * the flag is cleared.
-     *
-     * @return void
-     */
-    private function failEntryReads(): void
-    {
-        $this->failEntryReads = true;
-
-        DB::connection(StorageConnection::name())->beforeExecuting(function (string $query, array $bindings, Connection $connection): void {
-            if (!$this->failEntryReads || !str_starts_with($query, 'select') || !str_contains($query, EntrySettings::table())) {
-                return;
-            }
-
-            throw new QueryException((string) $connection->getName(), $query, $bindings, new \PDOException('SQLSTATE[HY000]: General error: the read failed'));
-        });
     }
 }

@@ -8,23 +8,11 @@ use Illuminate\Support\Str;
 use Illuminate\Translation\Translator;
 
 /**
- * Describes an entry of the trail for a person: the title of its code from the
- * package's translations, with its code, outcome, reason and display properties
- * as the entry holds them.
+ * Describes an entry for a person, titled from `audit-log::codes.<code>` in the
+ * locale, else the fallback locale, else the code itself.
  *
- * A title is looked up under `audit-log::codes.<code>` in a flat file keyed by
- * the full code, so related codes such as `invoice.approved` and
- * `invoice.approved.twice` never collide. An application adds or overrides
- * titles in `lang/vendor/audit-log/{locale}/codes.php`. Only a non-empty string
- * is a title: it is taken from the locale asked for, else from the fallback
- * locale, else the code itself is the title, so describing never fails for a
- * missing translation. A handler the application set for missing keys is not
- * asked for one. No value is ever replaced into a title, so nothing stored
- * reaches a translated sentence, and a locale that could name another
- * directory, holding a path separator, `..` or a NUL byte, is never looked up.
- *
- * The reason is the entry's, already `null` when its record concealed it, and
- * the properties are the entry's display view: nothing is read again.
+ * The file is flat, keyed by full code, so `invoice.approved` and
+ * `invoice.approved.twice` never collide. No stored value is put into a title.
  *
  * @api
  *
@@ -39,7 +27,7 @@ final readonly class Describer
     /** @var string The translation group holding the codes' titles. */
     public const string GROUP = 'codes';
 
-    /** @var list<string> What a locale never holds if it is to be looked up, as the translator refuses it when setting a locale. */
+    /** @var list<string> Locale fragments that could name another directory. */
     private const array UNSAFE_LOCALE = ['/', '\\', '..', "\0"];
 
     /**
@@ -54,8 +42,7 @@ final readonly class Describer
     ) {}
 
     /**
-     * The description of the entry, its title in the locale given or, without
-     * one, the application's.
+     * The description of the entry in the locale, or the application's.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailEntry  $entry
      * @param  ?string  $locale
@@ -96,9 +83,8 @@ final readonly class Describer
     }
 
     /**
-     * The key's line in the locale alone when it is a non-empty string other
-     * than the key, or `null`: for an unsafe locale, a missing line, or a line
-     * that is anything else, such as an array of lines.
+     * The key's line in the locale alone when it is a non-empty string, without
+     * asking the application's missing-key handler, or `null`.
      *
      * @param  string  $key
      * @param  string  $locale

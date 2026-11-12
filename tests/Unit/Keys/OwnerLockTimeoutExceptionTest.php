@@ -9,9 +9,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Keys\OwnerLockTimeoutException;
 
 /**
- * Unit tests for the owner lock timeout exception: the message naming the wait
- * alone, never the owner or the lock, no previous exception, and the class it
- * specialises.
+ * Unit tests for the owner lock timeout exception, which names the wait and
+ * never the owner or the lock.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

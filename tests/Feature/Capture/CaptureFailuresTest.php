@@ -9,12 +9,10 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 use SineMacula\Laravel\AuditLog\Capture\CaptureFailedException;
@@ -30,6 +28,7 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Tests\Concerns\CapturesLogLines;
+use Tests\Concerns\CreatesSigningInUsers;
 use Tests\Concerns\CreatesWatchedModels;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Capture\Events\ExcludedPortalEvent;
@@ -46,11 +45,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for how capture fails, through the provider's wiring and the
- * real dispatcher: a failed write of a mapped event, a core event, a Gate
- * denial and a watched change spilled, reported and said once each; the `throw`
- * failure mode never reaching the code that dispatched the event; a failing
- * `AuditCaptureFailed` listener and a failing reporter contained; no failure
- * holding a value of the event; and writing an entry never producing a record.
+ * real dispatcher.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(RecordModelChange::class)]
 final class CaptureFailuresTest extends TestCase
 {
-    use CapturesLogLines, CreatesWatchedModels, SearchesForSecrets;
+    use CapturesLogLines, CreatesSigningInUsers, CreatesWatchedModels, SearchesForSecrets;
 
     /** @var string The ability the Gate denies. */
     private const string ABILITY = 'approve-invoice';
@@ -78,8 +73,8 @@ final class CaptureFailuresTest extends TestCase
     private array $writeFailures = [];
 
     /**
-     * Create the users' table, bind the reporter, capture the log lines, turn
-     * Gate capture on with an ability it denies, and hear each failure event.
+     * Create the users' table, bind the reporter, deny an ability and hear each
+     * failure event.
      *
      * @return void
      */
@@ -110,9 +105,7 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * A failed write of each kind of capture is spilled once, reported once as
-     * the write's failure, and said once as `AuditWriteFailed` and once as
-     * `AuditCaptureFailed` naming the event, its source and the failure.
+     * A failed capture write is spilled, reported and dispatched once each.
      *
      * @return void
      */
@@ -148,10 +141,8 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * Under the `throw` failure mode a capture's failed write still never
-     * reaches the code that dispatched the event: the sign-in signs the user
-     * in, the Gate answers, the change is saved and the dispatch returns, each
-     * failure said once.
+     * Under the `throw` mode a failed capture write never reaches the
+     * dispatcher.
      *
      * @return void
      */
@@ -182,9 +173,7 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * A listener of `AuditCaptureFailed` that throws is contained: the dispatch
-     * returns, the listener's failure is reported by class names, and every
-     * later event is still captured.
+     * A throwing `AuditCaptureFailed` listener is contained and reported.
      *
      * @return void
      */
@@ -206,9 +195,8 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * A reporter that throws is contained: a mapper's failure and a failed
-     * write are each still said once, the write's reporter failure being
-     * reported in turn as the write path reports it, and the dispatch returns.
+     * A throwing reporter is contained and each failure is still dispatched
+     * once.
      *
      * @return void
      */
@@ -233,10 +221,7 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * No failure holds a value of the event or of its record: neither the
-     * reports, nor the failure events, nor the spilled records, whether a
-     * mapper or a write failed, though the mapper's exception, the event, the
-     * credentials and the failed write's own exception hold the secret.
+     * No capture failure report, event or spill holds a value of the event.
      *
      * @return void
      */
@@ -259,10 +244,8 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * Writing an entry never produces a record: a store that, while it writes,
-     * dispatches a mapped event, signs a user in, asks the Gate and saves a
-     * watched model writes the one entry it was given and says nothing; nor
-     * does a listener of a failed write that does the same.
+     * Writing an entry never captures another, even when the store fires
+     * events.
      *
      * @return void
      */
@@ -299,10 +282,7 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * Sign users in from the test's users' table without waiting, with a cheap
-     * hash, add a second session guard, and, while the application boots, map
-     * the portal events to a mapper that throws but for one class mapped to the
-     * portal mapper, and watch two models.
+     * Configure the users' guards and the portal mappers and watched models.
      *
      * @param  mixed  $app
      * @return void
@@ -348,10 +328,8 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
-     * What the package puts in a report: its message, its previous exception
-     * and the arguments of the package's own frames of its trace. The frames
-     * above them are the caller's (the dispatcher's and the guard's), which
-     * hold the event they were given while arguments are kept in traces.
+     * What the package puts in a report: its message, previous exception and
+     * own frames' arguments; the caller's frames hold the event anyway.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -374,41 +352,5 @@ final class CaptureFailuresTest extends TestCase
     private static function classesOf(AuditCaptureFailed $failure): array
     {
         return [$failure->eventClass, $failure->mapperClass, $failure->exceptionClass];
-    }
-
-    /**
-     * Create the users' table on the test's connection, and drop it before the
-     * application is destroyed.
-     *
-     * @return void
-     */
-    private function createUsersTable(): void
-    {
-        $schema = Schema::connection(self::CONNECTION);
-
-        $schema->dropIfExists(SigningInUser::TABLE);
-        $schema->create(SigningInUser::TABLE, static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('email', 191)->unique();
-            $table->string('password', 191);
-            $table->rememberToken();
-        });
-
-        $this->beforeApplicationDestroyed(static function (): void {
-            Schema::connection(self::CONNECTION)->dropIfExists(SigningInUser::TABLE);
-        });
-    }
-
-    /**
-     * A saved user of the email address, with the password every user is made
-     * with and the remember token given.
-     *
-     * @param  string  $email
-     * @param  ?string  $rememberToken
-     * @return \Tests\Fixtures\Capture\Models\SigningInUser
-     */
-    private static function newUser(string $email, #[\SensitiveParameter] ?string $rememberToken = null): SigningInUser
-    {
-        return SigningInUser::query()->create(['email' => $email, 'password' => SigningInUser::PASSWORD, 'remember_token' => $rememberToken]);
     }
 }

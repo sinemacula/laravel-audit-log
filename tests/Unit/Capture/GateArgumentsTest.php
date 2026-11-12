@@ -12,10 +12,8 @@ use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\StubDocument;
 
 /**
- * Unit tests for the arguments a Gate denial keeps: a model as its reference, a
- * class name as itself without a leading backslash, the marker for anything
- * else, at most eight kept and every one counted, and nothing converted to a
- * string, serialised or traversed on the way.
+ * Unit tests for the arguments a Gate denial keeps, without stringifying,
+ * serialising or traversing any.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,9 +27,7 @@ final class GateArgumentsTest extends TestCase
     private const string ALIAS_PREFIX = 'Tests\Unit\Capture\\';
 
     /**
-     * `GateArguments` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *
@@ -89,9 +85,8 @@ final class GateArgumentsTest extends TestCase
     }
 
     /**
-     * A class name longer than a reference type keeps is the marker, even when
-     * the class exists, so the length is judged on its own; the leading
-     * backslash is not counted.
+     * A class name longer than a reference type keeps is the marker even when
+     * the class exists; a leading backslash is not counted.
      *
      * @return void
      */

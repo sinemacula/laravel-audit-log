@@ -12,32 +12,11 @@ use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * Reads a line of this package's own NDJSON export, `audit-log-export/v1`, as
- * another installation's evidence: into an import line, or says why it is
- * rejected.
+ * Reads a line of this package's own `audit-log-export/v1` NDJSON export as
+ * another installation's evidence, or says why it is rejected.
  *
- * A line is the envelope the exporting installation stored, under the entries
- * table's column names, of a record version this package reads, else
- * `UNSUPPORTED_VERSION`; a column the version does not have is `UNKNOWN_FIELD`.
- * A record that installation captured is asserted by it: its `source_id` must
- * be the import's source (`SOURCE_MISMATCH`), and its `id` is the record's id
- * there. A record it had itself imported keeps its upstream identity, the
- * `source_id`, `source_record_id` and region it was imported under, so it is
- * never mistaken for that installation's own. A record whose source, either
- * way, is this installation is `OWN_SOURCE`: this installation's own records
- * come back through `audit-log:replay`, never as foreign evidence.
- *
- * The references are read from their flattened columns, and the remaining
- * fields from theirs, held to the import format's rules, a reserved code
- * included (`RESERVED_CODE`). `properties._audit` is removed whole and counted,
- * since its manifest descriptor names an artifact that is not imported and its
- * note, hash and diagnostics are the exporter's own; every value shaped as an
- * encrypted envelope, at any depth of the properties and the context, and an IP
- * address that is an envelope's JSON, is removed and counted, never treated as
- * this installation's ciphertext nor encrypted again. The integrity fields
- * (`recorded_at`, `integrity_version`, `key_id`, `hmac`) are another ring's and
- * are ignored, as are the exporter's credential, guard, session, request, trace
- * and user agent, its event version, batch and digest.
+ * Envelopes and the exporter's integrity fields are dropped, never treated as
+ * this installation's ciphertext or signatures.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,10 +34,10 @@ final readonly class ExportLineAdapter
     /** @var list<string> The references read from their flattened type and id columns. */
     private const array REFERENCES = ['actor', 'subject', 'principal', 'tenant'];
 
-    /** @var string The property removed whole: the exporter's own metadata. */
+    /** @var string The exporter's own metadata property, removed whole. */
     private const string METADATA_KEY = '_audit';
 
-    /** @var \SineMacula\Laravel\AuditLog\Lifecycle\ImportLineParser The parser the mapped fields are read through, held to the import format's rules. */
+    /** @var \SineMacula\Laravel\AuditLog\Lifecycle\ImportLineParser Holds the mapped fields to the import format. */
     private ImportLineParser $parser;
 
     /**
@@ -70,21 +49,20 @@ final readonly class ExportLineAdapter
      */
     public function __construct(
 
-        // The settings the skew allowed is read from.
+        // Not promoted: only handed to the parser.
         ImportSettings $settings,
 
-        // The clock a line's occurrence time is held against.
+        // Not promoted: only handed to the parser.
         Clock $clock,
 
-        /** The settings this installation's own source is read from. */
+        /** Gives this installation's own source id. */
         private SourceSettings $sources,
     ) {
         $this->parser = new ImportLineParser($settings, $clock, $sources);
     }
 
     /**
-     * The exported line, by its number in the file, as evidence of the import's
-     * source, or why it is rejected.
+     * The exported line as an import line, or why it is rejected.
      *
      * @param  int  $number
      * @param  string  $text
@@ -113,10 +91,8 @@ final readonly class ExportLineAdapter
     }
 
     /**
-     * The line's source, its record id there and that source's region: the
-     * exporter's for a record it captured, which must be the import's source,
-     * and the upstream one for a record it imported; or why the line is
-     * rejected.
+     * The line's source, its record id there and that source's region, or why
+     * the line is rejected.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -139,10 +115,8 @@ final readonly class ExportLineAdapter
     }
 
     /**
-     * The identity of a line from another installation, by its provenance: the
-     * upstream source and record id of a record it imported, and its own
-     * source, which must be the import's, and its record's id for a record it
-     * captured; or why the line is rejected.
+     * The identity by provenance: upstream for an imported record, the
+     * exporter's, which must be the import's source, for a captured one.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -164,8 +138,7 @@ final readonly class ExportLineAdapter
     }
 
     /**
-     * The JSON object the text holds as a map of its columns, or `null` when it
-     * holds anything else or is not JSON at all.
+     * The JSON object the text holds as a map, or `null` for anything else.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -184,10 +157,7 @@ final readonly class ExportLineAdapter
     }
 
     /**
-     * Why the line's shape is rejected: `UNSUPPORTED_VERSION` for a record
-     * version this package does not read, `UNKNOWN_FIELD` for a column the
-     * version does not have, and `MISSING_FIELD` for a required one absent or
-     * `null`; `null` when the shape is acceptable.
+     * Why the line's shape is rejected, or `null` when it is acceptable.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -210,9 +180,9 @@ final readonly class ExportLineAdapter
     }
 
     /**
-     * The line's columns as the import format's fields, with its record id
-     * there, and how many values were removed: `properties._audit`, whole. A
-     * reference half given is passed on as it is, and refused.
+     * The line's columns as the import format's fields, and how many values
+     * were removed; a half-given reference is passed on for the parser to
+     * refuse.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

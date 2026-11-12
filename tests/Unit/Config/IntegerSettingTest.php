@@ -11,9 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 
 /**
- * Unit tests for the numeric setting reader every settings class shares: the
- * default, the forms and range it accepts, the message it fails with, and the
- * parse the readers with a message of their own share.
+ * Unit tests for the integer setting reader every settings class shares.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -202,9 +200,8 @@ final class IntegerSettingTest extends TestCase
     }
 
     /**
-     * An integer, or the exact decimal form of one, names that integer; any
-     * other value, including a string past the integer range that a cast would
-     * saturate, names none.
+     * Only an integer or its exact decimal form parses, so a string past the
+     * integer range that a cast would saturate does not.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -219,9 +216,7 @@ final class IntegerSettingTest extends TestCase
     }
 
     /**
-     * `IntegerSetting` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *

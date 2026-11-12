@@ -17,45 +17,8 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Seals the entries no seal holds yet, batch after batch, each batch one seal
- * written in its own transaction: the recent pass, and the resumable sweep of
- * the whole table.
- *
- * The recent pass starts `integrity.seal.lookback_seconds` before the latest
- * entry time a recent pass has sealed, a high-water mark progress keeps and
- * only a recent pass moves forward, so a sweep's seal of old rows at the head
- * never pulls the window back. Without that mark it starts the lookback before
- * the latest entry of the last seal in the chain, or at the beginning of the
- * table when there is no seal. It reads only entries that are no seal's member,
- * so a row that commits late with an earlier time joins a later seal. The sweep
- * reads the whole table in windows from the cursor progress keeps, saved after
- * every window, so an interrupted sweep resumes where it stopped and never
- * restarts at the beginning until a pass is complete; it finds the rows older
- * than the lookback. Each batch reads on strictly after the last row the one
- * before read, and only a batch that writes a seal counts towards
- * `integrity.seal.max_batches`, so a run always ends.
- *
- * Only entries recorded no later than the run's start, less
- * `integrity.seal.settle_seconds`, are sealed; that bound is fixed when the run
- * starts. Sealing refuses to run inside a transaction on the storage
- * connection, so each seal commits on its own. Each run then ensures the
- * installation's id, seeded by the migrations and written again by the first
- * run or lifecycle operation only if it was lost, never replaced, before its
- * first batch. An attempt lost to a concurrent writer (a duplicate seal or
- * member, a deadlock, a serialisation failure, a lock wait timeout,
- * PostgreSQL's lock timeout or a locked database) is rolled back whole and made
- * again from scratch, after a jittered wait that grows with each attempt, at
- * most `integrity.seal.max_attempts` times; then the run stops with a
- * `SealContentionException`. A lost connection is never retried, because the
- * commit may have happened; the next run sees what it left. Anything else stops
- * the run unchanged.
- *
- * Progress records the last seal after each commit, the recent pass's
- * high-water mark after each of its seals, the sweep's cursor after every
- * window and its completion, and the run itself once it ends without a failure.
- * Progress is operational, never evidence: a mark that is lost or rewritten
- * moves only where the recent pass reads from, and the sweep still seals
- * everything.
+ * Seals the entries no seal holds yet, one seal per transaction, in a recent
+ * pass or a resumable sweep of the whole table.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -169,10 +132,8 @@ final readonly class Sealer
     }
 
     /**
-     * Seal batch after batch from the position until a batch reaches the end of
-     * what there is to read or the run has written its most seals, and record
-     * the run; a recent pass moves its high-water mark forward from the one
-     * given as it seals.
+     * Seal batch after batch until one reads to the end or the run has written
+     * its most seals, then record the run.
      *
      * @param  \Carbon\CarbonImmutable  $now
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SealCursor  $after
@@ -218,10 +179,8 @@ final readonly class Sealer
     }
 
     /**
-     * Make attempt after attempt at one seal until one succeeds: one lost to a
-     * concurrent writer is made again after a jittered wait while attempts
-     * remain, and is contention once none do; anything else stops the run
-     * unchanged.
+     * Make attempts at one seal until one succeeds, retrying one lost to a
+     * concurrent writer after a jittered wait while attempts remain.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Integrity\SealBatch  $write
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealResult  $result
@@ -254,9 +213,8 @@ final readonly class Sealer
     }
 
     /**
-     * Wait before the next attempt a random time no longer than the bound of
-     * the attempt that failed: 20 milliseconds after the first, doubling after
-     * each, up to a second.
+     * Wait a random time up to the failed attempt's bound: 20 milliseconds
+     * after the first, doubling after each, up to a second.
      *
      * @param  int  $attempt
      * @return void
@@ -271,10 +229,8 @@ final readonly class Sealer
     }
 
     /**
-     * Whether the failure is one a concurrent writer causes, which a fresh
-     * attempt may not meet: a duplicate seal or member, a concurrency error, or
-     * PostgreSQL's lock timeout. A lost connection never is, since its commit
-     * may have happened.
+     * Whether a concurrent writer caused the failure, so a fresh attempt may
+     * succeed. A lost connection never is, since its commit may have happened.
      *
      * @param  \Throwable  $exception
      * @return bool
@@ -291,9 +247,8 @@ final readonly class Sealer
     }
 
     /**
-     * Record what the batch did: its seal and its skipped candidates in the
-     * result, the seal in progress, and for the sweep its cursor, or its
-     * completion once it reached the end of the table.
+     * Record the batch's seal and skips in the result and progress, and the
+     * sweep's cursor or completion.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealBatch  $batch
      * @param  bool  $sweep
@@ -356,9 +311,8 @@ final readonly class Sealer
     }
 
     /**
-     * The latest entry time a recent pass has sealed, in the package's form:
-     * progress's mark, or without one the latest entry of the last seal in the
-     * chain, or `null` when there is no seal.
+     * The latest entry time a recent pass has sealed: progress's mark, else the
+     * last seal's latest entry, or `null` with no seal.
      *
      * @return ?string
      *

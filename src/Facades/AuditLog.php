@@ -12,10 +12,8 @@ use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
  * Package `AuditLog` facade: the recorder, with an `@method` line for every
  * method it declares, so IDEs and static analysis see them.
  *
- * `fake()` is the facade's own and not the recorder's, as Laravel's
- * `Mail::fake()` is, so production code names nothing of the testing helpers.
- * `lifecycle()` is the way into the log's holds, prunes, imports, erasures,
- * reinstatements and rewraps.
+ * `fake()` is the facade's own, as `Mail::fake()` is, so production code names
+ * no testing helper.
  *
  * @api
  *

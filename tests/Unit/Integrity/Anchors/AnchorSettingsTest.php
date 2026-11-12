@@ -12,10 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorSettings;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorDriver;
 
 /**
- * Unit tests for the anchor settings: the default of each, the values each
- * accepts, the exact message each malformed value fails closed with, a driver
- * that is none whenever it is not `disk` by name, a path that can never leave
- * its namespace, and the reader of every setting.
+ * Unit tests for the anchor settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,8 +51,7 @@ final class AnchorSettingsTest extends TestCase
     }
 
     /**
-     * A driver that is missing, `null`, empty or the string `null` is no
-     * anchor, so the environment line `null` and an empty one both turn the
+     * A driver that is missing, `null`, empty or the string `null` turns the
      * anchor off.
      *
      * @param  array<string, string|null>  $anchor
@@ -173,9 +169,8 @@ final class AnchorSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[anchor configuration, filesystems configuration]`: a disk that
-     * is no name, too long or not UTF-8, and a default disk that is no string
-     * when none is configured.
+     * Rows of `[anchor configuration, filesystems configuration]`: malformed
+     * disks, and a default disk that is no string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -216,9 +211,8 @@ final class AnchorSettingsTest extends TestCase
     }
 
     /**
-     * With nothing set the path is `audit-log-anchors`, a configured one is
-     * kept as given, its longest form included, and each read goes back to the
-     * configuration.
+     * The path defaults to `audit-log-anchors`, keeps a configured one as given
+     * and is read afresh each time.
      *
      * @return void
      */
@@ -290,9 +284,7 @@ final class AnchorSettingsTest extends TestCase
     }
 
     /**
-     * The path rule is one rule, which a disk anchor holds a path to as these
-     * settings do: every string path the settings refuse, the rule refuses, and
-     * the longest and the default paths it accepts.
+     * A disk anchor holds a path to the same rule as these settings.
      *
      * @return void
      */
@@ -311,9 +303,8 @@ final class AnchorSettingsTest extends TestCase
     }
 
     /**
-     * The batch is 100 with nothing set, takes its least and greatest value as
-     * an integer and as the digit string an environment line gives, and fails
-     * closed one past either.
+     * The batch defaults to 100, accepts its bounds as an integer or a digit
+     * string and fails closed one past either.
      *
      * @return void
      */
@@ -368,9 +359,7 @@ final class AnchorSettingsTest extends TestCase
     }
 
     /**
-     * With every setting malformed, `validate()` fails on the first in its
-     * order, then the next once that one is put right, and passes once none is
-     * left.
+     * `validate()` fails on the first malformed setting in its order.
      *
      * @return void
      */

@@ -27,23 +27,13 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Privacy\ThrowingFieldEncrypter;
 
 /**
- * Load contract for the minimiser: a payload of any size, built on a builder
- * before anything is measured, leaves a record within its byte budgets, with
- * only masked paths in its diagnostics and the same result from a second
- * capture, for a bounded growth in memory and a bounded time.
+ * Load budget for the minimiser: a payload of any size leaves a record within
+ * its byte budgets, with only masked paths in its diagnostics, in bounded
+ * memory and time.
  *
- * The peak is reset before each measurement, because within a process it never
- * otherwise falls, and the memory limit is raised for the test, because it is
- * often no more than the growth allowed, and the growth assertion should be
- * what fails rather than the engine's limit. The bound on time is deliberately
- * generous: it catches a pass that is not linear, and not a slow machine. It is
- * not asserted while Xdebug collects coverage, which slows every line by an
- * order of magnitude, so it would be measuring Xdebug.
- *
- * It claims no coverage because its payloads are among the slowest things in
- * the suite: a mutant whose covering tests included them would be skipped as
- * taking too long rather than run, so the classes they pass through would go
- * without a mutation check. Their behaviour is pinned by their own tests.
+ * The time bound is generous, catching a pass that is not linear, and is not
+ * asserted under Xdebug coverage. No coverage is claimed, since mutants these
+ * slow tests cover would be skipped as timeouts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,7 +55,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     /** @var int The most a capture's peak memory may grow by, in bytes: 128 MiB. */
     private const int MAX_MEMORY_GROWTH = 134217728;
 
-    /** @var int The most CPU time a capture may use, in nanoseconds: 30 seconds, far above linear work on any machine and far below quadratic work. */
+    /** @var int Most CPU time a capture may use, in nanoseconds: far above linear work and far below quadratic. */
     private const int MAX_NANOSECONDS = 30000000000;
 
     /** @var int How many bytes a ten-megabyte payload holds. */
@@ -74,16 +64,16 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     /** @var int How many elements a long list holds. */
     private const int ELEMENTS = 10000;
 
-    /** @var int How many distinct keys at the ceiling a map repeated through a long list holds. */
+    /** @var int Distinct keys at the ceiling a map repeated through a long list holds. */
     private const int REPEATED_KEYS = 10;
 
-    /** @var int How many rounds of the repeated keys are split to measure this machine: a tenth of the long list. */
+    /** @var int Rounds of the repeated keys split to measure this machine: a tenth of the long list. */
     private const int SAMPLED_ROUNDS = 1000;
 
-    /** @var int The ceiling of either budget, so that nothing is omitted. */
+    /** @var int The ceiling of either budget, so nothing is omitted. */
     private const int BUDGET_CEILING = 16777216;
 
-    /** @var int How much a capture may grow to under the limit of a small process: 128 MiB. */
+    /** @var int How much a capture may grow to under a small process's limit, in bytes: 128 MiB. */
     private const int SMALL_PROCESS_BYTES = 134217728;
 
     /** @var string The memory limit before the test. */
@@ -106,9 +96,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Restore the memory limit, as far as what the process still holds allows:
-     * the pages a payload scattered may not all go back at once, and a limit
-     * below them is refused with a warning. An unlimited process stays so.
+     * Restore the memory limit as far as the process allows: a limit below what
+     * it still holds is refused.
      *
      * @return void
      */
@@ -125,8 +114,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A ten-megabyte string is cut to the retained cap in the properties, and
-     * nothing is omitted, since what is cut fits.
+     * A ten-megabyte string is cut to the retained cap, and nothing is omitted.
      *
      * @return void
      */
@@ -157,8 +145,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A ten-megabyte identifier is hashed whole to a hash of fixed length, and
-     * is itself stored nowhere.
+     * A ten-megabyte identifier is hashed whole and stored nowhere.
      *
      * @return void
      */
@@ -172,7 +159,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A list too long for the budget goes whole, by its masked path, because
+     * A list too long for the budget goes whole, by its masked path, since
      * omission stays at the top level.
      *
      * @return void
@@ -188,7 +175,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
 
     /**
      * A thousand levels stop at the deepest kept, on the builder, so nothing
-     * after it ever walks them.
+     * walks them after.
      *
      * @return void
      */
@@ -206,9 +193,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Each of a hundred thousand keys is costed once and sorted once, the keys
-     * bytewise lowest going first, since they all cost the same: the 512 that
-     * fit beside the reserve are those left.
+     * A hundred thousand equal-cost keys are costed and sorted once, keeping
+     * the 512 bytewise lowest that fit beside the reserve.
      *
      * @return void
      */
@@ -241,8 +227,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A hundred thousand keys in the context stay within its own budget, and
-     * the fixed names the package fills are the last to go.
+     * A hundred thousand context keys stay within the context budget, and the
+     * package's fixed names go last.
      *
      * @return void
      */
@@ -261,9 +247,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A key of a megabyte and half a million tokens, past the ceiling, is never
-     * split and goes with its value even with room in the budget, leaving only
-     * `*` to say that it did.
+     * A megabyte key past the ceiling is never split and goes with its value,
+     * leaving `*` to say so.
      *
      * @return void
      */
@@ -279,8 +264,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Rows of `[bytes in the key]`: keys that exhausted a 128 MiB process while
-     * they were split into a token each, before the ceiling.
+     * Rows of `[bytes in the key]`: keys large enough to exhaust a 128 MiB
+     * process if split a token at a time.
      *
      * @return iterable<string, array{0: int}>
      */
@@ -293,11 +278,9 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A client's map key of many megabytes, camel-cased to give the most
-     * tokens, leaves the record written and costs no more than a small process
-     * has, at the top level and nested, in the properties and in the context.
-     * Only the key's own bytes are allowed for on top of the limit, since a
-     * client's request has to hold those anyway.
+     * A client's camel-cased map key of many megabytes costs no more than a
+     * small process has, anywhere in the record. Only the key's own bytes are
+     * allowed on top, since the request holds those anyway.
      *
      * @param  int  $bytes
      * @return void
@@ -320,9 +303,7 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A key at the ceiling, of the most tokens it can hold, is kept and judged,
-     * so its value is the marker: what is cheap enough to keep is still
-     * redacted.
+     * A key at the ceiling is kept and judged, so its value is still redacted.
      *
      * @return void
      */
@@ -339,8 +320,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * With room in the budget every map of a long list is kept, each walked for
-     * secret keys: each password is the marker, and nothing is omitted.
+     * With room in the budget every map of a long list is kept and walked for
+     * secret keys.
      *
      * @return void
      */
@@ -368,10 +349,9 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Ten thousand maps sharing a few keys at the ceiling, each of the most
-     * tokens it can hold, are judged in less CPU time than splitting every
-     * occurrence alone takes on this machine, only because each distinct key is
-     * split once for the whole capture.
+     * Ten thousand maps sharing a few ceiling-length keys are judged faster
+     * than splitting every occurrence, since each distinct key is split once
+     * per capture.
      *
      * @return void
      */
@@ -393,10 +373,9 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A rule beneath a wildcard is applied to every map of a long list, each
-     * field it does not name counted under a path masked whole, since no rule
-     * decides that field, and the list goes under its rule's name once it
-     * cannot fit.
+     * A rule beneath a wildcard applies to every map of a long list, unnamed
+     * fields counted under a path masked whole, and the list goes under the
+     * rule's name once it cannot fit.
      *
      * @return void
      */
@@ -425,9 +404,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * An encrypter that throws is called once in each capture and reported
-     * once, however many values were left to seal: every one is dropped, under
-     * the one path its rule writes, and the plaintext it threw is nowhere.
+     * An encrypter that throws is called and reported once per capture, every
+     * value is dropped under the rule's one path, and the plaintext is nowhere.
      *
      * @return void
      */
@@ -449,8 +427,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Ten thousand keys that collide once cleaned keep the list of paths to its
-     * bound and still count every one, and none is written in the diagnostics.
+     * Ten thousand keys that collide once cleaned keep the path list to its
+     * bound, count every one, and write none in the diagnostics.
      *
      * @return void
      */
@@ -468,9 +446,9 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Both captures of the payload stay within their bounds, and the second
-     * gives what the first gave; what the first gave. The expected diagnostics
-     * of each test, compared whole, are what show no value reached them.
+     * Both captures of the payload stay within their bounds and give the same
+     * result. Callers compare diagnostics whole, which is what shows no value
+     * reached them.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
@@ -495,8 +473,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * One capture of the snapshot, by a minimiser of its own, as every capture
-     * has, within the bounds on its memory and its time.
+     * One capture of the snapshot by its own minimiser, within the memory and
+     * time bounds.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingSnapshot  $snapshot
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
@@ -547,35 +525,8 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * The CPU time this process has used, user and system together. The limits
-     * catch work that grows too fast, so they measure the work: waiting for a
-     * core on a busy machine or runner uses none of it.
-     *
-     * @return int
-     */
-    private static function cpuNanoseconds(): int
-    {
-        $usage = getrusage();
-
-        assert(is_array($usage));
-
-        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec'])  * 1000000000
-            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) * 1000;
-    }
-
-    /**
-     * Whether Xdebug is collecting coverage in this process.
-     *
-     * @return bool
-     */
-    private static function isCollectingCoverage(): bool
-    {
-        return function_exists('xdebug_info') && in_array('coverage', xdebug_info('mode'), true);
-    }
-
-    /**
-     * Raise the budget of the properties to its ceiling, so that nothing is
-     * omitted and what was done to a value can be seen.
+     * Raise the property budget to its ceiling, so nothing is omitted and what
+     * was done to a value shows.
      *
      * @return void
      */

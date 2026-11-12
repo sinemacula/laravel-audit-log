@@ -17,15 +17,9 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Writes the lifecycle journal as the package does, and alters it as an
- * attacker with the database's credentials could: rows signed through the
- * container's journal signer, each at the next sequence and linked to the row
- * before it, in the configured log, at the container's clock; raw edits of a
- * stored row's columns; and the stored rows as raw rows.
- *
- * A row of a kind that carries an authority is written with one, unless a test
- * gives another. The rows are written on the storage connection, which is the
- * maintenance connection unless a test configures another.
+ * Writes the lifecycle journal as the package does, each row signed and linked
+ * at the next sequence on the storage connection, and alters stored rows as an
+ * attacker with the database's credentials could.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

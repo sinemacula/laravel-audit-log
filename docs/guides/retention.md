@@ -5,10 +5,9 @@ no longer keeps, leaving what a hold keeps, what has not been sealed and what ha
 deletion so `audit-log:verify` can account for it. This guide covers configuring retention, writing a policy of your
 own, preservation, holds, prune runs and what verification says afterwards.
 
-Two guarantees are stated apart here, as everywhere in the package. Whoever holds the database credentials can still
-delete or change rows: a hold, a prune and the lifecycle journal never stop that. What the package's cryptographic
-evidence does is make a deletion it did not journal detectable: the seals and the journal let `audit-log:verify` tell
-an entry pruned under a signed record from one that went missing.
+Whoever holds the database credentials can still delete or change rows: a hold, a prune and the lifecycle journal
+never stop that. What the package's cryptographic evidence does is make a deletion it did not journal detectable: the
+seals and the journal let `audit-log:verify` tell an entry pruned under a signed record from one that went missing.
 
 ## Retention by category
 

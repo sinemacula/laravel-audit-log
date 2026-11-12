@@ -35,26 +35,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * The reading guide's procedure for answering a subject access request: its
- * four blocks are in the guide as this test holds them, and run as written,
- * with nothing evaluated, they select the subject's entries as the actor and as
- * the subject, and the entries holding a fragment sealed under the subject's
- * keys whoever they are about, with every encrypted field revealed; export and
- * verify each selection; give a copy holding no other person's reference and no
- * fragment; and erase the subject's keys, leaving every other owner's fragment
- * and every export as it was.
- *
- * The policy block's class is the fixture `SubjectAccessPolicy`, whose text
- * from its class declaration on is the block's. The selection, the review and
- * the erasure blocks are the bodies of this test's `select()`, `review()` and
- * `erase()`, their last line, which hands back what the block left, aside, and
- * each class a block imports is imported here, the policy as the fixture. The
- * investigator and the subject are users under the morph alias `user`, as the
- * seeded entries name them: the subject is user 42, who acts on the seeded
- * invoice and has a card charged, and another person, user 99, acts on the
- * subject, and logs the subject's call to support, which holds the subject's
- * phone number and the agent's own summary. The package's own encrypter and
- * reader are bound here, as the provider binds them.
+ * The reading guide's subject access procedure, run as written: the bodies of
+ * `select()`, `review()` and `erase()`, less their last line, are its blocks.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -244,10 +226,10 @@ final class SubjectAccessProcedureTest extends TestCase
     /** @var string The code a card charge is recorded under, its card sealed under the actor's key. */
     private const string CHARGE = 'billing.card_charged';
 
-    /** @var string The code a support call is recorded under, the caller's phone sealed under the caller's key and the summary under the agent's. */
+    /** @var string The code a support call is recorded under, sealed for two owners. */
     private const string CALL = 'support.call_logged';
 
-    /** @var string The subject's card, sealed under the subject's key: spaced, so no hex digest or base64 ciphertext contains it by chance. */
+    /** @var string The subject's card, spaced so no digest or ciphertext holds it by chance. */
     private const string CARD = '4242 4242 4242 4242';
 
     /** @var string The subject's phone number, sealed under the subject's key in an entry about someone else. */
@@ -266,9 +248,7 @@ final class SubjectAccessProcedureTest extends TestCase
     private ?string $directory = null;
 
     /**
-     * Bind the package's key wrapper, encrypter and reader, as the provider
-     * binds them, and the read path; store users under the alias the seeded
-     * entries name them by; and define the charge and the call.
+     * Bind the privacy services and read path, alias users, define the events.
      *
      * @return void
      */
@@ -293,8 +273,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Forget the alias, put the clock back and remove what the procedure
-     * exported.
+     * Forget the alias, restore the clock and remove the exports.
      *
      * @return void
      */
@@ -316,10 +295,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Each block is in the guide exactly as this test holds it, and is what
-     * this test runs: the policy fixture's class is the policy block's, the
-     * bodies of `select()`, `review()` and `erase()` are the other blocks'
-     * code, and each class a block imports is imported here.
+     * Each block is in the guide exactly as this test holds and runs it.
      *
      * @return void
      */
@@ -346,12 +322,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The procedure, run as written, selects the subject's activity, newest
-     * first, then the entry holding the subject's fragment that is about
-     * someone else, keeping an entry both find once; exports and verifies each
-     * selection; gives a copy of the subject's own activity holding no other
-     * person's reference and no fragment; and erases the subject's two keys,
-     * one for each category that sealed a fragment of theirs.
+     * The procedure, run as written, selects, exports, copies and erases.
      *
      * @return void
      */
@@ -384,10 +355,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The entry holding the subject's fragment though neither its actor nor its
-     * subject is the subject is found by `holdingDataOf()` alone: the selection
-     * of the subject's activity does not hold it, the selection of their
-     * fragments does, with the other entry holding one.
+     * Only `holdingDataOf()` finds the subject's fragment in another's entry.
      *
      * @return void
      */
@@ -407,10 +375,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The grant reveals every encrypted field of the entries selected, whoever
-     * owns it: the call shows the subject's phone and, beside it, the agent's
-     * own summary, another owner's fragment, which the copy leaves out with
-     * everything else the properties hold.
+     * The grant reveals every encrypted field selected, whoever owns it.
      *
      * @return void
      */
@@ -431,10 +396,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Once the erasure step has run, every fragment sealed under the subject's
-     * keys reads erased in the entries the selection found, which the policy
-     * the procedure left bound still finds, while the agent's summary in the
-     * same entry is revealed as before, and both evidence exports still verify.
+     * After erasure the subject's fragments read erased; others stay revealed.
      *
      * @return void
      */
@@ -465,8 +427,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Running the erasure step again for a subject already erased writes
-     * nothing more: it is a no-op recorded as `already_erased`.
+     * Running the erasure again is a no-op recorded as `already_erased`.
      *
      * @return void
      */
@@ -483,9 +444,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The canonical export the procedure keeps as evidence of the subject's
-     * activity holds what the copy leaves out, the other person who acted on
-     * the subject included, which is why it is not a copy for the subject.
+     * The evidence export holds what the copy leaves out.
      *
      * @return void
      */
@@ -506,9 +465,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The evidence exports never decrypt, whatever the scope grants: the
-     * fragments the pages revealed are in the exports as the envelopes they
-     * were stored as.
+     * The evidence exports keep the fragments sealed, whatever the grant.
      *
      * @return void
      */
@@ -536,10 +493,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * An entry whose principal is the subject, though neither its actor nor its
-     * subject is, and which holds no fragment of theirs, is not selected:
-     * `onlyAbout()` matches the actor and the subject alone, and
-     * `holdingDataOf()` the fragments, as the guide says.
+     * An entry with the subject only as principal is not selected.
      *
      * @return void
      */
@@ -556,10 +510,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The policy lets no one but the investigator see anything, even bound as
-     * it is left once the investigator has found the fragments: another user
-     * the application authenticated reads an empty trail, and cannot find
-     * either of the investigator's exports to verify it.
+     * The policy lets no one but the investigator see anything.
      *
      * @return void
      */
@@ -582,11 +533,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Each read the procedure makes is recorded under the investigator: for
-     * each selection, one page, which records that it revealed encrypted
-     * fields, the export, and its verification; and the erasure is recorded
-     * under the investigator too, as the authority's operator, with the
-     * authority's reason.
+     * Each step of the procedure is recorded under the investigator.
      *
      * @return void
      */
@@ -617,10 +564,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * While a field encrypter other than the package's is bound, the selection
-     * of the subject's fragments is refused with a `\LogicException` naming
-     * that encrypter, as the guide says, once the subject's activity has been
-     * selected.
+     * Another bound encrypter refuses the fragments selection, naming itself.
      *
      * @return void
      */
@@ -637,9 +581,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The selection block, run as written for the investigator and the subject,
-     * exporting each selection into the directory; the entries it selected, by
-     * id, and its exports, by selection, are handed back.
+     * The selection block, run as written; hands back its entries and exports.
      *
      * @param  \Tests\Unit\Stubs\StubAuthUser  $investigator
      * @param  \Tests\Unit\Stubs\StubAuthUser  $subject
@@ -681,8 +623,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The review block, run as written for the subject over the entries
-     * selected; the copy it made is handed back.
+     * The review block, run as written; hands back the copy it made.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -709,9 +650,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The erasure block, run as written for the investigator and the subject on
-     * the request's case; the erasure's result and the authority it was made on
-     * are handed back.
+     * The erasure block, run as written; hands back its result and authority.
      *
      * @param  \Tests\Unit\Stubs\StubAuthUser  $investigator
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $you
@@ -729,10 +668,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Seed the subject approving the invoice, another person acting on the
-     * subject, and that person approving the invoice, a microsecond's order
-     * apart; the ids of the two entries about the subject are returned, the
-     * newest first.
+     * Seed the trail; return the two entries about the subject, newest first.
      *
      * @return array{0: string, 1: string}
      */
@@ -747,11 +683,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Record the subject's card charged, the card sealed under the subject's
-     * key, and then another person logging the subject's call to support about
-     * a ticket, the subject's phone sealed under the subject's key and the
-     * agent's summary under the agent's; the ids of the charge and the call are
-     * returned, in that order.
+     * Record the card charge and the support call, and return their ids.
      *
      * @return array{0: string, 1: string}
      */
@@ -777,8 +709,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * A directory of the test's own for the exports, removed with what it holds
-     * when the test ends.
+     * A directory for the exports, removed with its contents after the test.
      *
      * @return string
      */
@@ -792,8 +723,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * Make the definitions the only ones the facade's recorder and the
-     * container know, as an application registers them while it boots.
+     * Make the definitions the only ones the recorder and container know.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  ...$definitions
      * @return void
@@ -879,8 +809,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The code of a block: what its fence holds, without the marker and the
-     * fence.
+     * The code a block's fence holds, without the marker and the fence.
      *
      * @param  string  $block
      * @return string
@@ -893,8 +822,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The `use` lines a block's code opens with, and the code after them and
-     * the blank line that follows them.
+     * The `use` lines a block's code opens with, and the code after them.
      *
      * @param  string  $code
      * @return array{0: list<string>, 1: string}
@@ -907,9 +835,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The body of a method of this test, without its braces and its last line,
-     * which hands back what the block left, with the method's indentation
-     * removed.
+     * A method's body, less its braces and last line, unindented.
      *
      * @param  string  $method
      * @return string
@@ -927,8 +853,7 @@ final class SubjectAccessProcedureTest extends TestCase
     }
 
     /**
-     * The text of PHP source from its class declaration to its end, with its
-     * trailing whitespace dropped.
+     * PHP source from its class declaration on, trailing whitespace dropped.
      *
      * @param  string  $source
      * @return string

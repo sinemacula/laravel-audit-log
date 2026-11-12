@@ -27,19 +27,7 @@ use Tests\Concerns\SeedsArtifacts;
 use Tests\TestCase;
 
 /**
- * Integration tests for exporting the trail on whichever engine the suite runs
- * against, as an operator exports it while the application writes: an export in
- * each format verifies; a row another process commits once the export's bound
- * has been read, inside the part of the trail the export has yet to reach, is
- * not exported, though it is stored; the manifest names the snapshot the engine
- * took, never the testing transaction; entries of one recorded microsecond
- * across several chunks are each exported once, in id order; and the export's
- * dedicated session is gone once the export ends.
- *
- * SQLite runs on a file in WAL mode, set before any child starts, as the
- * operations guidance advises: in rollback-journal mode the snapshot's shared
- * lock would hold back the child's commit until the export ended. The processes
- * meet on file gates, never on timing.
+ * Integration tests for exporting the trail while another process writes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,8 +60,7 @@ final class ExportEnginesTest extends TestCase
     private string $directory = '';
 
     /**
-     * Bind the read path, let every viewer see every entry, read in chunks of a
-     * hundred and make the directory.
+     * Bind the read path, reveal every entry, chunk by 100, make the directory.
      *
      * @return void
      */
@@ -93,8 +80,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * Remove the directory, then what the children shared once the migrations
-     * have rolled back.
+     * Remove the directory, then the children's files after the rollback.
      *
      * @return void
      */
@@ -133,8 +119,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * An export of captured and bulk entries, across more than one chunk, in
-     * the format verifies on the engine with no finding.
+     * An export in each format verifies on the engine with no finding.
      *
      * @param  \SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat  $format
      * @return void
@@ -155,11 +140,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * A row another process inserts and commits once the export has read its
-     * bound, recorded inside the part of the trail the export has yet to read,
-     * is not exported: every later chunk reads the snapshot the bound was read
-     * in. The export verifies, and a later export holds the row among the
-     * entries recorded with it.
+     * A row another process commits after the bound is read is not exported.
      *
      * @return void
      */
@@ -199,10 +180,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * The manifest names the snapshot the engine took on its dedicated session,
-     * never the testing transaction: the storage connection, the engine's
-     * consistency, the database, the engine and the entries table, and the
-     * first and last positions of the lines.
+     * The manifest names the engine's snapshot, never the testing transaction.
      *
      * @return void
      */
@@ -233,9 +211,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * Two hundred and fifty entries recorded in one microsecond, read in chunks
-     * of a hundred whose keyset continues by id alone, are each exported once,
-     * in id order compared in the engine's migrated type, and verify.
+     * Entries of one microsecond across chunks export once each, in id order.
      *
      * @return void
      */
@@ -256,8 +232,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * Once an export ends, its dedicated session is purged: no connection the
-     * export made is left open.
+     * Once an export ends, no connection it made is left open.
      *
      * @return void
      */
@@ -282,8 +257,8 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * Put the database on a file SQLite can share across a fork, in WAL mode,
-     * before any child starts.
+     * Put SQLite on a WAL file shared across the fork, since a rollback journal
+     * would block the child's commit.
      *
      * @param  mixed  $app
      * @return void
@@ -336,8 +311,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * The lines of the export at the path, or the target, without their line
-     * feeds.
+     * The lines of the export at the path, or the target, without line feeds.
      *
      * @param  ?string  $path
      * @return list<string>
@@ -350,8 +324,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * The ids of the NDJSON lines of the export at the path, or the target, in
-     * order.
+     * The ids the export at the path, or the target, holds, in order.
      *
      * @param  ?string  $path
      * @return list<string>
@@ -389,9 +362,7 @@ final class ExportEnginesTest extends TestCase
     }
 
     /**
-     * Run the callback once, right after an export's bound has been read, the
-     * first statement of its snapshot, on whichever connection the snapshot is
-     * read.
+     * Run the callback once, right after an export's bound has been read.
      *
      * @param  \Closure(): void  $callback
      * @return void

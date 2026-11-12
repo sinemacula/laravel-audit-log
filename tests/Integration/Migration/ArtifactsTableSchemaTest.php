@@ -5,29 +5,18 @@ declare(strict_types = 1);
 namespace Tests\Integration\Migration;
 
 use Illuminate\Config\Repository as ConfigRepository;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the table the shipped artifacts migration
- * creates, on whichever engine the suite runs against: its columns and their
- * types, its key, one artifact for each entry, its binary collation and engine
- * on MySQL, the storage connection it is created on, the setting a collision
- * names, and its rollback.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index name and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the table the shipped artifacts migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,6 +26,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class ArtifactsTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped artifacts migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000600_create_audit_log_artifacts_table.php';
 
@@ -78,8 +69,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     ];
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -97,15 +87,14 @@ final class ArtifactsTableSchemaTest extends TestCase
         Builder::defaultTimePrecision(0);
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
         } finally {
             Builder::defaultTimePrecision($precision);
         }
     }
 
     /**
-     * Drop the table the test migrated, on the test's connection and on the
-     * storage connection of its own a test may configure.
+     * Drop the migrated table from the test's and the storage connection.
      *
      * @return void
      */
@@ -123,11 +112,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the artifact's id, its entry, its kind, its count, its
-     * digest, its encrypted members and its time, in that order, each of its
-     * type and none of them nullable: the ids are UUIDs, the digest the length
-     * of SHA-256 in hex, the members long text, the count unsigned on MySQL,
-     * and the time to the microsecond.
+     * Each column has its type, in order, and none is nullable.
      *
      * @return void
      */
@@ -149,8 +134,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * The id is the primary key, over it alone, so a second artifact under the
-     * same id is refused.
+     * The id alone is the primary key.
      *
      * @return void
      */
@@ -169,9 +153,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * Beside the primary key, the only index is the entry's own, unique, so an
-     * entry has at most one artifact: a second artifact for the entry, under
-     * another id, is refused.
+     * An entry has at most one artifact.
      *
      * @return void
      */
@@ -204,9 +186,8 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name fits
-     * PostgreSQL's 63 characters. SQLite names its primary key index itself and
-     * limits no name, so there the primary key is left out.
+     * Every index name fits PostgreSQL's 63 characters at the longest table
+     * name; SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -224,8 +205,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * The members hold far more than the 64 KiB a plain text column does, and
-     * read back byte for byte.
+     * The members hold more than a 64 KiB text column, byte for byte.
      *
      * @return void
      */
@@ -240,9 +220,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * The time is stored to the microsecond, as the migration declares whatever
-     * the builder's default, so a time written with six fractional digits reads
-     * back with all six.
+     * The time is stored to the microsecond, whatever the builder's default.
      *
      * @return void
      */
@@ -254,8 +232,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys and no `updated_at`, so pruning an entry
-     * never cascades and an artifact is never stamped as changed.
+     * The table has no foreign keys and no `updated_at`.
      *
      * @return void
      */
@@ -266,9 +243,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL every character column takes the table's binary collation
-     * without padding, whatever the connection's collation is, and the table is
-     * on InnoDB, so an artifact commits with its entry or not at all.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -293,22 +268,20 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * The migration runs on the storage connection: once the setting names a
-     * connection of its own, the table is created there and not on the default
-     * connection.
+     * The table is created on the storage connection, not the default.
      *
      * @return void
      */
     public function testTheTableIsOnTheStorageConnection(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         $config = app(ConfigRepository::class);
 
         $config->set('database.connections.' . self::STORAGE, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'store_']);
         $config->set('audit-log.storage.connection', self::STORAGE);
 
-        $migration = $this->loadMigration();
+        $migration = $this->loadMigration(self::MIGRATION_PATH);
 
         $migration->up(); // @phpstan-ignore method.notFound
 
@@ -318,10 +291,7 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `entries.artifacts_table` setting that renames it, and leaves the table
-     * as it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -330,7 +300,7 @@ final class ArtifactsTableSchemaTest extends TestCase
         DB::table(self::TABLE)->insert(self::row(1, 1));
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -344,14 +314,13 @@ final class ArtifactsTableSchemaTest extends TestCase
     }
 
     /**
-     * Rolling the migration back drops the configured table, and leaves the
-     * entries table beside it.
+     * A rollback drops the table and leaves the entries table.
      *
      * @return void
      */
     public function testARollbackDropsIt(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
         self::assertTrue(Schema::hasTable('audit_log_entries'));
@@ -375,25 +344,5 @@ final class ArtifactsTableSchemaTest extends TestCase
             'members'      => 'eyJpdiI6IjAxMjM0NTY3ODkifQ==',
             'created_at'   => '2026-11-01 12:00:00.000000',
         ];
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Artifacts migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

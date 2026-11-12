@@ -7,14 +7,10 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 
 /**
- * A seal a prune has authenticated: its envelope, its stored digest, and its
- * members, each entry id with the HMAC it was sealed with, in member order.
+ * A seal a prune has authenticated, built only by `PruneSeals::load()`.
  *
- * Member order is the entry ids as canonical lower-case UUID strings, sorted
- * bytewise in PHP, never by an engine's collation, so a member's position is
- * the same wherever it is computed, and a prune record's bitmap sets the bit at
- * that position. `PruneSeals::load()` alone builds one, once the seal's digest,
- * log, signature and membership have each been checked.
+ * Members sort bytewise in PHP, never by engine collation, so a member's
+ * position is the same wherever it is computed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

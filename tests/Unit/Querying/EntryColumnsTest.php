@@ -19,11 +19,7 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the columns of a stored entry as a shown entry holds them: the
- * entry built of them with what was projected, a concealed reason, references
- * of both their columns or none, the origin, the manifest descriptor the
- * artifact inspector accepts, and the refusal naming a column the entry cannot
- * hold.
+ * Unit tests for building a shown entry from a stored entry's columns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,8 +36,7 @@ final class EntryColumnsTest extends TestCase
     private const string HMAC = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
     /**
-     * The entry holds the stored columns, typed, and exactly the properties,
-     * context and address it is given, never the stored ones.
+     * The entry holds the stored columns typed, and the projected fields given.
      *
      * @return void
      */
@@ -96,8 +91,7 @@ final class EntryColumnsTest extends TestCase
     }
 
     /**
-     * The origin is its enum, none when none is stored, and a value no origin
-     * holds is refused naming the column.
+     * The origin is its enum or none; an unknown value is refused.
      *
      * @return void
      */
@@ -113,8 +107,7 @@ final class EntryColumnsTest extends TestCase
     }
 
     /**
-     * Rows of `[column, stored value]`: enum columns whose stored value the
-     * shown entry cannot hold.
+     * Rows of `[column, stored value]`: enum values the entry cannot hold.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -127,8 +120,7 @@ final class EntryColumnsTest extends TestCase
     }
 
     /**
-     * An entry whose outcome or provenance no enum holds is refused, naming the
-     * column and never its value.
+     * An unknown outcome or provenance is refused, naming only the column.
      *
      * @param  string  $column
      * @param  string  $value
@@ -146,8 +138,7 @@ final class EntryColumnsTest extends TestCase
     }
 
     /**
-     * The manifest is the kind, count and digest of a descriptor the artifact
-     * inspector accepts, never its artifact id, and none without one.
+     * The manifest is a descriptor's kind, count and digest, never its id.
      *
      * @return void
      */
@@ -178,9 +169,7 @@ final class EntryColumnsTest extends TestCase
     }
 
     /**
-     * `EntryColumns` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *
@@ -201,8 +190,7 @@ final class EntryColumnsTest extends TestCase
     }
 
     /**
-     * A stored entry of a captured record of an approved invoice, with the
-     * fields given in place of its own.
+     * A stored entry of an approved invoice, with the fields given.
      *
      * @param  array<string, ?string>  $fields
      * @return \SineMacula\Laravel\AuditLog\Querying\StoredEntry
@@ -213,8 +201,7 @@ final class EntryColumnsTest extends TestCase
     }
 
     /**
-     * The stored row of a captured record of an approved invoice, with the
-     * fields given in place of its own, finalised at `RECORDED_AT`.
+     * The stored row of an approved invoice, with the fields given.
      *
      * @param  array<string, ?string>  $fields
      * @return array<string, int|string|null>

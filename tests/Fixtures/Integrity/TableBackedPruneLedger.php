@@ -12,20 +12,12 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 
 /**
- * A prune ledger over a table of its own on the maintenance connection, as the
- * lifecycle journal keeps one: a prune deletes some of a segment's entries and
- * writes its record here in one transaction, so a test can kill it at each
- * boundary, or run it beside a verification, and see the record and the deletes
- * commit together or not at all.
+ * A prune ledger over a table of its own on the maintenance connection, so a
+ * test can kill a prune at each boundary and see its record and deletes commit
+ * together or not at all.
  *
- * The table holds every record of a seal, keyed by the seal and the record's
- * sequence among the seal's, each field stored as the record gives it, so a
- * record reads back exactly as it was written on every engine. Every query
- * reads the writer, so a replica's lag never hides a committed prune. A row is
- * read back through `PruneRecord::fromArray()`, which refuses a malformed field
- * as a record that cannot be read, and nothing more is checked here:
- * verification checks every record it is given. The test that creates the table
- * drops it.
+ * Every query reads the writer, so a replica's lag never hides a committed
+ * prune.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

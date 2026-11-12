@@ -19,18 +19,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the store's conflict path against the tombstones of
- * pruned records, on whichever engine the suite runs against: an insert that
- * violates a unique index while nothing is stored under the record's ids is
- * `RecordConflictException::alreadyPruned()` when retention pruned the record,
- * a bundle's as a record's, and inside a host transaction too, which stays
- * usable; any other violation still propagates the insert's own exception; and
- * a fresh insert of a pruned id violates nothing, so it is not refused here.
- *
- * A unique index on `request_id`, which the shipped table does not have, makes
- * the violation of an index other than the id's. A test prunes a record as
- * retention does: its entry and its artifact are deleted, and its seal and its
- * member are kept.
+ * Integration tests for the store's conflicts against pruned records'
+ * tombstones; a test-only `request_id` unique index gives the other violation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,10 +73,7 @@ final class PrunedRecordConflictTest extends TestCase
     }
 
     /**
-     * A pruned record stored again, whose insert violates another unique index
-     * because a later record holds its request id, finds nothing under its id
-     * and a sealed member with no entry: it is already pruned, never the raw
-     * violation, and nothing is stored.
+     * A pruned record whose insert violates another index is already pruned.
      *
      * @return void
      */
@@ -107,9 +94,7 @@ final class PrunedRecordConflictTest extends TestCase
     }
 
     /**
-     * Inside a host transaction on the storage connection the insert's
-     * savepoint is rolled back before the tombstones are read, so the record is
-     * already pruned there too and the host transaction goes on.
+     * Inside a host a pruned id is already pruned, and the host goes on.
      *
      * @return void
      *
@@ -140,8 +125,7 @@ final class PrunedRecordConflictTest extends TestCase
     }
 
     /**
-     * A pruned bundle stored again is refused as already pruned once its
-     * entry's insert fails, and its artifact's insert is rolled back with it.
+     * A pruned bundle is already pruned, its artifact insert rolled back.
      *
      * @return void
      *
@@ -166,9 +150,7 @@ final class PrunedRecordConflictTest extends TestCase
     }
 
     /**
-     * A violation of another unique index by a record that was never sealed
-     * still propagates the insert's own exception, whether or not its entry was
-     * ever stored.
+     * Any other violation still propagates the insert's own exception.
      *
      * @return void
      *
@@ -192,8 +174,7 @@ final class PrunedRecordConflictTest extends TestCase
     }
 
     /**
-     * An unsealed record whose entry was deleted is no tombstone: its violation
-     * propagates as any other.
+     * A deleted unsealed record is no tombstone: its violation propagates.
      *
      * @return void
      */
@@ -211,9 +192,7 @@ final class PrunedRecordConflictTest extends TestCase
     }
 
     /**
-     * A pruned record stored again directly with no violation is inserted: a
-     * fresh insert of a pruned id violates no index, so the store cannot see it
-     * without a statement on every write, and verification reports it.
+     * A fresh insert of a pruned id violates nothing, so it is stored.
      *
      * @return void
      */
@@ -227,8 +206,7 @@ final class PrunedRecordConflictTest extends TestCase
     }
 
     /**
-     * Finalise the record, store it, seal it and prune it as retention would:
-     * its artifact and its entry deleted, its seal and member kept.
+     * Store, seal and prune the record as retention would, keeping its seal.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord

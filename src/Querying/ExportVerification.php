@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Querying;
 
 /**
- * What the verification of an export found: the export entry its bundle names,
- * how many lines its file holds, and each finding of the chain, once, in the
- * order the chain checks them. An export is verified only when nothing was
- * found.
- *
- * It is returned only once the verification is recorded: the record of a
- * verification that could not be written returns none. A viewer the access
- * policy denies sees the entry missing, exactly as one who may not see it does.
+ * What an export's verification found, returned only once it is recorded; a
+ * denied viewer sees the entry missing, as one who may not see it does.
  *
  * @api
  *
@@ -32,18 +26,18 @@ final readonly class ExportVerification
      */
     public function __construct(
 
-        /** The id of the `audit_log.trail_exported` entry the bundle names, or `null` when it names none. */
+        /** The export entry the bundle names, or `null` for none. */
         public ?string $entryId,
 
-        /** How many lines the file holds, none when it was not read. */
+        /** How many lines the file holds; 0 when it was not read. */
         public int $lines,
 
-        /** What the chain found, each once, in the order it checks them; none for an export that verifies. */
+        /** The findings, each once, in the order the chain checks them. */
         public array $findings,
     ) {}
 
     /**
-     * Whether the export verified: the chain found nothing.
+     * Whether the chain found nothing.
      *
      * @return bool
      */

@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\SealContentionException;
 
 /**
- * Unit tests for the seal contention exception: its message naming the
- * attempts, the class it specialises, and the absence of any exception it
- * carries.
+ * Unit tests for the seal contention exception.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

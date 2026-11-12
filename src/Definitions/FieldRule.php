@@ -8,18 +8,11 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 
 /**
- * One field rule of an event definition: the path it names and how the value
- * there is handled, with, for an encrypted field, the owner whose key it is
- * stored under.
+ * One field rule of an event definition: its path, its handling and, for an
+ * encrypted field only, the owner whose key it is stored under.
  *
- * An encrypted field always names its owner, the record's actor or subject or
- * the path of a property holding a reference, and only an encrypted field names
- * one. When the owner is absent from a record or has no key, the field is
- * dropped, never stored in plaintext; applying a rule to a payload is the
- * redaction pipeline's work, not this class's.
- *
- * Definitions build their rules through `EventDefinition::rule()` and its
- * shorthands.
+ * An encrypted field whose owner is absent or has no key is dropped, never
+ * stored in plaintext.
  *
  * @api
  *
@@ -72,8 +65,8 @@ final readonly class FieldRule
     }
 
     /**
-     * Refuse an encrypted field without an owner, an owner on any other field,
-     * and an owner's path that is malformed, holds `*` or is the field's own.
+     * Refuse an encrypted field without an owner and an owner on any other
+     * field.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling  $handling
@@ -104,8 +97,7 @@ final readonly class FieldRule
     }
 
     /**
-     * Refuse an owner's path that is malformed, holds `*` or is the field's
-     * own.
+     * Refuse an owner's path that holds `*` or is the field's own.
      *
      * @param  string  $path
      * @param  string  $owner

@@ -26,10 +26,7 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * Feature tests for building an imported record from a line: the definition it
- * is built under, registered or the default in the line's category, the code
- * refused while registration is required, no contributor run, the record's
- * fields and source, its refusals, and a dry run that encrypts nothing.
+ * Feature tests for building an imported record from a line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,9 +80,7 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * The record is the line imported: its asserted fields, its source, its id
-     * drawn at the import's time, `imported` provenance, and nothing of a
-     * credential, guard, session, request, trace or user agent.
+     * The record is the line imported, with nothing of a request or session.
      *
      * @return void
      */
@@ -119,8 +114,7 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * A registered code is built under its definition: its version, its
-     * category over the line's, and its field rules.
+     * A registered code is built under its definition.
      *
      * @return void
      */
@@ -137,8 +131,8 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * An unregistered code is built under the default in the line's category,
-     * or `general` when the line names none, every field retained.
+     * An unregistered code takes the line's category, or `general` when it
+     * names none.
      *
      * @return void
      */
@@ -159,7 +153,7 @@ final class ImportRecordBuilderTest extends TestCase
 
     /**
      * While registration is required, an unregistered code is
-     * `UNREGISTERED_CODE` and a registered one is built.
+     * `UNREGISTERED_CODE`.
      *
      * @return void
      */
@@ -175,9 +169,7 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * No contributor runs: a registered one that fills an actor and a guard
-     * leaves the record's actor as the line gives it, none, and its guard
-     * empty.
+     * No contributor runs.
      *
      * @return void
      */
@@ -198,9 +190,7 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * A dry run encrypts nothing: the bound encrypter is never asked, and the
-     * field it would seal is dropped and diagnosed, as for an owner with no
-     * key; a real build seals it.
+     * A dry run encrypts nothing, dropping the field it would seal.
      *
      * @return void
      */
@@ -227,11 +217,8 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * The imported record's id is drawn at the import's time before the line is
-     * minimised, so every value sealed for it is sealed for the entry the
-     * record is stored as, with the line's tenant and the definition's
-     * category; it is a UUID version 7 of the import's time, never of the time
-     * the activity happened.
+     * The imported id is a UUID v7 of the import's time, drawn before
+     * minimising.
      *
      * @return void
      */
@@ -260,9 +247,7 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * A value the builder or the record refuses makes the line `INVALID_FIELD`:
-     * a correlation id outside its grammar, and a property under the reserved
-     * prefix.
+     * A value the builder or the record refuses makes the line `INVALID_FIELD`.
      *
      * @return void
      */
@@ -274,8 +259,7 @@ final class ImportRecordBuilderTest extends TestCase
     }
 
     /**
-     * An IP address that is not one is dropped by minimising, as a captured one
-     * is, and the record is still built.
+     * An IP address that is not one is dropped by minimising.
      *
      * @return void
      */

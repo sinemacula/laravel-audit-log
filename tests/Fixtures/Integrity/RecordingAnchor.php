@@ -10,18 +10,11 @@ use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorConflictException;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 
 /**
- * An anchor that holds the digests it is given in memory, by sequence, and
- * remembers every call that reaches it: the anchor a test binds as an instance,
- * so sealing and verifying in one test share what it holds.
+ * An anchor that holds digests in memory by sequence and records each call
+ * reaching it, so sealing and verifying in one test share it.
  *
- * It anchors idempotently, returning the sequence and digest as its receipt and
- * refusing another digest for a sequence it holds with an
- * `AnchorConflictException`; it confirms a receipt only while it holds exactly
- * that sequence and digest; and its head is its highest sequence. A test can
- * make it fail, recover, hold another digest at a sequence (a remote that
- * disagrees with the local log), or say it cannot discover. Only `anchor()`,
- * `confirms()` and `latest()` reach it, so only they are recorded and only they
- * fail; its name and whether it can discover are its own.
+ * It anchors idempotently, refusing another digest for a held sequence; a test
+ * can make it fail, recover, disagree at a sequence or refuse discovery.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -193,7 +186,17 @@ final class RecordingAnchor implements CheckpointAnchor
     {
         $this->reach('latest');
 
-        return $this->head();
+        if (!$this->discovery) {
+            throw new \LogicException('This anchor cannot discover its head, so it must never be asked for it.');
+        }
+
+        if ($this->held === []) {
+            return null;
+        }
+
+        $sequence = max(array_keys($this->held));
+
+        return new AnchoredHead($sequence, $this->held[$sequence]);
     }
 
     /**
@@ -212,29 +215,6 @@ final class RecordingAnchor implements CheckpointAnchor
         }
 
         $this->held[$seal->sequence] = $seal->sealDigest;
-    }
-
-    /**
-     * The highest sequence held and its digest, or `null` when nothing is
-     * held; an anchor made unable to discover refuses to be asked.
-     *
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead
-     *
-     * @throws \LogicException
-     */
-    private function head(): ?AnchoredHead
-    {
-        if (!$this->discovery) {
-            throw new \LogicException('This anchor cannot discover its head, so it must never be asked for it.');
-        }
-
-        if ($this->held === []) {
-            return null;
-        }
-
-        $sequence = max(array_keys($this->held));
-
-        return new AnchoredHead($sequence, $this->held[$sequence]);
     }
 
     /**

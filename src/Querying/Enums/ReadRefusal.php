@@ -5,10 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Querying\Enums;
 
 /**
- * Why a read of the trail, a count, an export or the verification of an export
- * was refused, as `AuditReadRefusedException::$reason` gives it, so a caller
- * can tell the causes apart without reading the message: a read inside an open
- * transaction, say, is one to make again once the transaction has committed.
+ * Why a read was refused, as `AuditReadRefusedException::$reason` gives it.
  *
  * @api
  *
@@ -17,19 +14,16 @@ namespace SineMacula\Laravel\AuditLog\Querying\Enums;
  */
 enum ReadRefusal: string
 {
-    // Entered while a read, an audit record's write or its failure, or an event
-    // mapper was running
+    // Entered while a read, a write or an event mapper was running
     case REENTRANT = 'reentrant';
 
-    // A transaction that could still roll the read's record back was open on a
-    // connection
+    // A transaction was open that could roll the read's record back
     case IN_TRANSACTION = 'in_transaction';
 
     // In sync mode, the bound store does not say its return is durable
     case NOT_DURABLE = 'not_durable';
 
-    // In sync mode, the bound store keeps no attachment, and every read's
-    // record carries one
+    // In sync mode, the bound store keeps no attachment a read's record needs
     case KEEPS_NO_ARTIFACTS = 'keeps_no_artifacts';
 
     // The read's record could not be written, or was never acknowledged

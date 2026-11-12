@@ -12,12 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for an owner's key row: the unit's digest of its canonical
- * columns, a tenantless unit apart, each malformed field refused naming it, a
- * unit that is not its columns' digest refused, the state's rules on the
- * wrapped key, its wrapping key id and the erasure id, the wrap context and
- * what it binds, the fields the signature leaves out, and the row's round trip
- * through storage.
+ * Unit tests for an owner's key row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,9 +35,8 @@ final class SubjectKeyRowTest extends TestCase
     private const string HMAC = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
     /**
-     * The unit's digest is the lower-case hex SHA-256, unkeyed, of the
-     * canonical encoding of the owner's type and id, the tenant's type and id
-     * and the category, and a draft takes it from its references.
+     * The unit digest is the unkeyed SHA-256 of the canonical owner, tenant and
+     * category.
      *
      * @return void
      *
@@ -281,9 +275,8 @@ final class SubjectKeyRowTest extends TestCase
     }
 
     /**
-     * A row holds a wrapped key exactly when its state holds a key, with the id
-     * of the key that wrapped it, and an erasure id exactly when it is erased;
-     * a stored row that breaks either rule is refused naming the field.
+     * A stored row whose wrapped key or erasure id disagrees with its state is
+     * refused naming the field.
      *
      * @param  string  $state
      * @param  ?string  $wrapped
@@ -299,9 +292,8 @@ final class SubjectKeyRowTest extends TestCase
     }
 
     /**
-     * An erased row holds no wrapped key and names its erasure, and may keep or
-     * drop the id of the key that wrapped it; a superseded row is read like a
-     * live one.
+     * An erased row holds no wrapped key and names its erasure; a superseded
+     * row reads like a live one.
      *
      * @return void
      */
@@ -340,9 +332,8 @@ final class SubjectKeyRowTest extends TestCase
     }
 
     /**
-     * The wrap context is the canonical JSON of the wrap domain, the
-     * generation, the row's id, the unit and the wrapping key's id, and a
-     * change of any of them is another context.
+     * The wrap context binds the domain, generation, row id, unit and wrapping
+     * key id.
      *
      * @return void
      *
@@ -387,9 +378,8 @@ final class SubjectKeyRowTest extends TestCase
     }
 
     /**
-     * The signed fields are the version and every column that never changes,
-     * with the key id; the state, the wrapped key, the wrapping key's id and
-     * the erasure id are left out, so a row signs the same in every state.
+     * The state and wrapping fields are left out of the signature, so a row
+     * signs the same in every state.
      *
      * @return void
      *
@@ -426,9 +416,8 @@ final class SubjectKeyRowTest extends TestCase
     }
 
     /**
-     * A signed row stores every column in table order, its time in the stored
-     * form, and reads back from what an engine returns, an integer as its
-     * decimal string and a time with fewer fractional digits included.
+     * A signed row stores every column in table order and reads back from any
+     * engine's form.
      *
      * @return void
      */

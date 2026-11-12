@@ -13,10 +13,8 @@ use SineMacula\Laravel\AuditLog\Privacy\Enums\IpMode;
 use SineMacula\Laravel\AuditLog\Privacy\RedactionSettings;
 
 /**
- * Unit tests for the redaction settings: the default of each, the values each
- * accepts, the exact message each malformed value fails closed with, the root
- * key and its fallback, the reader of every setting, and the values no message
- * or stack trace ever shows.
+ * Unit tests for the redaction settings: defaults, accepted values, exact
+ * failure messages, the root key, readers, and what none shows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

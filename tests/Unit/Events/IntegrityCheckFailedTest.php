@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
 
 /**
- * Unit tests for the event dispatched when an integrity check fails: it carries
- * the command, the counts by status, the first finding and where it was found,
- * the heads and whether the run was complete, and nothing that could leak a
- * value of an entry to a listener.
+ * Unit tests for the integrity failure event, which carries no value of an
+ * entry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,9 +28,8 @@ final class IntegrityCheckFailedTest extends TestCase
     private const array ANCHORING = ['anchored' => 5, 'unanchored' => 1, 'unavailable' => 0, 'contradicted' => 1];
 
     /**
-     * The event carries what it is given, each under its own name, and the
-     * eight properties are all it has, all public and none of a type that could
-     * hold an object of the log, so a new one has to be argued for here.
+     * The event carries what it is given in eight public properties, none able
+     * to hold an object of the log.
      *
      * @return void
      */

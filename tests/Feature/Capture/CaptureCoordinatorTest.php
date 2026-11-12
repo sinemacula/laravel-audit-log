@@ -51,15 +51,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the capture coordinator: a mapped event and a package
- * source's event each written once through the record pipeline, from a builder
- * with no recorder described inside the mapping window; every way a source can
- * return or fail contained, with one report and one `AuditCaptureFailed`
- * holding class names alone; a failed write handled once; nothing captured
- * inside the write guard; and a deferred capture's callback holding no payload.
- *
- * The test binds the capture state as the provider does, and binds a registry
- * of its own.
+ * Feature tests for the capture coordinator, on a registry of the test's own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,9 +82,8 @@ final class CaptureCoordinatorTest extends TestCase
     private array $writeFailures = [];
 
     /**
-     * Fake the store, bind the reporter and a registry of the test's own, since
-     * the application's freezes once booted, capture the log lines and hear
-     * each failure event.
+     * Fake the store, bind the reporter and a fresh registry, as the
+     * application's freezes once booted.
      *
      * @return void
      */
@@ -136,8 +127,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * An event no mapping applies to is not captured, with nothing mapped or
-     * with other events mapped, and says nothing.
+     * An event no mapping applies to is not captured and says nothing.
      *
      * @return void
      */
@@ -152,9 +142,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * An event of the package's own is never captured, even when a broad
-     * mapping would apply to it, and is turned away before any mapping is
-     * resolved, so its class is never looked up.
+     * A package event is turned away before any mapping is resolved.
      *
      * @SuppressWarnings("php:S3011")
      *
@@ -171,8 +159,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapped event object is written once, through its mapper: the record
-     * returned is the one stored, and the same object again is not captured.
+     * A mapped event object is written once, through its mapper.
      *
      * @return void
      */
@@ -193,8 +180,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * The mapper is given a new builder with no recorder, inside the mapping
-     * window, so its `record()` is refused.
+     * The mapper gets a builder with no recorder, so its `record()` is refused.
      *
      * @return void
      */
@@ -211,8 +197,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapper that records the builder it was given is contained: nothing is
-     * written, one report and one `AuditCaptureFailed` name the classes.
+     * A mapper that records the builder it was given is contained.
      *
      * @return void
      */
@@ -222,8 +207,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapper that writes a record of its own while it runs is contained:
-     * neither its record nor the one it returns is written.
+     * A mapper that writes a record of its own is contained.
      *
      * @return void
      */
@@ -233,9 +217,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A source that skips an event leaves it unclaimed, so another source
-     * captures it; once captured it is claimed, and a later source skips it
-     * before describing it.
+     * A skipped event is left unclaimed for another source.
      *
      * @return void
      */
@@ -266,10 +248,8 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A deferred capture's failure callback, waiting in the commit queue, holds
-     * class names and nothing of the event, so the event's values are never
-     * kept until the commit; the failure is said once when the commit runs the
-     * write.
+     * A deferred capture's failure callback holds class names and nothing of
+     * the event.
      *
      * @return void
      */
@@ -350,8 +330,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapper that chooses any timing, even the one a capture would use, is
-     * contained: only the capture decides how its record is written.
+     * A mapper that chooses any timing is contained.
      *
      * @return void
      */
@@ -361,8 +340,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapper may write its record after the transaction, which keeps it when
-     * the transaction rolls back.
+     * A mapper may write after the transaction, surviving its rollback.
      *
      * @return void
      */
@@ -403,9 +381,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapper that throws is contained: it is reported once as a capture
-     * failure naming the three classes, with no previous exception and nothing
-     * of the original's message.
+     * A throwing mapper is reported once with nothing of its message.
      *
      * @return void
      */
@@ -421,8 +397,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapper the container makes as something that is not a mapper is
-     * contained, naming the mapper registered.
+     * A mapper the container makes as something else is contained.
      *
      * @return void
      */
@@ -434,8 +409,8 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * An event that matches two broad mappings is contained, with no mapper
-     * named, and neither mapper runs.
+     * An event matching two broad mappings is contained and neither mapper
+     * runs.
      *
      * @return void
      */
@@ -453,9 +428,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A failure before the capture runs, such as the capture state failing to
-     * resolve, is contained in the same way, for a mapped event with no mapper
-     * named yet and for a package source naming itself.
+     * A failure before the capture runs is contained the same way.
      *
      * @return void
      */
@@ -478,9 +451,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A failed write is handled once, as any failed write is: one spill line,
-     * one report of the write's own failure, one `AuditWriteFailed`, then one
-     * `AuditCaptureFailed`, and the capture returns `null`.
+     * A failed write is spilled, reported and dispatched once each.
      *
      * @return void
      */
@@ -500,8 +471,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A capture never reads the failure mode: under `throw` a failed write is
-     * still contained, and a malformed mode stops no capture.
+     * A capture never reads the failure mode.
      *
      * @return void
      */
@@ -523,8 +493,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A listener of `AuditCaptureFailed` that throws is contained: its failure
-     * is reported by class names, and the capture still returns `null`.
+     * A throwing `AuditCaptureFailed` listener is contained.
      *
      * @return void
      */
@@ -545,8 +514,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A reporter that throws is contained: the capture still dispatches its
-     * `AuditCaptureFailed` and returns `null`.
+     * A throwing reporter is contained.
      *
      * @return void
      */
@@ -564,8 +532,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * Inside the write guard nothing is captured and nothing is said: no mapper
-     * or source runs, no report is made and no event fires.
+     * Nothing is captured or said inside the write guard.
      *
      * @return void
      */
@@ -592,9 +559,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A package source takes the same path as a mapper: its record is written
-     * through the pipeline, and its failed write is handled once and named by
-     * the source.
+     * A package source takes the same path as a mapper.
      *
      * @return void
      */
@@ -615,8 +580,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A strict choice is refused before the event object is claimed, so a later
-     * capture of the same object still writes it.
+     * A strict choice is refused before the event object is claimed.
      *
      * @return void
      */
@@ -630,9 +594,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * Only a source that may defer chooses a timing: it may wait for the
-     * commit, which it then does, while a source that may not is contained;
-     * neither may be fail-closed or transactional.
+     * Only a source allowed to defer may choose a timing.
      *
      * @return void
      */
@@ -664,8 +626,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A source that does not claim its events writes the same object each time
-     * it sees it, and leaves it unclaimed for a mapping.
+     * A non-claiming source writes the same object each time it sees it.
      *
      * @return void
      */
@@ -680,9 +641,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * No failure carries a value of the event, of its record or of the original
-     * exception: neither the reports, nor the failure events, nor the spilled
-     * record, whether a mapper, a write or a listener failed.
+     * No capture failure carries a value of the event, record or exception.
      *
      * @return void
      */
@@ -710,8 +669,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A contained failure lets the listeners after the bridge run, through the
-     * real dispatcher.
+     * A contained failure lets the listeners after the bridge run.
      *
      * @return void
      */
@@ -747,10 +705,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * Map the portal events to the mapper, capture one, and assert it was
-     * contained: `null`, nothing written, one report of a capture failure and
-     * one `AuditCaptureFailed`, each naming the event, the mapper and the
-     * failure's class.
+     * Capture a portal event through the mapper and assert it was contained.
      *
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\EventMapper>  $mapper
      * @param  class-string<\Throwable>  $failure
@@ -819,8 +774,7 @@ final class CaptureCoordinatorTest extends TestCase
     }
 
     /**
-     * A mapper that notes what its builder is: what its `record()` says, that
-     * the mapping window is open, and whether the builder is used up.
+     * A mapper that notes what its builder is.
      *
      * @return object{seen: list<bool|string>}&\SineMacula\Laravel\AuditLog\Contracts\EventMapper
      */

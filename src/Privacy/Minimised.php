@@ -5,10 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Privacy;
 
 /**
- * What a record stores once it has been minimised: its properties, its context
- * and its IP address, and nothing raw. Diagnostics of what was removed travel
- * inside `properties._audit.omitted`, so this value has no field of its own for
- * them.
+ * What a record stores once minimised; diagnostics travel in
+ * `properties._audit.omitted`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

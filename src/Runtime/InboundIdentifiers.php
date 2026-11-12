@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Runtime;
 
 /**
- * What an identifier from outside must look like before it is believed: a value
- * from a request header or carried back from a queue payload is the identifier
- * it claims to be, or it is `null`.
- *
- * Each validator takes any value, because a carried value comes back from a
- * payload, and neither cleans nor cuts it. Anything malformed, any non-string
- * included, is `null`, and nothing throws, so the caller falls through without
- * ever having to name what it was given.
+ * Validates identifiers from request headers or queue payloads: each value is
+ * the identifier it claims to be, or `null`, never cleaned, cut or thrown over.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,7 +21,7 @@ final class InboundIdentifiers
     /** @var string Pattern of a W3C trace id: 32 lower-case hexadecimal digits, not all zero. */
     private const string TRACE_ID_PATTERN = '/\A(?!0{32})[0-9a-f]{32}\z/';
 
-    /** @var string Pattern of a version-00 `traceparent`: a trace id and a parent id, neither all zero, and the flags, all lower case, capturing the trace id. */
+    /** @var string Pattern of a version-00 `traceparent`, capturing its trace id. */
     private const string TRACEPARENT_PATTERN = '/\A00-((?!0{32})[0-9a-f]{32})-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}\z/';
 
     /**
@@ -62,8 +56,7 @@ final class InboundIdentifiers
     }
 
     /**
-     * The trace id of the valid version-00 `traceparent` header the value is,
-     * or `null` when it is none.
+     * The trace id of the version-00 `traceparent` the value is, or `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

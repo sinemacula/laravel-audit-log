@@ -6,22 +6,16 @@ namespace Tests\Integration\Stores;
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
-use Illuminate\Foundation\Testing\DatabaseTransactionsManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the host's after-commit callbacks around the store, on
- * the engine the suite runs against: a callback the host registers before the
- * store runs is kept through a stored record, a failed audit insert and a
- * resolved duplicate, runs once when the host commits, and is dropped with the
- * entry when the host rolls back; under Laravel's own transaction manager and
- * under the one its `DatabaseTransactions` testing trait installs, whose
- * wrapping transaction a host commit never reaches.
+ * Integration tests for a host's after-commit callbacks around the store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,7 +25,7 @@ use Tests\TestCase;
 #[CoversClass(DatabaseAuditStore::class)]
 final class HostTransactionCallbacksTest extends TestCase
 {
-    use InteractsWithAuditStore;
+    use InteractsWithAuditStore, RunsInsideTheTestingWrapper;
 
     /** @var string The id records are pinned to. */
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
@@ -59,9 +53,7 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * A callback registered inside a nested host transaction is kept through a
-     * stored record and through the inner commit, and runs once, at the outer
-     * commit, with the entry committed.
+     * A host callback survives a stored record and runs once at outer commit.
      *
      * @return void
      */
@@ -89,9 +81,7 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * A callback is kept when an audit insert fails on the probe table's
-     * `NOT NULL` column and rolls back to its savepoint, and runs once at the
-     * host's commit.
+     * A host callback survives a failed audit insert and runs once at commit.
      *
      * @return void
      */
@@ -115,8 +105,7 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * A callback is kept when a duplicate's insert rolls back to its savepoint
-     * and the duplicate is resolved, and runs once at the host's commit.
+     * A host callback survives a resolved duplicate and runs once at commit.
      *
      * @return void
      */
@@ -140,8 +129,7 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * A host that rolls back drops its callback, which never runs, and the
-     * entry the store wrote within it.
+     * A rolled-back host drops its callback and the stored entry.
      *
      * @return void
      */
@@ -162,15 +150,13 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * Under the testing manager, inside its wrapping transaction, a host's
-     * callback is kept through a stored record and runs once when the host
-     * commits, though the wrapper never does.
+     * Under the testing manager a host callback runs once at the host's commit.
      *
      * @return void
      */
     public function testUnderTheTestingManagerAHostCallbackRunsOnceAtTheHostCommit(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->registerHostCallback($connection);
@@ -190,9 +176,7 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * Under the testing manager a host's callback is kept when an audit insert
-     * fails and rolls back to its savepoint, and runs once when the host
-     * commits.
+     * Under the testing manager a failed audit insert keeps the host callback.
      *
      * @return void
      */
@@ -200,7 +184,7 @@ final class HostTransactionCallbacksTest extends TestCase
     {
         $this->pointAtProbeTable();
 
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->registerHostCallback($connection);
@@ -217,40 +201,6 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * Install the testing manager on the storage connection, open its wrapping
-     * transaction as `DatabaseTransactions` does, run the test inside it, and
-     * roll the wrapper back however the test ends.
-     *
-     * @param  \Closure(\Illuminate\Database\Connection): void  $test
-     * @return void
-     */
-    private function insideTheTestingWrapper(\Closure $test): void
-    {
-        $connection = $this->storageConnection();
-        $manager    = new DatabaseTransactionsManager([$connection->getName()]);
-
-        $this->app?->instance('db.transactions', $manager);
-
-        $connection->setTransactionManager($manager);
-
-        $dispatcher = $connection->getEventDispatcher();
-
-        self::assertNotNull($dispatcher);
-
-        $connection->unsetEventDispatcher();
-        $connection->beginTransaction();
-        $connection->setEventDispatcher($dispatcher);
-
-        try {
-            $test($connection);
-        } finally {
-            $connection->unsetEventDispatcher();
-            $connection->rollBack();
-            $connection->setEventDispatcher($dispatcher);
-        }
-    }
-
-    /**
      * Register the host's after-commit callback on the connection.
      *
      * @param  \Illuminate\Database\Connection  $connection
@@ -264,8 +214,7 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * Store a record into the probe table, which fails on its `NOT NULL` column
-     * with the engine's own `QueryException`.
+     * Store a record into the probe table, failing on its `NOT NULL` column.
      *
      * @return void
      *
@@ -283,8 +232,7 @@ final class HostTransactionCallbacksTest extends TestCase
     }
 
     /**
-     * The captured record of an approved invoice under the pinned id, finalised
-     * on the frozen clock.
+     * An approved invoice under the pinned id, finalised on the frozen clock.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
      */

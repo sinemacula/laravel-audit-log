@@ -9,15 +9,8 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 
 /**
- * The counts of one verification run, kept as it streams so no report is held:
- * the segments in each integrity and each anchoring status, every status listed
- * from zero in enum order, the segments awaiting their first anchoring, the
- * findings of the run as a whole, and the unsealed entries, pending and
- * overdue.
- *
- * Of every failing segment and run finding, it keeps the first failure: the one
- * of the most severe status, and of those the earliest it was given, with the
- * id it was found at.
+ * The counts of one verification run, kept as it streams so no report is held,
+ * and its first failure: the most severe, then the earliest given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,8 +56,7 @@ final class VerificationTally
     }
 
     /**
-     * Count a segment's report, and keep its finding when it is the first
-     * failure.
+     * Count a segment's report, keeping its finding if it is the first failure.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SegmentReport  $report
      * @return void
@@ -82,8 +74,7 @@ final class VerificationTally
     }
 
     /**
-     * Keep a finding of the run as a whole, and its finding when it is the
-     * first failure.
+     * Keep a finding of the run, and note it if it is the first failure.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\RunFinding  $finding
      * @return void
@@ -96,8 +87,7 @@ final class VerificationTally
     }
 
     /**
-     * Keep the counts of the entries no seal holds: those younger than the
-     * allowed age, pending, and those older, overdue.
+     * Keep the counts of unsealed entries, pending or overdue.
      *
      * @param  int  $pending
      * @param  int  $overdue
@@ -110,8 +100,7 @@ final class VerificationTally
     }
 
     /**
-     * The segments in each integrity status, by its value, every status listed
-     * in enum order.
+     * The segments in each integrity status, by value, in enum order.
      *
      * @return array<string, int>
      */
@@ -121,8 +110,7 @@ final class VerificationTally
     }
 
     /**
-     * The segments in each anchoring status, by its value, every status listed
-     * in enum order.
+     * The segments in each anchoring status, by value, in enum order.
      *
      * @return array<string, int>
      */

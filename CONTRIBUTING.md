@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions are welcome via GitHub pull requests. This guide covers the expectations for working on this package.
+Contributions are welcome via GitHub pull requests.
 
 ## Requirements
 
@@ -42,9 +42,8 @@ test: add a write budget test for the database store
 chore: update qlty configuration
 ```
 
-Pull request titles must follow the same convention - and they are the ones that matter most: PRs are
-squash-merged, so the title becomes the commit on `master`, and release-please derives the changelog and
-the next version from those commits.
+Pull request titles follow the same convention. PRs are squash-merged, so the title becomes the commit on `master`,
+and release-please derives the changelog and the next version from those commits.
 
 ### Code Quality
 
@@ -102,20 +101,18 @@ budgets, so run it serially with `phpunit`, never with `paratest`.
 - PHPStan level 8 compliance
 - Full type hints on all public method parameters and return types
 - PHPDoc on all methods and classes
-- Namespaces keep to the dependency rules in `tests/Unit/Architecture/NamespaceDependenciesTest.php`: each rule in
-  `RULES` (and `FRAMEWORK_RULES` for the framework) says which namespaces may not name which others, and a class that
-  moves or a dependency that narrows changes a rule there, never the test's scanner. Every name a rule gives must exist,
-  so a rule left behind by a move fails.
+- Namespaces keep to the dependency rules in `RULES` and `FRAMEWORK_RULES` of
+  `tests/Unit/Architecture/NamespaceDependenciesTest.php`. A class that moves changes a rule there, never the test's
+  scanner, and a rule naming a namespace that no longer exists fails.
 - Nothing shipped (`src`, `config`, `database`, `lang`, `docs`, the README or `composer.json`) names, requires or
   detects another Sine Macula package; `PackageBoundaryTest` and `DocumentationTest` hold the code and the docs to it.
   Examples use neutral names such as `invoice.approved` and `app:ticket-123`.
-- New code is expected to ship with tests covering the behavioural surface; the package's mutation-testing gate
-  (`composer test:mutation`) is the enforced floor. Behaviour that spans the capture lifecycle (events, the write path,
-  transactions, queues) should be covered by integration tests that exercise the package the way a consuming
-  application does.
+- New code ships with tests of its behaviour; the mutation gate (`composer test:mutation`) is the enforced floor.
+  Behaviour that spans events, the write path, transactions or queues gets integration tests that use the package as
+  an application does.
 
 ## Pull Requests
 
-- Title the PR as a Conventional Commit - the squash-merge makes it the commit that drives the changelog
+- Title the PR as a Conventional Commit
 - Keep changes minimal and scoped to a single concern
 - Do not change static analysis or formatting configuration without prior discussion

@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\SealFailedException;
 
 /**
- * Unit tests for the exception a stopped seal run is reported as: its message
- * naming the class alone, the class it specialises, and the absence of any
- * exception it carries.
+ * Unit tests for the exception a stopped seal run is reported as.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -10,9 +10,8 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 
 /**
- * Unit tests for the event dispatched when the store accepts a record: it
- * carries the record's id, code and category, and nothing that could leak a
- * value of the record to a listener.
+ * Unit tests for the recorded event, which carries the record's id, code and
+ * category and no value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

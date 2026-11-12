@@ -13,10 +13,8 @@ use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 
 /**
- * Unit tests for the audit work waiting on one commit: every piece runs
- * whatever another does, the first failure is thrown once all have run, a later
- * one is reported, and a transaction found aborted runs nothing but the abandon
- * steps.
+ * Unit tests for the audit work waiting on one commit: every piece runs, and
+ * the first failure is thrown once all have.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

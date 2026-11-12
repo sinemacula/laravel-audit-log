@@ -43,10 +43,8 @@ final class KeyTokenizerTest extends TestCase
     }
 
     /**
-     * Rows of `[key, tokens]`: separators of every kind, each boundary between
-     * a letter and a digit, each camel-case boundary, the format characters a
-     * key is read without, keys that must stay one token, and keys with no
-     * tokens.
+     * Rows of `[key, tokens]`: separators, letter-digit and camel-case
+     * boundaries, ignored format characters, single tokens and none.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */

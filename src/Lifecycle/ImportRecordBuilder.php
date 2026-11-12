@@ -22,26 +22,11 @@ use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 
 /**
- * Builds the imported record of an import line, as the capture pipeline builds
- * a captured one, less what an import cannot carry.
+ * Builds the imported record of an import line as the capture pipeline builds a
+ * captured one, less what an import cannot carry.
  *
- * A code registered in the catalogue is built under its definition, its field
- * rules, minimisation and encryption included. An unregistered code is
- * `UNREGISTERED_CODE` while `audit-log.definitions.require_registered` holds,
- * and is otherwise built under the permissive default in the line's category,
- * or `general`. The line's references, outcome and reason, correlation id and
- * properties describe a builder, its IP address and context are filled as a
- * contributor would fill them, and the builder is minimised and built into an
- * imported record of the source given. Its id is drawn at the import's time
- * before it is minimised, since every encrypted value is sealed for the entry
- * it belongs to. Any value the builder or the record refuses makes the line
- * `INVALID_FIELD`, a property under the reserved `_audit` prefix among them.
- *
- * No contributor runs: an import carries no ambient context, and nothing of the
- * request, the command or the job doing the import is the record's. A dry run
- * minimises over a sealer of the encrypter that encrypts nothing, so it creates
- * no key and seals no value, and an encrypted field is diagnosed as dropped
- * exactly as an owner without a key would be.
+ * No contributor runs, since nothing of the process doing the import is the
+ * record's; the id is drawn before minimising, as values are sealed per entry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,13 +42,13 @@ final readonly class ImportRecordBuilder
      */
     public function __construct(
 
-        /** The container the catalogue, the settings and the minimiser are resolved from on every build. */
+        /** Resolves the catalogue, the settings and the minimiser on every build. */
         private Container $container,
     ) {}
 
     /**
-     * The imported record of the line, from the source given and drawn at the
-     * import's time, or why the line is rejected; a dry run encrypts nothing.
+     * The imported record of the line, or why it is rejected; a dry run
+     * encrypts nothing.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine  $line
      * @param  \SineMacula\Laravel\AuditLog\Records\ImportedSource  $source
@@ -97,9 +82,8 @@ final readonly class ImportRecordBuilder
     }
 
     /**
-     * The definition the code is built under: the registered one, the
-     * permissive default in the category given or `general`, or `null` when the
-     * code is not registered and unregistered codes are refused.
+     * The registered definition, else the permissive default, or `null` when
+     * unregistered codes are refused.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\EventCode  $code
      * @param  ?string  $category
@@ -124,8 +108,7 @@ final readonly class ImportRecordBuilder
     }
 
     /**
-     * The minimiser of this build: over a sealer of the encrypter that encrypts
-     * nothing for a dry run, and over the bound encrypter otherwise.
+     * The minimiser, sealing with no encrypter on a dry run so no key is made.
      *
      * @param  bool  $dryRun
      * @return \SineMacula\Laravel\AuditLog\Privacy\RecordMinimiser
@@ -144,9 +127,8 @@ final readonly class ImportRecordBuilder
     }
 
     /**
-     * A builder describing the line: its code, references, outcome and reason,
-     * correlation id and properties given, and its IP address and context
-     * filled as a contributor fills them.
+     * A builder describing the line, its client and context filled as a
+     * contributor fills them.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine  $line
      * @param  \SineMacula\Laravel\AuditLog\Records\EventCode  $code

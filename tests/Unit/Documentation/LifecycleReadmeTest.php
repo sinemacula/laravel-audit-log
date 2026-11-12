@@ -7,16 +7,11 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
- * Unit tests that keep the README in step with the lifecycle: every leaf of the
- * lifecycle, retention and import settings has its row in the configuration
- * table with the env var the shipped file reads, or none for a map; the six
- * lifecycle commands, the facade's way into the lifecycle and the retention and
- * import guides are named, and each guide is there; and Laravel's
- * `model:prune`, which the package never used, is named nowhere.
- *
- * A drift guard: it catches an omission or a rename, not wrong prose.
+ * A drift guard keeping the README in step with the lifecycle: it catches an
+ * omission or a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,6 +21,8 @@ use PHPUnit\Framework\TestCase;
 #[CoversNothing]
 final class LifecycleReadmeTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var list<string> The sections of the shipped configuration the lifecycle reads. */
     private const array SECTIONS = ['lifecycle', 'retention', 'import'];
 
@@ -36,8 +33,8 @@ final class LifecycleReadmeTest extends TestCase
     private const array GUIDES = ['docs/guides/retention.md', 'docs/guides/import.md'];
 
     /**
-     * Rows of `[leaf, the env var it reads or null for a map]`: every leaf of
-     * the lifecycle, retention and import settings the shipped file holds.
+     * Rows of `[leaf, env var or null for a map]`: every lifecycle, retention
+     * and import leaf.
      *
      * @return iterable<string, array{0: string, 1: ?string}>
      */
@@ -59,8 +56,7 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * Each leaf has its row in the README's configuration table, naming the env
-     * var the shipped file reads it from, or `-` for a map, which has none.
+     * Each leaf has a README row naming its env var, or `-` for a map.
      *
      * @param  string  $leaf
      * @param  ?string  $env
@@ -76,9 +72,7 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * The leaves the provider yields are exactly the thirteen settings the
-     * lifecycle, retention and import read, so a leaf dropped from the shipped
-     * file and from the README together still fails.
+     * The leaves are exactly the thirteen settings, so a joint drop fails.
      *
      * @return void
      */
@@ -102,8 +96,7 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * The README names each lifecycle command, the facade's way into the
-     * lifecycle and both lifecycle guides, each of which exists.
+     * The README names each lifecycle command, the facade call and both guides.
      *
      * @return void
      */
@@ -124,8 +117,7 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * The maintenance connection's row names everything that runs through it,
-     * the import's journal rows among them.
+     * The maintenance connection's row names everything that runs through it.
      *
      * @return void
      */
@@ -138,20 +130,19 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * Retention is the package's own prune, so the README no longer names
-     * Laravel's `model:prune`.
+     * The README never names Laravel's `model:prune`; retention is the
+     * package's own.
      *
      * @return void
      */
-    public function testTheReadmeNoLongerNamesModelPrune(): void
+    public function testTheReadmeNeverNamesModelPrune(): void
     {
         self::assertStringNotContainsString('model:prune', self::readme());
         self::assertStringContainsString('retention through `audit-log:prune`, scheduled by the package', self::readme());
     }
 
     /**
-     * The env var the shipped file reads the leaf from, or `null` when it reads
-     * none, as for a map: the `env()` call on the leaf's own line.
+     * The env var the shipped file reads the leaf from, or `null` for a map.
      *
      * @param  string  $leaf
      * @return ?string
@@ -170,48 +161,5 @@ final class LifecycleReadmeTest extends TestCase
         self::assertNotNull($line, sprintf('The shipped configuration has no line for `%s`.', $leaf));
 
         return preg_match('/^env\(\'([A-Z0-9_]+)\'/', $line, $env) === 1 ? $env[1] : null;
-    }
-
-    /**
-     * Every row of the README's configuration table, by its key without the
-     * backticks, as its cells.
-     *
-     * @return array<string, list<string>>
-     */
-    private static function configurationRows(): array
-    {
-        preg_match_all('/^\| `([a-z_.]+)` +\|.*\|$/m', self::readme(), $matches, PREG_SET_ORDER);
-
-        $rows = [];
-
-        foreach ($matches as $match) {
-            $rows[$match[1]] = array_map(trim(...), explode('|', trim($match[0], '|')));
-        }
-
-        return $rows;
-    }
-
-    /**
-     * The README.
-     *
-     * @return string
-     */
-    private static function readme(): string
-    {
-        $readme = file_get_contents(self::root() . '/README.md');
-
-        self::assertIsString($readme);
-
-        return $readme;
-    }
-
-    /**
-     * The repository's root.
-     *
-     * @return string
-     */
-    private static function root(): string
-    {
-        return dirname(__DIR__, 3);
     }
 }

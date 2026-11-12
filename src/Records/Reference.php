@@ -12,15 +12,8 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use Symfony\Component\Uid\AbstractUid;
 
 /**
- * Something a record refers to, as a type and an id: the actor, the subject,
- * the principal or the tenant. A model is referred to by its morph class, or by
- * its class name when an enforced morph map omits it, and by its key.
- *
- * Both parts are strings from 1 to 191 characters with no control characters,
- * validated and never truncated, trimmed or case-folded: an id is kept exactly
- * as given, so `42`, `007`, an integer beyond `PHP_INT_MAX` given as a string,
- * and a UUID or ULID in either case each stay what they are. A reference never
- * reads a model's other attributes, so it can never carry them.
+ * Something a record refers to, as a type and an id kept exactly as given; it
+ * never reads a model's other attributes, so it cannot carry them.
  *
  * @api
  *
@@ -70,10 +63,8 @@ final readonly class Reference implements Arrayable
     }
 
     /**
-     * A reference to the model: its morph class, or its class name when an
-     * enforced morph map omits it, and its key as a string. The model must have
-     * a key, a string, an integer or a UUID or ULID object; a deleted model
-     * that still holds its key is referred to as before.
+     * A reference to the model's morph class, or class name when an enforced
+     * morph map omits it, and its key; a deleted model keeps its reference.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @return self
@@ -108,8 +99,7 @@ final readonly class Reference implements Arrayable
     }
 
     /**
-     * Refuse a part that is empty, longer than the reference columns, or not
-     * already clean text.
+     * Refuse a part that is empty, too long or not clean text.
      *
      * @param  string  $value
      * @param  'id'|'type'  $part

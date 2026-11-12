@@ -7,17 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * The tally of one anchoring pass: whether an anchor is configured at all, the
- * seals anchored and the last of them, and what stopped the pass, if anything:
- * an anchor that was unavailable, by the class of its failure and the seal from
- * which seals wait to be anchored, a conflict the anchor raised for a seal, or
- * a seal refused because it does not verify.
- *
- * A pass stops at the first of these, so the first one recorded is the one
- * kept. A conflict and a refusal are alarms, since each is evidence of
- * tampering or of a seal that cannot be trusted; an unavailable anchor is not,
- * because a later run tries again. The tally holds sequences, ids, classes and
- * findings, never a value of an entry.
+ * The tally of one anchoring pass, which stops at its first unavailable anchor,
+ * conflict or refused seal and keeps only that one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,10 +23,10 @@ final class AnchorResult
     /** @var ?int The sequence of the last seal anchored, or `null` before any. */
     private ?int $lastAnchored = null;
 
-    /** @var ?string The class of the failure that made the anchor unavailable, or `null` while it is not. */
+    /** @var ?string The class of the failure that made the anchor unavailable, or `null`. */
     private ?string $unavailableClass = null;
 
-    /** @var ?int The sequence of the first seal that waits to be anchored, or `null` when none or unknown. */
+    /** @var ?int The sequence of the first seal waiting to be anchored, or `null` when none or unknown. */
     private ?int $waitingFrom = null;
 
     /** @var ?array{sequence: int, sealId: string} The seal the anchor holds another digest for, or `null`. */
@@ -68,9 +59,8 @@ final class AnchorResult
     }
 
     /**
-     * Record that the anchor was unavailable with a failure of the class, from
-     * the seal of the sequence on, or before any seal was read when the
-     * sequence is `null`. Only the first is kept.
+     * Record the anchor unavailable from the sequence on, or before any seal
+     * was read when it is `null`; only the first is kept.
      *
      * @param  ?int  $sequence
      * @param  string  $class
@@ -87,7 +77,7 @@ final class AnchorResult
     }
 
     /**
-     * Record that the anchor holds another digest for the seal. Only the first
+     * Record that the anchor holds another digest for the seal; only the first
      * is kept.
      *
      * @param  int  $sequence
@@ -100,9 +90,8 @@ final class AnchorResult
     }
 
     /**
-     * Record that the seal was refused because it does not verify, for the
-     * finding; its id is `null` when the id itself is malformed. Only the first
-     * is kept.
+     * Record the seal refused for the finding, its id `null` when malformed;
+     * only the first is kept.
      *
      * @param  int  $sequence
      * @param  ?string  $sealId
@@ -189,8 +178,8 @@ final class AnchorResult
     }
 
     /**
-     * Whether the pass found something to alarm on: a conflict or a refused
-     * seal. An unavailable anchor is not one, since a later run tries again.
+     * Whether the pass found a conflict or a refused seal; an unavailable
+     * anchor is no alarm, since a later run tries again.
      *
      * @return bool
      */
@@ -200,8 +189,7 @@ final class AnchorResult
     }
 
     /**
-     * Whether the pass stopped before its batch was done: the anchor was
-     * unavailable, raised a conflict, or a seal was refused.
+     * Whether the pass stopped before its batch was done.
      *
      * @return bool
      */

@@ -9,14 +9,8 @@ use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * An audit store that keeps nothing: every call succeeds and writes nowhere.
- *
- * It is for an application that turns the audit log off in one environment
- * while its code goes on recording. It is never durable and joins no
- * transaction, so a fail-closed or a transactional record bound to it is
- * refused unless the outbox acknowledges for it, rather than being told it was
- * kept. It accepts attachments, since it keeps nothing of any record, so
- * nothing of a bulk record is lost more than of another.
+ * An audit store that keeps nothing, for turning the log off in one
+ * environment; never durable, so a fail-closed record needs the outbox.
  *
  * @api
  *
@@ -38,8 +32,7 @@ final readonly class NullAuditStore implements AcceptsAttachments, DurableAuditS
     }
 
     /**
-     * Whether a return is a durable acknowledgement: never, since nothing is
-     * kept.
+     * Whether a return is durable: never, since nothing is kept.
      *
      * @return bool
      */
@@ -50,8 +43,7 @@ final readonly class NullAuditStore implements AcceptsAttachments, DurableAuditS
     }
 
     /**
-     * Whether a write joins a transaction on the connection: never, since there
-     * is no write.
+     * Whether a write joins a transaction on the connection: never.
      *
      * @param  string  $connection
      * @return bool
@@ -63,9 +55,8 @@ final readonly class NullAuditStore implements AcceptsAttachments, DurableAuditS
     }
 
     /**
-     * Whether the store keeps a record's attachment with its entry: it accepts
-     * one, since it keeps nothing of any record, so nothing is selectively
-     * lost.
+     * Whether the store keeps attachments: yes, since it loses every record
+     * alike.
      *
      * @return bool
      */

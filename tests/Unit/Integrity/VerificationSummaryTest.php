@@ -17,13 +17,10 @@ use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
+use Tests\Concerns\RaisesWarningsAsExceptions;
 
 /**
- * Unit tests for what one verification run established: when it fails, with and
- * without `strict`, with and without an anchor configured, the anchoring grace
- * and the empty remote it excuses, its summary line with the journal's and the
- * key store's parts, their findings failing it, and the event it gives
- * listeners.
+ * Unit tests for what one verification run established and when it fails.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,41 +30,13 @@ use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
 #[CoversClass(VerificationSummary::class)]
 final class VerificationSummaryTest extends TestCase
 {
+    use RaisesWarningsAsExceptions;
+
     /** @var string A seal's id. */
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
     /** @var string An entry's id. */
     private const string ENTRY_ID = '01932b4e-8a40-7000-8000-000000000001';
-
-    /**
-     * Raise every PHP warning as an exception, so each summary is also built
-     * and read quietly: inside a Laravel application a warning becomes an
-     * exception, which would turn verifying the log into an error.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        set_error_handler(static function (int $level, string $message): never {
-            throw new \ErrorException($message, 0, $level);
-        });
-    }
-
-    /**
-     * Restore the error handler after each test.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        restore_error_handler();
-
-        parent::tearDown();
-    }
 
     /**
      * A run whose every segment is valid and anchored, under an anchor whose
@@ -178,9 +147,8 @@ final class VerificationSummaryTest extends TestCase
     }
 
     /**
-     * A strict run excuses an unanchored segment that awaits its first
-     * anchoring, but never one that is unavailable or contradicted, even if it
-     * was sealed as recently, and never one unanchored past the grace.
+     * A strict run excuses only an unanchored segment within the grace that
+     * awaits its first anchoring.
      *
      * @return void
      */
@@ -199,9 +167,8 @@ final class VerificationSummaryTest extends TestCase
     }
 
     /**
-     * A strict run fails on an anchor that was unavailable or contradicted when
-     * its head was asked for, and on an anchor that holds no seal while the
-     * local log has one past the grace.
+     * A strict run fails on an unavailable or contradicting anchor, or an empty
+     * one past the grace.
      *
      * @return void
      */
@@ -216,10 +183,8 @@ final class VerificationSummaryTest extends TestCase
     }
 
     /**
-     * An anchor that holds no seal is excused while every seal from the first
-     * awaits its first anchoring, and not once one does not, nor for a ranged
-     * run that starts after the first seal, nor for an anchor's head that is
-     * merely unanchored.
+     * An empty anchor is excused only while every seal from the first awaits
+     * its first anchoring.
      *
      * @return void
      */
@@ -234,9 +199,7 @@ final class VerificationSummaryTest extends TestCase
     }
 
     /**
-     * An anchor that holds no seal is never excused when the run checked no
-     * segment, which a log with seals and a range left nothing to check would
-     * be.
+     * An empty anchor is never excused when the run checked no segment.
      *
      * @return void
      */
@@ -276,10 +239,7 @@ final class VerificationSummaryTest extends TestCase
     }
 
     /**
-     * The summary line names the range, both heads, how the anchor compared,
-     * whether the run was complete and strict, every count, what was read of
-     * the journal and the key store, the first failure and whether it passed,
-     * in that order of keys.
+     * The summary line's keys and their order are pinned.
      *
      * @return void
      */
@@ -346,11 +306,8 @@ final class VerificationSummaryTest extends TestCase
     }
 
     /**
-     * The key store's section is in each form: none until it is given, as for a
-     * ranged run; kept once given, through the journal's and with everything
-     * else as it was; in the line as its own array; and a key finding the tally
-     * holds is the event's first finding and fails the run, though no segment
-     * failed.
+     * The key store's section is absent until given, kept once given, and its
+     * finding fails the run.
      *
      * @return void
      */
@@ -488,9 +445,8 @@ final class VerificationSummaryTest extends TestCase
     }
 
     /**
-     * The summary of the reports and run findings given, from the first seal
-     * given, under an anchor whose head compared as given, or no anchor when it
-     * is `null`.
+     * The summary of the reports and run findings given, with no anchor when
+     * the comparison is `null`.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Integrity\SegmentReport>  $reports
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus  $remote

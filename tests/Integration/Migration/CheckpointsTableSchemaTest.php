@@ -4,26 +4,18 @@ declare(strict_types = 1);
 
 namespace Tests\Integration\Migration;
 
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the table the shipped checkpoints
- * migration creates, on whichever engine the suite runs against.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the table the shipped checkpoints migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,6 +25,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class CheckpointsTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped checkpoints migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000300_create_audit_log_checkpoints_table.php';
 
@@ -57,8 +51,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     ];
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -76,7 +69,7 @@ final class CheckpointsTableSchemaTest extends TestCase
         Builder::defaultTimePrecision(0);
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
         } finally {
             Builder::defaultTimePrecision($precision);
         }
@@ -96,9 +89,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the twenty-one columns of a seal; only the link to the
-     * previous seal, the journal head it commits to and the four anchor columns
-     * may be missing.
+     * Twenty-one columns; only the link, journal head and anchor are nullable.
      *
      * @return void
      */
@@ -134,10 +125,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The columns are in the order of the seal: its identity and place in the
-     * chain, what it holds, when, how it is signed, the journal head it commits
-     * to, its signature, and last the anchor columns, the only ones written
-     * after the row.
+     * The columns are in seal order, the anchor columns last.
      *
      * @return void
      */
@@ -172,8 +160,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * A sequence is held by one seal only, so two sealers that both read the
-     * same head can never both extend it.
+     * A sequence is held by one seal only.
      *
      * @return void
      */
@@ -193,9 +180,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * Beside the primary key and the unique sequence, the only indexes are the
-     * one the anchorer reads by, whether the seal is anchored, then its
-     * sequence, and the one the highest journal commitment is read by.
+     * The only other indexes are the anchorer's and the journal commitment's.
      *
      * @return void
      */
@@ -215,10 +200,8 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name, the
-     * primary key's included, fits PostgreSQL's 63 characters, and the longest
-     * reaches it exactly. SQLite names its primary key index itself and limits
-     * no name, so there the primary key is left out.
+     * Every index name fits PostgreSQL's 63 characters, the longest exactly;
+     * SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -235,9 +218,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * Every string column has the length its value takes: a hex digest or
-     * signature 64, a key id 32, and the class of an error cut to 191; the ids
-     * are stored as UUIDs.
+     * Every string column has the length its value takes; ids are UUIDs.
      *
      * @return void
      */
@@ -261,10 +242,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The sequence and the journal sequence a seal commits to are big integers,
-     * so neither log runs out of sequences, and a sequence beyond what a 32-bit
-     * integer holds is kept as written; the algorithm version is a small
-     * integer.
+     * The sequences are big integers and the algorithm version a small one.
      *
      * @return void
      */
@@ -294,9 +272,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * Every time is stored to the microsecond, as the migration declares
-     * whatever the builder's default, so a time written with six fractional
-     * digits reads back with all six.
+     * Every time is stored to the microsecond, whatever the builder's default.
      *
      * @return void
      */
@@ -325,8 +301,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The receipt is `json`, never `jsonb`, so the engine keeps the text the
-     * anchor returned; SQLite stores it as text.
+     * The receipt is `json`, never `jsonb`, so the anchor's text is kept.
      *
      * @return void
      */
@@ -339,8 +314,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The anchor columns are written after the seal, and a seal at genesis has
-     * no previous seal; the rest of the row is what was inserted.
+     * The anchor columns are written after the seal, the rest left as inserted.
      *
      * @return void
      */
@@ -365,9 +339,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * A seal of an empty journal commits to no head, so both journal columns
-     * are null, and a seal of a journal with rows keeps the head's sequence and
-     * HMAC as written.
+     * The journal head is null for an empty journal, else kept as written.
      *
      * @return void
      */
@@ -385,8 +357,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys and no timestamps, so a seal needs nothing
-     * of the entries it holds, and pruning an entry leaves its seal whole.
+     * The table has no foreign keys and no timestamps.
      *
      * @return void
      */
@@ -398,8 +369,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL every character column takes the table's binary collation
-     * without padding, whatever the connection's collation is.
+     * On MySQL every character column is binary without padding.
      *
      * @return void
      */
@@ -423,8 +393,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is on InnoDB, so a seal and its members commit
-     * together or not at all.
+     * On MySQL the table is on InnoDB.
      *
      * @return void
      */
@@ -446,16 +415,13 @@ final class CheckpointsTableSchemaTest extends TestCase
      */
     public function testRollsBackByDroppingTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `integrity.checkpoints_table` setting that renames it, and leaves the
-     * table as it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -464,7 +430,7 @@ final class CheckpointsTableSchemaTest extends TestCase
         DB::table(self::TABLE)->insert(self::row(1));
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -489,8 +455,7 @@ final class CheckpointsTableSchemaTest extends TestCase
     }
 
     /**
-     * A genesis seal with every column a seal must have, numbered so its id and
-     * sequence are its own, with the given columns replaced.
+     * A genesis seal, numbered so its id and sequence are its own.
      *
      * @param  int  $number
      * @param  array<string, int|string>  $columns
@@ -514,25 +479,5 @@ final class CheckpointsTableSchemaTest extends TestCase
             'signature'         => str_repeat('c', 64),
             ...$columns,
         ];
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Checkpoints migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

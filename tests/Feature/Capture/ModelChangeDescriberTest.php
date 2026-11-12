@@ -45,17 +45,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * Feature tests for how a watched model's change is described, through the
- * Eloquent events the watch listens for: what each change keeps, read raw and
- * never through an accessor, an appended attribute or a cast; a restore told
- * from its update; a force deletion recorded once; cancelled and repeated
- * operations recorded as Eloquent fires them; hidden and encrypted fields
- * refused on the instance before any value is read unless explicitly handled;
- * the model as the subject; and delivery after the model's own connection
- * commits.
- *
- * The test binds the watcher and the capture state as the provider does, and
- * watches its own models while the application boots.
+ * Feature tests for how a watched model's change is described through its
+ * Eloquent events.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -146,8 +137,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * An update keeps each watched field it changed, before and after, in the
-     * watch's order, and no field it changed that is not watched.
+     * An update keeps each changed watched field, before and after, in watch
+     * order.
      *
      * @return void
      */
@@ -219,8 +210,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A deletion keeps the stored values, never a value set and not saved, for
-     * a soft deletion and for a hard one.
+     * A deletion keeps the stored values, never unsaved ones.
      *
      * @return void
      */
@@ -243,8 +233,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A force deletion is one record, under its own code, keeping the stored
-     * values.
+     * A force deletion is one record under its own code.
      *
      * @return void
      */
@@ -261,8 +250,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * The deletion a force deletion runs through is heard, and records nothing,
-     * so the force deletion's own record is the only one.
+     * The deletion a force deletion runs through records nothing.
      *
      * @return void
      */
@@ -284,10 +272,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * The deletion a force deletion runs through is passed over before any
-     * field is checked, so a force deletion of an instance that hides a watched
-     * field is refused once, with one report and one `AuditCaptureFailed`, not
-     * once for each event.
+     * A force deletion of an instance hiding a watched field is refused once.
      *
      * @return void
      */
@@ -304,9 +289,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A deletion names the row Eloquent removed, by the key it is stored under,
-     * never a key set and not saved, for a soft deletion and a force deletion
-     * alike.
+     * A deletion names the row by its stored key, never an unsaved one.
      *
      * @return void
      */
@@ -337,9 +320,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A hard deletion with a key set and not saved names the stored row as its
-     * subject, so a field the watch encrypts is sealed under that row's key,
-     * and erasing that row's key erases it.
+     * A hard deletion seals encrypted fields under the stored row's key.
      *
      * @return void
      */
@@ -370,8 +351,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Force deleting a soft-deleted model records its deletion, then its force
-     * deletion, each once.
+     * Force deleting a trashed model records its deletion and force deletion
+     * once each.
      *
      * @return void
      */
@@ -386,8 +367,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A restore is one record under its own code, keeping the watched fields
-     * and the watched fields it changed alongside, and no update.
+     * A restore is one record under its own code with its changes, and no
+     * update.
      *
      * @return void
      */
@@ -412,9 +393,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * The deleted-at column a restore clears is one of its changes only when it
-     * is watched; a restore that changes no watched field keeps the snapshot
-     * alone.
+     * The deleted-at a restore clears is a change only when watched.
      *
      * @return void
      */
@@ -445,8 +424,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A restore its restoring listener cancels records nothing, and nothing of
-     * it is left to record later.
+     * A cancelled restore records nothing, now or later.
      *
      * @return void
      */
@@ -470,8 +448,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Restoring a model that is not deleted changes nothing, so records
-     * nothing.
+     * Restoring a model that is not deleted records nothing.
      *
      * @return void
      */
@@ -486,8 +463,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * An update of a deleted model that leaves it deleted is an update, not a
-     * restore.
+     * An update of a deleted model that leaves it deleted is an update.
      *
      * @return void
      */
@@ -523,8 +499,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Deleting a hard-deleted model again fires nothing, so records nothing,
-     * for a model without soft deletes and for one deleted for good.
+     * Deleting a hard-deleted model again records nothing.
      *
      * @return void
      */
@@ -544,8 +519,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Soft deleting a trashed model again writes its deleted-at again, so it is
-     * a second deletion and a second record.
+     * Soft deleting a trashed model again is a second deletion.
      *
      * @return void
      */
@@ -562,8 +536,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A model without soft deletes has no restore: clearing a column named as a
-     * deleted-at column is an ordinary update.
+     * Clearing a deleted-at column without soft deletes is an update.
      *
      * @return void
      */
@@ -598,10 +571,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A watched field the instance is made to hide refuses the capture of its
-     * change: no record, one report and one `AuditCaptureFailed` naming the
-     * model and the listener, and the change itself goes on. Another instance
-     * of the class is captured as before.
+     * A watched field the instance hides refuses the capture; the change goes
+     * on.
      *
      * @return void
      */
@@ -642,8 +613,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A field cast `encrypted` refuses the capture, before anything is
-     * described.
+     * A field cast `encrypted` refuses the capture before it is described.
      *
      * @return void
      */
@@ -663,8 +633,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A field cast to an encrypted collection through a cast with arguments
-     * refuses the capture: the arguments are dropped before the class is read.
+     * An encrypted cast with arguments refuses the capture.
      *
      * @return void
      */
@@ -684,9 +653,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Rows of `[cast, whether it encrypts]`: Laravel's encrypted casts with and
-     * without arguments, in any case, and any cast class whose short name
-     * begins `AsEncrypted`, against casts that do not encrypt.
+     * Rows of `[cast, whether it encrypts]`.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -711,8 +678,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A cast refuses a field kept as read exactly when it encrypts, read from
-     * the instance's casts, so a cast merged on the instance counts.
+     * A cast refuses a field exactly when it encrypts, read from the instance.
      *
      * @param  string  $cast
      * @param  bool  $encrypts
@@ -736,8 +702,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * An explicit handling lets a hidden field and an encrypted one be watched,
-     * each kept only as its handling says.
+     * An explicit handling lets a hidden or encrypted field be watched.
      *
      * @return void
      */
@@ -753,8 +718,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Neither the number's accessor nor the appended label is read by a
-     * capture, though both refuse to be read.
+     * No accessor or appended attribute is read by a capture.
      *
      * @return void
      */
@@ -776,8 +740,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Values are kept as stored: an enum as its value, a date in the form the
-     * connection stores it, never cast or normalised to an instant.
+     * Values are kept as stored, never cast or normalised.
      *
      * @return void
      */
@@ -793,8 +756,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * The subject of every change is the model, by its class and key, and a
-     * deleted model is referred to as before.
+     * The subject of every change is the model, by its class and key.
      *
      * @return void
      */
@@ -816,9 +778,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A change waits for its own model's connection to commit: inside a
-     * transaction there it is written at the commit, and a transaction open on
-     * another connection does not hold it.
+     * A change waits for its own model's connection to commit.
      *
      * @return void
      */
@@ -846,8 +806,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * The builder is set to wait for the commit of the model's connection by
-     * its name: the default connection's for a model that names none.
+     * The builder waits for the model's connection by name, the default if
+     * none.
      *
      * @return void
      */
@@ -866,8 +826,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A model whose connection has no name is refused, since its change could
-     * not wait for that connection.
+     * A model whose connection has no name is refused.
      *
      * @return void
      */
@@ -894,8 +853,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * An update and a restore are both told from the update itself, whichever
-     * is asked for.
+     * An update and a restore are told apart from the update itself.
      *
      * @return void
      */
@@ -915,9 +873,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Bind the watcher and the capture state as the provider does, and watch
-     * the invoices, their revisions, the lines and the sealed lines while the
-     * application boots.
+     * Bind the watcher and capture state as the provider does and watch the
+     * models.
      *
      * @param  mixed  $app
      * @return void
@@ -942,8 +899,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Describe a creation of the fixture's invoice watching the field as it is
-     * read, and assert it is refused before anything is described.
+     * Assert describing the invoice's creation with the field watched is
+     * refused.
      *
      * @param  string  $field
      * @return void
@@ -968,9 +925,8 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * Assert the change was refused and contained: nothing written, one report
-     * of a capture failure and one `AuditCaptureFailed`, each naming the model,
-     * the listener and the refusal's class.
+     * Assert the change was refused and contained, naming the model and
+     * listener.
      *
      * @return void
      */
@@ -1024,8 +980,7 @@ final class ModelChangeDescriberTest extends TestCase
     }
 
     /**
-     * A saved invoice: the number, the approved status and the amount, with the
-     * attributes given.
+     * A saved invoice with the attributes given.
      *
      * @param  array<string, \DateTimeInterface|scalar|null>  $attributes
      * @return \Tests\Fixtures\Capture\Models\WatchedInvoice

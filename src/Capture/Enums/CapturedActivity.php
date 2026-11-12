@@ -8,15 +8,8 @@ use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 
 /**
- * The codes the package records when it captures Laravel's own authentication
- * and authorisation events, each defined for the security category.
- *
- * The package defines these at boot, so an application or an integration that
- * defines one of them differently is refused then; an integration records its
- * own activity under codes it defines. Every definition is version 1, in the
- * `security` category, and drops every field it does not list: a sign-in keeps
- * only whether it was remembered, a gate denial only the ability and its
- * arguments, and every other code keeps no property at all.
+ * The codes the package records for Laravel's authentication and authorisation
+ * events, defined at boot, so a conflicting definition is refused.
  *
  * @api
  *
@@ -62,10 +55,9 @@ enum CapturedActivity: string implements DefinesAuditEvents
     private const string CATEGORY = 'security';
 
     /**
-     * The definition of this case's event code: version 1, the `security`
-     * category and every field it does not list dropped, keeping `remember` for
-     * a sign-in, the ability, its arguments and their count for a gate denial,
-     * and nothing for any other code.
+     * The case's definition: version 1, `security`, and every field dropped but
+     * `remember` for a sign-in or restored session and the ability and its
+     * arguments for a Gate denial.
      *
      * @return \SineMacula\Laravel\AuditLog\Definitions\EventDefinition
      *

@@ -7,10 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Privacy;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
 
 /**
- * What a field reader answers for an encrypted fragment of an entry: the value
- * it revealed, or the state that keeps the fragment sealed, `encrypted`,
- * `erased` or `unreadable`. A sealed reading holds no value, so an entry shows
- * either a value its reader chose to reveal or a marker, never a ciphertext.
+ * What a field reader answers for an encrypted fragment: the revealed value, or
+ * the state that keeps it sealed, never a ciphertext.
  *
  * @api
  *
@@ -62,8 +60,8 @@ final readonly class FieldReading
     }
 
     /**
-     * What an entry shows in the fragment's place: the state's marker for a
-     * sealed reading, and the value for a revealed one.
+     * What an entry shows in the fragment's place: the state's marker, or the
+     * revealed value.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

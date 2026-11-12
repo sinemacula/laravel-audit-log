@@ -49,13 +49,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:seal`: it seals the recent window or sweeps the
- * table and says what it sealed, anchors afterwards even when sealing failed,
- * warns on an unavailable anchor and still succeeds, alarms with a whole,
- * payload-free event and a reported exception on a refused head, a skipped
- * entry, a conflict or a refused seal, names any other failure by its class
- * alone, and takes the cache lock only when the store can hold one, skipping a
- * run while another holds it and releasing it after.
+ * Feature tests for `audit-log:seal`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,9 +80,7 @@ final class SealCommandTest extends TestCase
     private \ArrayObject $alarms;
 
     /**
-     * Register the command with the console kernel, which keeps the test
-     * independent of the provider, stop the clock, bind no anchor, and record
-     * every report and every integrity event.
+     * Register the command, freeze the clock, bind no anchor, record alarms.
      *
      * @return void
      */
@@ -138,8 +130,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A run seals what is unsealed, prints the tally and succeeds; with no
-     * anchor configured it says nothing of anchoring.
+     * A run seals what is unsealed and prints the tally.
      *
      * @return void
      */
@@ -166,8 +157,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A sweep seals a window of the table from its cursor and says whether it
-     * reached the end; the next sweep goes on from there.
+     * A sweep seals from its cursor and says whether it reached the end.
      *
      * @return void
      */
@@ -189,8 +179,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A sweep finds a row older than the recent window's lookback, which the
-     * recent pass leaves.
+     * A sweep finds a row older than the recent pass's lookback.
      *
      * @return void
      */
@@ -208,8 +197,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A configured anchor is given the seals once they are sealed, and the
-     * count anchored is printed.
+     * A configured anchor is given the seals and the count is printed.
      *
      * @return void
      */
@@ -228,9 +216,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * An unavailable anchor warns, naming its class and the seal from which
-     * seals wait, and the run still succeeds with nothing reported or
-     * dispatched.
+     * An unavailable anchor warns and the run still succeeds.
      *
      * @return void
      */
@@ -249,8 +235,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * An anchor unavailable before any seal is read, for a name the column
-     * cannot hold, warns without naming a seal.
+     * An anchor unavailable before any seal warns without naming one.
      *
      * @return void
      */
@@ -267,9 +252,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * An anchor that holds another digest for a seal is an alarm: an error is
-     * printed, a whole event is dispatched counting it tampered and
-     * contradicted, the exception is reported, and the run fails.
+     * An anchor holding another digest for a seal alarms and fails.
      *
      * @return void
      */
@@ -297,8 +280,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A seal that does not verify is refused, never anchored, and alarms under
-     * the status of its finding.
+     * A seal that does not verify is refused, never anchored, and alarms.
      *
      * @return void
      */
@@ -322,8 +304,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A seal refused for a key the ring no longer holds alarms as unverifiable,
-     * not tampered.
+     * A seal under a key the ring lacks alarms as unverifiable.
      *
      * @return void
      */
@@ -339,9 +320,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A last seal whose stored digest disagrees with its fields is never
-     * extended: sealing stops, the alarm counts it tampered under the head's
-     * id, and the run fails.
+     * A last seal whose digest disagrees is never extended and alarms.
      *
      * @return void
      */
@@ -364,8 +343,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A last seal of another log id is never extended: sealing stops and the
-     * alarm counts it unverifiable.
+     * A last seal of another log id is never extended and alarms.
      *
      * @return void
      */
@@ -384,10 +362,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Entries that cannot be sealed are skipped and alarmed as unverifiable,
-     * counted in the output, while the event, whose maps count segments, counts
-     * the one failing condition once however many entries were skipped; no id
-     * of them is in the output, the event or the report.
+     * Skipped entries alarm as unverifiable, counted once, naming no id.
      *
      * @return void
      */
@@ -412,10 +387,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * An anchor setting that is malformed stops anchoring alone: the run still
-     * seals, prints that anchoring stopped, reports it as a seal failure by its
-     * class alone and exits 1, and dispatches nothing, since the log itself is
-     * not found altered.
+     * A malformed anchor setting stops anchoring alone and dispatches nothing.
      *
      * @return void
      */
@@ -435,9 +407,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * The sweep holds its own lock, apart from the recent pass's, so a long
-     * sweep never keeps the recent pass from sealing and anchoring, and either
-     * pass that finds its own lock held does nothing.
+     * The sweep holds its own lock apart from the recent pass's.
      *
      * @return void
      */
@@ -470,9 +440,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Every event the command dispatches lists every integrity and every
-     * anchoring status, in order, zero-filled, and covers no head, no remote
-     * head and not the whole log.
+     * Every event map lists every status, in order, zero-filled.
      *
      * @return void
      */
@@ -503,8 +471,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A failure that stops sealing is printed and reported by its class alone:
-     * neither its message, its statement nor its bindings appear anywhere.
+     * A sealing failure is printed and reported by its class alone.
      *
      * @return void
      */
@@ -522,8 +489,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A failure of the anchorer itself is printed and reported by its class
-     * alone, and fails the run.
+     * An anchorer failure is reported by its class alone and fails the run.
      *
      * @return void
      */
@@ -540,8 +506,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Anchoring runs even when sealing stops, so seals already committed are
-     * still anchored.
+     * Anchoring runs even when sealing stops.
      *
      * @return void
      */
@@ -592,8 +557,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[how the cache fails]`: a default store that is not configured,
-     * and a store whose lock throws.
+     * Rows of `[how the cache fails]`.
      *
      * @return iterable<string, array{0: \Closure(self): void}>
      */
@@ -614,8 +578,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A cache that fails does not stop sealing: the run goes on without a lock,
-     * reporting nothing.
+     * A failing cache does not stop sealing.
      *
      * @param  \Closure(self): void  $failing
      * @return void
@@ -633,8 +596,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * The lock is held while the run seals and released after it, whether it
-     * succeeded or failed.
+     * The lock is released after the run, whether it succeeded or failed.
      *
      * @return void
      */
@@ -665,9 +627,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A run that an error stops before it ends, here an output that can no
-     * longer be written to, still releases the lock rather than leaving the
-     * next runs to skip until it lapses.
+     * An interrupted run still releases the lock.
      *
      * @return void
      */
@@ -709,8 +669,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Every attempt lost to a concurrent writer stops sealing with contention,
-     * which is reported by its class and fails the run.
+     * Contention is reported by its class and fails the run.
      *
      * @return void
      */
@@ -732,8 +691,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A run inside a transaction on the storage connection seals nothing, says
-     * why by class alone, and fails.
+     * A run inside a storage transaction seals nothing and fails.
      *
      * @return void
      */
@@ -750,9 +708,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A listener that fails hides nothing: its own exception is reported, as it
-     * threw, the alarm's exception is still reported after it, and the run
-     * still fails.
+     * A failing listener hides nothing and the run still fails.
      *
      * @return void
      */
@@ -772,8 +728,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * A reporter that fails too stops nothing: the error is printed, anchoring
-     * still runs, and the run still fails.
+     * A failing reporter stops nothing and the run still fails.
      *
      * @return void
      */
@@ -790,8 +745,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Nothing printed, dispatched or reported holds a value of an entry or of a
-     * failure, across a skipped entry, a conflict and a stopped run.
+     * Nothing printed, dispatched or reported holds an entry or failure value.
      *
      * @return void
      */
@@ -896,8 +850,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Change columns of the first seal, as someone who can write to the
-     * database could.
+     * Change columns of the first seal, as a database writer could.
      *
      * @param  array<string, string>  $columns
      * @return void
@@ -923,8 +876,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Store a record whose properties hold the planted secret, recorded at the
-     * time given, and return its id.
+     * Store a record holding the planted secret and return its id.
      *
      * @param  string  $recordedAt
      * @return string
@@ -941,8 +893,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Assert that exactly one event was dispatched, with the maps, the finding
-     * and the id given.
+     * Assert exactly one event was dispatched, with the maps, finding and id.
      *
      * @param  array<string, int>  $integrity
      * @param  array<string, int>  $anchoring
@@ -968,8 +919,7 @@ final class SealCommandTest extends TestCase
     }
 
     /**
-     * Assert that exactly one exception of the class was reported, with the
-     * message given and no previous.
+     * Assert exactly one exception of the class was reported, with no previous.
      *
      * @param  string  $message
      * @param  class-string<\Throwable>  $class

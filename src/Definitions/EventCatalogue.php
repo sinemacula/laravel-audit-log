@@ -9,26 +9,11 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * The event definitions an application registers while it boots, one per code,
- * and the definition every code is recorded under.
+ * The event definitions registered at boot, one per code, with the package's
+ * own present from construction whatever the freeze.
  *
- * The package's own definitions, those of its read path, are there from the
- * moment the catalogue is made, before any registration and whatever the
- * freeze, so a package record has its definition before the application boots
- * and after it. Defining one of them again identically changes nothing, and
- * differently is refused as any conflicting definition is.
- *
- * A definition is registered on its own or as every case of an enum defining
- * the application's codes; an enum is registered whole or, when any of its
- * cases is refused, not at all. Registering an identical definition again
- * changes nothing, and a different one for a registered code is refused,
- * whichever came first. Once the application has booted the catalogue is frozen
- * and refuses any further registration, so a long-lived worker never registers
- * twice. A code no definition registers takes the permissive default, or is
- * refused when the caller requires registration, which it reads from the
- * setting on each capture: the catalogue is resolved at boot to be frozen, and
- * a malformed setting must not stop an application booting before
- * `audit-log:check` can report it.
+ * Whether registration is required is the caller's to say, so a malformed
+ * setting never stops boot before `audit-log:check` reports it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,8 +29,7 @@ final class EventCatalogue
     private bool $frozen = false;
 
     /**
-     * Constructor. The package's own definitions are there from the start, so
-     * they hold before the application boots and after the catalogue freezes.
+     * Constructor.
      *
      * @throws \InvalidArgumentException
      * @throws \LogicException
@@ -58,9 +42,8 @@ final class EventCatalogue
     }
 
     /**
-     * Register a definition, or every case of an enum implementing
-     * `DefinesAuditEvents`, given by its class name. Every check runs before
-     * anything is registered, so a refused enum registers none of its cases.
+     * Register a definition, or every case of a `DefinesAuditEvents` enum by
+     * class name, all or none.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition|string  $definition
      * @return void
@@ -84,9 +67,8 @@ final class EventCatalogue
     }
 
     /**
-     * The definition the code is recorded under: the registered one, or the
-     * permissive default (version 1, the `general` category, every field
-     * retained) when none is, unless registration is required.
+     * The code's registered definition, else the permissive default unless
+     * registration is required.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\EventCode  $code
      * @param  bool  $requireRegistered
@@ -119,8 +101,7 @@ final class EventCatalogue
     }
 
     /**
-     * Refuse any further registration: the application has booted. Freezing
-     * again changes nothing.
+     * Refuse any further registration; freezing again changes nothing.
      *
      * @return void
      */
@@ -171,9 +152,9 @@ final class EventCatalogue
     }
 
     /**
-     * The definitions of every case of the enum: refused unless it implements
-     * `DefinesAuditEvents` and is backed by strings, checked before any case is
-     * asked for its definition, and unless each case defines its own code.
+     * The definitions of every case of the enum, refused unless it is a
+     * string-backed `DefinesAuditEvents` enum whose cases each define their own
+     * code.
      *
      * @param  string  $class
      * @return list<\SineMacula\Laravel\AuditLog\Definitions\EventDefinition>

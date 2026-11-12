@@ -23,10 +23,7 @@ use Tests\Unit\Stubs\Enums\StubActivity;
 use Tests\Unit\Stubs\Enums\StubNumberedActivity;
 
 /**
- * Feature tests for the audit store tests bind in place of the database store:
- * how it is bound, what it holds and gives back, a bulk record's attachment
- * included, that a failing one throws and holds nothing, and that it says it is
- * durable, joins any transaction and keeps attachments.
+ * Feature tests for the audit store tests bind in place of the database store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -351,9 +348,8 @@ final class FakeAuditStoreTest extends TestCase
     }
 
     /**
-     * The fake keeps attachments, failing or not, so a bulk record can be
-     * tested against it; the record `recorded()` returns carries the very
-     * attachment the store was handed, and `finalised()` the very bundle.
+     * The fake keeps attachments, failing or not, and returns the very
+     * attachment and bundle it was handed.
      *
      * @return void
      */

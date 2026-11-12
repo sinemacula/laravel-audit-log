@@ -11,17 +11,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
 
 /**
- * Reads the options the lifecycle commands share: the authority an operation is
- * asked for on, the owner an erasure or a reinstatement names by its `type` and
- * `id` arguments, a reference given as `type:id`, and an instant given as an
- * ISO-8601 time or a date.
+ * Reads the options the lifecycle commands share: the authority, the owner, a
+ * `type:id` reference, an instant and a hold basis.
  *
- * The authority is what the shell asserts, and proves nothing of who runs the
- * command: `--by-type` and `--by-id` name the operator, `--reason` a
- * machine-readable reason code and `--reference`, when given, the ticket or
- * case the operation answers to. Each option or argument missing or malformed
- * is refused with an `InvalidArgumentException` that names it and never the
- * value given, so a command can print it as it is.
+ * A refusal names the option and never the value, so a command can print it as
+ * it is.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,14 +46,13 @@ final class LifecycleOptions
     private const string NOT_AN_INSTANT = 'The --%s option must be an ISO-8601 time with `Z` or an offset, or a `Y-m-d` date.';
 
     /**
-     * Disallow instantiation; utility container only.
+     * Disallow instantiation.
      */
     private function __construct() {}
 
     /**
-     * The authority the command's `--by-type`, `--by-id`, `--reason` and
-     * `--reference` options assert: the operator the first two name together,
-     * the reason code and the external reference, if any.
+     * The authority the `--by-type`, `--by-id`, `--reason` and `--reference`
+     * options assert.
      *
      * @param  \Illuminate\Console\Command  $command
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\Authority
@@ -140,10 +133,8 @@ final class LifecycleOptions
     }
 
     /**
-     * The instant the option's value names, in UTC: an ISO-8601 time with `Z`
-     * or an offset, to the second or a fraction of it, or a `Y-m-d` date, which
-     * is its midnight in UTC. A date or a time that does not exist is refused,
-     * never rolled over.
+     * The instant the option names, in UTC: an ISO-8601 time with `Z` or an
+     * offset, or a `Y-m-d` date at midnight; an impossible date is refused.
      *
      * @param  string  $option
      * @param  string  $value

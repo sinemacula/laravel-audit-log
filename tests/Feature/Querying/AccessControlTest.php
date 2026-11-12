@@ -17,7 +17,6 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\CursorCodec;
 use SineMacula\Laravel\AuditLog\Querying\InvalidCursorException;
-use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Querying\TrailReader;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -26,15 +25,7 @@ use Tests\Fixtures\Querying\ClosurePolicy;
 use Tests\TestCase;
 
 /**
- * Feature tests for access control, through the read API alone: the default
- * policy denying every viewer, a bound policy asked on every read, a tenant
- * outside the scope reading as nothing whether it exists or not, a guessed
- * subject outside the scope not found, a caller's filter never escaping a scope
- * of several tenants, a cursor refused and recorded when it is reused by
- * another viewer, under a narrower scope or with other filters, or tampered
- * with, and still opening when its anchor row is pruned; a count limited to the
- * scope and seeing the rows a page sees; and `onlyAbout()`, tenantless entries
- * and categories narrowing the scope.
+ * Feature tests for what a viewer's access scope lets the read API return.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,7 +43,7 @@ final class AccessControlTest extends TestCase
     /** @var string The tenant type every seeded entry is in. */
     private const string TENANT_TYPE = 'organisation';
 
-    /** @var array<string, string> The cursor's parts after its version, by name, at their place among the dot-separated parts. */
+    /** @var array<string, string> The index of each cursor part after the version, by name. */
     private const array CURSOR_PARTS = ['key id' => '1', 'payload' => '2', 'mac' => '3'];
 
     /**
@@ -69,9 +60,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * With no policy of the application's bound, every viewer is denied: a page
-     * is empty, a count is nought, nothing is read from the entries table, and
-     * each read is recorded as a denial under the default policy.
+     * With no policy bound, every read is denied, empty and recorded.
      *
      * @return void
      */
@@ -80,11 +69,11 @@ final class AccessControlTest extends TestCase
         $this->seedEntries(3);
         $this->captureQueries();
 
-        $page = $this->trail()->cursorPaginate();
+        $page = $this->financeTrail()->cursorPaginate();
 
         self::assertInstanceOf(DenyAllPolicy::class, app(AuditAccessPolicy::class));
         self::assertSame([[], null], [$page->entries, $page->nextCursor]);
-        self::assertSame(0, $this->trail()->count());
+        self::assertSame(0, $this->financeTrail()->count());
         self::assertSame([], $this->entryReads());
 
         foreach ($this->readRecords() as $record) {
@@ -96,8 +85,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A bound policy is asked on every read, for the viewer and the purpose,
-     * and what it answers is what is read; its class is named in each record.
+     * A bound policy is asked on every read and named in each record.
      *
      * @return void
      */
@@ -108,9 +96,9 @@ final class AccessControlTest extends TestCase
 
         $this->seedEntry(['tenant_id' => 'org_02']);
 
-        self::assertSame([$mine], self::idsOf($this->trail()->cursorPaginate()));
-        self::assertSame([$mine], self::idsOf($this->trail()->cursorPaginate()));
-        self::assertSame(1, $this->trail()->count());
+        self::assertSame([$mine], self::idsOf($this->financeTrail()->cursorPaginate()));
+        self::assertSame([$mine], self::idsOf($this->financeTrail()->cursorPaginate()));
+        self::assertSame(1, $this->financeTrail()->count());
         self::assertSame([ReadPurpose::READ, ReadPurpose::READ, ReadPurpose::COUNT], array_column($policy->asked(), 1));
 
         foreach ($this->readRecords() as $record) {
@@ -119,9 +107,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A tenant filter outside a scope of one tenant reads as nothing, with no
-     * statement, though the tenant's entries exist, and is recorded as a read
-     * that returned nothing.
+     * A tenant filter outside the scope reads as nothing, with no query.
      *
      * @return void
      */
@@ -132,7 +118,7 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['tenant_id' => 'org_02']);
         $this->captureQueries();
 
-        $trail = $this->trail()->forTenant(self::tenant('org_02'));
+        $trail = $this->financeTrail()->forTenant(self::tenant('org_02'));
 
         self::assertSame([], $trail->cursorPaginate()->entries);
         self::assertSame(0, $trail->count());
@@ -144,9 +130,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A tenant outside the scope that has entries gives exactly the result one
-     * that has none gives, a page and a count alike, with no statement to tell
-     * them apart, and records alike.
+     * A guessed tenant reads exactly as an unknown one, with no query.
      *
      * @return void
      */
@@ -156,8 +140,8 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['tenant_id' => 'org_02']);
         $this->captureQueries();
 
-        $guessed = $this->trail()->forTenant(self::tenant('org_02'));
-        $unknown = $this->trail()->forTenant(self::tenant('org_99'));
+        $guessed = $this->financeTrail()->forTenant(self::tenant('org_02'));
+        $unknown = $this->financeTrail()->forTenant(self::tenant('org_99'));
 
         self::assertEquals($unknown->cursorPaginate(10), $guessed->cursorPaginate(10));
         self::assertSame($unknown->count(), $guessed->count());
@@ -174,9 +158,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A subject id guessed from outside the scope is not found: an invoice of
-     * another tenant reads exactly as an invoice that does not exist, a page
-     * and a count alike, though the invoice's entries are in the table.
+     * A subject id outside the scope reads as one that does not exist.
      *
      * @return void
      */
@@ -185,8 +167,8 @@ final class AccessControlTest extends TestCase
         $this->allowTenants(self::tenant('org_01'));
         $this->seedEntry(['tenant_id' => 'org_02', 'subject_id' => 'inv_0099']);
 
-        $guessed = $this->trail()->forSubject(Reference::of('invoice', 'inv_0099'));
-        $unknown = $this->trail()->forSubject(Reference::of('invoice', 'inv_none'));
+        $guessed = $this->financeTrail()->forSubject(Reference::of('invoice', 'inv_0099'));
+        $unknown = $this->financeTrail()->forSubject(Reference::of('invoice', 'inv_none'));
 
         self::assertSame(1, DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('subject_id', 'inv_0099')->count());
         self::assertEquals($unknown->cursorPaginate(), $guessed->cursorPaginate());
@@ -194,8 +176,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * Rows of `[what narrows the trail]`: filters a caller might hope widen a
-     * scope of two tenants, each matching rows of a third tenant and of none.
+     * Rows of `[what narrows the trail]`: filters that might widen a scope.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail}>
      */
@@ -210,10 +191,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A caller's filter never escapes a scope of several tenants: whatever the
-     * filter, on the first page, on every page a cursor opens, and in the
-     * count, only the entries of the scope's tenants are read, though the
-     * filter matches entries of another tenant and of none.
+     * No filter escapes a multi-tenant scope, on any page or in the count.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
      * @return void
@@ -231,7 +209,7 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(self::inTenant('org_03', ['actor_id' => '7']), self::at(2));
         $this->seedEntry(self::inTenant(null, ['actor_id' => '7']), self::at(3));
 
-        $trail = $narrow($this->trail());
+        $trail = $narrow($this->financeTrail());
 
         self::assertSame(array_reverse($inScope), self::idsOf($trail->cursorPaginate()));
         self::assertSame(array_reverse($inScope), array_merge(...array_map(self::idsOf(...), $this->walk($trail, 1))));
@@ -239,9 +217,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A cursor issued to one viewer and handed to another is refused, before
-     * anything is read, and the refusal is recorded as the second viewer's
-     * denial.
+     * A cursor handed to another viewer is refused and recorded as a denial.
      *
      * @return void
      */
@@ -250,7 +226,7 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
         $other  = app(AuditTrail::class)->visibleTo(Reference::of('App\Models\User', '8'))->inCategory('finance');
 
         $this->captureQueries();
@@ -264,8 +240,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A cursor issued under one scope is refused once the policy answers the
-     * viewer with a narrower one, so a revoked tenant is never paged into.
+     * A cursor is refused once the viewer's scope narrows.
      *
      * @return void
      */
@@ -275,15 +250,14 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['tenant_id' => 'org_01'], self::at(0));
         $this->seedEntry(['tenant_id' => 'org_02'], self::at(1));
 
-        $cursor = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
 
         $this->allowTenants(self::tenant('org_01'));
-        $this->assertCursorRefused(fn () => $this->trail()->cursorPaginate(1, $cursor));
+        $this->assertCursorRefused(fn () => $this->financeTrail()->cursorPaginate(1, $cursor));
     }
 
     /**
-     * Rows of `[what narrows the trail the cursor is opened on]`: filters other
-     * than those the cursor was issued under.
+     * Rows of `[what narrows the trail the cursor is opened on]`.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail}>
      */
@@ -297,8 +271,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A cursor is refused on a trail filtered otherwise than the one it was
-     * issued for, even where the filters select the same entries.
+     * A cursor is refused under other filters that select the same rows.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
      * @return void
@@ -309,15 +282,13 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
 
-        $this->assertCursorRefused(fn () => $narrow($this->trail())->cursorPaginate(1, $cursor));
+        $this->assertCursorRefused(fn () => $narrow($this->financeTrail())->cursorPaginate(1, $cursor));
     }
 
     /**
-     * A cursor with any of its parts changed, its version, its key id, its
-     * position or its MAC, is refused before anything is read, and each refusal
-     * is recorded.
+     * A cursor with any part changed is refused before any read, and recorded.
      *
      * @return void
      */
@@ -326,7 +297,7 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor   = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor   = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
         $tampered = ['version' => 'v2' . substr($cursor, 2)];
 
         foreach (self::CURSOR_PARTS as $name => $index) {
@@ -338,7 +309,7 @@ final class AccessControlTest extends TestCase
         foreach ($tampered as $name => $changed) {
             self::assertNotSame($cursor, $changed, "The {$name} was not changed.");
 
-            $this->assertCursorRefused(fn () => $this->trail()->cursorPaginate(1, $changed));
+            $this->assertCursorRefused(fn () => $this->financeTrail()->cursorPaginate(1, $changed));
         }
 
         self::assertSame([], $this->entryReads());
@@ -349,8 +320,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A cursor holds its position, not a reference to a row: when the row it
-     * was issued after is pruned, it still opens the page after that position.
+     * A cursor holds a position, so pruning its anchor row does not break it.
      *
      * @return void
      */
@@ -359,11 +329,11 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
 
         $ids   = $this->seedEntries(4);
-        $first = $this->trail()->cursorPaginate(2);
+        $first = $this->financeTrail()->cursorPaginate(2);
 
         DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $ids[2])->delete();
 
-        $second = $this->trail()->cursorPaginate(2, $this->nextCursorOf($first));
+        $second = $this->financeTrail()->cursorPaginate(2, $this->nextCursorOf($first));
 
         self::assertSame([$ids[3], $ids[2]], self::idsOf($first));
         self::assertSame([$ids[1], $ids[0]], self::idsOf($second));
@@ -382,13 +352,12 @@ final class AccessControlTest extends TestCase
             $this->seedEntry(self::inTenant($tenant));
         }
 
-        self::assertSame(2, $this->trail()->count());
+        self::assertSame(2, $this->financeTrail()->count());
         self::assertSame(4, DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('category', 'finance')->count());
     }
 
     /**
-     * Rows of `[the scope, what narrows the trail]`: scopes and filters of
-     * every kind.
+     * Rows of `[the scope, what narrows the trail]`.
      *
      * @formatter:off
      *
@@ -418,8 +387,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A page and a count see the same rows: a walk of every page shows as many
-     * entries as the count counts, under every scope and filter.
+     * A walk of every page shows as many entries as the count counts.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
@@ -440,8 +408,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * A scope about a reference sees the entries whose actor or subject it is,
-     * and not those where it is only the principal or appears nowhere.
+     * A scope about a reference sees only entries it is actor or subject of.
      *
      * @return void
      */
@@ -456,13 +423,12 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['actor_type' => 'customer', 'actor_id' => '7'], self::at(3));
         $this->seedEntry([], self::at(4));
 
-        self::assertSame([$bySubject, $byActor], self::idsOf($this->trail()->cursorPaginate()));
-        self::assertSame(2, $this->trail()->count());
+        self::assertSame([$bySubject, $byActor], self::idsOf($this->financeTrail()->cursorPaginate()));
+        self::assertSame(2, $this->financeTrail()->count());
     }
 
     /**
-     * An entry of no tenant is seen only by a scope that adds tenantless
-     * entries: one of listed tenants alone never sees it.
+     * A tenantless entry is seen only by a scope that adds tenantless entries.
      *
      * @return void
      */
@@ -473,17 +439,15 @@ final class AccessControlTest extends TestCase
 
         $this->allowTenants(self::tenant('org_01'));
 
-        self::assertSame([$tenanted], self::idsOf($this->trail()->cursorPaginate()));
+        self::assertSame([$tenanted], self::idsOf($this->financeTrail()->cursorPaginate()));
 
         $this->usePolicy(static fn (): AccessScope => AccessScope::tenants(self::tenant('org_01'))->withTenantless());
 
-        self::assertSame([$tenantless, $tenanted], self::idsOf($this->trail()->cursorPaginate()));
+        self::assertSame([$tenantless, $tenanted], self::idsOf($this->financeTrail()->cursorPaginate()));
     }
 
     /**
-     * Categories narrow: a scope of some categories sees only those, a filter
-     * inside them narrows further, one outside them sees nothing, and a scope
-     * excepting a category never sees it whatever the filter asks.
+     * A category scope narrows every filter, and excepted ones are never seen.
      *
      * @return void
      */
@@ -507,20 +471,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * The trail, in the `finance` category the seeded entries are in, read for
-     * the viewer, so the records of the reads themselves are never among what
-     * is read.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
-    }
-
-    /**
-     * Every page of the trail of the size given, from the first by each page's
-     * cursor, in order.
+     * Every page of the trail, from the first, in order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $trail
      * @param  int  $perPage
@@ -540,9 +491,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * Seed entries of every kind a scope or a filter tells apart: three tenants
-     * and none, two categories, two actors, a subject that is a user, and two
-     * codes.
+     * Seed entries of every kind a scope or filter tells apart.
      *
      * @return void
      */
@@ -595,8 +544,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * The cursor with the first character of its part at the index changed to
-     * another that base64url allows, so the part still decodes.
+     * The cursor with one character of the part changed, still valid base64url.
      *
      * @param  string  $cursor
      * @param  int  $index
@@ -612,8 +560,7 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * The fields of an entry in the organisation of the id, or in no tenant for
-     * none, with the fields given.
+     * The fields of an entry in the organisation, or in no tenant for `null`.
      *
      * @param  ?string  $tenant
      * @param  array<string, ?string>  $fields
@@ -644,16 +591,5 @@ final class AccessControlTest extends TestCase
     private static function at(int $microseconds): string
     {
         return sprintf('2026-11-01T12:00:00.%06dZ', $microseconds);
-    }
-
-    /**
-     * The ids of the entries the page shows, in order.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
-     * @return list<string>
-     */
-    private static function idsOf(TrailPage $page): array
-    {
-        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
     }
 }

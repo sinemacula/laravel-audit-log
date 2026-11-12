@@ -9,16 +9,8 @@ use Illuminate\Log\LogManager;
 use Psr\Log\LoggerInterface;
 
 /**
- * Reaches a log channel's own logger, past Laravel's wrapper, for a line that
- * holds a whole record or a line another system parses.
- *
- * Laravel's wrapper merges `Log::shareContext()` into every record and hands
- * every message to each `MessageLogged` listener, so an error tracker
- * collecting breadcrumbs would hold the record beside a failure report meant to
- * be free of it, and a format printing `%context%` would carry the shared
- * context into a line. The channel's handlers and formatter still run.
- * Laravel's `Context` reaches the underlying logger through its processor, as
- * `extra`, and only a format printing `%extra%` shows it.
+ * Reaches a log channel's own logger past Laravel's wrapper, so shared context
+ * and `MessageLogged` listeners never see a line that holds a whole record.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

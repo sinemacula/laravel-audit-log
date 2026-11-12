@@ -38,15 +38,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * End-to-end tests for jobs a real worker takes from a database queue: what a
- * job's records carry from whoever dispatched it, that a malformed or missing
- * envelope is ignored, that the carried actor is never resolved, and that one
- * job's state does not reach the next.
- *
- * Nothing but the queue's table exists for a user, so resolving a carried actor
- * fails the job. Each test dispatches, then starts the worker's side of the
- * work afresh: no guard holds anyone and the scoped state is new, as in another
- * process.
+ * End-to-end tests for what jobs a real database-queue worker runs carry; no
+ * user table exists, so resolving a carried actor fails the job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,7 +72,7 @@ final class WorkerContextTest extends TestCase
     private const int USER_ID = 42;
 
     /**
-     * Create the queue's table, and surface a failure inside a route.
+     * Create the queue's table and surface failures inside routes.
      *
      * @return void
      */
@@ -121,9 +114,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A job dispatched from a request records queue and its class, with the
-     * request's id, the actor and the guard, though no guard holds anyone in
-     * the worker.
+     * A job records the dispatcher's request id, actor and guard.
      *
      * @return void
      */
@@ -180,8 +171,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * The actor is a reference: a job's records still name a user deleted after
-     * the job was dispatched.
+     * A job's records still name an actor deleted after dispatch.
      *
      * @return void
      */
@@ -215,8 +205,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * The carried actor is never turned back into a model: running the job
-     * queries no table of a user, and no guard ends up holding one.
+     * The carried actor is never resolved: no user query, no guard holding one.
      *
      * @return void
      */
@@ -243,9 +232,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Jobs from different dispatchers, run one after the other by one worker,
-     * each have their own request id and actor, and the one with no actor gets
-     * nobody else's.
+     * Two jobs in one worker each keep their own request id and actor.
      *
      * @return void
      */
@@ -267,8 +254,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A payload with no Context at all, as one queued before the package was
-     * installed has, gives no actor and a fresh request id.
+     * A payload with no Context gives no actor and a fresh request id.
      *
      * @return void
      */
@@ -293,8 +279,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Rows of `[hidden Context values]`: envelopes a payload could hold, hand
-     * built, that are missing a part or malformed in one.
+     * Rows of `[hidden Context values]`: malformed or incomplete envelopes.
      *
      * @return iterable<string, array{0: array<string, array<array-key, string>|bool|int|string|null>}>
      */
@@ -323,8 +308,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A malformed envelope is ignored, never trusted and never an error: the
-     * job runs and its record has no actor and no guard.
+     * A malformed envelope is ignored: the job records no actor or guard.
      *
      * @param  array<string, array<array-key, string>|bool|int|string|null>  $hidden
      * @return void
@@ -415,8 +399,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Each job of a chain has the request id and actor of whoever dispatched
-     * the chain, including the job the first one dispatched from the worker.
+     * Each job of a chain keeps the identity of whoever dispatched the chain.
      *
      * @return void
      */
@@ -441,8 +424,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A sync job run from inside a worker's job carries the carried actor on,
-     * and the outer job gets its frame back.
+     * A sync job in a worker's job keeps the actor; the outer frame returns.
      *
      * @return void
      */
@@ -464,8 +446,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Rows of `[inner job, code it records]`: an inner job that succeeds and
-     * one that throws.
+     * Rows of `[inner job, code]`: one that succeeds and one that throws.
      *
      * @return iterable<string, array{0: \Illuminate\Contracts\Queue\ShouldQueue, 1: string}>
      */
@@ -478,10 +459,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Laravel hydrates an inner sync job's payload into the one Context, and
-     * that snapshot stays there when it ends. The outer job's records go on
-     * naming the actor it carried, and not whoever it signed in for the inner
-     * job, on success and on failure.
+     * An inner sync job's Context leaves the outer job's actor unchanged.
      *
      * @param  \Illuminate\Contracts\Queue\ShouldQueue  $inner
      * @param  string  $code
@@ -502,8 +480,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * What the outer job sends on afterwards carries its own actor, and not the
-     * one the inner job's payload left in Context.
+     * What the outer job dispatches afterwards carries its own actor.
      *
      * @return void
      */
@@ -517,8 +494,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A job with no envelope after a job with one starts afresh, though nothing
-     * has forgotten the scoped state between them: `runNextJob()` does not.
+     * An envelope-less job after one with an envelope gets a fresh request id.
      *
      * @return void
      */
@@ -544,9 +520,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A listener on `JobProcessed` that a provider's `boot()` adds runs before
-     * the frame ends, so what it records has the job's origin, name and carried
-     * actor.
+     * A `JobProcessed` listener added in `boot()` runs in the job's frame.
      *
      * @return void
      */
@@ -562,10 +536,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * In a worker `JobFailed` comes before `JobExceptionOccurred`.
-     * `Queue::failing()` runs in the job's frame; `JobFailed` then ends it, so
-     * a listener on `JobExceptionOccurred` for a job that has failed for good
-     * is outside any frame: pinned, and documented.
+     * `JobExceptionOccurred` for a job failed for good runs outside the frame.
      *
      * @return void
      */
@@ -587,8 +558,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A job that will be tried again fires `JobExceptionOccurred` alone, whose
-     * listeners run in the job's frame.
+     * `JobExceptionOccurred` for a job to be retried runs in the job's frame.
      *
      * @return void
      */
@@ -606,8 +576,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A job that throws leaves no frame: the next job has its own name, and the
-     * stack is empty when the worker is done.
+     * A failing job leaves no frame for the next job.
      *
      * @return void
      */
@@ -625,8 +594,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * In a worker, unlike on the sync connection, a job's `failed()` hook runs
-     * in the job's frame, with what it carried.
+     * In a worker, a job's `failed()` hook runs in the job's frame.
      *
      * @return void
      */
@@ -646,8 +614,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A worker's daemon loop forgets scoped instances before each job, which
-     * leaves no frame behind and does not trouble the next job's own.
+     * Forgetting scoped instances between jobs leaves no frame behind.
      *
      * @return void
      */
@@ -673,8 +640,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Only the package's state is ever reset: what the application put in
-     * Context arrives untouched, and is still there when the job is done.
+     * Only the package's state is reset; the app's Context is untouched.
      *
      * @return void
      */
@@ -693,8 +659,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * What a job carries is in its payload as plain text, which is the
-     * documented cost of carrying it in hidden Context.
+     * The carried envelope is in the payload unencrypted, as documented.
      *
      * @return void
      */
@@ -711,10 +676,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Laravel keeps guards between jobs on a worker, so a guard one job leaves
-     * signed in still holds that user when the next job starts. That user is
-     * not the next job's actor: its own carried one is, and the guards are left
-     * alone.
+     * A guard Laravel keeps between jobs does not make the next job's actor.
      *
      * @return void
      */
@@ -733,8 +695,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A job with no snapshot has no actor at all after one that left a guard
-     * signed in: not the leftover.
+     * A job with no snapshot has no actor after a job left a guard signed in.
      *
      * @return void
      */
@@ -750,8 +711,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * What the next job dispatches is not stamped with the leftover either: it
-     * goes on with that job's own carried actor.
+     * What the next job dispatches is not stamped with the leftover user.
      *
      * @return void
      */
@@ -766,9 +726,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A job that signs someone in itself is that person's work, beating what it
-     * carried, even when it signs in the same user afresh. Whoever it leaves
-     * signed in is a leftover for the job after it in turn.
+     * A user a job signs in itself is its actor, over what it carried.
      *
      * @return void
      */
@@ -787,9 +745,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * A job that fails itself and carries on has left its frame, since
-     * `JobFailed` ends it: its later record is outside any frame and reads no
-     * carried actor. Pinned, and documented rather than worked around.
+     * A record after a job fails itself is outside the frame, as documented.
      *
      * @return void
      */
@@ -825,8 +781,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * List the provider that audits a job's end, booted after the package's as
-     * an application's is.
+     * Register the provider auditing a job's end, booted after the package's.
      *
      * @param  mixed  $app
      * @return array<int, class-string<\Illuminate\Support\ServiceProvider>>
@@ -855,8 +810,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Dispatch the job signed in as the user, or as nobody, then start the
-     * worker's side of the work, and return the id the job carries.
+     * Dispatch the job as the user or nobody, start the worker; the job's id.
      *
      * @param  ?\Tests\Unit\Stubs\StubAuthUser  $user
      * @param  \Illuminate\Contracts\Queue\ShouldQueue  $job
@@ -880,9 +834,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Start the worker's side of the work afresh, as another process would: no
-     * guard holds anyone, and the scoped state, Context with it, is new. This
-     * is what a worker's daemon loop does before each job, guards apart.
+     * Start the worker's side afresh: no guard and new scoped state.
      *
      * @return void
      */
@@ -896,9 +848,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Run the next jobs through a real worker, in this application. A job's
-     * exception goes to the exception handler, which reports nothing here, so
-     * what proves a job ran is what it recorded.
+     * Run the next jobs through a real worker; only their records prove it.
      *
      * @param  int  $jobs
      * @param  int  $maxTries
@@ -933,8 +883,7 @@ final class WorkerContextTest extends TestCase
     }
 
     /**
-     * Replace the queued job's hidden Context with the values given, each
-     * serialised as a payload holds it.
+     * Replace the queued job's hidden Context with the values, serialised.
      *
      * @param  array<string, array<array-key, string>|bool|int|string|null>  $hidden
      * @return void

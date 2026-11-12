@@ -13,17 +13,9 @@ use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
 
 /**
- * Shared base for deterministic performance-contract tests.
- *
- * Counts what a subject under test asks of the default connection, so the suite
- * can assert structural statement budgets without making flaky wall-clock
- * assertions: every statement the connection is asked to run, counted before it
- * runs, so one that fails counts too (the query log records only those that
- * succeed); every savepoint, a transaction begun inside another; every
- * rollback, of a transaction or a savepoint; and every top-level transaction
- * and commit, which run on PDO directly and which no statement count sees,
- * though each is a round trip on MySQL and PostgreSQL. The clock is frozen at a
- * time with microseconds.
+ * Base for statement-budget tests: counts what a subject asks of the default
+ * connection, under a frozen clock. Statements are counted before they run,
+ * since the query log keeps only those that succeed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,22 +82,25 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * Release the frozen clock.
+     * Roll back any transaction a test left open and release the frozen clock.
      *
      * @return void
      */
     #[\Override]
     protected function tearDown(): void
     {
+        while (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->rollBack();
+        }
+
         CarbonImmutable::setTestNow();
 
         parent::tearDown();
     }
 
     /**
-     * Run a subject and assert the exact statement budget: its reads, its
-     * writes, its savepoints and its rollbacks. A write is an `insert`,
-     * `update`, `delete` or `replace`; every other statement is a read.
+     * Run a subject and assert its exact reads, writes, savepoints and
+     * rollbacks; a write is an `insert`, `update`, `delete` or `replace`.
      *
      * @template TResult
      *
@@ -132,10 +127,8 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * The reads a commit costs with audit work waiting on it: one on
-     * PostgreSQL, which asks whether the transaction was already aborted,
-     * because a commit there reports a success even then, and none on any other
-     * engine.
+     * The reads a commit costs with audit work waiting: one on PostgreSQL,
+     * whose commit reports success even after an abort, so it asks first.
      *
      * @return int
      */
@@ -145,8 +138,8 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * Run a subject and assert how many top-level transactions it began and how
-     * many it committed, which no statement budget sees.
+     * Run a subject and assert the top-level transactions it began and
+     * committed, which run on PDO directly and no statement budget sees.
      *
      * @template TResult
      *
@@ -166,8 +159,7 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * Run a subject with the counts started afresh, so what is captured
-     * afterwards is what it asked for alone.
+     * Run a subject with the counts reset.
      *
      * @template TResult
      *
@@ -187,8 +179,7 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * The statements the last captured subject asked the default connection to
-     * run, in order.
+     * The statements the last captured subject asked for, in order.
      *
      * @return list<string>
      */
@@ -208,7 +199,7 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * The savepoints the last captured subject began.
+     * The transaction and savepoint rollbacks the last captured subject made.
      *
      * @return int
      */
@@ -226,6 +217,57 @@ abstract class PerformanceContractTestCase extends TestCase
     protected function capturedRollbacks(): int
     {
         return $this->rollbacks;
+    }
+
+    /**
+     * The CPU time this process has used, user and system: waiting for a core
+     * uses none of it.
+     *
+     * @return int
+     */
+    protected static function cpuNanoseconds(): int
+    {
+        $usage = getrusage();
+
+        assert(is_array($usage));
+
+        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec'])  * 1000000000
+            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) * 1000;
+    }
+
+    /**
+     * Whether Xdebug is collecting coverage in this process.
+     *
+     * @return bool
+     */
+    protected static function isCollectingCoverage(): bool
+    {
+        return function_exists('xdebug_info') && in_array('coverage', xdebug_info('mode'), true);
+    }
+
+    /**
+     * An entries row with every required column, numbered so each id is unique.
+     *
+     * @param  int  $number
+     * @return array<string, int|string>
+     */
+    protected static function entryRow(int $number): array
+    {
+        return [
+            'id'                => sprintf('0195f4a2-7b1c-7000-8000-%012d', $number),
+            'record_version'    => 1,
+            'event'             => 'invoice.approved',
+            'event_version'     => 1,
+            'category'          => 'billing',
+            'outcome'           => 'success',
+            'provenance'        => 'captured',
+            'source_id'         => 'app',
+            'occurred_at'       => self::NOW,
+            'recorded_at'       => self::NOW,
+            'integrity_version' => 1,
+            'key_id'            => 'test-key',
+            'hmac'              => str_repeat('a', 64),
+        ];
     }
 
     /**

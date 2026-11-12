@@ -7,30 +7,13 @@ namespace SineMacula\Laravel\AuditLog\Contracts;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 
 /**
- * Event mapper contract: translates an event the application or an integration
- * dispatches into the record of what happened, so the event is captured without
- * the code that dispatched it recording anything.
+ * Event mapper contract: translates a dispatched event into the record of what
+ * happened.
  *
- * A mapper is registered at boot with `AuditLog::map()`, for an event's class
- * or for a parent class or interface of it. It is resolved from the container
- * for each capture and must keep no state between calls. It receives a builder
- * with no recorder, whose `record()` is a `\LogicException`, and never records
- * anything itself, through that builder or through the facade, since an
- * explicit record while a mapper runs is refused: the capture writes the
- * builder the mapper returns. What the mapper sets off is captured as it would
- * be anywhere else, so a watched model it saves or a Gate check it denies is
- * recorded by its own capture, while capturing or dispatching the event it is
- * mapping again writes nothing.
- *
- * A mapper sets at least the code, with `event()`, and the fields it translates
- * from the event. It names the code itself and never derives one from the
- * event's class, so renaming the class never changes the trail. It returns the
- * same builder, or `null` to skip the event. It must not choose a timing,
- * `failClosed()` or `transactional()`, since a capture decides how it is
- * written. Anything else, a mapper that throws among it, is a contained capture
- * failure: nothing is written, the failure is reported without the event's
- * values, `Events\AuditCaptureFailed` is dispatched, and the code that
- * dispatched the event goes on.
+ * An implementation keeps no state, names its own code rather than deriving one
+ * from the event's class, never records anything itself, and never chooses a
+ * timing, `failClosed()` or `transactional()`. Anything else it gets wrong,
+ * throwing included, is a contained capture failure.
  *
  * @api
  *
@@ -40,9 +23,8 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 interface EventMapper
 {
     /**
-     * The record the event describes: the builder given, with its code and the
-     * fields translated from the event set, or `null` when the event is not to
-     * be recorded.
+     * The builder given, with its code and translated fields set, or `null` to
+     * skip the event.
      *
      * @param  object  $event
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $record

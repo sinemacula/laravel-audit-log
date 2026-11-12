@@ -8,12 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * An invoice whose created, updated and deleted events are dispatched as a
- * custom event, which a listener answers: Eloquent then never dispatches its
- * own events for them, so nothing listening for those hears the change.
- *
- * Any class whose constructor takes the model would do as the custom event; a
- * standard one keeps the fixture to one class. The answering listener is
- * registered when the model boots, on the application's dispatcher.
+ * custom event a listener answers, so Eloquent never dispatches its own and
+ * nothing listening for those hears the change.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

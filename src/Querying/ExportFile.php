@@ -7,33 +7,11 @@ namespace SineMacula\Laravel\AuditLog\Querying;
 use Illuminate\Support\Str;
 
 /**
- * The file an export is written to, from the moment it is prepared to the
- * moment it is published: a temporary file beside the target, its digests and
- * positions kept as each line is written, a temporary bundle beside it, and the
- * publication of both.
+ * An export's file and bundle, written to private temporary files beside the
+ * target and published together or not at all.
  *
- * Each temporary file is `.<name>.<uuid>.tmp` in the target's directory,
- * created exclusively under a umask of `0077`, restored at once, then made
- * `0600`, so no other user can open it at any moment, before its first byte or
- * after. Every line, the last included, ends in one line feed, so an export of
- * no line is an empty file. The file's digest is the SHA-256 of its bytes, its
- * membership digest the SHA-256 of each id and a line feed in file order, and
- * its first and last positions are the recorded instant and id of its first and
- * last lines. The file is closed when the bundle is written, and takes no line
- * after it.
- *
- * Publication puts the bundle at `<target>.manifest.json`, then the file at the
- * target. Without `force` each is hard-linked to its place and its temporary
- * file unlinked, which fails, never replaces, when the place is taken, even by
- * a file that appeared after the export was prepared; a directory whose
- * filesystem cannot hold a hard link is refused before anything is made, so an
- * export that could never be published is never journalled. With `force` the
- * file already at each place is first renamed aside, beside it, a directory
- * refused, then the new one is renamed into the place, and only once both are
- * in place are the set-aside files removed. A step that fails removes both
- * temporary files and whatever this publication had already put in place,
- * renames back what it had set aside, so a previous export and its bundle are
- * left as they were, then throws naming the step alone.
+ * Without `force`, publication hard-links into place so it never replaces a
+ * file that appeared after the export was prepared.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,16 +23,16 @@ final class ExportFile
     /** @var string What a bundle's path adds to its export's. */
     public const string MANIFEST_SUFFIX = '.manifest.json';
 
-    /** @var string What the name of a file set aside by a forced publication ends in. */
+    /** @var string The suffix of a file set aside by a forced publication. */
     private const string ASIDE_SUFFIX = '.replaced';
 
-    /** @var string What the names of the hard-link probe's files end in. */
+    /** @var string The suffix of the hard-link probe's files. */
     private const string PROBE_SUFFIX = '.probe';
 
-    /** @var int The umask a temporary file is created under: nothing for the group or anyone else. */
+    /** @var int Created under this umask so no other user can ever open it. */
     private const int UMASK = 0077;
 
-    /** @var int The mode of a temporary file, and so of a published one: read and write for its owner alone. */
+    /** @var int The mode of a temporary, and so a published, file. */
     private const int MODE = 0600;
 
     /** @var ?resource The temporary file, open for writing until the bundle is written. */
@@ -63,22 +41,22 @@ final class ExportFile
     /** @var \HashContext The running SHA-256 of the file's bytes. */
     private \HashContext $file;
 
-    /** @var \SineMacula\Laravel\AuditLog\Querying\MembershipDigest The running digest of the ids written, in file order. */
+    /** @var \SineMacula\Laravel\AuditLog\Querying\MembershipDigest The running digest of the ids written. */
     private MembershipDigest $membership;
 
     /** @var int How many lines have been written. */
     private int $lines = 0;
 
-    /** @var ?array{0: string, 1: string} The recorded instant and id of the first line, once there is one. */
+    /** @var ?array{0: string, 1: string} The recorded instant and id of the first line. */
     private ?array $first = null;
 
-    /** @var ?array{0: string, 1: string} The recorded instant and id of the last line, once there is one. */
+    /** @var ?array{0: string, 1: string} The recorded instant and id of the last line. */
     private ?array $last = null;
 
-    /** @var ?string The temporary bundle, once it is created and until it is published or removed. */
+    /** @var ?string The temporary bundle, until it is published or removed. */
     private ?string $bundleTemp = null;
 
-    /** @var bool Whether both temporary files have been published or removed, so neither is touched again. */
+    /** @var bool Whether both temporary files have been published or removed. */
     private bool $finished = false;
 
     /**
@@ -103,9 +81,7 @@ final class ExportFile
     }
 
     /**
-     * Prepare an export to the target: refuse a directory that does not exist
-     * or is not writable, a target that is a directory, and a target or bundle
-     * that exists without `force`, then create the temporary file.
+     * Check the target, then create the temporary file.
      *
      * @param  string  $target
      * @param  bool  $force
@@ -122,12 +98,8 @@ final class ExportFile
     }
 
     /**
-     * Refuse a target whose directory does not exist or is not writable, a
-     * target that is a directory, and, without `force`, a target or a bundle
-     * that exists, or a directory whose filesystem cannot hold the hard link a
-     * publication without `force` needs: the checks `prepare()` makes before it
-     * creates anything, so an export can make them before anything else. The
-     * hard-link probe leaves nothing behind.
+     * Refuse a target that could never be published, before anything is made or
+     * journalled.
      *
      * @param  string  $target
      * @param  bool  $force
@@ -161,8 +133,7 @@ final class ExportFile
     }
 
     /**
-     * Append a line and a line feed, and keep the digests, the count and the
-     * positions of the entry it holds.
+     * Append a line and a line feed, updating the digests, count and positions.
      *
      * @param  string  $line
      * @param  string  $id
@@ -202,8 +173,7 @@ final class ExportFile
     }
 
     /**
-     * The SHA-256 of the bytes written so far, as 64 lower-case hexadecimal
-     * characters.
+     * The hex SHA-256 of the bytes written so far.
      *
      * @return string
      */
@@ -213,8 +183,7 @@ final class ExportFile
     }
 
     /**
-     * The membership digest of the ids written, in file order. It is taken
-     * once, so no line is written after it.
+     * The membership digest of the ids written; take it after the last line.
      *
      * @return string
      */
@@ -244,8 +213,7 @@ final class ExportFile
     }
 
     /**
-     * Close the file, which takes no line after it, then write the bundle to a
-     * temporary file of its own beside the target, created as the file's was.
+     * Close the file, then write the bundle to its own temporary file.
      *
      * @param  string  $bundle
      * @return void
@@ -281,12 +249,8 @@ final class ExportFile
     }
 
     /**
-     * Publish the bundle at `<target>.manifest.json`, then the file at the
-     * target: linked into place without `force`, so neither replaces what is
-     * there, and with `force` renamed into place once what is there is set
-     * aside, which is removed only once both are in place. A step that fails
-     * removes both temporary files and what this call had put in place, puts
-     * back what it had set aside, then throws.
+     * Publish the bundle, then the file; a failed step undoes both and leaves
+     * any previous export as it was.
      *
      * @param  bool  $force
      * @return void
@@ -324,8 +288,7 @@ final class ExportFile
     }
 
     /**
-     * Remove both temporary files, leaving anything already published; once
-     * removed, or published, nothing is removed again.
+     * Remove both temporary files, leaving anything already published.
      *
      * @return void
      */
@@ -348,8 +311,7 @@ final class ExportFile
     }
 
     /**
-     * Undo a publication that failed: remove both temporary files and what it
-     * had put in place, then rename what it had set aside back into place.
+     * Remove what a failed publication placed and restore what it set aside.
      *
      * @param  list<string>  $placed
      * @param  array<string, string>  $asides
@@ -369,9 +331,8 @@ final class ExportFile
     }
 
     /**
-     * Whether the place is free once what is there is renamed aside, beside it,
-     * where it went kept by the place: nothing there is free already, and a
-     * directory, or a file that cannot be moved, never frees it.
+     * Whether the place is free once what is there is renamed aside; a
+     * directory never frees it.
      *
      * @param  string  $place
      * @param  array<string, string>  $asides
@@ -394,9 +355,8 @@ final class ExportFile
     }
 
     /**
-     * Whether the target's directory can hold a hard link: a probe file is
-     * created there exclusively under a name of its own and linked to a second
-     * name, and whatever the probe made is removed, never anything else.
+     * Whether the target's directory can hold a hard link, probing with files
+     * of its own that it removes.
      *
      * @param  string  $target
      * @return bool
@@ -424,8 +384,7 @@ final class ExportFile
     }
 
     /**
-     * A temporary file's path for the place: hidden, in the place's directory,
-     * named after it and made unique.
+     * A unique hidden temporary path beside the place.
      *
      * @param  string  $place
      * @return string
@@ -436,10 +395,7 @@ final class ExportFile
     }
 
     /**
-     * Create the temporary file exclusively under the umask, which is restored
-     * however the open ends, then make it readable and writable by its owner
-     * alone, and return it open for writing. A file already at the path is
-     * never opened.
+     * Create the temporary file exclusively and privately, open for writing.
      *
      * @param  string  $temp
      * @return resource
@@ -471,10 +427,8 @@ final class ExportFile
     }
 
     /**
-     * Put the temporary file in its place, saying whether it is there: linked,
-     * failing when the place is taken, then unlinked, without `force`; renamed
-     * over the place with it. A link whose temporary file cannot be unlinked is
-     * taken back.
+     * Whether the temporary file was put in its place: renamed with `force`,
+     * else linked, failing when the place is taken.
      *
      * @param  string  $temp
      * @param  string  $place

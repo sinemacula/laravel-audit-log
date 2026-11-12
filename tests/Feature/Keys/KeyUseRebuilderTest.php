@@ -19,15 +19,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for rebuilding the key uses from the entries, on whichever
- * engine the suite runs against: a key use a verified entry names and the table
- * lacks is added, every envelope found at any depth; an entry whose signature
- * does not match, or whose signing key the ring does not hold, adds nothing;
- * nothing is ever removed; the entries are read in pages by id; and a dry run
- * counts without writing.
- *
- * The entries are signed as the store signs them and inserted as it inserts
- * them, without their key uses, so what is missing is the rebuild's to add.
+ * Feature tests for rebuilding the key uses from entries stored without them,
+ * on whichever engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,10 +33,8 @@ final class KeyUseRebuilderTest extends TestCase
     use InteractsWithAuditStore;
 
     /**
-     * Every key a verified entry's envelopes name, in its properties at any
-     * depth, its context and its IP address, is added once per entry; a key use
-     * already stored is not added again, and a key that is not a canonical UUID
-     * has none.
+     * Every key a verified entry's envelopes name, at any depth, gets one key
+     * use; stored ones and non-UUID keys are not added.
      *
      * @return void
      */
@@ -63,9 +54,8 @@ final class KeyUseRebuilderTest extends TestCase
     }
 
     /**
-     * Only an entry whose signature verifies is trusted: one whose content was
-     * changed after it was signed, and one signed under a key the ring does not
-     * hold, are skipped and add nothing.
+     * Only an entry whose signature verifies is trusted: a changed one, or one
+     * under a key the ring does not hold, adds nothing.
      *
      * @return void
      */
@@ -87,9 +77,8 @@ final class KeyUseRebuilderTest extends TestCase
     }
 
     /**
-     * A rebuild only adds: a key use no verified entry names, and one of an
-     * entry that is not stored, are both left where they are, and a rebuild run
-     * again adds nothing.
+     * A rebuild only adds: key uses no verified entry names are kept, and a
+     * second rebuild adds nothing.
      *
      * @return void
      */
@@ -125,9 +114,8 @@ final class KeyUseRebuilderTest extends TestCase
     }
 
     /**
-     * The entries are read in pages of 1,000 by id, each page after the last id
-     * of the one before, on the writer, and an entry with no envelope is
-     * verified and adds nothing.
+     * The entries are read in pages of 1,000 by id on the writer, and an entry
+     * with no envelope adds nothing.
      *
      * @return void
      */

@@ -23,13 +23,7 @@ use Tests\Fixtures\Querying\ClosurePolicy;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:export`: it exports the trail a viewer named by
- * type and id may see, and prints the entries, the journal entry and how it was
- * acknowledged, the file's digest and the bundle; it verifies an export,
- * printing each finding; it refuses a missing or unreferenceable viewer, an
- * unknown format and a target it may not write before anything is read, with
- * `INVALID`; a refused read exits with `FAILURE`; a denied viewer is given an
- * empty export; and nothing else thrown is caught.
+ * Feature tests for `audit-log:export`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,8 +72,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Remove the directory and everything in it, and put the entries table
-     * back.
+     * Remove the directory and put the entries table back.
      *
      * @return void
      */
@@ -104,9 +97,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * An export prints how many entries it holds and where, the journal entry
-     * and how it was acknowledged, the file's SHA-256 and where its bundle is,
-     * and exits with `SUCCESS`.
+     * An export prints its count, journal entry, digest and bundle.
      *
      * @return void
      */
@@ -134,8 +125,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * The viewer is the reference the type and the id name together, which the
-     * policy is asked about for `export` and the journal names as its actor.
+     * The viewer is the reference `--viewer-type` and `--viewer-id` name.
      *
      * @return void
      */
@@ -158,8 +148,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[the options given]`: runs that name the viewer's type, its id,
-     * or neither, but never both.
+     * Rows of `[the options given]`: runs missing either viewer option.
      *
      * @return iterable<string, array{0: array<string, string>}>
      */
@@ -173,8 +162,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Without both viewer options the command says why and exits with `INVALID`
-     * before the policy is asked or anything is read, written or recorded.
+     * Without both viewer options the command is invalid before any read.
      *
      * @param  array<string, string>  $options
      * @return void
@@ -211,8 +199,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * A viewer a reference refuses is refused the same way, naming the part and
-     * never what was given, before anything is read.
+     * An unreferenceable viewer is refused without echoing what was given.
      *
      * @param  string  $type
      * @param  string  $id
@@ -232,8 +219,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * A format other than `ndjson`, `ocsf` or `cef` is refused before anything
-     * is read, for an export and for a verification alike.
+     * An unknown format is refused before anything is read.
      *
      * @return void
      */
@@ -253,8 +239,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * An existing file is refused without `--force`, exiting with `INVALID`
-     * before the policy is asked, and is left as it was.
+     * An existing file is refused without `--force` and left as it was.
      *
      * @return void
      */
@@ -273,8 +258,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * A target whose directory does not exist exits with `INVALID`, saying so
-     * without naming the path.
+     * A missing target directory is invalid, without naming the path.
      *
      * @return void
      */
@@ -307,8 +291,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Verifying an untouched export prints that it verified and exits with
-     * `SUCCESS`, once the verification is recorded.
+     * Verifying an untouched export succeeds once the verification is recorded.
      *
      * @return void
      */
@@ -324,8 +307,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Verifying a tampered export prints each finding, in the chain's order,
-     * then that it did not verify, and exits with `FAILURE`.
+     * Verifying a tampered export lists each finding in order and fails.
      *
      * @return void
      */
@@ -351,8 +333,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * A file with no bundle beside it does not verify, and the command says
-     * which steps failed.
+     * A file with no bundle does not verify, naming the failed steps.
      *
      * @return void
      */
@@ -368,9 +349,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * A read whose record cannot be written is refused: the command prints the
-     * refusal, which names no value, exits with `FAILURE`, and publishes
-     * nothing.
+     * An unrecordable read is refused, printing no value, publishing nothing.
      *
      * @return void
      */
@@ -404,9 +383,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Under the default policy, which denies every viewer, the viewer is given
-     * an empty export, journalled as denied, and the command exits with
-     * `SUCCESS`, as for an export that finds nothing.
+     * Under the default policy a viewer gets an empty export and success.
      *
      * @return void
      */
@@ -438,8 +415,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Each format is accepted, written as asked, journalled under its name, and
-     * verifies.
+     * Each format is accepted, written, journalled under its name and verifies.
      *
      * @param  \SineMacula\Laravel\AuditLog\Export\Enums\ExportFormat  $format
      * @return void
@@ -476,8 +452,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * What an access policy throws reaches the console as it was thrown, and is
-     * not printed as a refusal.
+     * What an access policy throws is not caught as a refusal.
      *
      * @return void
      *
@@ -499,8 +474,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * An invalid argument the target did not raise, here a storage connection
-     * that is not configured, is not caught as the target's refusal.
+     * An invalid argument the target did not raise is not caught.
      *
      * @return void
      */
@@ -522,9 +496,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * The command is named `audit-log:export`, takes the file and
-     * `--viewer-type`, `--viewer-id`, `--format`, `--force` and `--verify`
-     * alone, and writes NDJSON unless told otherwise.
+     * The command's name, options and NDJSON default are pinned.
      *
      * @return void
      */
@@ -545,8 +517,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Assert that nothing was read, written or recorded, and the policy was
-     * asked nothing.
+     * Assert nothing was read, written or recorded and the policy unasked.
      *
      * @param  \Tests\Fixtures\Querying\ClosurePolicy  $policy
      * @return void
@@ -560,8 +531,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Run the command on the target as the tests' viewer, with the options
-     * given over those, and return its exit code.
+     * Run the command as the tests' viewer and return its exit code.
      *
      * @param  array<string, bool|string>  $options
      * @return int
@@ -585,8 +555,7 @@ final class ExportCommandTest extends TestCase
     }
 
     /**
-     * Run the command with the arguments and options given, keep what it
-     * printed, and return its exit code.
+     * Run the command, keep what it printed, and return its exit code.
      *
      * @param  array<string, bool|string>  $parameters
      * @return int

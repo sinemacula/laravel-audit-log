@@ -20,10 +20,8 @@ use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
- * Unit tests for the lines `audit-log:verify` prints as text: a verified seal's
- * and a run finding's, each id and class shown as text with nothing in it read
- * as a style, and the summary's coverage, anchor clause, counts, journal and
- * key store, verified or skipped.
+ * Unit tests for the lines `audit-log:verify` prints as text, nothing in an id
+ * or a class read as a style.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,9 +71,8 @@ final class VerifyLinesTest extends TestCase
     }
 
     /**
-     * Rows of `[id, what a line shows]`: no id is `none`, and an id read from
-     * an altered table is repaired, stripped of control characters and escaped
-     * as the console escapes text, so nothing in it is read as a style.
+     * Rows of `[id, what a line shows]`: no id is `none`, and an altered
+     * table's id is repaired, stripped of control characters and escaped.
      *
      * @return iterable<string, array{0: ?string, 1: string}>
      */

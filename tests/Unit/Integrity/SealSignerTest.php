@@ -20,13 +20,7 @@ use Symfony\Component\VarDumper\Dumper\CliDumper;
 use Tests\Concerns\SearchesForSecrets;
 
 /**
- * Unit tests for the seal signer: the HKDF seal key, of an explicit ring and a
- * derived one, and the seal and prune signatures, each pinned by the golden
- * vectors; the prune label of version 2; the separation of a seal key from a
- * row key and of a seal signature from a row HMAC and a prune signature, and of
- * a record of one set of members from one of another; verification that selects
- * the key by the stored id, refuses an unknown key and a malformed signature,
- * and fails a tampered one; and a seal key that no dump or trace shows.
+ * Unit tests for the seal signer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -96,9 +90,8 @@ final class SealSignerTest extends TestCase
     }
 
     /**
-     * With no explicit ring, the key derived from the test `app.key` signs,
-     * under the golden id, and its seal key is HKDF over the derived secret, as
-     * the golden vector pins.
+     * With no explicit ring, the seal key is HKDF over the secret derived from
+     * `app.key`.
      *
      * @return void
      *
@@ -142,9 +135,8 @@ final class SealSignerTest extends TestCase
     }
 
     /**
-     * The seal key is never the ring key that signs rows: it differs from the
-     * secret, and the HMAC of the golden canonical seal, or of its labelled
-     * digest, under the row secret is not the seal's signature.
+     * The seal key is never the row key, and a row HMAC is never a seal's
+     * signature.
      *
      * @return void
      *
@@ -201,9 +193,7 @@ final class SealSignerTest extends TestCase
     }
 
     /**
-     * Verification takes the key the seal names, never the current one: a seal
-     * signed under the retired key verifies while the current key signs, and
-     * its signature fails for the same seal claiming the current key.
+     * Verification takes the key the seal names, never the current one.
      *
      * @return void
      *
@@ -331,9 +321,8 @@ final class SealSignerTest extends TestCase
     }
 
     /**
-     * The golden seal's two disjoint records sign to their golden digests and
-     * signatures under the ring's signing key, each the HMAC of the prune label
-     * and its digest under the golden seal key, and each verifies.
+     * The golden seal's two prune records sign to their golden digests and
+     * signatures.
      *
      * @return void
      *
@@ -361,9 +350,7 @@ final class SealSignerTest extends TestCase
     }
 
     /**
-     * A record signed for one set of a seal's members never verifies for
-     * another: the golden records' bitmaps swapped, their counts with them, or
-     * a bitmap widened to every member, fail under the signature they carry.
+     * A prune record signed for one set of members never verifies for another.
      *
      * @return void
      *
@@ -391,9 +378,8 @@ final class SealSignerTest extends TestCase
     }
 
     /**
-     * A prune record whose any bound field differs from what was signed, or
-     * whose signature is changed or a seal's, fails; one signed under a key
-     * since retired still verifies by the id it names.
+     * A prune record with any bound field or its signature changed fails; a
+     * retired key still verifies.
      *
      * @return void
      *
@@ -452,11 +438,8 @@ final class SealSignerTest extends TestCase
     }
 
     /**
-     * The seal key is derived on every call and kept nowhere: no dump of the
-     * signer shows it, nor anything signing gives back, and a refusal while
-     * signing holds neither it nor the planted secret. The secret and every key
-     * passed between methods are marked sensitive, so a trace through them
-     * shows neither.
+     * The seal key is derived per call and kept nowhere, so no dump, return
+     * value or trace shows it.
      *
      * @return void
      *

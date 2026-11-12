@@ -28,15 +28,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the listener that records a watched model's changes: only a
- * model of exactly a watched class is captured, each method records its own
- * change on every event, a model naming no connection waits for the default
- * connection's commit, a failure names the model and the listener and stops
- * neither the change nor the listeners after it, and a custom event that stops
- * Eloquent's own leaves nothing to hear.
- *
- * The test binds the watcher and the capture state as the provider does, and
- * watches its own models while the application boots.
+ * Feature tests for the listener that records a watched model's changes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,8 +70,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * A model whose class is not watched is left alone, saved or handed to the
-     * listener.
+     * An unwatched model is ignored, saved or handed to the listener.
      *
      * @return void
      */
@@ -95,8 +86,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * A subclass of a watched class is not watched through its parent, saved or
-     * handed to the listener.
+     * A subclass of a watched class is not watched through its parent.
      *
      * @return void
      */
@@ -113,8 +103,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * Each method records the change it is named for, from the model handed to
-     * it, every time it is called.
+     * Each method records its own change every time it is called.
      *
      * @return void
      */
@@ -138,8 +127,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * The Eloquent events of a watched model reach the listener, one record for
-     * each change.
+     * Each Eloquent event of a watched model gives one record.
      *
      * @return void
      */
@@ -157,8 +145,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * A model that names no connection waits for the commit of the default
-     * connection, whichever that is.
+     * A model naming no connection waits for the default connection's commit.
      *
      * @return void
      */
@@ -197,8 +184,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * A failed capture names the model's class and this listener, and stops
-     * neither the change nor the listeners after it.
+     * A failed capture names the model and listener and stops nothing after it.
      *
      * @return void
      */
@@ -227,8 +213,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * A model whose custom events are answered never dispatches Eloquent's own,
-     * so a watch of it hears nothing and records nothing.
+     * A model whose custom events halt Eloquent's own records nothing.
      *
      * @return void
      */
@@ -248,8 +233,7 @@ final class RecordModelChangeTest extends TestCase
     }
 
     /**
-     * Bind the watcher and the capture state as the provider does, and watch
-     * the invoices and the halting invoices while the application boots.
+     * Bind the watcher and capture state as the provider does; watch invoices.
      *
      * @param  mixed  $app
      * @return void
@@ -299,8 +283,7 @@ final class RecordModelChangeTest extends TestCase
      */
     private static function restores(WatchedInvoice $invoice): bool
     {
-        // Larastan's stub of the soft-delete trait declares its query-builder
-        // restore, which is static, over the model's own instance method
+        // Larastan's soft-delete stub declares the builder's static restore()
         // @phpstan-ignore staticMethod.dynamicCall
         return $invoice->restore();
     }

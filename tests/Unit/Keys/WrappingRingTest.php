@@ -14,10 +14,8 @@ use SineMacula\Laravel\AuditLog\Keys\UnknownWrappingKeyException;
 use SineMacula\Laravel\AuditLog\Keys\WrappingRing;
 
 /**
- * Unit tests for the wrapping ring: a derived key's dashed fingerprint id, the
- * previous application keys kept for unwrapping, an explicit ring that never
- * falls back to `app.key`, a derivation apart from the integrity ring's, and a
- * ring rebuilt on every call.
+ * Unit tests for the wrapping ring and the keys it derives from `app.key` or
+ * reads explicitly.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,9 +41,8 @@ final class WrappingRingTest extends TestCase
     private const string NEW_SECRET = 'explicit-wrap-new-secret-32-byte';
 
     /**
-     * Without an explicit ring, the key that wraps is derived from `app.key` by
-     * HKDF-SHA256 under its own info, and its id is `d-` and the first 16 hex
-     * characters of the HMAC of the id label under its secret.
+     * Without an explicit ring the wrapping key is HKDF-SHA256 of `app.key`,
+     * its id `d-` and 16 hex characters of an HMAC.
      *
      * @return void
      *
@@ -132,10 +129,8 @@ final class WrappingRingTest extends TestCase
     }
 
     /**
-     * An explicit ring still unwraps the keys derived from `app.key` and
-     * `app.previous_keys`, so the keys wrapped before it was set unwrap and a
-     * rewrap can move them; it never wraps under them, and it lists them after
-     * its own keys, the current one first.
+     * An explicit ring still unwraps keys derived from `app.key`, listed after
+     * its own, so a rewrap can move them, but never wraps under them.
      *
      * @return void
      */
@@ -190,9 +185,8 @@ final class WrappingRingTest extends TestCase
     }
 
     /**
-     * The derivation is apart from the integrity ring's: the same `app.key`
-     * gives another secret and another id, so the integrity key and the
-     * wrapping key are never one key.
+     * The derivation differs from the integrity ring's, so the integrity and
+     * wrapping keys are never one key.
      *
      * @return void
      */

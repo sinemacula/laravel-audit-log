@@ -10,11 +10,7 @@ use PHPUnit\Framework\TestCase;
 use Tests\Fixtures\Export\OcsfValidator;
 
 /**
- * Tests for the offline OCSF validator the formatter tests rely on: it accepts
- * a valid event of each pinned class, refuses each invalid fixture with the one
- * error it names, holds each class as resolved through its `extends` chain and
- * the profiles it includes, with a class's enum merged over the dictionary's,
- * and checks types, objects, arrays, constraints and profiles.
+ * Tests for the offline OCSF validator the formatter tests rely on.
  *
  * It covers nothing: the validator is a test fixture, not the package's code.
  *
@@ -149,9 +145,8 @@ final class OcsfValidatorTest extends TestCase
     }
 
     /**
-     * API Activity is resolved through Application Activity to Base Event: it
-     * keeps Base Event's attributes and its parent's category, takes its own
-     * uid, and its own attribute overrides an included profile's.
+     * API Activity resolves through Application Activity to Base Event, and its
+     * own attributes override a profile's.
      *
      * @return void
      *
@@ -177,9 +172,8 @@ final class OcsfValidatorTest extends TestCase
     }
 
     /**
-     * Base Event, which extends nothing and is in no listed category, is class
-     * 0 in category 0, and an attribute it has only from a profile keeps that
-     * profile, where API Activity declares the same attribute as its own.
+     * Base Event is class 0 in category 0, and an attribute it has only from a
+     * profile keeps that profile.
      *
      * @return void
      *
@@ -196,9 +190,7 @@ final class OcsfValidatorTest extends TestCase
     }
 
     /**
-     * A class's enum is merged over the dictionary's: API Activity's four
-     * activities join the dictionary's unknown and other, and Base Event's
-     * success and failure join the dictionary's statuses.
+     * A class's enum is merged over the dictionary's.
      *
      * @return void
      *
@@ -300,9 +292,8 @@ final class OcsfValidatorTest extends TestCase
     }
 
     /**
-     * Whatever `unmapped` holds, and whatever a profile the event names
-     * declares, is accepted: `unmapped` is free, and a profile's attributes are
-     * declared once it applies.
+     * Anything in `unmapped`, or declared by a profile the event names, is
+     * accepted.
      *
      * @return void
      *

@@ -5,10 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records;
 
 /**
- * The version of the envelope a record is stored in, and the versions this
- * release reads back. Every captured record carries the current version; a
- * stored record of any other version is refused when it is read, because old
- * rows are never rewritten and a newer version is never guessed.
+ * The envelope version a record is stored in, and the versions this release
+ * reads; old rows are never rewritten and a newer version never guessed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

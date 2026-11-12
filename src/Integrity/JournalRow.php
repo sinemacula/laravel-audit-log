@@ -10,26 +10,9 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * One row of the lifecycle journal, as it is drafted, signed and stored: its
- * place in the chain, the log it belongs to, its kind, the operation it records
- * and when, the authority that asked for it, the seal or the hold it names, its
- * payload and the payload's digest, the HMAC of the row before, and its own
- * signature.
- *
- * The payload is the canonical JSON text of a map, stored as text and never in
- * a JSON column, so the digest the signature covers is the digest of the bytes
- * stored. The signature covers the payload through that digest alone, so the
- * chain verifies from the small columns, and a reader that needs a payload
- * reads it and checks it against the digest. A row read without its payload
- * holds `null` for it.
- *
- * Every field is checked as it is built: a draft is refused with an
- * `InvalidArgumentException` naming the field, and a stored row read through
- * `fromRow()` with an `UnexpectedValueException` naming the column and never
- * its value. A draft is the first row of the chain exactly when it has no
- * previous HMAC; a stored row that breaks that rule is read, since it is
- * evidence the chain must report as a gap, not a row it may refuse to load. A
- * draft holds no key id and no HMAC until it is signed.
+ * One row of the lifecycle journal, as drafted, signed and stored. The payload
+ * is canonical JSON stored as text, so the digest the signature covers is of
+ * the bytes stored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -187,10 +170,9 @@ final readonly class JournalRow
     }
 
     /**
-     * An unsigned row: its payload the canonical JSON text of the map given,
-     * `{}` for an empty one, and its digest taken, with no key id and no HMAC
-     * until it is signed. The authority is `null` or its type and id, and the
-     * previous HMAC is `null` exactly on the first row.
+     * An unsigned row with its payload's canonical text and digest; the
+     * authority is `null` or its type and id, and the previous HMAC is `null`
+     * exactly on the first row.
      *
      * @formatter:off
      *
@@ -269,11 +251,9 @@ final readonly class JournalRow
     }
 
     /**
-     * The row of a decoded stored row, with its payload when asked: integers
-     * are read as an integer or its decimal string and times in any form an
-     * engine returns. A missing or malformed column is refused naming the
-     * column, never quoting its value, and so is a payload that is not the
-     * canonical JSON text of a map.
+     * The row of a decoded stored row, with its payload when asked; a missing
+     * or malformed column, or a payload that is not a canonical map, is refused
+     * naming the column, never its value.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -371,9 +351,8 @@ final readonly class JournalRow
     }
 
     /**
-     * The fields the HMAC covers, each under its canonical key: every column
-     * but the HMAC and the payload, whose digest stands for it. The order is
-     * irrelevant: the canonical encoding sorts the keys.
+     * The fields the HMAC covers: every column but the HMAC and the payload,
+     * whose digest stands for it.
      *
      * @formatter:off
      *
@@ -718,8 +697,7 @@ final readonly class JournalRow
                 return $text;
             }
         } catch (\JsonException|\UnexpectedValueException) {
-            // Neither JSON nor a canonical value: refused below, as any other
-            // text that is not a canonical map
+            // Refused below, as any other text that is not a canonical map
         }
 
         throw new \UnexpectedValueException(sprintf(self::STORED_MALFORMED, 'payload'));

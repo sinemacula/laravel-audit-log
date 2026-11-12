@@ -40,14 +40,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the coordinator that delivers a claimed outbox row's record
- * to each destination of the store: the receipt it keeps for each, counted
- * before the call; a stack's destinations each tried, and a retry reaching only
- * those still without the record; the transaction a database destination shares
- * with its receipt; destinations that come and go; the claim renewed before
- * each call and each receipt, and nothing further written once it is lost; the
- * write guard around each call; and a bundle handed whole to each destination
- * that keeps attachments, while one that keeps none is refused before it is
- * called, as its own failure.
+ * to each destination of the store, keeping a receipt for each.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -180,9 +173,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A failure whose message, SQL and bindings hold the secret leaves none of
-     * it on the receipt, in the last failure or anywhere in the deliveries
-     * table: only its class and its SQLSTATE are kept.
+     * A failure holding the secret in its message, SQL and bindings leaves only
+     * its class and SQLSTATE in the deliveries table.
      *
      * @return void
      */
@@ -244,9 +236,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A stack whose second destination fails is incomplete, its first
-     * destination delivered and its second not, and the last failure names the
-     * second by its id.
+     * A stack whose second destination fails is incomplete, and the last
+     * failure names that destination by its id.
      *
      * @return void
      */
@@ -388,8 +379,7 @@ final class DeliveryCoordinatorTest extends TestCase
 
     /**
      * A receipt that fails to say a database destination has the record rolls
-     * back the record's insert with it, so the entry and the receipt never
-     * disagree: the delivery is incomplete, with nothing stored.
+     * back the record's insert with it.
      *
      * @return void
      */
@@ -490,9 +480,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * The undelivered receipt of a destination removed from the stack is
-     * reported once, as the row completes, naming the record and the
-     * destination; an incomplete delivery reports nothing of it.
+     * A removed destination's undelivered receipt is reported once, as the row
+     * completes; an incomplete delivery reports nothing of it.
      *
      * @return void
      */
@@ -647,9 +636,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A claim lost while a destination is called writes no receipt of the call,
-     * even though it succeeded, and the remaining destinations are not called:
-     * the new owner repeats the work.
+     * A claim lost during a destination call writes no receipt and calls no
+     * further destination, leaving the work to the new owner.
      *
      * @return void
      */
@@ -700,11 +688,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A claim lost while a database destination is called inside its shared
-     * transaction rolls that transaction back: no entry and no delivered
-     * receipt, while the new owner keeps the row. The lost claim is read as
-     * such, not as a failure of the destination, so the claim is not renewed
-     * again to write a failed receipt.
+     * A claim lost inside a database destination's shared transaction rolls it
+     * back, and is not renewed again to write a failed receipt.
      *
      * @return void
      */
@@ -809,12 +794,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A destination of a stack that keeps no attachments, whether it says so or
-     * implements no contract to say anything, is asked before it is called and
-     * refused a bundle: its attempt is counted, its receipt keeps the refusal's
-     * class and stays undelivered, and it is never handed the bundle. The
-     * destinations that keep attachments, before and after it, are still tried
-     * and each has the bundle whole.
+     * A stack destination that keeps no attachments is refused the bundle
+     * before it is called, while the others each get it whole.
      *
      * @return void
      */
@@ -881,9 +862,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A single store that keeps no attachments is the one destination refused:
-     * its attempt counted, its receipt keeping the refusal's class, and the
-     * failure naming the store's class and no destination.
+     * A single store that keeps no attachments is refused, with the failure
+     * naming its class and no destination.
      *
      * @return void
      */
@@ -908,10 +888,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A destination that keeps no attachments is refused inside no transaction:
-     * the refusal comes before a database destination's shared transaction
-     * would begin, so no statement of the refused attempt runs inside one, and
-     * no entry or artifact is written.
+     * A destination that keeps no attachments is refused before a database
+     * destination's shared transaction begins, writing nothing.
      *
      * @return void
      */
@@ -935,9 +913,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * Once the destination that refused a bundle keeps attachments, the next
-     * delivery of the row hands it the bundle, and the destination that had it
-     * already is not called again.
+     * Once the refusing destination keeps attachments, the next delivery hands
+     * it the bundle and skips the one that has it.
      *
      * @return void
      */
@@ -962,10 +939,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * A bundle reaches each destination that keeps attachments whole: the
-     * database stores its entry and its artifact, and another destination is
-     * handed the record with its attachment, byte for byte the envelope that
-     * was written.
+     * A bundle reaches each destination that keeps attachments whole, byte for
+     * byte the envelope that was written.
      *
      * @return void
      */
@@ -1096,9 +1071,8 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
-     * Note each write of the outbox or the deliveries table among the steps, by
-     * what it does: a renewal, an attempt counted, a receipt delivered or
-     * failed.
+     * Add each write of the outbox or the deliveries table to the steps, by
+     * what it does.
      *
      * @return void
      */

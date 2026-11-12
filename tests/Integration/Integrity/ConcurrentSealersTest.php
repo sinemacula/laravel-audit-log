@@ -32,19 +32,9 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Integration tests for sealers racing one another in real processes, on
- * whichever engine the suite runs against: two sealers released together seal
- * every entry once, in one chain with no gap; a sealer that loses the race for
- * a sequence rolls back and seals again from the new head; a writer inserting
- * while seals are made never leaves an entry half sealed, skipped or sealed
- * twice; a recent pass and a sweep share the table safely; and a seal's open
- * transaction never makes a recording wait on MySQL or PostgreSQL, while on
- * SQLite the one writer makes it wait out `busy_timeout`.
- *
- * SQLite runs in WAL mode, as the operations guidance advises, so a sealer's
- * read never blocks another process's commit; a sealer whose snapshot another
- * commit made stale is refused at its first write, and retries. The processes
- * meet on file gates rather than on timing.
+ * Integration tests for sealers racing in real processes that meet on file
+ * gates; SQLite runs in WAL mode, where a stale snapshot is refused at its
+ * first write.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -97,14 +87,9 @@ final class ConcurrentSealersTest extends TestCase
     private const string IDS = 'ids';
 
     /**
-     * Seal on a fixed clock, verify on another, and bind no anchor and no prune
-     * ledger, so verification checks the seals alone.
-     *
-     * Xdebug's develop mode keeps every failed statement alive with the frames
-     * of its exception, and on SQLite a statement that is never finalised keeps
-     * its stale snapshot, so no attempt after a lost race could ever write.
-     * There, on SQLite, these tests are skipped; they run whenever develop mode
-     * is off.
+     * Seal and verify on fixed clocks with no anchor or prune ledger. Skipped
+     * on SQLite under Xdebug develop mode, which keeps failed statements and
+     * their stale snapshots alive.
      *
      * @return void
      */
@@ -147,10 +132,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * Two sealers in separate processes, released by one gate over 2,000
-     * entries in batches of 100, seal every entry exactly once between them:
-     * the seals they report add up to the stored chain, its sequences run from
-     * 1 with no gap, and every segment verifies as `valid`.
+     * Two sealers released together over 2,000 entries seal each exactly once
+     * in one gapless, valid chain.
      *
      * @return void
      */
@@ -175,11 +158,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * A sealer held after its selection, before its insert, loses the race when
-     * another seals and commits first: its insert of the same sequence is
-     * refused, its attempt rolls back whole, and it seals again from the new
-     * head, chaining onto the winner's seal the entries stored since, and
-     * counting the retry.
+     * A sealer that loses the race for a sequence rolls back whole and seals
+     * again from the new head, counting the retry.
      *
      * @return void
      */
@@ -218,10 +198,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * A writer in another process inserting entry after entry while this one
-     * seals again and again never leaves an entry half sealed: once a last run
-     * has sealed the rest, every entry it stored is a member exactly once, none
-     * is skipped, and the chain verifies.
+     * A writer inserting while seals are made never leaves an entry skipped,
+     * half sealed or sealed twice.
      *
      * @return void
      */
@@ -263,9 +241,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * A recent pass and a sweep in separate processes, released by one gate,
-     * share the table safely: between them every entry is sealed once in one
-     * chain, the sweep reaches the end of the table, and the chain verifies.
+     * A recent pass and a sweep racing seal every entry once in one chain, and
+     * the sweep completes.
      *
      * @return void
      */
@@ -291,14 +268,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * Sealing takes no application lock that recording waits on. A seal held
-     * open in another process after its inserts leaves MySQL and PostgreSQL
-     * free to record at once, within a lock wait far shorter than either
-     * engine's default; the open seal holds only what it selected, and the
-     * entry recorded beside it joins the next seal. SQLite has one writer, so
-     * there a recording made beside the open seal waits out `busy_timeout` and
-     * is refused as a locked database, and once the seal commits the same
-     * recording succeeds.
+     * An open seal never makes a recording wait on MySQL or PostgreSQL; on
+     * SQLite's one writer it waits out `busy_timeout` and is refused.
      *
      * @return void
      */
@@ -333,11 +304,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * On PostgreSQL with `lock_timeout` set, a seal attempt that waits behind
-     * another sealer's uncommitted seal of the same sequence past the timeout
-     * is cancelled (SQLSTATE `55P03`), rolled back whole and made again, never
-     * a stopped run: once the other seal commits, the retry reads it as the
-     * head and finds nothing left to seal.
+     * On PostgreSQL a seal attempt cancelled by `lock_timeout` (`55P03`) rolls
+     * back and retries, finding nothing left to seal.
      *
      * @return void
      */
@@ -401,8 +369,7 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * On MySQL or PostgreSQL, record an entry beside the open seal with a lock
-     * wait of one second, which a lock taken by sealing would exceed, and
+     * Record an entry beside the open seal with a one-second lock wait, and
      * return its id.
      *
      * @param  \Illuminate\Database\Connection  $connection
@@ -423,10 +390,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * On SQLite, record an entry beside the open seal with a short
-     * `busy_timeout`: the recording waits that long for the one writer and is
-     * refused as a locked database, storing nothing. Return the id the
-     * recording is made under once the seal is released to commit.
+     * On SQLite, a recording beside the open seal is refused as locked; return
+     * the id it is made under once the seal commits.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return string
@@ -473,9 +438,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * In a child: hold this process just before its first checkpoint insert,
-     * once its selection is made inside the seal's transaction, until it is
-     * released, having said it arrived. A retry's insert is not held.
+     * In a child: hold before the first checkpoint insert until released,
+     * having said it arrived; a retry is not held.
      *
      * @return void
      */
@@ -497,9 +461,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * In a child: hold this process inside the seal's transaction once its
-     * members are inserted, until it is released, having said it arrived; on
-     * release, say the seal has committed once it has.
+     * In a child: hold inside the seal's transaction after its members until
+     * released, then say when it has committed.
      *
      * @return void
      */
@@ -520,9 +483,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * Store the number of entries, a microsecond apart, in one transaction,
-     * which on a file database is far quicker than a commit each, and return
-     * their ids.
+     * Store the number of entries a microsecond apart in one transaction, far
+     * quicker than a commit each on a file database, and return their ids.
      *
      * @param  int  $count
      * @return list<string>
@@ -534,9 +496,8 @@ final class ConcurrentSealersTest extends TestCase
     }
 
     /**
-     * Assert every entry given is a member of exactly one seal and no other
-     * entry is, that the seals' sequences run from 1 with no gap, and that
-     * every segment verifies.
+     * Assert each entry is a member of exactly one seal, the sequences have no
+     * gap, and every segment verifies.
      *
      * @param  list<string>  $ids
      * @return void
@@ -613,18 +574,5 @@ final class ConcurrentSealersTest extends TestCase
     private static function keepsFailedStatements(): bool
     {
         return function_exists('xdebug_info') && in_array('develop', xdebug_info('mode'), true);
-    }
-
-    /**
-     * The ids in byte order, as the members are read back.
-     *
-     * @param  list<string>  $ids
-     * @return list<string>
-     */
-    private static function sorted(array $ids): array
-    {
-        usort($ids, strcmp(...));
-
-        return $ids;
     }
 }

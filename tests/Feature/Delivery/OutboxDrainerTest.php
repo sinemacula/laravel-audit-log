@@ -39,15 +39,8 @@ use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the outbox drain: it delivers each due row's record, byte
- * for byte as it was finalised, and deletes the row before saying so; retries a
- * failure after a doubling wait, and fails and keeps a row at its last attempt,
- * reporting it then and only then; fails and keeps a row it cannot decrypt or
- * verify, and one that killed its worker too often; never lets a first worker
- * that outlived its lease change what a new owner did; runs from a fixed due
- * instant, so it always ends; refuses to run inside a transaction; says every
- * failure inside the write guard; and delivers a bundle whole, or keeps its row
- * for a retry while a destination keeps no attachments.
+ * Feature tests for the outbox drain, which delivers each due row's record and
+ * retries or fails the rows it cannot.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -129,9 +122,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * The store receives the record the outbox was given, byte for byte, and
-     * the database keeps its signature and its times as they were, and they
-     * verify.
+     * The store receives the outbox's record byte for byte, and its signature
+     * and times verify as they were.
      *
      * @return void
      */
@@ -485,9 +477,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A row claimed with more attempts than it may have, which only a worker
-     * killed on each of them leaves, is failed as abandoned without being
-     * delivered, and reported by its id alone.
+     * A row claimed past its attempt limit, which only a repeatedly killed
+     * worker leaves, is failed as abandoned and reported by id alone.
      *
      * @return void
      */
@@ -634,9 +625,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * An envelope signed under an integrity key since removed from the ring
-     * cannot be verified, so its row is failed as an unknown key and kept,
-     * never signed again under the current key.
+     * An envelope signed under a key removed from the ring is failed as an
+     * unknown key and kept, never re-signed under the current key.
      *
      * @return void
      */
@@ -698,9 +688,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A row whose receipts cannot be read is a failed delivery like any other:
-     * it retries after its backoff, keeps the failure's class, is not reported
-     * and stops no other row.
+     * A row whose receipts cannot be read retries after its backoff like any
+     * failed delivery, unreported, and stops no other row.
      *
      * @return void
      */
@@ -745,10 +734,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * Whichever statement of the deliveries table fails, an outage of the
-     * storage connection is retried with a backoff that doubles, keeps the
-     * failure's class, is reported once at the last attempt, and never reads as
-     * `abandoned`, which means only that a worker died.
+     * A storage outage on any deliveries statement retries with doubling
+     * backoff, is reported at the last attempt, and is never `abandoned`.
      *
      * @param  string  $statement
      * @return void
@@ -811,9 +798,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A row whose work stops for a reason a delivery does not expect, here a
-     * renewal that fails, is reported payload-free, retried after its backoff
-     * rather than left on its lease, and stops no other row.
+     * A row stopped by an unexpected failure, here a failed renewal, is
+     * reported payload-free, retried after its backoff and stops no other row.
      *
      * @return void
      */
@@ -950,9 +936,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A row another worker claims between this drain reading it and claiming it
-     * is counted missed and left to that worker, whose claim is the only one
-     * taken, and the drain goes on to the next row.
+     * A row another worker claims between this drain's read and claim is
+     * counted missed and left to that worker.
      *
      * @return void
      */
@@ -982,9 +967,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A first worker still inside its destination when its lease passes and a
-     * new owner delivers and deletes the row cannot delete it: it is stale, and
-     * only the new owner counts the delivery.
+     * A first worker whose lease passed while a new owner delivered and deleted
+     * the row cannot delete it; only the new owner counts it.
      *
      * @return void
      */
@@ -1023,9 +1007,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A first worker on its last attempt whose destination fails after a new
-     * owner has failed the row cannot fail it again or report it: only the new
-     * owner's abandonment is said.
+     * A first worker failing on its last attempt after a new owner failed the
+     * row cannot fail or report it again.
      *
      * @return void
      */
@@ -1052,8 +1035,7 @@ final class OutboxDrainerTest extends TestCase
 
     /**
      * A first worker whose destination succeeds after its lease passed writes
-     * no receipt of it: the receipt shows the new owner's failure, still
-     * undelivered.
+     * no receipt; the new owner's failure stands.
      *
      * @return void
      */
@@ -1364,9 +1346,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A row holding a bundle is delivered whole: the database keeps its entry,
-     * which verifies, and its artifact, equal to the attachment the row held,
-     * then the row is deleted.
+     * A row holding a bundle is delivered whole, entry and artifact, then
+     * deleted.
      *
      * @return void
      */
@@ -1392,10 +1373,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * A row holding a bundle for a stack with a destination that keeps no
-     * attachments is retried, never deleted: the database has the bundle, the
-     * destination that keeps none was never handed it, and the row keeps the
-     * refusal's class for its next attempt.
+     * A bundle row for a stack with a destination keeping no attachments is
+     * retried, never deleted, keeping the refusal's class.
      *
      * @return void
      */
@@ -1422,9 +1401,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * At its last attempt, a row holding a bundle that its store keeps no
-     * attachments of is failed and kept for a replay, never deleted, and the
-     * refusal is reported once by its class, naming the store.
+     * At its last attempt, a bundle row whose store keeps no attachments is
+     * failed and kept for a replay, and reported once.
      *
      * @return void
      */
@@ -1615,12 +1593,8 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * Put a record in the outbox and bind a non-participating destination whose
-     * first call, the first worker's, moves the clock past its lease and runs a
-     * second drain, the new owner, inside it. The new owner's call runs the
-     * work given; the first worker's call then returns, or throws when told to,
-     * having run the work first when told to. Returns the list the new owner's
-     * tally is put in.
+     * Put a record behind a destination whose first call passes its lease and
+     * runs the new owner's drain; returns that drain's tally.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\FinalisedRecord): void  $work
      * @param  bool  $firstFails

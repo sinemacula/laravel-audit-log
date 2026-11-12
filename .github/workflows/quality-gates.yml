@@ -63,9 +63,8 @@ jobs:
                     php-version: 8.3
                     coverage: pcov
 
-            # On a push, origin/master is the pushed commit itself, so the gate
-            # diffs against the commit master moved from. A push that rewrote
-            # master instead of moving it forward leaves no such base.
+            # On a push, origin/master is the pushed commit, so diff against the
+            # commit master moved from; a rewritten master leaves no such base.
             -   name: Scoped mutation gate
                 env:
                     BEFORE: ${{ github.event.before }}

@@ -38,6 +38,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SealsEntries;
 use Tests\Fixtures\Records\RecordFactory;
@@ -45,14 +46,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for one prune chunk under the lifecycle lock, on whichever
- * engine the suite runs against: it deletes only the rows it read and verified
- * under the lock that are still eligible, unheld and delivered; an id already
- * gone is never covered; its record covers exactly the deleted positions; a
- * delete that mismatches rolls the chunk back; a hold committed before the
- * lock, an outbox row and a row no longer eligible each keep their entry; a
- * member of another seal deletes nothing; and every statement runs on the
- * maintenance connection.
+ * Feature tests for one prune chunk under the lifecycle lock.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,7 +56,7 @@ use Tests\TestCase;
 #[CoversClass(PruneChunk::class)]
 final class PruneChunkTest extends TestCase
 {
-    use InteractsWithOutbox, SealsEntries;
+    use ConnectsSecondDatabases, InteractsWithOutbox, SealsEntries;
 
     /** @var string When every chunk runs. */
     private const string NOW = '2026-11-04 15:00:00';
@@ -84,9 +78,6 @@ final class PruneChunkTest extends TestCase
 
     /** @var string When every chunk's record says it pruned. */
     private const string PRUNED_AT = '2026-11-04T15:00:00.000000Z';
-
-    /** @var string A maintenance connection of its own, to the worker's database. */
-    private const string MAINTENANCE = 'audit_maintenance';
 
     /**
      * Stop the clock, keep every category thirty days, and bind the configured
@@ -127,9 +118,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * The chunk deletes only the rows it read under the lock that are eligible:
-     * the lock is its first statement, every read follows it, the deletes name
-     * exactly the eligible rows, and a planned row inside its cut-off is left.
+     * The chunk deletes only the eligible rows it read under the lock.
      *
      * @return void
      */
@@ -164,8 +153,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * An id whose entry is already gone is left alone and never covered: the
-     * record sets the positions of the entries the chunk deleted alone.
+     * An id whose entry is already gone is never covered.
      *
      * @return void
      */
@@ -187,10 +175,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * The record covers exactly the positions, in member order, of the entries
-     * deleted, counts them, names the seal, its digest and its members, the run
-     * as its operation and the time given, and verifies; the journal row names
-     * the seal and the run.
+     * The record covers exactly the deleted positions and verifies.
      *
      * @return void
      */
@@ -226,8 +211,8 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * A delete of entries that affects fewer rows than it names rolls the whole
-     * chunk back: its other deletes and its journal row with it.
+     * A delete that affects fewer rows than it names rolls the whole chunk
+     * back.
      *
      * @return void
      */
@@ -252,9 +237,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * A hold committed after the replay was verified but before the chunk's
-     * lock is seen: the chunk advances the replay under the lock, and the held
-     * rows are kept and counted.
+     * A hold committed before the chunk's lock is seen.
      *
      * @return void
      */
@@ -277,9 +260,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * Eligibility is decided from the verified row: a planned id whose row is
-     * of a protected code, or whose time is inside its cut-off, is left and
-     * counted, while the eligible rows beside it go.
+     * Eligibility is decided from the verified row.
      *
      * @return void
      */
@@ -299,8 +280,8 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * An entry with an outbox row written before the chunk's lock is kept and
-     * counted as pending, as is one with a receipt not yet delivered.
+     * An entry with an earlier outbox row or an undelivered receipt is kept as
+     * pending.
      *
      * @return void
      */
@@ -330,9 +311,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * A planned id that is a member of another seal fails the chunk's check of
-     * membership: nothing is deleted, nothing is journalled, and the seal is to
-     * be skipped.
+     * A member of another seal is never deleted.
      *
      * @return void
      */
@@ -355,8 +334,8 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * A candidate whose row was changed after it was sealed fails verification,
-     * and the chunk deletes nothing.
+     * A candidate changed after it was sealed fails verification and nothing is
+     * deleted.
      *
      * @return void
      */
@@ -375,8 +354,8 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * With a maintenance connection of its own, the lock, every read and every
-     * delete of the chunk run on it, and the storage connection runs nothing.
+     * With a maintenance connection of its own, every statement of the chunk
+     * runs on it.
      *
      * @return void
      */
@@ -401,8 +380,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * Run a chunk of the ids of the first seal from the replay given, or one
-     * verified now, in a lifecycle transaction, with the run's decisions.
+     * Run a chunk of the first seal's ids in a lifecycle transaction.
      *
      * @param  list<string>  $ids
      * @param  ?\SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
@@ -483,8 +461,8 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * Store a captured record with the fields given over its own, happening at
-     * the instant given and recorded at the test's time, and return its id.
+     * Store a captured record with the fields given over its own and return its
+     * id.
      *
      * @param  string  $occurredAt
      * @param  array<string, string>  $fields
@@ -501,9 +479,8 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * Delete the entry, through the chunk's own connection, as the chunk's last
-     * delete of receipts runs, so its delete of entries affects one row fewer
-     * than it names.
+     * Delete the entry as the chunk deletes receipts, so its entries delete
+     * affects one row fewer.
      *
      * @param  string  $id
      * @return void
@@ -524,8 +501,7 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
-     * Log each statement from now as the lock, a delete or anything else, with
-     * the ids it names and its connection's transaction level.
+     * Log each statement from now as the lock, a delete or anything else.
      *
      * @return \ArrayObject<int, array{0: string, 1: list<string>, 2: int}>
      */
@@ -549,31 +525,6 @@ final class PruneChunkTest extends TestCase
         });
 
         return $log;
-    }
-
-    /**
-     * Configure a second connection to the worker's database as the maintenance
-     * connection: on SQLite it shares the in-memory database's connection.
-     *
-     * @return void
-     */
-    private function sameDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
-
-        $root = DB::connection(self::CONNECTION);
-
-        if ($root->getDriverName() !== 'sqlite') {
-            return;
-        }
-
-        $same = DB::connection(self::MAINTENANCE);
-
-        $same->setPdo($root->getPdo());
-        $same->setReadPdo($root->getPdo());
     }
 
     /**

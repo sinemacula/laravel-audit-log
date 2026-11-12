@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for an import line: the fields it keeps, and its source assertion,
- * which is exactly what the line asserts, each reference as its type and id,
- * and never its category, its source, its region or its number.
+ * Unit tests for an import line and its source assertion.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,10 +52,7 @@ final class ImportLineTest extends TestCase
     }
 
     /**
-     * The assertion is exactly the asserted fields, in their order, with the
-     * references as pairs and `null` for none, and never the category, the
-     * source, the region, the record's id, the line's number or what was
-     * dropped.
+     * The assertion is exactly the asserted fields, references as pairs.
      *
      * @return void
      */

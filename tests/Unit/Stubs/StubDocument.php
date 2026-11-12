@@ -7,9 +7,8 @@ namespace Tests\Unit\Stubs;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Eloquent stub with a string key that does not increment, standing in for a
- * model keyed by a UUID, a ULID or any other string; its key is never cast, so
- * a test can give it any key.
+ * A model with a non-incrementing string key that is never cast, standing in
+ * for one keyed by a UUID, a ULID or any other string.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

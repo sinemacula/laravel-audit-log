@@ -24,19 +24,12 @@ use Tests\Fixtures\Support\FrozenClock;
 
 /**
  * The generator of the golden version 1 export in `golden-v1`, kept to show how
- * its files were made; the suite never runs it, and only reads the files it
- * wrote, pinned by their digests.
+ * its files were made; the suite never runs it and reads the files pinned by
+ * their digests.
  *
- * Run inside the package's test application, with its tables migrated and the
- * `app.key` the Feature and Integration tests configure, it seeds three
- * entries, two approvals and a bulk approval whose line carries its descriptor
- * alone, each signed under the key derived from that `app.key`, then exports
- * every entry an auditor may see, under a scope that reveals no encrypted
- * field, as NDJSON, at a fixed instant; the manifest names that scope by the
- * keyed fingerprint of its normalised form, the grant included. It writes the
- * export as `export.ndjson`, its bundle as `export.ndjson.manifest.json`, and
- * the journal's entry row and artifact row, as the storage connection holds
- * them, as `journal.json`, which a test inserts before it verifies the export.
+ * It seeds two approvals and a bulk approval under the test `app.key`, exports
+ * what an auditor may see as NDJSON at a fixed instant, and writes the export,
+ * its bundle and the journal's rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

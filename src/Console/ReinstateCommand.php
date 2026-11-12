@@ -10,22 +10,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ReinstatementRefusedException;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:reinstate`: reinstates an erased owner, so a key may be created
- * for the owner again in a generation above the floor of its erasure,
- * journalled behind the lifecycle lock and decided from the owner's latest
- * marker and the verified journal, then records it. A reinstatement creates no
- * key and makes no erased field readable again.
- *
- * The owner is named by the `type` and `id` arguments. It trusts the shell, as
- * every maintenance command does: `--by-type` and `--by-id` assert the operator
- * and prove nothing of who runs it, and the boundary is the maintenance
- * connection's credentials. It prints the operation's id, the reinstatement's
- * journal row, the owner's keyed fingerprint and the id of the ring key it was
- * taken under, never the owner, the generation floor, and a warning when the
- * record could not be written. An owner who is not erased is refused, recorded
- * `denied`, and exits 1, as does any other failure, printed by its class alone
- * and never its message; an argument or option it refuses exits 2 before
- * anything runs.
+ * `audit-log:reinstate`: reinstates an erased owner so new keys can be created
+ * above its erasure's generation floor; erased fields stay unreadable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,8 +34,7 @@ final class ReinstateCommand extends Command
     protected $description = 'Reinstate an erased owner, so new keys may be created for it';
 
     /**
-     * Reinstate the owner the arguments name, once the arguments and options
-     * are known to be well formed, and print it.
+     * Reinstate the owner the arguments name and print it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @return int

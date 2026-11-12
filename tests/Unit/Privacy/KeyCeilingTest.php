@@ -12,8 +12,7 @@ use SineMacula\Laravel\AuditLog\Privacy\OmissionLog;
 
 /**
  * Unit tests for the key ceiling: where it falls, that a longer key goes with
- * its whole branch at every depth, and what is said about it, in the properties
- * and the context alike.
+ * its branch at any depth, and how it is logged.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,9 +74,8 @@ final class KeyCeilingTest extends TestCase
     }
 
     /**
-     * Rows of `[values holding a longer key, what is left]`: the key at each
-     * depth, within a map and within a map in a list, with its siblings kept.
-     * The key is built in the test, so the data set does not print it.
+     * Rows of `[values holding a longer key, what is left]`, the key built in
+     * the test so the data set does not print it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

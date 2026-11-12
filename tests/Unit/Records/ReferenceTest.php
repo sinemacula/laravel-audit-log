@@ -17,9 +17,7 @@ use Tests\Unit\Stubs\StubSealedUser;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for the reference value: the ids it keeps exactly, the pairs it
- * refuses, how a model is referred to under each morph map, the keys a model
- * may have, and the equality and shape it gives.
+ * Unit tests for the reference value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -350,9 +348,7 @@ final class ReferenceTest extends TestCase
     }
 
     /**
-     * Referring to a model reads its key and its morph class only: it never
-     * reads another attribute, turns the model into an array or JSON, casts it
-     * to a string or queries it, each of which this model refuses by throwing.
+     * Referring to a model reads only its key and its morph class.
      *
      * @return void
      */

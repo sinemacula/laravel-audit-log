@@ -8,7 +8,6 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -23,6 +22,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\WritesTheJournal;
@@ -32,13 +32,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:prune`: it runs a prune and prints its run id,
- * status, counts, skipped seals, cursor and remaining seals; plans one with
- * `--dry-run`, printing the plan per pair and per seal and writing nothing;
- * takes a time budget from 60 to 86400 seconds and refuses any other before a
- * statement runs; writes one JSON object with `--json`; exits 1 for a failed
- * run and for a skipped seal; warns when the record could not be written; and
- * prints no value of an entry.
+ * Feature tests for `audit-log:prune`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,7 +42,7 @@ use Tests\TestCase;
 #[CoversClass(PruneCommand::class)]
 final class PruneCommandTest extends TestCase
 {
-    use ReadsTheTrail, SealsEntries, WritesTheJournal;
+    use CountsStatements, ReadsTheTrail, SealsEntries, WritesTheJournal;
 
     /** @var string When every run starts. */
     private const string NOW = '2026-12-15 15:00:00';
@@ -63,10 +57,7 @@ final class PruneCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, keep entries thirty days, bind the configured policy
-     * and the journal's ledger, report to a recording handler, and register the
-     * command with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, keep entries 30 days, bind services, register command.
      *
      * @return void
      */
@@ -103,8 +94,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A run deletes what retention no longer keeps, prints its run id, status
-     * and counts, and exits 0.
+     * A run deletes what retention no longer keeps and prints what it did.
      *
      * @return void
      */
@@ -129,8 +119,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A dry run prints its plan, what it would delete, per pair and per seal,
-     * exits 0 and writes nothing: no entry deleted, no journal row, no record.
+     * A dry run prints its plan per pair and per seal and writes nothing.
      *
      * @return void
      */
@@ -171,8 +160,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * `--json` names each pair's tenant of a dry run's plan by its digest, as
-     * the printed plan does, never by its reference.
+     * `--json` names a plan's tenant by its digest, never its reference.
      *
      * @return void
      */
@@ -244,8 +232,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A time budget out of range, or not a number, is refused with exit 2
-     * before any statement runs.
+     * A time budget out of range or not a number exits 2 before any statement.
      *
      * @param  string  $value
      * @return void
@@ -261,8 +248,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A failed run, here on a journal that fails verification, prints its
-     * status and reason and exits 1.
+     * A failed run prints its status and reason and exits 1.
      *
      * @return void
      */
@@ -276,8 +262,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A run that skipped a seal it could not authenticate prints the seal's id
-     * and exits 1, though it ended partial.
+     * A skipped seal is printed and exits 1, though the run ended partial.
      *
      * @return void
      */
@@ -312,8 +297,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A run whose record could not be written says so, and still exits 0, since
-     * the run stands.
+     * A run whose record could not be written warns and still exits 0.
      *
      * @return void
      */
@@ -344,8 +328,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * Nothing a run, a dry run or `--json` prints holds a value of an entry: a
-     * property, its subject, its client address or its context.
+     * Nothing a run, dry run or `--json` prints holds an entry's value.
      *
      * @return void
      */
@@ -372,8 +355,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * Store the number of entries that happened past thirty days, each holding
-     * a secret property, and return their ids.
+     * Store entries past thirty days, each with a secret, and return their ids.
      *
      * @param  int  $count
      * @return list<string>
@@ -407,25 +389,7 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
-    }
-
-    /**
-     * Run the command with the options given, keep what it printed, and return
-     * its exit code.
+     * Run the command, keep what it printed, and return its exit code.
      *
      * @param  array<string, bool|string>  $parameters
      * @return int

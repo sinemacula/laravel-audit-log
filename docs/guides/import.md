@@ -161,6 +161,5 @@ prune deletes them unless a hold keeps them.
 `--dry-run`, or `dryRun: true`, reads the file, validates, minimises encrypting nothing and classifies each line
 against the rows stored, and counts the lines past retention. That count is best effort, in an import as in a dry run:
 a retention policy or setting that fails to answer leaves it `null`, reported once, and never stops the import. It
-writes nothing: no batch, no journal row, no key, no
-record. It is a plan, not a promise, since another import may store the same records first, and lines repeated in
-different chunks of one file are not compared.
+writes nothing: no batch, no journal row, no key, no record. It is a plan, not a promise, since another import may
+store the same records first, and lines repeated in different chunks of one file are not compared.

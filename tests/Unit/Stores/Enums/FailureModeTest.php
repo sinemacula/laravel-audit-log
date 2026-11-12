@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 
 /**
- * Unit tests for the failure mode enum: its cases and the values configuration
- * names them by.
+ * Unit tests for the failure mode enum's cases and values.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 final class FailureModeTest extends TestCase
 {
     /**
-     * The cases, in order, with the values configuration names them by, so a
-     * renamed, reordered or added case fails.
+     * The cases and their configuration values are pinned, in order.
      *
      * @return void
      */

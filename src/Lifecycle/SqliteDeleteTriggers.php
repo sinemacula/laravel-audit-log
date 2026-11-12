@@ -8,19 +8,11 @@ use Illuminate\Database\Connection;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 
 /**
- * The delete triggers of the entries and the artifacts on SQLite, which a prune
- * drops and recreates around its deletes.
+ * SQLite's entry and artifact delete triggers, which a prune drops and
+ * recreates inside the chunk's transaction.
  *
- * SQLite has no users, so the storage note's triggers refuse every delete they
- * cover, the maintenance one included. A prune on SQLite therefore drops the
- * delete triggers of the entries and the artifacts that are installed, deletes,
- * and creates them again with the documented text, all inside the chunk's own
- * transaction, so a chunk that rolls back restores them as they were and no
- * other connection ever sees them missing. A trigger that is not installed is
- * neither dropped nor created. On every other engine nothing runs: the
- * documented triggers there let the maintenance user delete.
- *
- * This is the one place the package changes the schema at runtime.
+ * SQLite has no users, so the triggers refuse even the maintenance delete; a
+ * rollback restores them unseen by other connections.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,9 +33,8 @@ final readonly class SqliteDeleteTriggers
         SQL;
 
     /**
-     * The names of the delete triggers of the entries and the artifacts that
-     * are installed, each dropped, on SQLite; on any other engine, none, and no
-     * statement runs.
+     * Drop the installed delete triggers on SQLite and return their names; none
+     * on any other engine.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<string>
@@ -75,8 +66,8 @@ final readonly class SqliteDeleteTriggers
     }
 
     /**
-     * Create again each delete trigger named, with the documented text of its
-     * table, on SQLite; on any other engine nothing runs.
+     * Create each named delete trigger again on SQLite; nothing runs on any
+     * other engine.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<string>  $names
@@ -94,8 +85,7 @@ final readonly class SqliteDeleteTriggers
     }
 
     /**
-     * The documented text of the delete trigger of the table, as the storage
-     * note gives it.
+     * The documented text of the table's delete trigger.
      *
      * @param  string  $table
      * @return string

@@ -12,20 +12,8 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use Tests\TestCase;
 
 /**
- * Integration tests for where the shipped key migrations, run by Laravel's own
- * `migrate` and `migrate:rollback` commands, create the subject keys, the owner
- * erasures and the key uses: always on the storage connection, beside the
- * entries whose fields the keys encrypt and the journal that records their
- * erasures, never on the default connection, the maintenance connection or
- * wherever the outbox goes, and with no row seeded.
- *
- * The storage, the maintenance and the outbox connections are further
- * connections to the test database, each with a table prefix of its own: a
- * database of its own on SQLite, where each in-memory connection has one, and
- * prefixed tables beside the default connection's on PostgreSQL and MySQL.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the connection `migrate` puts the key tables on; a
+ * migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,10 +39,7 @@ final class KeyMigrationsConnectionTest extends TestCase
     private const array TABLES = ['audit_log_subject_keys', 'audit_log_owner_erasures', 'audit_log_key_uses'];
 
     /**
-     * Each key table is created on the storage connection, beside the entries
-     * and the journal, and on no other, the maintenance connection and the
-     * moved outbox's included, with no row; rolling the migrations back drops
-     * each from the storage connection again.
+     * Each key table is created on the storage connection alone, with no row.
      *
      * @return void
      */
@@ -79,8 +64,7 @@ final class KeyMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Moving the outbox leaves the key tables on the storage connection, and
-     * puts none of them on the outbox connection.
+     * Moving the outbox leaves the key tables on the storage connection.
      *
      * @return void
      */
@@ -106,9 +90,8 @@ final class KeyMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Put the package's tables on a second connection to the test database,
-     * with a prefix of its own, name a maintenance connection of its own, and
-     * register the outbox connection the same way.
+     * Prefix the other connections to the test database, each a database of its
+     * own on in-memory SQLite, and put the package's tables on one.
      *
      * @param  mixed  $app
      * @return void

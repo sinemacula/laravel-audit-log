@@ -8,13 +8,9 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\PruneRecord;
 
 /**
- * A prune ledger held in memory: the records a test gives it, by the seal each
- * names, so a test chooses which seals verification finds pruned and with what
- * records, valid, forged, overlapping or for another seal.
- *
- * Every record given is kept, in the order given, beside the seal's others, as
- * a seal pruned by several transactions has several. Nothing is checked here:
- * verification checks every record it is given.
+ * A prune ledger held in memory, so a test chooses which seals verification
+ * finds pruned and with what records; every record is kept in order and none is
+ * checked.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

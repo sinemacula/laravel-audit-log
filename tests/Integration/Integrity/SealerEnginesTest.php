@@ -23,11 +23,8 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Integration tests for sealing on whichever engine the suite runs against:
- * seals chain on each engine, the keyset is exact at equal microseconds, an id
- * order is never taken for a high-water mark, a row that commits out of order
- * joins a later seal, every statement reaches the writer, and a stored seal's
- * fields give back the digest it was inserted with in each engine's time form.
+ * Integration tests for sealing on each engine: chaining, exact keysets, late
+ * commits, writer-only statements and digests from stored times.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,9 +89,8 @@ final class SealerEnginesTest extends TestCase
     }
 
     /**
-     * On each engine, seals are written and chained: sequences 1 to 3 with no
-     * gap, each linked to the one before by its id and stored digest, every
-     * entry a member once.
+     * Seals 1 to 3 chain by id and stored digest with no gap, every entry a
+     * member once.
      *
      * @return void
      */
@@ -123,9 +119,8 @@ final class SealerEnginesTest extends TestCase
     }
 
     /**
-     * At one microsecond shared by more rows than a batch holds, the keyset
-     * splits them exactly by id: every row is sealed once, across batches, and
-     * none is missed or read twice.
+     * Rows sharing one microsecond across batches are split exactly by id, each
+     * sealed once.
      *
      * @return void
      */
@@ -169,11 +164,8 @@ final class SealerEnginesTest extends TestCase
     }
 
     /**
-     * A row whose transaction commits after a seal, though it was recorded
-     * before that seal's latest member, is not in that seal, and joins the next
-     * one. On MySQL and PostgreSQL its transaction is open on another
-     * connection while the seal is written; SQLite has one writer, so there it
-     * commits once the seal has.
+     * A row committed after a seal, though recorded before its latest member,
+     * joins the next seal; on SQLite it commits once the seal has.
      *
      * @return void
      */
@@ -203,10 +195,8 @@ final class SealerEnginesTest extends TestCase
     }
 
     /**
-     * Sealing reads and writes the writer: with a replica that lags behind the
-     * primary, the head the second run chains onto, the candidates it seals,
-     * the seals, the members and the progress are all on the primary, and the
-     * replica sees none of them, holding only what its migrations seeded.
+     * Sealing reads and writes the primary alone, so a lagging replica sees
+     * none of it.
      *
      * @return void
      */
@@ -243,9 +233,8 @@ final class SealerEnginesTest extends TestCase
     }
 
     /**
-     * On each engine, the stored seal's fields, in the time form the engine
-     * returns, give back the digest the seal was inserted with, a whole second
-     * and a single fractional digit included.
+     * A stored seal's fields, in the engine's time form, give back its inserted
+     * digest, whole seconds and single fractional digits included.
      *
      * @return void
      */
@@ -289,9 +278,8 @@ final class SealerEnginesTest extends TestCase
     }
 
     /**
-     * Insert, through the late writer when there is one, a copy of the first
-     * entry under a new id, recorded before the latest entry, and return its
-     * id; with no late writer, store it through the package.
+     * Insert a copy of the first entry under a new id, recorded before the
+     * latest, through the late writer or else the package, and return its id.
      *
      * @param  ?\Illuminate\Database\Connection  $late
      * @return string
@@ -333,18 +321,5 @@ final class SealerEnginesTest extends TestCase
         }
 
         $config->set('audit-log.storage.connection', self::SPLIT_CONNECTION);
-    }
-
-    /**
-     * The ids in byte order, as the members are read back.
-     *
-     * @param  list<string>  $ids
-     * @return list<string>
-     */
-    private static function sorted(array $ids): array
-    {
-        usort($ids, strcmp(...));
-
-        return $ids;
     }
 }

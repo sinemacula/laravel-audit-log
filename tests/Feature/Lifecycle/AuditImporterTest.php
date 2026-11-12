@@ -43,19 +43,14 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay;
 use SineMacula\Laravel\AuditLog\Lifecycle\SourceDigest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for importing another system's records, on whichever engine the
- * suite runs against: a dry run that writes nothing; every column of an
- * imported row, signed and sealed; the batch and its counts; a repeated, a
- * conflicting and an exported import; the hold committed with the start before
- * any entry and left in place on failure; a broken journal, a changed
- * file and a refused source or transaction; the journal's start and finish;
- * the close of a running batch; and which connection writes what.
+ * Feature tests for importing another system's records into the audit log.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,7 +60,7 @@ use Tests\TestCase;
 #[CoversClass(AuditImporter::class)]
 final class AuditImporterTest extends TestCase
 {
-    use SealsEntries, WritesTheJournal;
+    use ConnectsSecondDatabases, SealsEntries, WritesTheJournal;
 
     /** @var string When every import runs. */
     private const string NOW = '2026-11-02 09:00:00.000000';
@@ -79,15 +74,12 @@ final class AuditImporterTest extends TestCase
     /** @var string The refusal of a batch that cannot be closed. */
     private const string NOT_CLOSABLE = 'Only a running import batch, or a final one whose finish was never journalled, is closed.';
 
-    /** @var string A second connection name to the same database, for the maintenance connection. */
-    private const string MAINTENANCE = 'audit_maintenance';
-
     /** @var list<string> The files this test wrote. */
     private array $files = [];
 
     /**
-     * Freeze the clock, name this installation's source and bind the configured
-     * retention policy.
+     * Freeze the clock, name this installation's source and bind the retention
+     * policy.
      *
      * @return void
      */
@@ -124,8 +116,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A dry run reads, classifies and counts, and issues no statement but
-     * reads: no batch, no journal row, no installation id, no entry.
+     * A dry run reads and counts but writes nothing.
      *
      * @return void
      */
@@ -158,11 +149,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * An imported row is `imported`, of its source, region and record id there,
-     * its batch and its keyed digest; its origin is as given or `null`, its
-     * occurrence time kept, and it is recorded at the import's time or its
-     * occurrence, whichever is later; it is signed by this ring, and sealed in
-     * this chain like any row.
+     * An imported row carries its source identity, batch and digest, signed and
+     * sealed like any row.
      *
      * @return void
      */
@@ -202,9 +190,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The batch records the importer, the reason and reference, the source and
-     * region, the format, the file's SHA-256, its counts and its times, and
-     * ends `complete` when every line was imported or a duplicate.
+     * The batch records its importer, source, file digest, counts and times,
+     * and ends `complete`.
      *
      * @return void
      */
@@ -231,8 +218,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The batch is never externally verified: the package attests what this
-     * installation accepted, not what the source asserted.
+     * The batch is never externally verified.
      *
      * @return void
      */
@@ -252,8 +238,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Importing the same file twice stores each record once: the second import
-     * finds every line a duplicate and is complete.
+     * Importing the same file twice stores each record once.
      *
      * @return void
      */
@@ -270,9 +255,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A line that asserts something else under a record id imported already is
-     * a conflict, never a raw exception: the batch is `partial` and lists its
-     * id.
+     * A conflicting line marks the batch `partial` and lists its record id.
      *
      * @return void
      */
@@ -306,8 +289,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Imported rows are never dispatched as `AuditRecorded` and never reach the
-     * outbox or a destination.
+     * Imported rows are never dispatched or delivered.
      *
      * @return void
      */
@@ -325,9 +307,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * With a hold asked for, the start's journal row, the hold's row and its
-     * projection row commit before the first entry is written, and the hold
-     * keeps exactly the batch.
+     * The start and its hold commit before the first entry, and the hold keeps
+     * exactly the batch.
      *
      * @return void
      */
@@ -359,9 +340,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The start and its hold commit together: a failure after the hold's row
-     * rolls back the start's row too, and the batch is `failed` with no entry
-     * and no hold.
+     * A failure after the hold's row rolls back the start and fails the batch.
      *
      * @return void
      *
@@ -392,8 +371,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A broken journal refuses the start: nothing is appended, no entry is
-     * written, and the batch is `failed`.
+     * A broken journal refuses the start and the batch is `failed`.
      *
      * @return void
      *
@@ -417,8 +395,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A failure after the start fails the batch, journals its finish as
-     * `failed`, leaves the hold in place, and is rethrown.
+     * A failure after the start fails the batch, journals its finish and leaves
+     * the hold.
      *
      * @return void
      *
@@ -449,8 +427,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A file that changed between its two reads fails the batch, which journals
-     * its finish as `failed`, and the failure is rethrown.
+     * A file that changed between its two reads fails the batch.
      *
      * @return void
      *
@@ -474,8 +451,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The closure given is told of the start once it has committed, with the
-     * batch running and the hold placed, before any entry is written.
+     * The started closure is told once the start commits, before any entry is
+     * written.
      *
      * @return void
      */
@@ -494,7 +471,7 @@ final class AuditImporterTest extends TestCase
 
     /**
      * An import whose source is this installation is refused before its file is
-     * read, writing nothing.
+     * read.
      *
      * @return void
      *
@@ -513,8 +490,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * An import inside a host transaction on the storage connection is refused,
-     * writing nothing.
+     * An import inside a host transaction on the storage connection is refused.
      *
      * @return void
      *
@@ -539,8 +515,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A malformed import setting refuses the import before anything is read or
-     * written.
+     * A malformed import setting refuses the import before anything is read.
      *
      * @return void
      */
@@ -555,9 +530,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Another installation's export imports: its captured lines under their ids
-     * there, its imported lines under their upstream identity, and its
-     * envelopes and metadata dropped.
+     * Another installation's export imports under its upstream identities,
+     * without envelopes or metadata.
      *
      * @return void
      */
@@ -598,9 +572,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Once an imported row is gone, as retention prunes it, importing the same
-     * line again creates a new row: the duplicate check holds only while the
-     * earlier row survives.
+     * Importing a line again after its row was pruned creates a new row.
      *
      * @return void
      */
@@ -621,8 +593,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Lines already past their retention when they arrive are counted, so an
-     * operator sees what the next prune would delete unless it is held.
+     * Lines already past their retention on arrival are counted.
      *
      * @return void
      */
@@ -639,10 +610,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Rows of `[how the retention policy fails to answer]`: a malformed
-     * `retention.schedule`, which the configured policy validates with every
-     * other retention setting, and a policy of the application's own that
-     * throws.
+     * Rows of `[how the retention policy fails to answer]`.
      *
      * @return iterable<string, array{0: \Closure(): void}>
      */
@@ -698,10 +666,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A retention policy that fails to answer never fails the import: every
-     * line is imported, the batch completes, the count of lines past retention
-     * is given up as `null`, and the failure is reported once, by its class
-     * alone, in a dry run as in an import.
+     * A failing retention policy leaves the past-retention count `null` and is
+     * reported once by class.
      *
      * @param  \Closure(): void  $fail
      * @return void
@@ -731,10 +697,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The journal opens the batch with `import_started`, naming the batch, the
-     * source, the format, the file's digest and the hold, and closes it with
-     * `import_finished` and its counts, each under the import's operation and
-     * authority.
+     * The journal opens the batch with `import_started` and closes it with
+     * `import_finished`.
      *
      * @return void
      */
@@ -775,8 +739,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A running batch whose import stopped is closed `interrupted`, its counts
-     * as they stood, and its finish journalled under the closer's authority.
+     * Close marks a running batch `interrupted` and journals its finish.
      *
      * @return void
      */
@@ -799,8 +762,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A finished batch, a closed one, one that does not exist and an id that is
-     * not a lower-case UUID are each refused, and nothing is journalled.
+     * Close refuses a finished, closed, missing or malformed batch and journals
+     * nothing.
      *
      * @return void
      *
@@ -828,9 +791,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A data failure on a chunk's insert reaches the caller masked: its class
-     * and SQLSTATE kept, and no binding of an imported record, nor a value the
-     * driver quoted, in its message or in anything reported.
+     * A chunk's data failure is rethrown masked, keeping its class and
+     * SQLSTATE.
      *
      * @return void
      *
@@ -876,8 +838,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A malformed batch id is refused before any statement runs, so no engine
-     * sees it, a native `uuid` column included.
+     * A malformed batch id is refused before any statement runs.
      *
      * @return void
      *
@@ -902,9 +863,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A batch whose `import_started` never committed, its import killed between
-     * the batch's insert and its start, is closed `interrupted` and journals
-     * nothing, so the journal holds no finish without its start and verifies.
+     * Closing a batch whose start never committed journals nothing.
      *
      * @return void
      */
@@ -920,9 +879,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A close whose finish fails to journal leaves the batch running, so a
-     * second close journals it: one finish, the batch `interrupted`, and the
-     * journal verifies.
+     * A close whose journal fails leaves the batch running for a retry.
      *
      * @return void
      *
@@ -959,10 +916,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * An import whose finish is journalled but whose batch could not then be
-     * made final returns its status, and leaves the batch running; a close
-     * makes it final with the status journalled, journals nothing more, and
-     * commits no record of its own.
+     * A finish journalled before its batch was made final is completed by
+     * close.
      *
      * @return void
      */
@@ -992,9 +947,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * An import whose finish cannot be journalled leaves its batch running
-     * rather than final, so a close journals the finish the batch never had and
-     * the journal verifies.
+     * A finish that cannot be journalled leaves the batch running for close.
      *
      * @return void
      *
@@ -1030,9 +983,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A final batch whose start the journal holds with no finish, as a start
-     * that committed though its transaction reported a failure leaves it, has
-     * that finish journalled from its row, its status kept.
+     * A final batch whose start has no finish has that finish journalled with
+     * its status kept.
      *
      * @return void
      */
@@ -1051,9 +1003,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The entries and the batch are written through the storage connection and
-     * the journal and the hold through the maintenance connection, each named
-     * apart.
+     * Entries and the batch go through the storage connection; the journal and
+     * hold through maintenance.
      *
      * @return void
      */
@@ -1093,35 +1044,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Configure the maintenance connection as a second name for the storage
-     * connection's database.
-     *
-     * @return void
-     */
-    private function sameDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-        $root   = $config->string('database.default');
-
-        $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . $root));
-        $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
-
-        $connection = DB::connection($root);
-
-        if ($connection->getDriverName() !== 'sqlite') {
-            return;
-        }
-
-        $same = DB::connection(self::MAINTENANCE);
-
-        $same->setPdo($connection->getPdo());
-        $same->setReadPdo($connection->getPdo());
-    }
-
-    /**
-     * Start a batch as an import whose process was then killed leaves it: its
-     * row `running` and, unless the kill came before it, its journal's
-     * `import_started`, and nothing after.
+     * Leave a batch as a killed import does: `running`, with its start
+     * journalled unless killed before.
      *
      * @param  bool  $started
      * @return string
@@ -1162,8 +1086,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The findings `audit-log:verify`'s journal section gives, pairing every
-     * import's finish with its start.
+     * The journal findings `audit-log:verify` gives.
      *
      * @return list<\SineMacula\Laravel\AuditLog\Integrity\RunFinding>
      */
@@ -1251,8 +1174,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A line of the import format, of the record id given and with the fields
-     * given over its own.
+     * A line of the import format, with the fields given over its own.
      *
      * @param  string  $recordId
      * @param  array<string, array<string, string>|string|null>  $fields
@@ -1286,8 +1208,7 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * The source assertion of the fields of a line of the import format, as an
-     * import line gives it.
+     * The source assertion an import line gives for the fields of a line.
      *
      * @param  array<string, array<string, string>|string>  $line
      * @return array<string, array<int|string, string>|int|string|null>

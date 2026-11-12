@@ -7,9 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Records;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The shape a correlation id must have: `<namespace>:<value>`, a lower-case
- * namespace of up to 32 characters, a value starting with a non-space, at most
- * 191 characters in all and no control characters.
+ * A correlation id's shape: `<namespace>:<value>`, with a lower-case namespace
+ * of up to 32 characters and no control characters.
  *
  * @api
  *

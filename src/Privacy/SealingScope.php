@@ -7,17 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Privacy;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * What every value of one record is sealed for: the entry the record will be
- * stored as, the log it is signed into, its tenant and category, and every
- * owner it encrypts for. It gives each value its field context at the value's
- * path, so the values of a record share one entry, one key unit per owner and
- * one list of owners.
- *
- * Its parts are checked as it is built, as a field context checks them, so a
- * malformed one fails the record before anything is sealed. A record with no
- * owner seals nothing, since every value is sealed under an owner's key, so its
- * scope may be built without a log id, which is then never read; asking that
- * scope for a context is a `LogicException`.
+ * What every value of one record is sealed for, giving each value its field
+ * context; a record with no owner needs no log id and gives no context.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,8 +49,7 @@ final readonly class SealingScope
         /** The category of the record's definition. */
         private string $category,
 
-        // Every owner the record encrypts for, in any order and repeated
-        // freely; kept each once, sorted, as a context keeps them.
+        // In any order and repeated freely; deduplicated into `$this->owners`
         #[\SensitiveParameter]
         array $owners,
     ) {
@@ -67,15 +57,12 @@ final readonly class SealingScope
             self::refuse('A record with an owner is sealed for the log its entry is signed into.');
         }
 
-        // A context at the address checks every part but a path, and keeps the
-        // owners as each later context is given them
+        // A context at the address checks the other parts and sorts the owners
         $this->owners = $logId === null ? [] : (new FieldContext($entryId, [self::ADDRESS], $logId, $tenant, $category, $owners))->owners;
     }
 
     /**
-     * The context of the value at the path: the column, `properties`, `context`
-     * or `ip`, then each map key as `EncryptedField::segment()` names it and
-     * each list index as an integer at the element's stored index.
+     * The context of the value at the path.
      *
      * @param  array<array-key, int|string>  $path
      * @return \SineMacula\Laravel\AuditLog\Privacy\FieldContext
@@ -93,8 +80,7 @@ final readonly class SealingScope
     }
 
     /**
-     * Refuse a use of the scope that seals what a record with no owner never
-     * could.
+     * Refuse a use of the scope a record with no owner never needs.
      *
      * @param  string  $message
      * @return never

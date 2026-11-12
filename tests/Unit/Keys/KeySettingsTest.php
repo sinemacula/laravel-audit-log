@@ -12,11 +12,8 @@ use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 use SineMacula\Laravel\AuditLog\Keys\KeySettings;
 
 /**
- * Unit tests for the owners' key settings: the explicit wrapping ring decoded
- * as the integrity ring is, the current key set with it or not at all, the
- * application keys read through the integrity settings, the rewrap batch and
- * its range, validation that never reads the application keys beside an
- * explicit ring, and refusals that name the setting and never a secret.
+ * Unit tests for the owners' key settings and the refusals that never name a
+ * secret.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,9 +69,8 @@ final class KeySettingsTest extends TestCase
     }
 
     /**
-     * An explicit ring's secrets are decoded, raw and `base64:` alike, a
-     * numeric id is read as the integer key PHP makes of it, and the current
-     * key id is read.
+     * An explicit ring's secrets are decoded, raw and `base64:` alike, and a
+     * numeric id is read as an integer.
      *
      * @return void
      */
@@ -119,9 +115,8 @@ final class KeySettingsTest extends TestCase
     }
 
     /**
-     * Each malformed ring or current key id fails closed with its message from
-     * `currentKeyId()` and `validate()`, even beside a valid `app.key`, so no
-     * reader ever falls back to the derived ring.
+     * Each malformed ring or current key id fails closed, even beside a valid
+     * `app.key`, with no fallback.
      *
      * @param  array<string, array<int|string, array<int, string>|int|string|null>|bool|int|string|null>  $privacy
      * @param  string  $message
@@ -215,9 +210,7 @@ final class KeySettingsTest extends TestCase
     }
 
     /**
-     * Validation reads the application keys only when no ring is set: an
-     * explicit ring validates with no `app.key`, and without one a missing
-     * `app.key` fails it.
+     * Validation reads the application keys only when no ring is set.
      *
      * @return void
      */

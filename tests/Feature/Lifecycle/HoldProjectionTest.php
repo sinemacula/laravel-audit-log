@@ -22,11 +22,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\TestCase;
 
 /**
- * Feature tests for the holds projection, on whichever engine the suite runs
- * against: a row carries its hold's scope, digest, batch, times and authority;
- * a rebuild from the verified chain equals the projection kept live by holds
- * and releases; and drift names every hold missing, extra or changed, by id,
- * and none when the projection is in step.
+ * Feature tests for the holds projection, its rebuild and its drift.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,10 +71,7 @@ final class HoldProjectionTest extends TestCase
     }
 
     /**
-     * A row carries its hold's id, the canonical text of its scope and the
-     * scope's digest, its basis, the import batch its scope keeps, when it was
-     * placed and is due for review, its authority, operation and journal
-     * sequence.
+     * A row carries its hold's scope, digest, batch, times and authority.
      *
      * @return void
      */
@@ -139,8 +132,8 @@ final class HoldProjectionTest extends TestCase
     }
 
     /**
-     * Deleting a row removes that hold's row alone, and deleting one already
-     * missing is no error.
+     * Deleting a row removes that hold's row alone, and a missing one is no
+     * error.
      *
      * @return void
      */
@@ -156,9 +149,7 @@ final class HoldProjectionTest extends TestCase
     }
 
     /**
-     * A rebuild from the verified chain gives exactly the rows the holds and
-     * releases kept live, after a row was deleted and another inserted by hand,
-     * and returns how many it holds.
+     * A rebuild from the verified chain equals the projection kept live.
      *
      * @return void
      */
@@ -185,8 +176,8 @@ final class HoldProjectionTest extends TestCase
     }
 
     /**
-     * Rebuilding replaces every row, on the connection given, with exactly the
-     * holds given, and returns their count.
+     * Rebuilding replaces every row with exactly the holds given and returns
+     * their count.
      *
      * @return void
      */
@@ -205,9 +196,7 @@ final class HoldProjectionTest extends TestCase
     }
 
     /**
-     * Drift names, sorted, a hold with no row, a row of no hold, and a row
-     * whose scope, scope digest, basis or review date is not its hold's, and
-     * nothing of a row in step.
+     * Drift names, sorted, every hold missing, extra or changed.
      *
      * @return void
      */
@@ -248,8 +237,7 @@ final class HoldProjectionTest extends TestCase
     }
 
     /**
-     * A projection in step with the replayed holds has no drift, and neither
-     * has an empty one of no holds.
+     * A projection in step, or empty with no holds, has no drift.
      *
      * @return void
      */
@@ -268,9 +256,7 @@ final class HoldProjectionTest extends TestCase
     }
 
     /**
-     * A review date the row holds in a form that cannot be read drifts, and so
-     * does a review date set on a row whose hold has none, or dropped from a
-     * row whose hold has one.
+     * An unreadable, added or dropped review date drifts.
      *
      * @return void
      */
@@ -305,7 +291,7 @@ final class HoldProjectionTest extends TestCase
 
     /**
      * A hold of the id given, of the scope and review date given or every entry
-     * and none, placed by a user on a regulator's request.
+     * and none.
      *
      * @param  string  $id
      * @param  ?\SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $scope

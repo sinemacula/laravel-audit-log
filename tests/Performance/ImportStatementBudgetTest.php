@@ -33,14 +33,9 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\MakesSubjectKeys;
 
 /**
- * Statement budgets of an import: ten thousand rows open no savepoint and one
- * transaction per chunk; a chunk's statements are fixed, apart from its
- * inserts, which scale with the rows each insert carries on its engine and
- * never with the rows themselves; an encrypted chunk adds its records' key
- * lookups and the inserts of its key uses, which scale with the key uses each
- * insert carries, never one per entry; and a dry run writes nothing. Every
- * budget is a count of statements and transactions, never a time, and an
- * encrypted chunk's is measured against a plain chunk's in the same process.
+ * Statement budget for an import: one transaction per chunk and no savepoint,
+ * inserts that scale with each engine's rows per insert, never per entry, and a
+ * dry run that writes nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -102,10 +97,8 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Ten thousand rows in chunks of 500 open no savepoint: one transaction per
-     * chunk and one for each of the journal's start and finish, none nested,
-     * counted by the transaction events, since a savepoint never reaches the
-     * statement log, and nothing rolled back.
+     * Ten thousand rows in chunks of 500 open one transaction per chunk, none
+     * nested, and roll nothing back.
      *
      * @return void
      */
@@ -122,10 +115,8 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A chunk's statements are fixed but for its inserts: a chunk of 500 new
-     * lines and one of 100 differ only by the inserts, which are as many as the
-     * engine's rows per insert need, and each chunk is one transaction with no
-     * savepoint.
+     * A chunk's statements are fixed but for its inserts, which follow the
+     * engine's rows per insert.
      *
      * @return void
      */
@@ -151,11 +142,8 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An encrypted chunk of 500 lines by one actor whose key exists costs what
-     * a plain chunk of 500 costs, measured first, plus one key lookup per
-     * record and the inserts of its 500 key uses, as many as the engine's rows
-     * per statement need: two on SQLite, at 400 rows each, and one elsewhere,
-     * never one per entry; it is still one transaction with no savepoint.
+     * An encrypted chunk adds one key lookup per record and key-use inserts by
+     * the engine's placeholder limit, never one per entry.
      *
      * @return void
      */
@@ -182,8 +170,7 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A dry run of a thousand lines writes nothing and opens no transaction:
-     * every statement it issues is a read.
+     * A dry run of a thousand lines only reads and opens no transaction.
      *
      * @return void
      */
@@ -200,9 +187,8 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The budget of a chunk of new lines from the first given: one read to
-     * classify, and the claim, the inserts and the counts as writes, with no
-     * savepoint and no rollback.
+     * The budget of a chunk of new lines from the first given: one read, then
+     * the claim, the inserts and the counts.
      *
      * @param  int  $first
      * @param  int  $count
@@ -300,10 +286,9 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Write the chunk of lines and return the statements it ran, checking it
-     * was one transaction, committed once. Every chunk counts into the one
-     * tally, as an import does, so each chunk's progress changes the batch row:
-     * MySQL counts an update that changes nothing as no row.
+     * Write the chunk and return its statements, checking it was one committed
+     * transaction. Chunks share one tally so each changes the batch row: MySQL
+     * counts an unchanged update as no row.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
      * @return list<string>
@@ -338,9 +323,8 @@ final class ImportStatementBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Encrypt the card of the encrypted code for its actor, under the package's
-     * encrypter and wrapper, and make each actor's key first, so a chunk only
-     * looks the keys up.
+     * Encrypt the encrypted code's card for its actor, making each actor's key
+     * first so a chunk only looks keys up.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  ...$actors
      * @return void

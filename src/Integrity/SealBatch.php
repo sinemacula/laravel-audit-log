@@ -5,14 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * What one sealing attempt did: the seal it wrote, if any, the rows its
- * selection read, the candidates it left out as malformed, where the next batch
- * reads on from, and whether the selection reached the end of what there was to
- * read.
- *
- * The rows read are the candidates of the recent pass, and the whole window of
- * the sweep, sealed or not. The position is the last row read, skipped or not,
- * so the next batch always moves past every row this one read.
+ * What one sealing attempt did, and where the next batch reads on from.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,7 +41,7 @@ final readonly class SealBatch
         /** The candidates left out because their id, HMAC or time is malformed. */
         public int $skipped,
 
-        /** The position of the last row read, or `null` when none was. */
+        /** The last row read, skipped or not, or `null` when none was. */
         public ?SealCursor $last,
 
         // The most rows the selection could read.

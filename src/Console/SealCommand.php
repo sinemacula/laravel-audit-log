@@ -22,33 +22,11 @@ use SineMacula\Laravel\AuditLog\Integrity\SealResult;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:seal`: seals the entries no seal holds yet, from the lookback
- * before the last seal, or with `--sweep` the whole table from the sweep's
- * cursor, then anchors the seals the configured anchor does not hold yet.
+ * `audit-log:seal`: seals the entries no seal holds yet, recent ones or with
+ * `--sweep` the whole table from its cursor, then anchors pending seals.
  *
- * When the default cache store can lock, a recent pass holds the
- * `audit-log:seal` lock and a sweep the `audit-log:seal:sweep` lock, each for
- * at most 900 seconds, and a run that finds its own lock held does nothing and
- * succeeds. The two passes are safe beside each other, so a long sweep never
- * holds up the recent pass or its anchoring. A store that cannot lock, or that
- * fails, costs only that optimisation, and the run goes on without one, since
- * sealing is safe beside another sealer. Anchoring runs even after sealing
- * failed, so seals already committed are still anchored, and the anchorer is
- * resolved only once sealing is done, so an anchor setting that is malformed
- * stops anchoring alone and never sealing.
- *
- * It prints what it sealed and anchored. A refusal to extend the last seal,
- * entries that cannot be sealed, an anchor that holds another digest for a seal
- * and a seal refused because it does not verify each print an error, dispatch a
- * payload-free `IntegrityCheckFailed` whose maps list every status, counting
- * the one failing condition once, and report an
- * `IntegrityCheckFailedException`; anything else that stops the run is named by
- * its class alone and reported as a `SealFailedException`, and dispatches
- * nothing. Each exits non-zero. An unavailable anchor only warns, since a later
- * run tries again and a strict verification is what fails on it. Nothing
- * printed, dispatched or reported holds a message, a statement, a binding or a
- * value of an entry, and the id of an entry that cannot be sealed is never
- * named.
+ * Nothing printed, dispatched or reported holds a message, statement, binding
+ * or entry value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,8 +87,8 @@ final class SealCommand extends Command
     }
 
     /**
-     * Seal the recent entries, or sweep the table, and print what was sealed.
-     * Whether sealing succeeded is returned.
+     * Seal the recent entries, or sweep the table, print what was sealed, and
+     * return whether sealing succeeded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Sealer  $sealer
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityAlarm  $alarm
@@ -137,10 +115,8 @@ final class SealCommand extends Command
     }
 
     /**
-     * Anchor the seals the anchor does not hold yet, and print what was
-     * anchored. The anchorer is resolved here, after sealing, so an anchor that
-     * cannot be built from its settings stops anchoring alone. Whether
-     * anchoring succeeded is returned: an unavailable anchor does not fail it.
+     * Anchor the pending seals; an unavailable anchor does not fail it, and
+     * resolving the anchorer here keeps its settings from stopping sealing.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityAlarm  $alarm
@@ -190,10 +166,8 @@ final class SealCommand extends Command
     }
 
     /**
-     * Alarm on the entries the run left unsealed because they cannot be sealed,
-     * never naming one. The output gives how many; the event counts the one
-     * failing condition once, as every seal alarm does, since its maps count
-     * segments and never entries. Whether there were none is returned.
+     * Alarm on entries that cannot be sealed, never naming one; the event
+     * counts the condition once, since its maps count segments.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealResult  $result
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityAlarm  $alarm
@@ -308,9 +282,8 @@ final class SealCommand extends Command
     }
 
     /**
-     * Take the named lock when the default cache store can hold one: the lock,
-     * once taken; `false` when another run holds it; `null` when the store
-     * cannot lock or fails, so the run goes on without one.
+     * Take the named lock: the lock, `false` when another run holds it, or
+     * `null` when the default store cannot lock or fails.
      *
      * @param  \Illuminate\Contracts\Cache\Factory  $cache
      * @param  string  $name
@@ -334,8 +307,7 @@ final class SealCommand extends Command
     }
 
     /**
-     * Release the lock the run took. A release that fails leaves the lock to
-     * lapse.
+     * Release the lock the run took.
      *
      * @param  \Illuminate\Contracts\Cache\Lock  $lock
      * @return void
@@ -349,9 +321,8 @@ final class SealCommand extends Command
     }
 
     /**
-     * Run the step and return what it returns, or the fallback when it throws:
-     * for a step whose failure costs only an optimisation, and so must never
-     * stop the run or hide what it found.
+     * Run the step, or return the fallback when it throws, for a step whose
+     * failure costs only an optimisation.
      *
      * @template T
      *
@@ -370,9 +341,8 @@ final class SealCommand extends Command
     }
 
     /**
-     * The event of a seal run that failed: the counts given under every
-     * integrity and every anchoring status, zero-filled, the finding and the id
-     * it was found at, and no head, since a seal run does not verify the log.
+     * The event of a failed seal run, zero-filled across every status, with no
+     * head since a seal run does not verify the log.
      *
      * @param  array<string, int>  $integrity
      * @param  array<string, int>  $anchoring
@@ -395,8 +365,7 @@ final class SealCommand extends Command
     }
 
     /**
-     * The counts under every status, in the statuses' order, a status not
-     * counted being zero.
+     * The counts under every status, in order, zero where not counted.
      *
      * @param  array<string, int>  $counts
      * @param  list<\SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus|\SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus>  $statuses

@@ -36,17 +36,7 @@ use Tests\TestCase;
 
 /**
  * Integration tests for the one failure a capture lets out: a concurrency error
- * or a lost connection that ended a transaction open on the connection it
- * happened on, during a capture that writes at once, propagates sanitised, on
- * every engine the suite runs on.
- *
- * It does so whether the store's write raised it, through Laravel's own
- * transaction handling, or a contributor did before the write, and it is judged
- * against the transactions open before the capture ran, since Laravel forgets a
- * transaction whose connection is lost. Nothing of the original reaches the
- * host, nothing is spilled or reported, and the capture's failure is still said
- * once. With no transaction open the same failures end nothing and are
- * contained.
+ * or lost connection that ended an open host transaction propagates sanitised.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -119,10 +109,8 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * A store's deadlock inside a host transaction reaches the host as the
-     * sanitised deadlock, which Laravel still retries: the host's transaction
-     * stands at its level, nothing is spilled or reported, and the capture's
-     * failure is said once.
+     * A store's deadlock in a host transaction reaches the host as the
+     * sanitised, retryable deadlock, with nothing spilled or reported.
      *
      * @return void
      */
@@ -141,9 +129,8 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * A store's lost connection inside a host transaction reaches the host as
-     * the sanitised failed write, holding nothing of the failure, and the
-     * capture's failure is said once.
+     * A store's lost connection in a host transaction reaches the host as the
+     * sanitised failed write, holding nothing of the failure.
      *
      * @return void
      */
@@ -164,9 +151,8 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * A contributor's deadlock before the write, inside a host transaction on
-     * its connection, propagates as the sanitised deadlock too: nothing is
-     * written, spilled or reported, and the capture's failure is said once.
+     * A contributor's deadlock before the write in a host transaction
+     * propagates sanitised, with nothing written, spilled or reported.
      *
      * @return void
      */
@@ -188,9 +174,8 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * A contributor's lost connection before the write ends the host's
-     * transaction, which Laravel then forgets; it was open when the capture
-     * began, so the failure propagates as a capture failure holding class names
+     * A contributor's lost connection ends the host transaction, which Laravel
+     * then forgets, and still propagates as a capture failure of class names
      * alone.
      *
      * @return void
@@ -236,9 +221,8 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * With no transaction open the same failure ends nothing, so the capture
-     * contains it and returns `null`: reported once, by the write's own failure
-     * after a spill or as a capture failure before the write, and said once.
+     * With no transaction open the failure ends nothing, so the capture
+     * contains it, returns `null` and reports it once.
      *
      * @param  \Closure(): \Illuminate\Database\QueryException  $failure
      * @param  bool  $beforeTheWrite
@@ -274,9 +258,8 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * Bind a store whose write raises the failure inside a transaction of its
-     * own on the worker's connection, so Laravel's transaction handling runs as
-     * it does for a real insert.
+     * Bind a store whose write raises the failure inside its own transaction on
+     * the worker's connection, as a real insert would.
      *
      * @param  \Throwable  $failure
      * @return void

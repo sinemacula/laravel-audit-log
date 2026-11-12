@@ -7,19 +7,11 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
- * Unit tests that keep the README in step with owners' keys and erasure: every
- * leaf of the privacy settings has its row in the configuration table with the
- * env var the shipped file reads, or none for a map, and the default it ships;
- * the features name encryption by default and link the privacy guide, which is
- * there; the usage shows the definition that encrypts a field, the reveal
- * grant, `holdingDataOf()`, an erasure through the facade and the four privacy
- * commands; the maintenance connection's row and the check's paragraph name
- * what the privacy operations add; and the two outcomes of an erasure, and what
- * credentials can still do, are stated apart.
- *
- * A drift guard: it catches an omission or a rename, not wrong prose.
+ * A drift guard keeping the README in step with owners' keys and erasure: it
+ * catches an omission or a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,6 +21,8 @@ use PHPUnit\Framework\TestCase;
 #[CoversNothing]
 final class PrivacyReadmeTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var string The section of the shipped configuration the owners' keys read. */
     private const string SECTION = 'privacy';
 
@@ -55,9 +49,7 @@ final class PrivacyReadmeTest extends TestCase
     ];
 
     /**
-     * Rows of `[leaf, the env var it reads or null for a map, its default as
-     * the README shows it]`: every leaf of the privacy settings the shipped
-     * file holds.
+     * Rows of `[leaf, env var or null, default as shown]`: every privacy leaf.
      *
      * @return iterable<string, array{0: string, 1: ?string, 2: string}>
      */
@@ -76,9 +68,7 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * Each leaf has its row in the README's configuration table, naming the
-     * default the shipped file falls back to and the env var it reads, or `-`
-     * for a map, which has none.
+     * Each leaf has a row naming its default and env var, or `-` for a map.
      *
      * @param  string  $leaf
      * @param  ?string  $env
@@ -96,9 +86,7 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * The leaves the provider yields are exactly the six privacy settings, with
-     * the env vars and defaults the package reads, so a leaf dropped from the
-     * shipped file and from the README together still fails.
+     * The leaves are exactly the six privacy settings, so a joint drop fails.
      *
      * @return void
      */
@@ -115,8 +103,7 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * The privacy rows follow the redaction rows and come before the failure
-     * rows, in the order the shipped file lists them.
+     * The privacy rows sit between the redaction and failure rows, in order.
      *
      * @return void
      */
@@ -132,10 +119,8 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * The features say a field a definition encrypts is sealed under its
-     * owner's key by default and erased with it, linking the privacy guide,
-     * which the guides table lists too and which exists; and encrypted values
-     * are no longer said never to be shown.
+     * The features say an encrypted field is sealed under its owner's key and
+     * erased with it, and link the privacy guide.
      *
      * @return void
      */
@@ -154,9 +139,7 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * The usage shows the definition that encrypts a field, the reveal grant,
-     * `holdingDataOf()` and an erasure through the facade, and names each
-     * privacy command as it is run.
+     * The usage shows the privacy calls and names each privacy command.
      *
      * @return void
      */
@@ -178,15 +161,13 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * The usage states the two outcomes of an erasure apart, and that database
-     * credentials can still destroy or restore keys, which the package makes
-     * detectable and never impossible.
+     * The usage states both outcomes apart, and what credentials can still do.
      *
      * @return void
      */
     public function testTheUsageStatesTheTwoOutcomesAndWhatCredentialsCanDo(): void
     {
-        $usage = self::flattened(self::between(self::readme(), '### Encrypted fields and erasure', '### Guides'));
+        $usage = self::collapsed(self::between(self::readme(), '### Encrypted fields and erasure', '### Guides'));
 
         self::assertStringContainsString('An erasure revokes the owner\'s fields in the live store when it commits; it is complete only once the procedure', $usage);
         self::assertStringContainsString('Database credentials can still destroy or restore keys, and `audit-log:verify` and `audit-log:check` make that detectable', $usage);
@@ -195,9 +176,7 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * The maintenance connection's row names the privacy operations that run
-     * through it, after what ran through it before, and the check's paragraph
-     * says a restored database fails until the erasures are re-applied.
+     * The maintenance row and the check's paragraph name the privacy steps.
      *
      * @return void
      */
@@ -207,12 +186,11 @@ final class PrivacyReadmeTest extends TestCase
 
         self::assertNotNull($row);
         self::assertStringStartsWith(self::MAINTENANCE_ROW, $row[3]);
-        self::assertStringContainsString(self::RESTORE_CHECK, self::flattened(self::readme()));
+        self::assertStringContainsString(self::RESTORE_CHECK, self::collapsed(self::readme()));
     }
 
     /**
-     * The env var the shipped file reads the privacy leaf from, or `null` when
-     * it reads none, as for a map: the `env()` call on the leaf's own line.
+     * The env var the shipped file reads the leaf from, or `null` for a map.
      *
      * @param  string  $key
      * @return ?string
@@ -250,25 +228,6 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * Every row of the README's configuration table, by its key without the
-     * backticks, as its cells, in order.
-     *
-     * @return array<string, list<string>>
-     */
-    private static function configurationRows(): array
-    {
-        preg_match_all('/^\| `([a-z_.]+)` +\|.*\|$/m', self::readme(), $matches, PREG_SET_ORDER);
-
-        $rows = [];
-
-        foreach ($matches as $match) {
-            $rows[$match[1]] = array_map(trim(...), explode('|', trim($match[0], '|')));
-        }
-
-        return $rows;
-    }
-
-    /**
      * The text between the two headings, which the test fails without.
      *
      * @param  string  $text
@@ -287,41 +246,5 @@ final class PrivacyReadmeTest extends TestCase
         self::assertIsInt($end, sprintf('The README has no `%s` after `%s`.', $to, $from));
 
         return substr($text, $start, $end - $start);
-    }
-
-    /**
-     * The text with every run of whitespace made one space, so a sentence is
-     * found however its lines are wrapped.
-     *
-     * @param  string  $text
-     * @return string
-     */
-    private static function flattened(string $text): string
-    {
-        return (string) preg_replace('/\s+/', ' ', $text);
-    }
-
-    /**
-     * The README.
-     *
-     * @return string
-     */
-    private static function readme(): string
-    {
-        $readme = file_get_contents(self::root() . '/README.md');
-
-        self::assertIsString($readme);
-
-        return $readme;
-    }
-
-    /**
-     * The repository's root.
-     *
-     * @return string
-     */
-    private static function root(): string
-    {
-        return dirname(__DIR__, 3);
     }
 }

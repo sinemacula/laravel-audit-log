@@ -15,15 +15,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 
 /**
- * Write and memory contract for a bulk operation of a thousand subjects: its
- * write is the artifact's insert and then the entry's, in one transaction of
- * their own, or in one savepoint inside a host's; and the memory it takes grows
- * with the size of its manifest, never with a cost per member beyond it.
- *
- * The subjects are references, so nothing is read for them. No wall-clock or
- * CPU-time bound is set: a ratio of times between small runs is noise on a
- * shared runner, and the bounds it would pin are the count and byte bounds the
- * manifest's own tests pin.
+ * Write and memory budget for a thousand-subject bulk operation. No wall-clock
+ * bound is set: time ratios between small runs are noise on a shared runner.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,31 +33,15 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
     /** @var int How many subjects the large operation names. */
     private const int SUBJECTS = 1000;
 
-    /** @var int How many bytes of memory a bulk write may grow by for each byte its manifest's canonical form grows by. */
+    /** @var int Bytes of memory a bulk write may grow by per byte its manifest's canonical form grows by. */
     private const int BYTES_PER_CANONICAL_BYTE = 24;
 
-    /** @var int The growth any two sizes of bulk write may differ by beyond that, for the allocator's rounding: 64 KiB. */
+    /** @var int Growth allowed beyond that for the allocator's rounding, in bytes. */
     private const int ALLOWANCE = 65536;
 
     /**
-     * Roll back any transaction a test left open.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        while (DB::connection()->transactionLevel() > 0) {
-            DB::connection()->rollBack();
-        }
-
-        parent::tearDown();
-    }
-
-    /**
-     * A thousand-subject bulk write outside a transaction is two inserts, the
-     * artifact's and then the entry's, in one top-level transaction it opens
-     * and commits, with no read.
+     * A thousand-subject bulk write is two inserts, the artifact's then the
+     * entry's, in one transaction of its own.
      *
      * @return void
      */
@@ -79,9 +56,7 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside a host's transaction a thousand-subject bulk write written at once
-     * is the same two inserts in one savepoint, and opens no transaction of its
-     * own.
+     * Inside a host's transaction it is the same two inserts in one savepoint.
      *
      * @return void
      */
@@ -102,12 +77,8 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The peak memory of a bulk write grows with its manifest and nothing more:
-     * from a thousand subjects to four thousand, measured in the same process,
-     * it grows by at most 24 bytes for each byte the manifest's canonical form
-     * grows by, and 64 KiB more, where it takes about 20 today. A cost of each
-     * member beyond that, an object or a buffer made for it, exceeds the bound,
-     * and the fixed costs both sizes share cancel out.
+     * Peak memory grows with the manifest, not per member: from 1,000 to 4,000
+     * subjects, by at most 24 bytes per canonical byte plus 64 KiB.
      *
      * @return void
      */
@@ -144,8 +115,7 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The growth of peak memory a bulk write of the subjects takes, from the
-     * memory in use when it begins.
+     * The growth of peak memory a bulk write of the subjects takes.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @return int

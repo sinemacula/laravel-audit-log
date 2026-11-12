@@ -16,37 +16,11 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 
 /**
- * The runs the package schedules: sealing (`audit-log:seal`, every five minutes
- * by default), the sweep (`audit-log:seal --sweep`, daily), a full, strict
- * verification that sweeps first (`audit-log:verify --strict --sweep-first`,
- * daily) and the prune (`audit-log:prune`, daily), each when its schedule
- * setting gives a cron expression.
+ * The runs the package schedules: sealing, the sweep, a strict verification and
+ * the prune, each when its schedule setting gives a cron expression.
  *
- * The prune is scheduled only when it can delete something: when the bound
- * retention policy is not the configured one, whose answers the schedule cannot
- * know, or when the configured one keeps anything for less than forever. A
- * policy left unbound counts as the configured one. A bound policy that cannot
- * be resolved is reported and the prune is still scheduled, so the run refuses
- * and records the failure rather than retention stopping without a trace.
- *
- * A schedule set to `null` or empty registers nothing for that run, so the
- * application can run the command elsewhere. A malformed schedule registers
- * nothing for that run either, and is reported, never thrown: the schedule is
- * resolved by `schedule:run`, `schedule:list` and `schedule:work`, and an
- * exception there would stop every task of the application. The other runs are
- * still registered.
- *
- * Each run is started in the background, so a long sweep or verification never
- * holds up the application's tasks due in the same minute. Each is kept from
- * overlapping itself by a lock that lapses well inside its period, 15 minutes
- * for sealing and 23 hours for the daily runs, so a run killed before it
- * released its lock skips at most the runs within that time. Each runs on one
- * server only when the cache store the scheduler's locks are taken in, the one
- * `Schedule::useCache()` set from `cache.schedule_store` or the scheduler's
- * environment, or else the default store, is one every server shares.
- * Registering reads configuration, the schedule and the bound retention policy
- * alone: it issues no query and resolves no store, and each command is named by
- * its string, so no command class is resolved.
+ * A malformed schedule is reported, never thrown, since `schedule:run` would
+ * otherwise stop every task.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,8 +66,7 @@ final readonly class IntegritySchedule
     ) {}
 
     /**
-     * Register sealing, the sweep, the strict verification and the prune on the
-     * schedule, each when its setting gives a cron expression, and the prune
+     * Register each run whose setting gives a cron expression, and the prune
      * only when it can delete something.
      *
      * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
@@ -108,10 +81,8 @@ final readonly class IntegritySchedule
     }
 
     /**
-     * Whether the prune can delete something: the bound retention policy is not
-     * the configured one, or the configured one keeps anything for less than
-     * forever. A bound policy that cannot be resolved is not reported here:
-     * what resolving it threw is thrown, for the caller to name.
+     * Whether the prune can delete something: the bound policy is not the
+     * configured one, or it keeps anything for less than forever.
      *
      * @return bool
      *
@@ -124,10 +95,8 @@ final readonly class IntegritySchedule
     }
 
     /**
-     * When the prune runs: its setting's cron expression, or `null` when the
-     * setting gives none, or when the prune cannot delete anything. A bound
-     * policy that cannot be resolved is reported, and counts as one that can
-     * delete.
+     * The prune's cron expression, or `null` when unset or the prune can delete
+     * nothing; an unresolvable policy is reported and counts as deleting.
      *
      * @return ?string
      *
@@ -169,9 +138,8 @@ final readonly class IntegritySchedule
     }
 
     /**
-     * Whether the retention policy is the one the package binds: true when no
-     * policy is bound, and false for any other class; what resolving a bound
-     * policy throws is thrown.
+     * Whether the retention policy is the package's own, as it is when none is
+     * bound.
      *
      * @return bool
      *
@@ -187,10 +155,8 @@ final readonly class IntegritySchedule
     }
 
     /**
-     * Register one run at the expression its setting gives, in the background,
-     * kept from overlapping itself and, on a shared cache, to one server;
-     * nothing when the setting gives none, or when it is malformed, which is
-     * reported.
+     * Register one run in the background, without overlap and, on a shared
+     * cache, on one server; a malformed setting registers nothing.
      *
      * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
      * @param  string  $command
@@ -223,11 +189,8 @@ final readonly class IntegritySchedule
     }
 
     /**
-     * Whether the cache store the scheduler takes the run's locks in has a
-     * driver every server shares: the store its mutex was given, or the default
-     * store when it was given none, read from configuration alone, so no store
-     * is resolved. A mutex the cache does not back says nothing of a shared
-     * store, so the run is not kept to one server.
+     * Whether the scheduler's lock store has a driver every server shares, read
+     * from configuration so no store is resolved.
      *
      * @param  \Illuminate\Console\Scheduling\Event  $event
      * @return bool

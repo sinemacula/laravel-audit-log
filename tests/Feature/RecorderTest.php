@@ -70,16 +70,8 @@ use Tests\Unit\Stubs\StubAuthUser;
 use Tests\Unit\Stubs\StubDocument;
 
 /**
- * Feature tests for the recorder: what each of its calls does, and the capture
- * pipeline a recorded activity runs: the definition, the timing's checks, the
- * contributors in order, minimising what they leave, the clock and source, and
- * delivery, the trail it gives as the way into the read path, and the lifecycle
- * it gives as the way into holds, prunes and imports. Its collaborators come
- * from the current container on every capture, and it holds nothing but
- * registration data.
- *
- * Definitions and contributors are registered on a recorder of a test's own,
- * since the application's has frozen by the time a test runs.
+ * Feature tests for the recorder, registering on a recorder of each test's own
+ * as the application's freezes at boot.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -210,9 +202,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A reason with a success would have nowhere to go, so it is refused rather
-     * than dropped, before anything is built: even an invalid code gets this
-     * refusal, and nothing is stored.
+     * A reason with a success is refused before anything is built.
      *
      * @return void
      */
@@ -230,8 +220,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `event()` gives a builder for the code, which writes when it is recorded
-     * and not before.
+     * `event()` gives a builder that writes only when recorded.
      *
      * @return void
      */
@@ -323,8 +312,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The defaults are resolved first, in their order, then each registered
-     * contributor, in its order, each one for the capture.
+     * The defaults run first, then each registered contributor, in order.
      *
      * @return void
      */
@@ -349,8 +337,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A default fills the field first, so the ambient actor beats a later
-     * contributor's, and that contributor fills what is still a gap.
+     * A default fills a field before a later contributor can.
      *
      * @return void
      */
@@ -408,8 +395,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * Of two contributors filling one field, the first registered wins,
-     * whichever way round they are registered.
+     * Of two contributors filling one field, the first registered wins.
      *
      * @return void
      */
@@ -433,8 +419,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A contributor is resolved from the container for every capture, so a
-     * worker retains none and a later binding is the one used.
+     * A contributor is resolved per capture, so a worker retains none.
      *
      * @return void
      */
@@ -525,8 +510,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * With registration required an unregistered code is refused, nothing is
-     * consumed and nothing is stored; a registered one is accepted.
+     * With registration required an unregistered code is refused.
      *
      * @return void
      */
@@ -667,8 +651,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A timing that cannot be honoured is refused before anything is consumed,
-     * so the same builder records once it can.
+     * A timing refusal leaves the builder usable.
      *
      * @return void
      */
@@ -738,8 +721,8 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * In the default mode a failed write does not reach the caller, and the
-     * captured record is still returned.
+     * In the default mode a failed write is not thrown and the record is
+     * returned.
      *
      * @return void
      */
@@ -756,8 +739,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A record made while another is being written is returned as captured, and
-     * stored nowhere.
+     * A record made during another write is returned and stored nowhere.
      *
      * @return void
      */
@@ -780,8 +762,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The builder's fail-closed choice reaches the delivery: refused for a
-     * store that does not say it is durable, which an ordinary record is not.
+     * A fail-closed builder is refused by a store that is not durable.
      *
      * @return void
      */
@@ -834,7 +815,8 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The purpose goes in the properties and the channel in the context.
+     * `accessed()` puts the purpose in the properties and the channel in the
+     * context.
      *
      * @return void
      */
@@ -865,7 +847,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * Rows of `[purpose, channel, which is refused]`: malformed codes of each.
+     * Rows of `[purpose, channel, which is refused]`.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string}>
      */
@@ -882,7 +864,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * Each must be a machine-readable code, and the message names which.
+     * A malformed purpose or channel is refused, naming which.
      *
      * @param  string  $purpose
      * @param  string  $channel
@@ -930,8 +912,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * Rows of `[definition]`: a definition of the code handling the purpose any
-     * way but keeping it.
+     * Rows of `[definition]`: each handling of the purpose but keeping it.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Definitions\EventDefinition}>
      */
@@ -949,8 +930,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A disclosure's definition must keep why it was disclosed, however else it
-     * would handle the purpose, and the builder writes nothing.
+     * A disclosure definition that does not keep the purpose is refused.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
      * @return void
@@ -1023,8 +1003,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The application has booted by the time a test runs, so `define()` is
-     * refused.
+     * `define()` is refused once the application has booted.
      *
      * @return void
      */
@@ -1037,8 +1016,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The application has booted by the time a test runs, so `contribute()` is
-     * refused.
+     * `contribute()` is refused once the application has booted.
      *
      * @return void
      */
@@ -1107,10 +1085,8 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * Two properties, of these types and no other, so a worker can retain
-     * nothing of a request through the recorder: the event mappers and the
-     * model watcher, which holds the dispatcher, are resolved for each
-     * registration, never held.
+     * The recorder holds only registration data, so a worker retains nothing of
+     * a request.
      *
      * @return void
      */
@@ -1126,8 +1102,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The store is resolved for every capture, so one bound after the recorder
-     * was resolved is the one used.
+     * A store bound after the recorder resolved is the one used.
      *
      * @return void
      */
@@ -1143,10 +1118,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * Minimising takes a snapshot of its own after the contributors ran: a
-     * secret one filled into the context is redacted, and a field encrypted
-     * under the actor reaches the encrypter under the actor one filled, though
-     * the recorder's first snapshot held neither.
+     * Minimising sees what the contributors filled.
      *
      * @return void
      */
@@ -1170,8 +1142,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A registered code stores what its definition retains and drops the rest,
-     * counting the removal.
+     * A registered code drops the fields its definition does not retain.
      *
      * @return void
      */
@@ -1188,8 +1159,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A code with no definition keeps every field that is not secret-shaped,
-     * and the marker replaces the value of one that is.
+     * An unregistered code keeps every field but masks secret-shaped ones.
      *
      * @return void
      */
@@ -1201,8 +1171,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A registered definition's rules apply along with its version and
-     * category, from the one definition the capture found.
+     * A registered definition's rules apply with its version and category.
      *
      * @return void
      */
@@ -1220,8 +1189,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A malformed setting fails the write before anything reaches the store,
-     * through either way of recording.
+     * A malformed setting fails the write before anything is stored.
      *
      * @return void
      */
@@ -1243,8 +1211,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A minimiser's failure comes before the builder is used up, so the same
-     * builder records once the setting is put right.
+     * A minimiser failure leaves the builder usable.
      *
      * @return void
      */
@@ -1272,8 +1239,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A failure comes from the capture that met it, and the next capture is
-     * judged afresh: the minimiser holds nothing between them.
+     * Each capture builds its own minimiser.
      *
      * @return void
      */
@@ -1290,8 +1256,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * An encrypter bound after the application booted is the one a capture
-     * uses, so the package never holds on to its default.
+     * An encrypter bound after boot is the one a capture uses.
      *
      * @return void
      */
@@ -1307,9 +1272,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * An encrypter that throws does not fail the write: the field is dropped
-     * and diagnosed, the record is stored, and the failure is reported without
-     * the exception the encrypter threw.
+     * A throwing encrypter drops the field and the record is still stored.
      *
      * @return void
      */
@@ -1335,8 +1298,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * An identifier reaches the record as its keyed hash, under the configured
-     * key, and is never stored as given.
+     * An identifier is stored only as its keyed hash.
      *
      * @return void
      */
@@ -1367,8 +1329,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `map()` registers the mapper with the event mappers the container binds,
-     * which every capture reads.
+     * `map()` registers the mapper with the bound event mappers.
      *
      * @return void
      */
@@ -1384,8 +1345,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The first mapping adds the one listener that routes every event to its
-     * mapping, and no later one adds another, an identical mapping included.
+     * The first mapping adds the routing listener once.
      *
      * @return void
      */
@@ -1408,8 +1368,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A first mapping that is refused maps nothing, so it adds no listener, and
-     * the next one that is accepted adds it.
+     * A refused first mapping adds no listener.
      *
      * @return void
      */
@@ -1435,8 +1394,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The application has booted by the time a test runs, so `map()` is
-     * refused, and nothing starts listening.
+     * `map()` is refused once the application has booted.
      *
      * @return void
      */
@@ -1455,8 +1413,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `capture()` writes the event through its mapper and returns the record
-     * the store holds.
+     * `capture()` writes the event through its mapper and returns the record.
      *
      * @return void
      */
@@ -1478,8 +1435,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A captured record does not wait for an open transaction: it is written at
-     * once, unlike an explicit record.
+     * A captured record does not wait for an open transaction.
      *
      * @return void
      */
@@ -1520,7 +1476,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * An event no mapping applies to is not captured, and nothing is written.
+     * An unmapped event is not captured.
      *
      * @return void
      */
@@ -1532,9 +1488,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `watch()` watches the model with the watcher the container binds, whose
-     * definitions go into its catalogue and whose listeners go on the
-     * dispatcher.
+     * `watch()` watches the model with the bound watcher.
      *
      * @return void
      */
@@ -1557,8 +1511,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The application has booted by the time a test runs, so `watch()` is
-     * refused, and the model is not watched.
+     * `watch()` is refused once the application has booted.
      *
      * @return void
      */
@@ -1577,9 +1530,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `covering()` gives the builder the manifest of its subjects, each once in
-     * canonical order, still to be recorded; recording it seals the manifest as
-     * the record's attachment.
+     * `covering()` gives a builder carrying the subjects' manifest.
      *
      * @return void
      */
@@ -1621,8 +1572,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A bound store that keeps no attachment refuses a bulk operation up front,
-     * naming the store, before a single subject is read.
+     * A store that keeps no attachment refuses a bulk operation up front.
      *
      * @return void
      */
@@ -1651,9 +1601,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The bounds are read from the configuration on every call, so a changed
-     * setting applies to the next one, and a malformed one is refused by its
-     * key.
+     * The bulk bounds are read on every call.
      *
      * @return void
      */
@@ -1712,8 +1660,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A bulk record with no timing waits for the transaction to commit, as any
-     * explicit record does.
+     * A bulk record with no timing waits for the commit.
      *
      * @return void
      */
@@ -1730,9 +1677,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * An explicit record runs the pipeline of the recorder that built it: the
-     * definitions and the contributors of a recorder of a test's own apply to
-     * its records, and not to the application recorder's.
+     * An explicit record runs the pipeline of the recorder that built it.
      *
      * @return void
      */
@@ -1752,8 +1697,8 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The properties and a captured event hold the raw payload, so each is
-     * marked sensitive where the recorder takes it.
+     * The properties and captured event parameters are sensitive, as they hold
+     * the raw payload.
      *
      * @return void
      */
@@ -1771,9 +1716,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `trail()` resolves a new trail from the current container on each call,
-     * so a trail bound there is the one it gives, and two calls never share
-     * one.
+     * `trail()` resolves a new trail from the current container each call.
      *
      * @return void
      */
@@ -1790,9 +1733,8 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * `lifecycle()` resolves a new way into the lifecycle from the current
-     * container on each call, so one bound there is the one it gives, and two
-     * calls never share one.
+     * `lifecycle()` resolves a new lifecycle from the current container each
+     * call.
      *
      * @return void
      */
@@ -1809,8 +1751,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The trail `trail()` gives names no viewer: a terminal call on it is
-     * refused before anything is queried or recorded.
+     * The trail `trail()` gives names no viewer, so a terminal call is refused.
      *
      * @return void
      */
@@ -1860,8 +1801,8 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A recorder of a test's own, whose registration is not frozen, with the
-     * catalogue given or a fresh one.
+     * A recorder of a test's own, not frozen, on the catalogue given or a fresh
+     * one.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Definitions\EventCatalogue  $catalogue
      * @return \SineMacula\Laravel\AuditLog\Recorder
@@ -1882,8 +1823,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * How many times the listener that routes mapped events is on the
-     * application's dispatcher for every event.
+     * How many times the mapped-event routing listener is on the dispatcher.
      *
      * @SuppressWarnings("php:S3011")
      *
@@ -1907,8 +1847,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * Bind event mappers that are not frozen, as the application's are while it
-     * boots, and return them.
+     * Bind and return event mappers that are not frozen.
      *
      * @return \SineMacula\Laravel\AuditLog\Capture\MapperRegistry
      */
@@ -1922,8 +1861,7 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * The class of a contributor filling a different tenant from
-     * `TenantContributor`'s.
+     * A contributor class filling a tenant other than `TenantContributor`'s.
      *
      * @return class-string<\SineMacula\Laravel\AuditLog\Contracts\ContextContributor>
      */

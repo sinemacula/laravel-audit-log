@@ -18,36 +18,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * One chunk of a prune, inside a lifecycle transaction the caller's
- * `MaintenanceTransaction::run()` opened, behind the lock: every decision it
- * makes is read after the lock, and it signs a prune record of exactly what it
- * deleted.
+ * One chunk of a prune, inside a lifecycle transaction behind the lock, signing
+ * a prune record of exactly what it deleted.
  *
- * The replay is advanced first, so the holds it applies are those of the
- * verified chain, every hold committed before the lock among them. The
- * candidates' full rows are read next; an id that is not returned is left
- * alone, since it was pruned already or was never present, and no record ever
- * covers it. Every row returned must verify under the key it names, carry the
- * HMAC its member was sealed with, and be a member of the authenticated seal,
- * or the chunk deletes nothing and the seal is skipped for the run, so a prune
- * never erases evidence of tampering. So is a row whose member a valid prune
- * record of the seal already sets: an entry stored again after it was pruned
- * stays, reported `resurrected`, and no record ever sets a member twice. A seal
- * whose prune records cannot be read is skipped the same way. Each verified
- * row's eligibility is then decided again from that row: its pair's decision of
- * the run, its time before the cut-off, and a code that is not protected. A row
- * any active hold matches is kept, and so is one with an outbox row or a
- * receipt not yet delivered.
- *
- * What is left is deleted, its artifacts and receipts first, then the entries,
- * each statement naming at most 500 ids, and every delete of entries must
- * affect exactly the rows it names, or a `PruneMismatchException` rolls the
- * chunk back. On SQLite the installed delete triggers are dropped before and
- * created again after, in the same transaction. The prune record sets exactly
- * the deleted members' positions, names the run as its operation, and is
- * appended to the journal as the chunk's `prune` row, so the deletion and its
- * record commit together or not at all. A chunk with nothing left to delete
- * writes nothing but the lock.
+ * A candidate that does not authenticate, or that a prune record already
+ * covers, skips the seal, so a prune never erases evidence of tampering.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -95,9 +70,8 @@ final readonly class PruneChunk
     ) {}
 
     /**
-     * Prune the ids of the seal, inside the lifecycle transaction the
-     * connection holds, and return what the chunk did, with the replay it ended
-     * with.
+     * Prune the seal's ids and return what the chunk did, with the replay it
+     * ended with.
      *
      * @formatter:off
      *
@@ -169,9 +143,8 @@ final readonly class PruneChunk
     }
 
     /**
-     * Whether any of the holds keeps the stored row, each hold's scope matched
-     * in PHP against the row as the engine stores it, so a dry run counts held
-     * entries exactly as a chunk keeps them.
+     * Whether any hold keeps the stored row, matched in PHP so a dry run counts
+     * held entries exactly as a chunk keeps them.
      *
      * @param  array<string, scalar|null>  $row
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\Hold>  $holds
@@ -189,10 +162,8 @@ final readonly class PruneChunk
     }
 
     /**
-     * Whether the candidate's row is the seal's member as it was sealed: a
-     * member of the seal, carrying the HMAC it was sealed with, and verifying
-     * under the key it names. A row that cannot be decoded, or whose key the
-     * ring no longer holds, is not.
+     * Whether the row is the seal's member as sealed, with its HMAC and
+     * verifying under the key it names.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -218,10 +189,8 @@ final readonly class PruneChunk
     }
 
     /**
-     * Whether a valid prune record of the seal already sets the member of any
-     * of the rows, read on the chunk's connection after the lock, so the row
-     * was stored again after it was pruned; or whether the seal's records
-     * cannot be read, so what they set is unknown.
+     * Whether a prune record of the seal already covers a row, stored again
+     * after its prune, or the records cannot be read.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneSeal  $seal
@@ -249,9 +218,8 @@ final readonly class PruneChunk
     }
 
     /**
-     * Whether the verified row is eligible, decided from the row itself: its
-     * pair's decision of the run admits its time, and its code is not
-     * protected. A row whose tenant cannot be referenced never is.
+     * Whether the verified row is eligible under its pair's decision and its
+     * code is not protected.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -285,9 +253,8 @@ final readonly class PruneChunk
     }
 
     /**
-     * Sign the prune record of the deleted members' positions and append it to
-     * the journal as the chunk's `prune` row, returning the replay that
-     * accepted it.
+     * Sign the prune record of the deleted positions and append it to the
+     * journal, returning the replay that accepted it.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
@@ -325,8 +292,7 @@ final readonly class PruneChunk
     }
 
     /**
-     * The candidates' full rows, read on the connection's writer, at most 500
-     * ids to a statement.
+     * The candidates' full rows, read on the connection's writer.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<string>  $ids
@@ -363,9 +329,8 @@ final readonly class PruneChunk
     }
 
     /**
-     * Delete the entries of the ids, their artifacts and receipts first, at
-     * most 500 ids to a statement, around SQLite's delete triggers, refusing a
-     * delete of entries that affects another number of rows than it names.
+     * Delete the entries after their artifacts and receipts, around SQLite's
+     * delete triggers, refusing a row count mismatch.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<string>  $ids

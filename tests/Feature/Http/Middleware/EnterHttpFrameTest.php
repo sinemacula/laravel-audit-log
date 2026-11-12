@@ -20,9 +20,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Tests\TestCase;
 
 /**
- * Feature tests for the middleware that starts a request's execution frame: the
- * frame entered, the earlier identity forgotten, the rest of Context left
- * alone, the response passed on, and the frame outliving the response.
+ * Feature tests for the middleware that starts a request's execution frame.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -165,10 +163,8 @@ final class EnterHttpFrameTest extends TestCase
     }
 
     /**
-     * The middleware has no `terminate()`, and through the real kernel, after
-     * the response has gone and the kernel has terminated, the frame is still
-     * there, so a `terminating()` callback or a deferred record keeps its
-     * request.
+     * The frame outlives the response and the kernel's termination, so a
+     * `terminating()` callback keeps its request.
      *
      * @return void
      */

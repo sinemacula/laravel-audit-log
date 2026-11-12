@@ -8,9 +8,9 @@ use SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * An audit store that hands every record to a callback, which may keep it, read
- * the world around it or throw, and that says of itself whatever the test
- * configures: durable or not, and the connections whose transactions it joins.
+ * An audit store that hands every record to a callback and says of itself
+ * whatever the test configures: durable or not, and the connections whose
+ * transactions it joins.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

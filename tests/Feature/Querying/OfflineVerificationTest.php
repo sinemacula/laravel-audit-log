@@ -8,17 +8,8 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
 
 /**
- * It verifies with no class of the package, as an auditor would: the golden
- * export's file and membership digests are checked against its bundle's
- * manifest with nothing but `hash_file()`, `json_decode()` and a loop over the
- * lines; the export entry's HMAC is recomputed over its canonical columns with
- * a key derived from the application key alone; and the manifest is shown to be
- * the very one the signed entry describes, so an edited manifest cannot pass
- * beside an untouched entry.
- *
- * Nothing here loads the package: the canonical encoding and the key derivation
- * are written out as an auditor would write them from the documentation, which
- * is what the test proves possible.
+ * Proves an auditor can verify the golden export with no class of the package,
+ * from the documented encoding and key derivation alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,9 +35,7 @@ final class OfflineVerificationTest extends TestCase
     private const int JSON_FLAGS = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR;
 
     /**
-     * The file's SHA-256 is the manifest's, and the SHA-256 of each line's id
-     * and a line feed, in file order, is its membership digest, over as many
-     * lines as it counts, from its first position to its last.
+     * The file and membership digests verify against the manifest alone.
      *
      * @return void
      */
@@ -77,9 +66,7 @@ final class OfflineVerificationTest extends TestCase
     }
 
     /**
-     * The export entry's HMAC is HMAC-SHA256 over the canonical encoding of
-     * every column but `hmac`, under the key HKDF derives from the application
-     * key, whose id the entry names; and each line verifies the same way.
+     * The entry's HMAC verifies under a key derived from the app key alone.
      *
      * @return void
      */
@@ -102,10 +89,7 @@ final class OfflineVerificationTest extends TestCase
     }
 
     /**
-     * The manifest is the one the signed entry describes: its SHA-256 is the
-     * digest of the entry's own `properties._audit.manifest`, whose artifact
-     * id, kind `export` and count are the bundle's descriptor, and the entry's
-     * `file_sha256` and `returned` are the manifest's.
+     * The manifest is the one the signed entry describes.
      *
      * @return void
      */
@@ -127,9 +111,7 @@ final class OfflineVerificationTest extends TestCase
     }
 
     /**
-     * A manifest edited beside an untouched entry fails offline: its digest is
-     * no longer the one the entry signs, and editing the entry's descriptor to
-     * match breaks the entry's HMAC.
+     * An edited manifest fails offline, and matching the entry breaks its HMAC.
      *
      * @return void
      */
@@ -153,8 +135,7 @@ final class OfflineVerificationTest extends TestCase
     }
 
     /**
-     * The bundle, decoded with its objects as objects, after checking it is one
-     * canonical JSON object followed by one line feed.
+     * The bundle, decoded with objects, once checked as canonical JSON.
      *
      * @return \stdClass
      */
@@ -190,10 +171,7 @@ final class OfflineVerificationTest extends TestCase
     }
 
     /**
-     * The integrity key derived from the application key, and its id: HKDF with
-     * SHA-256 to 32 bytes under the integrity info, and `d` followed by the
-     * first 16 hexadecimal characters of the HMAC of `audit-log:key-id` under
-     * it.
+     * The integrity key derived from the application key, and its id.
      *
      * @return array{0: string, 1: string}
      */
@@ -205,8 +183,7 @@ final class OfflineVerificationTest extends TestCase
     }
 
     /**
-     * The HMAC-SHA256 of the row's columns but `hmac`, canonically encoded,
-     * under the secret.
+     * The HMAC-SHA256 of the row's canonical columns but `hmac`.
      *
      * @param  \stdClass  $row
      * @param  string  $secret
@@ -222,10 +199,7 @@ final class OfflineVerificationTest extends TestCase
     }
 
     /**
-     * The canonical encoding, as the documentation states it: `null`, booleans
-     * and integers as JSON writes them, strings through `json_encode()` with
-     * fixed flags, a list as its members in order, and an object as its members
-     * with their keys sorted bytewise.
+     * The canonical encoding, written out from the documentation.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

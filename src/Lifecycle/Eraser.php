@@ -30,59 +30,10 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Erases an owner: destroys every key the owner holds, so every field ever
- * encrypted for the owner, wherever it is stored, sent or replayed, reads
- * `erased`, and marks the owner erased, so no key is created for the owner
- * again until a reinstatement. All or nothing, unless asked to go ahead in
- * part.
+ * Erases an owner by destroying every key it holds and marking it erased, all
+ * or nothing unless asked to go ahead in part.
  *
- * An erasure is refused `unsupported_encrypter`, before anything else, when the
- * bound field encrypter is not one that keeps the package's key store, since
- * the keys it made are where the package cannot see them. The installation is
- * then confirmed, once, and the erasure runs in one `MaintenanceTransaction`:
- * the lifecycle lock, the whole journal verified, or in a run of erasures the
- * replay the last one committed advanced to the journal's head, so each journal
- * row of the run is read once (`ErasureRun`), then the owner's lock, so no key
- * of the owner is created meanwhile, and every read that decides a destruction
- * after both. The owner's latest marker is read, then the owner's keys: more
- * than 10,000 live or superseded keys are refused `too_many_keys`, and every
- * key of the owner, in any state, must verify under the signing key it names,
- * or the erasure is refused `key_unverifiable`, naming the keys, since nothing
- * is destroyed that cannot be authenticated. An owner whose latest marker
- * records an erasure and who holds no live or superseded key is already erased:
- * nothing is written, and the result says so.
- *
- * The outbox rows created before the erasure started, failed ones included, are
- * counted after the lock: any refuses the erasure `pending_delivery`, unless it
- * was asked to accept them, since every field of the owner they hold is erased
- * with the key. Each live or superseded key's entries are then read through its
- * key uses and decide its blocks, from the holds of the verified chain, the
- * policy's preservation at the erasure's UTC midnight and the entries that fail
- * authentication; any block refuses the erasure `blocked`, naming every reason,
- * unless it was asked to go ahead in part, when the blocked keys are kept and
- * the rest destroyed. Every refusal throws an `ErasureRefusedException` and
- * writes nothing.
- *
- * Otherwise an `erasure` row is appended onto the verified head, naming the
- * authority, the owner's fingerprint under the ring's signing key, the new
- * generation floor (the largest of the owner's previous floor and every
- * generation of the owner's keys), whether it went ahead in part, the outbox
- * rows it accepted, each destroyed key with its state, HMAC, wrapped key digest
- * and wrapping key before and its state after, each kept key with its reasons,
- * and the entries the destroyed keys encrypted. The destroyed keys are then
- * tombstoned, erased with no wrapped key and the row's id as their erasure, by
- * updates that name live or superseded keys alone and must change exactly the
- * keys they name, or the whole erasure, row and marker included, rolls back
- * with an `UnexpectedValueException`; and an `erased` marker is inserted under
- * the row's id, at its sequence and time, at the new floor. An erasure that
- * destroys nothing, of an owner with no key or one asked to go ahead in part
- * whose every key is blocked, still marks and journals the owner. On MySQL the
- * owner's lock is released once the transaction has ended, however it ended,
- * every attempt's; elsewhere the transaction's end released it.
- *
- * An erasure revokes the owner's fields in the live store when it commits;
- * whoever holds the database credentials can still destroy or restore keys, and
- * the signatures and the journal make that detectable, not impossible.
+ * A key that does not authenticate is never destroyed; refusals write nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -96,9 +47,6 @@ final readonly class Eraser
 
     /** @var int The most keys one tombstone update names. */
     public const int STATEMENT_IDS = 500;
-
-    /** @var string Why an erasure rolls back when a tombstone update does not change exactly the keys it names. */
-    private const string MISMATCH = 'A subject key changed while its owner was erased; the erasure is rolled back.';
 
     /**
      * Constructor.
@@ -122,16 +70,16 @@ final readonly class Eraser
      */
     public function __construct(
 
-        /** The frame the erasure runs in, behind the lifecycle lock. */
+        /** Runs the erasure behind the lifecycle lock. */
         private MaintenanceTransaction $transaction,
 
         /** The journal the erasure is appended to. */
         private Journal $journal,
 
-        /** The signer the journal is verified with. */
+        /** Verifies the journal. */
         private JournalSigner $signer,
 
-        /** The settings the journal's log id is read from. */
+        /** Gives the journal's log id. */
         private SealSettings $settings,
 
         /** Reads the owner's keys on the maintenance connection. */
@@ -140,7 +88,7 @@ final readonly class Eraser
         /** Authenticates every key of the owner. */
         private SubjectKeySigner $keySigner,
 
-        /** The owner markers, read and inserted on the maintenance connection. */
+        /** The owner markers on the maintenance connection. */
         private OwnerMarkers $markers,
 
         /** The owner's lock, taken after the lifecycle lock. */
@@ -161,16 +109,13 @@ final readonly class Eraser
         /** The bound field encrypter, which must keep the package's key store. */
         private FieldEncrypter $encrypter,
 
-        /** The time the erasure starts at, which its outbox count and preservation are decided by. */
+        /** The erasure's start, which decides its outbox count and preservation. */
         private Clock $clock,
     ) {}
 
     /**
-     * Erase the owner in one lifecycle transaction, all or nothing unless
-     * `$partial` lets the unblocked keys go, refusing outbox rows older than
-     * the erasure unless `$pending` accepts them, and return what it did. In a
-     * run of erasures, the run confirms the installation once and carries the
-     * verified journal from each committed erasure to the next.
+     * Erase the owner in one lifecycle transaction; in a run of erasures the
+     * verified journal is carried from each committed erasure to the next.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
@@ -246,8 +191,8 @@ final readonly class Eraser
     }
 
     /**
-     * Refuse the erasure when the bound field encrypter is not one that keeps
-     * the package's key store, naming the encrypter's class.
+     * Refuse the erasure when the bound field encrypter does not keep the
+     * package's key store, whose keys it cannot see.
      *
      * @param  string  $fingerprint
      * @param  string  $fingerprintKey
@@ -265,10 +210,7 @@ final readonly class Eraser
     }
 
     /**
-     * Erase the owner inside the lifecycle transaction the connection holds,
-     * after the owner's lock: the marker and the keys read and authenticated,
-     * the outbox counted, the blocks decided, then the row appended, the keys
-     * tombstoned and the marker inserted; return what it did and the replay it
+     * Erase the owner under its lock, returning the result and the replay it
      * leaves.
      *
      * @formatter:off
@@ -333,8 +275,7 @@ final readonly class Eraser
     }
 
     /**
-     * How many outbox rows were created before the erasure started, read after
-     * the lock; any refuses the erasure unless it accepts them.
+     * How many outbox rows predate the erasure; any refuses it unless accepted.
      *
      * @formatter:off
      *
@@ -362,7 +303,7 @@ final readonly class Eraser
     }
 
     /**
-     * Every reason the blocks give, each once; any block refuses the erasure
+     * Every distinct reason the blocks give; any block refuses the erasure
      * unless it goes ahead in part.
      *
      * @formatter:off
@@ -391,7 +332,7 @@ final readonly class Eraser
     }
 
     /**
-     * The erasure row the replay accepted last, once the journal appended it.
+     * The erasure row the replay accepted last.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
      * @return \SineMacula\Laravel\AuditLog\Integrity\JournalRow
@@ -404,10 +345,8 @@ final readonly class Eraser
     }
 
     /**
-     * Every key of the owner, in every state, by id, read after the locks and
-     * each authenticated: more than `MAX_KEYS` live or superseded keys are
-     * refused before any is read, and a key that does not verify under the
-     * signing key it names, or cannot be read, refuses the erasure.
+     * Every key of the owner, each authenticated; more than `MAX_KEYS` holding
+     * keys, or one that does not verify, refuses the erasure.
      *
      * @formatter:off
      *
@@ -441,8 +380,7 @@ final readonly class Eraser
         try {
             $keys = $this->keys->ofOwner($connection, $owner);
         } catch (\UnexpectedValueException) {
-            // A key too malformed to read cannot be authenticated, and names no
-            // id that can be trusted
+            // A key too malformed to read names no id that can be trusted
             throw self::refusal(ErasureRefusal::KEY_UNVERIFIABLE, [], $run);
         }
 
@@ -472,10 +410,7 @@ final readonly class Eraser
     }
 
     /**
-     * The erasure row's payload: the owner's fingerprint, the floor, whether it
-     * went ahead in part, the outbox rows it accepted, each destroyed key's
-     * before and after and each kept key's reasons, sorted by key id, and the
-     * entries affected.
+     * The erasure row's payload, with destroyed and kept keys sorted by id.
      *
      * @formatter:off
      *
@@ -514,9 +449,7 @@ final readonly class Eraser
     }
 
     /**
-     * What the erasure row lists of a key it destroys: its id, its unit's
-     * digest and its generation, its state, HMAC, wrapped key's digest and
-     * wrapping key before, and its state after.
+     * What the erasure row lists of a key it destroys, before and after.
      *
      * @formatter:off
      *
@@ -541,9 +474,8 @@ final readonly class Eraser
     }
 
     /**
-     * Tombstone the keys with the erasure's id, at most 500 to a statement,
-     * each statement naming live or superseded keys alone and refused unless it
-     * changes exactly the keys it names.
+     * Tombstone the keys in chunks, refusing a statement that does not change
+     * exactly the keys it names.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<string>  $ids
@@ -561,13 +493,13 @@ final readonly class Eraser
                 ->update(['state' => KeyState::ERASED->value, 'wrapped_key' => null, 'erasure_id' => $erasureId]);
 
             if ($updated !== count($chunk)) {
-                throw new \UnexpectedValueException(self::MISMATCH);
+                throw new \UnexpectedValueException('A subject key changed while its owner was erased; the erasure is rolled back.');
             }
         }
     }
 
     /**
-     * The refusal, with its reasons, about the owner the run fingerprints.
+     * The refusal, with its reasons, for the run's owner.
      *
      * @formatter:off
      *

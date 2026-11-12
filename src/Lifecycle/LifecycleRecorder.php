@@ -23,35 +23,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 
 /**
- * Writes the record of a lifecycle operation, a prune, a hold, a release or an
- * import, through the package's own write path once the operation's transaction
- * has committed: fail-closed and immediate whatever the failure mode says, by
- * the operator who asked for it, or by no one for a prune, in explicitly no
- * tenant, so an ambient one is never inherited, and keeping its evidence
- * exactly or refused before anything is delivered.
+ * Writes a lifecycle operation's record once its transaction commits:
+ * fail-closed and immediate, in no tenant, by its operator or no one.
  *
- * "Fail-closed" names the recording attempt alone: the operation has committed
- * already, with the journal row that describes it, and the journal is the
- * authority, so a record that cannot be written never undoes it. A record is
- * not attempted while a transaction is open on the connection that would
- * acknowledge it, the storage connection in sync mode and the outbox
- * connection in outbox mode, since its acknowledgement could still roll back;
- * that is confirmed again once the write returns, since the contributors it
- * runs are the application's code. A refusal, a failed write, which the
- * fail-closed rule spills, and a write never acknowledged are each reported
- * once, through the report latch, as a payload-free
- * `LifecycleRecordFailedException`, and answered `false`; nothing is rethrown,
- * and `audit-log:reconcile` records what is missing.
- *
- * Each record's id is derived from its code and its operation id, a UUID of
- * version 8 from their SHA-256, so one operation's record of one code has one
- * id wherever it is written: queued in the outbox or stored, by the operation
- * or by a reconciliation, a second write of it is refused by the outbox's or
- * the entries' primary key, or is the record stored already, and never a second
- * record.
- *
- * It resolves everything from the container on every call, so it outlives
- * requests safely.
+ * Nothing is attempted while the acknowledging connection is in a transaction,
+ * since the acknowledgement could still roll back.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,7 +36,7 @@ use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
  */
 final readonly class LifecycleRecorder
 {
-    /** @var string What every record id is derived under, before its code and operation id. */
+    /** @var string The info every record id is derived under. */
     private const string ID_INFO = 'audit-log lifecycle record id v1';
 
     /**
@@ -70,15 +46,13 @@ final readonly class LifecycleRecorder
      */
     public function __construct(
 
-        /** The container the settings, the definitions, the contributors and the reporter are resolved from on every call. */
+        /** The container everything is resolved from on every call, so it outlives requests. */
         private Container $container,
     ) {}
 
     /**
-     * Record the activity by the actor, keeping the evidence exactly, with its
-     * outcome and the reason given for a failure or a denial, and say whether
-     * the store or the outbox acknowledged it; a record that was refused,
-     * failed or was never acknowledged is reported once and answered `false`.
+     * Record the activity, keeping the evidence exactly, and say whether it was
+     * acknowledged; a failure is reported once.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor
@@ -107,9 +81,8 @@ final readonly class LifecycleRecorder
     }
 
     /**
-     * The id of the record of the code for the operation: a lower-case UUID of
-     * version 8 and the RFC 9562 variant, from the SHA-256 of the derivation's
-     * info, the code and the operation id, each ended by a NUL.
+     * A UUIDv8 from the SHA-256 of the code and operation id, so every write of
+     * one record has one id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  string  $operationId
@@ -128,9 +101,8 @@ final readonly class LifecycleRecorder
     }
 
     /**
-     * Attempt the record, outside any transaction on the acknowledging
-     * connection, and return why it is not written, or `null` once it is
-     * acknowledged with no such transaction open.
+     * Attempt the record and return why it was not written, or `null`;
+     * rechecked after the write, as contributors are application code.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor
@@ -172,10 +144,8 @@ final readonly class LifecycleRecorder
     }
 
     /**
-     * Write the builder's record through the record pipeline with a package
-     * write that refuses it unless it keeps the evidence exactly, under the
-     * definitions and contributors registered while the application booted, and
-     * say whether the store or the outbox acknowledged it.
+     * Write the record through the pipeline, refused unless it keeps the
+     * evidence, and say whether it was acknowledged.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleEvidence  $evidence
@@ -211,9 +181,8 @@ final readonly class LifecycleRecorder
     }
 
     /**
-     * The name of the connection that would acknowledge the record, when a
-     * transaction is open on it: the storage connection in sync mode, and the
-     * outbox connection in outbox mode; `null` when none is open.
+     * The acknowledging connection's name, storage or outbox by mode, when a
+     * transaction is open on it.
      *
      * @return ?string
      *
@@ -230,8 +199,7 @@ final readonly class LifecycleRecorder
     }
 
     /**
-     * Report the failure once, through the report latch, ignoring a reporter
-     * that fails.
+     * Report the failure once, ignoring a reporter that fails.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecordFailedException  $failure
      * @return void
@@ -245,15 +213,13 @@ final readonly class LifecycleRecorder
                 $handler->report($failure);
             });
         } catch (\Throwable) {
-            // The operation stands all the same; a broken reporter has nowhere
-            // left to say so, and must not undo it
+            // A broken reporter must not undo the operation
         }
     }
 
     /**
-     * The builder of the record: the activity's code, by the actor or
-     * explicitly no one, in explicitly no tenant, with the evidence's
-     * properties, the outcome and its reason, fail-closed, and so immediate.
+     * The record's builder, in explicitly no tenant so an ambient one is never
+     * inherited.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $actor

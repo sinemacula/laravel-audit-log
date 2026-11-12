@@ -8,19 +8,8 @@ use Illuminate\Contracts\Support\Arrayable;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\RewrapStatus;
 
 /**
- * What a rewrap did, or for a dry run would do: the operation, whether it
- * committed and whether its `audit_log.keys_rewrapped` record was written,
- * whether it rotated, the wrapping key every key it rewrapped is now wrapped
- * under, how many keys it rewrapped, how many live keys it superseded, the keys
- * it skipped, and its batches.
- *
- * A run that is not a dry run commits each batch on its own, so a result that
- * is returned is committed; a run that fails throws instead, and the batches it
- * committed stand. A dry run commits nothing, and counts what a run would do
- * were nothing to change before it ran. The status is `partial` when any key
- * was skipped, since its row failed its signature or its wrapped key did not
- * unwrap, and `complete` otherwise. At most 100 skipped keys are named; key ids
- * are opaque and name no owner.
+ * What a rewrap did, or for a dry run would do; each batch commits alone, so a
+ * failed run's batches stand.
  *
  * @api
  *
@@ -82,8 +71,7 @@ final readonly class RewrapResult implements Arrayable
         /** How many keys the run skipped. */
         public int $skipped,
 
-        // The ids of the keys the run skipped, bounded as the result keeps
-        // them.
+        // Not promoted: sorted and bounded before it is kept
         array $skippedKeyIds,
 
         /** How many batches the run committed, or for a dry run would commit. */

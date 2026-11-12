@@ -10,9 +10,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\PruneResult;
 
 /**
- * Unit tests for what a prune run did: its counts per category bounded at the
- * fifty largest with the rest under `_other`, its skipped seals bounded at a
- * hundred, whether its record was written, and the map it renders.
+ * Unit tests for what a prune run did.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,8 +24,7 @@ final class PruneResultTest extends TestCase
     private const string RUN = '01932b4e-c000-7000-8000-000000000001';
 
     /**
-     * Sixty categories, each deleting a different count, keep the fifty largest
-     * by name, the largest first, and the ten smallest summed under `_other`.
+     * The fifty largest categories keep their names; the rest sum to `_other`.
      *
      * @return void
      */
@@ -53,8 +50,7 @@ final class PruneResultTest extends TestCase
     }
 
     /**
-     * Categories deleting the same count are ordered bytewise, so which of them
-     * is kept by name never depends on the order they were counted in.
+     * Ties are ordered bytewise, so the kept names never depend on count order.
      *
      * @return void
      */
@@ -76,9 +72,7 @@ final class PruneResultTest extends TestCase
     }
 
     /**
-     * No more than fifty categories are kept as they are, the largest first,
-     * with no `_other`; one given is kept, and an already bounded map bounds to
-     * itself.
+     * Up to fifty categories are kept as given, with no `_other`.
      *
      * @return void
      */
@@ -116,8 +110,7 @@ final class PruneResultTest extends TestCase
     }
 
     /**
-     * Whether the record was written is `false` until it is set, and setting it
-     * keeps everything else.
+     * The recorded flag is `false` until set, which keeps everything else.
      *
      * @return void
      */
@@ -133,8 +126,7 @@ final class PruneResultTest extends TestCase
     }
 
     /**
-     * The map renders every field under its snake-case key, in order, the
-     * status as its value.
+     * The map renders every field under its snake-case key, in order.
      *
      * @return void
      */

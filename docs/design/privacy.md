@@ -2,16 +2,14 @@
 
 ## Purpose
 
-This note records how an owner's personal data is sealed, read and erased: the keys the package keeps for each owner
-and how they are wrapped, created, rotated and destroyed, the envelope a field is sealed in and what binds it to its
-entry, the key uses that find an owner's entries, the grant that lets a viewer read a sealed field, the erasure that
-destroys an owner's keys, what a database restore brings back, what an erasure does not reach, and what each store the
-package writes holds. An audit log is personal data held about everyone it names, and erasure here is the destruction
-of keys, never of rows, so the integrity of the log and the right to erasure both hold. Two guarantees are stated
-apart, here as everywhere. Database credentials can still destroy keys, key uses and markers; the package's
-cryptographic evidence makes unauthorised destruction, substitution or restoration detectable, never impossible. What
-none of this promises is in `threat-model.md`; how the trail is read is in `reading.md`; how an erasure is journalled
-beside the other maintenance operations is in `lifecycle.md`.
+This note records how an owner's personal data is sealed, read and erased: the owners' keys and how they are wrapped,
+created, rotated and destroyed, the envelope a field is sealed in, the key uses that find an owner's entries, the reveal
+grant, erasure, restores, what an erasure does not reach, and what each store the package writes holds. An audit log is
+personal data held about everyone it names, and erasure here is the destruction of keys, never of rows, so the integrity
+of the log and the right to erasure both hold. Two guarantees are stated apart, here as everywhere. Database credentials
+can still destroy keys, key uses and markers; the package's cryptographic evidence makes unauthorised destruction,
+substitution or restoration detectable, never impossible. What none of this promises is in `threat-model.md`; how the
+trail is read is in `reading.md`; how an erasure is journalled is in `lifecycle.md`.
 
 ## Invariants
 
@@ -103,7 +101,7 @@ beside the other maintenance operations is in `lifecycle.md`.
 - A key is in one of three states (`Integrity\Enums\KeyState`): `live` (wrapped, it seals and opens), `superseded`
   (wrapped, it opens only) and `erased` (no wrapped key, and it never reopens).
 - A data key is `random_bytes(32)`, stored only wrapped: AES-256-GCM through `Contracts\KeyWrapper`, a fresh 12-byte
-  nonce and a 16-byte tag, as `base64url(nonce ‖ ciphertext ‖ tag)`, 80 characters under `Keys\LocalKeyWrapper`. The
+  nonce and a 16-byte tag, as `base64url(nonce || ciphertext || tag)`, 80 characters under `Keys\LocalKeyWrapper`. The
   wrap's additional data is the canonical encoding of `{d: 'sinemacula/audit-log:wrap:v1', generation, k, unit,
   wrap_key_id}`, so a wrapped key moved to another row, or beside another wrapping key id, does not unwrap.
 - A key row is signed: `hmac` is the lower-case hex HMAC-SHA256 of the label `audit-log:subject-key:v1`, a line feed
@@ -160,7 +158,7 @@ beside the other maintenance operations is in `lifecycle.md`.
   `hash_hkdf('sha256', $dataKey, 32, 'sinemacula/audit-log:field-key:v1', $entryId)`, so a derived key seals only the
   fields of one entry, each under its own random nonce. That bounds the use of each key by construction, far below
   what AES-GCM allows under one key with random nonces, and rotation is on demand.
-- The envelope is `{v: 1, k: <key row id>, c: base64url(nonce ‖ ciphertext ‖ tag)}`: AES-256-GCM, a 12-byte nonce
+- The envelope is `{v: 1, k: <key row id>, c: base64url(nonce || ciphertext || tag)}`: AES-256-GCM, a 12-byte nonce
   drawn by `random_bytes()` inside the call and never a parameter, and a 16-byte tag (`Privacy\FieldCipher`). `c` is
   strict base64url with no padding whose re-encoding is the stored text, of 30 to 1052 decoded bytes.
 - The additional data is the canonical encoding of `{d: 'sinemacula/audit-log:field:v1', entry, k, log, path, v}`,

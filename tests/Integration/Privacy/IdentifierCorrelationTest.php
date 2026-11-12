@@ -23,12 +23,7 @@ use Tests\Concerns\InteractsWithAuditStore;
 use Tests\TestCase;
 
 /**
- * Integration tests for correlating sign-in activity across stored rows, on the
- * engine the suite runs against: one identifier has one hash however it was
- * typed, a change of key is visible in its fingerprint, and the hash is kept
- * unless the configuration says otherwise, whatever a definition does with the
- * record's other fields. Each row is read back and searched in PHP, as a reader
- * on any engine could, and verifies.
+ * Integration tests for correlating sign-ins by identifier hash across rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +46,7 @@ final class IdentifierCorrelationTest extends TestCase
     private const string IDENTIFIER = 'alice@example.com';
 
     /**
-     * Five failures and the lockout they lead to carry one hash, so the six
-     * rows are found to be one attempt from their JSON alone.
+     * Five failures and the lockout they lead to share one hash.
      *
      * @return void
      */
@@ -89,8 +83,7 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * What a form may post of one email address, in any case and with any
-     * padding, shares one hash.
+     * One email address in any case or padding shares one hash.
      *
      * @return void
      */
@@ -109,8 +102,7 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * Two identifiers have two hashes, and an identifier that is not an email
-     * address keeps its case, because a username's case can matter.
+     * Different identifiers hash differently, and a username keeps its case.
      *
      * @return void
      */
@@ -121,21 +113,19 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * The same key gives the same hash, and a changed key changes the
-     * fingerprint as well as the HMAC, so what no longer correlates says so.
-     * Both rows still verify, since verifying uses another key.
+     * A changed key changes the fingerprint as well as the HMAC.
      *
      * @return void
      */
     public function testAChangedKeyChangesTheFingerprint(): void
     {
-        self::config()->set('audit-log.redaction.key', str_repeat('a', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('a', 32));
 
         $first = (string) $this->storedHashOf(self::IDENTIFIER);
 
         self::assertSame($first, $this->storedHashOf(self::IDENTIFIER));
 
-        self::config()->set('audit-log.redaction.key', str_repeat('b', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('b', 32));
 
         $changed = $this->storedHashOf(self::IDENTIFIER);
 
@@ -145,9 +135,7 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * With no key configured the hash derives from the application's, under the
-     * identifier's own info: fingerprint, colon, HMAC, each worked out here by
-     * hand so nothing of the hasher is taken on trust.
+     * With no key configured the hash derives from the application key.
      *
      * @return void
      */
@@ -161,14 +149,13 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * In `drop` mode no row holds a hash, and because that is configuration and
-     * not a loss, none holds a diagnostic either.
+     * In `drop` mode no row holds a hash or a diagnostic.
      *
      * @return void
      */
     public function testDropModeStoresNoHash(): void
     {
-        self::config()->set('audit-log.redaction.identifiers', 'drop');
+        app(ConfigRepository::class)->set('audit-log.redaction.identifiers', 'drop');
 
         $stored = $this->storedAndVerified(self::failedSignIn(self::IDENTIFIER)->record());
 
@@ -180,8 +167,7 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * A definition whose unlisted fields are dropped loses the fields, counted,
-     * and never the hash, which is not among them.
+     * A definition dropping unlisted fields keeps the hash.
      *
      * @return void
      */
@@ -200,8 +186,7 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * A blank identifier, which a form can post, stores no hash and no
-     * diagnostic, so it never correlates with another blank.
+     * A blank identifier stores no hash and no diagnostic.
      *
      * @return void
      */
@@ -227,8 +212,7 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * The hash stored for a failed sign-in under the identifier, once the row
-     * has verified.
+     * The hash stored for a failed sign-in under the identifier, once verified.
      *
      * @param  string  $identifier
      * @return ?string
@@ -250,8 +234,7 @@ final class IdentifierCorrelationTest extends TestCase
     }
 
     /**
-     * Read back the row of a captured record and assert it verifies; the
-     * decoded row.
+     * The decoded row of a captured record, asserted to verify.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -281,15 +264,5 @@ final class IdentifierCorrelationTest extends TestCase
         $hash       = is_array($properties) ? ($properties['_audit']['identifier_hash'] ?? null) : null;
 
         return is_string($hash) ? $hash : null;
-    }
-
-    /**
-     * The application's configuration.
-     *
-     * @return \Illuminate\Config\Repository
-     */
-    private static function config(): ConfigRepository
-    {
-        return app(ConfigRepository::class);
     }
 }

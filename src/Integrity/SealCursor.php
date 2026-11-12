@@ -7,18 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * A position in the entries' `(recorded_at, id)` order, from which sealing
- * reads on: the rows after an entry, or every row from an instant on.
- *
- * Both parts are kept in the stored form, as the column returned them, so a
- * position round-trips on each engine whatever form its times take. Neither is
- * checked as a UUID or an instant, nor bounded or cut to a length, because the
- * row a position names may be one the sealer skipped as malformed, an id longer
- * than a UUID or an empty time among them, and a position that could not name
- * it exactly would stop sealing there or never move past it. Whether the
- * position starts at its time, the row at that time included, or after the
- * entry it names is kept apart from both parts, so an empty id is never read as
- * either.
+ * A position in the entries' `(recorded_at, id)` order that sealing reads on
+ * from, kept as stored and unchecked so it names even a malformed row exactly.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,7 +33,7 @@ final readonly class SealCursor
         public string $id,
 
         /** Whether the position starts at its time, the row at that time included, rather than after the entry. */
-        private bool $fromItsTime,
+        public bool $fromItsTime,
     ) {}
 
     /**
@@ -61,9 +51,7 @@ final readonly class SealCursor
     }
 
     /**
-     * The position after the entry with the stored time and id, whatever they
-     * hold: the rows read from it on are later, or at the same time with a
-     * greater id.
+     * The position after the entry with the stored time and id.
      *
      * @param  string  $recordedAt
      * @param  string  $id
@@ -91,17 +79,6 @@ final readonly class SealCursor
         }
 
         return new self($recordedAt, $id, ($value['from_its_time'] ?? false) === true);
-    }
-
-    /**
-     * Whether the position starts at its time, the row at that time included,
-     * rather than after an entry.
-     *
-     * @return bool
-     */
-    public function startsAtItsTime(): bool
-    {
-        return $this->fromItsTime;
     }
 
     /**

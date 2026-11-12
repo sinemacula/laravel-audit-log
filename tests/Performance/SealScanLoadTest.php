@@ -30,32 +30,14 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Load contract for scanning the entries table when sealing: a sweep's work
- * grows in line with the table, whether its rows are unsealed or already
- * sealed, because a window costs the same wherever its cursor is; a recent pass
- * costs the same whatever sealed history lies beyond its lookback; and the
- * batches of a backlog follow each other, each reading on from where the one
- * before stopped, never from the beginning.
+ * Load budget for scanning the entries table when sealing: a sweep grows
+ * linearly with the table, a recent pass ignores history beyond its lookback,
+ * and a backlog never restarts.
  *
- * Nothing here is held to an absolute limit: each measurement over the larger
- * table is compared with one over the smaller, taken in this process, so a slow
- * machine slows both. Each is the least CPU time of three runs, user and system
- * together, since a run can only be slowed by what else is happening.
- * `getrusage()` sees only this process, so the CPU time of a database server is
- * never counted: the measurements run on SQLite alone, whose engine works
- * inside the process, and are skipped on any other driver. They are not taken
- * while Xdebug collects coverage either, which slows every line by an order of
- * magnitude, so they would be measuring Xdebug. Whether a backlog restarts is a
- * matter of the statements alone, so it is checked on every engine.
- *
- * The sealer reads only an entry's id, HMAC and time, so the tables are filled
- * with copies of one finalised entry under fresh ids and times, which is far
- * quicker than finalising each.
- *
- * It claims no coverage because its tables are among the slowest things in the
- * suite to fill: a mutant whose covering tests included them would be skipped
- * as taking too long rather than run. The sealer's behaviour is pinned by its
- * own tests.
+ * CPU time is compared with a smaller run in this process, on SQLite only,
+ * since `getrusage()` cannot see a database server's work, and never under
+ * Xdebug coverage. No coverage is claimed, since mutants these slow tests cover
+ * would be skipped as timeouts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,13 +52,13 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     /** @var int How many rows the smaller table holds; the larger holds four times as many. */
     private const int ROWS = 2000;
 
-    /** @var int How much more work four times the rows may cost: linear growth is four times, and quadratic sixteen. */
+    /** @var int Most extra work four times the rows may cost: linear is four times, quadratic sixteen. */
     private const int MAX_WORK_RATIO = 6;
 
-    /** @var int How much more a recent pass may cost over four times the sealed history: one that does not grow with it costs the same. */
+    /** @var int Most a recent pass may cost over four times the sealed history; one that does not grow with it costs the same. */
     private const int MAX_RECENT_RATIO = 2;
 
-    /** @var int How much more a window from near the beginning of a table may cost than one from near its end: one that reads only its batch costs the same. */
+    /** @var int Most a window near a table's start may cost over one near its end. */
     private const int MAX_WINDOW_RATIO = 2;
 
     /** @var int The batch a sweep seals and reads its windows in. */
@@ -88,7 +70,7 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     /** @var int How many runs each CPU measurement takes the least of. */
     private const int ROUNDS = 3;
 
-    /** @var int How many recent passes or windows one measurement makes, so it is long enough to measure. */
+    /** @var int Recent passes or windows per measurement, so it is long enough to measure. */
     private const int PASSES = 20;
 
     /** @var int How many recent rows each recent pass finds sealed in its lookback. */
@@ -104,9 +86,8 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     private ?array $template = null;
 
     /**
-     * A sweep of four times the unsealed rows costs no more than six times the
-     * CPU time of a sweep of the smaller table: linear growth gives four, and
-     * quadratic sixteen.
+     * A sweep of four times the unsealed rows costs at most six times the CPU
+     * time: linear gives four, quadratic sixteen.
      *
      * @return void
      */
@@ -130,10 +111,8 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A recent pass over a table whose sealed history is four times as large,
-     * all of it recorded more than the lookback before the newest sealed row,
-     * costs no more than twice one over the smaller history: it starts at the
-     * lookback, so the history beyond it is never read.
+     * A recent pass over four times the sealed history costs at most twice as
+     * much: history beyond its lookback is never read.
      *
      * @return void
      */
@@ -176,9 +155,8 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Across a run of ten batches over a backlog, only the first candidate
-     * query starts at the beginning of the table, and each one after it reads
-     * on strictly after the position the one before reached.
+     * Across ten batches of a backlog only the first candidate query starts at
+     * the beginning; each after reads on from where the last stopped.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Integrity\Sealer): \SineMacula\Laravel\AuditLog\Integrity\SealResult  $run
      * @return void
@@ -209,9 +187,8 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A sweep over four times the rows, every one sealed already, costs no more
-     * than six times the CPU time of one over the smaller table: its windows
-     * read on to the end and seal nothing.
+     * A sweep over four times the rows, all sealed, costs at most six times the
+     * CPU time.
      *
      * @return void
      */
@@ -234,11 +211,8 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A sweep window reads at most its batch of rows wherever its cursor is, so
-     * a window from near the beginning of a sealed table costs no more than
-     * twice the CPU time of one from near its end: one that sorted every row
-     * after its cursor before taking its batch would cost in line with the rows
-     * left, and make a whole sweep quadratic in the table.
+     * A sweep window costs the same wherever its cursor is; one that sorted
+     * every later row would make a sweep quadratic.
      *
      * @return void
      */
@@ -295,20 +269,9 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Seal in batches of the size given.
-     *
-     * @param  int  $batch
-     * @return void
-     */
-    private function useBatch(int $batch): void
-    {
-        app(ConfigRepository::class)->set('audit-log.integrity.seal.batch', $batch);
-    }
-
-    /**
-     * Insert the number of rows, copies of one finalised entry, a chunk at a
-     * time, the first recorded at the offset given in microseconds after the
-     * time given, and each next one a microsecond later.
+     * Insert copies of one finalised entry a chunk at a time, the first the
+     * offset in microseconds after the time given, each next a microsecond
+     * later.
      *
      * @param  int  $count
      * @param  string  $from
@@ -398,10 +361,9 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Record the position every candidate query from now on reads after, in
-     * order: `null` for one that starts at the beginning of the table, and
-     * otherwise its time, in the package's form, and its id, which is empty for
-     * one that starts at its time.
+     * Record the position each candidate query from now on reads after: `null`
+     * from the table's start, else its time and id, the id empty when it starts
+     * at its time.
      *
      * @return \ArrayObject<int, ?array{0: string, 1: string}>
      */
@@ -478,21 +440,5 @@ final class SealScanLoadTest extends PerformanceContractTestCase
         }
 
         return $least;
-    }
-
-    /**
-     * The CPU time this process has used, user and system together: waiting for
-     * a core on a busy machine or runner uses none of it.
-     *
-     * @return int
-     */
-    private static function cpuNanoseconds(): int
-    {
-        $usage = getrusage();
-
-        assert(is_array($usage));
-
-        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec'])  * 1000000000
-            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) * 1000;
     }
 }

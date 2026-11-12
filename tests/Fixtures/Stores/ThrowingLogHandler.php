@@ -8,14 +8,11 @@ use Monolog\Handler\AbstractProcessingHandler;
 use Monolog\LogRecord;
 
 /**
- * A Monolog handler that fails every write with a `\RuntimeException` whose
- * message holds `self::SECRET`, the worst a broken channel could do: it stands
- * for a full disk or an unreachable log server.
+ * A Monolog handler that fails every write with a `\RuntimeException` holding
+ * `self::SECRET`, standing for a full disk or an unreachable log server.
  *
- * A channel uses it through the `monolog` driver (`channel()` gives the
- * configuration), and a test gives its message through `handler_with`, so a
- * message Laravel reads as a deadlock or a lost connection makes the channel
- * fail as one.
+ * A test sets the message through `handler_with`, so one Laravel reads as a
+ * deadlock or lost connection fails the channel as one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

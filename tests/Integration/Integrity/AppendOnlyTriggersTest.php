@@ -20,22 +20,9 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for the triggers the storage note documents, run exactly as
- * written on whichever engine the suite runs against: they install, refuse an
- * update of an entry, an artifact or a member, a change to any immutable
- * checkpoint column and a delete of a member or a seal, allow the anchor
- * columns, refuse a delete of an entry or an artifact by anyone but the
- * maintenance user (on SQLite by anyone), let the maintenance user delete one,
- * refuse a `TRUNCATE` on PostgreSQL, leave the integrity state table alone, and
- * leave sealing, anchoring, the sweep and verification working; the documented
- * SQLite prune takes the lifecycle lock, deletes and restores its triggers, an
- * entry's artifact with it, and a failed one rolled back keeps them.
- *
- * On MySQL and PostgreSQL the documented grants are run too, for the logins
- * this worker creates, `audit_writer_<token>`, `audit_maintenance_<token>` and
- * `audit_verifier_<token>`, which are dropped when the test ends, as the
- * triggers are, and they limit what each login does to an artifact. The tests
- * cover documented SQL, not a class of the package.
+ * Integration tests for the documented append-only triggers and grants, run
+ * exactly as written on each engine; this worker's logins and triggers are
+ * dropped when each test ends.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,9 +59,8 @@ final class AppendOnlyTriggersTest extends TestCase
     private array $logins = [];
 
     /**
-     * Register both commands, stop the clock when every command runs, seal at a
-     * fixed time, then run the documented grants for this worker's logins,
-     * where the engine has users, and the documented triggers.
+     * Register the commands, stop the clock and seal at a fixed time, then run
+     * the documented grants and triggers.
      *
      * @return void
      */
@@ -204,10 +190,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * A delete of an artifact by the tables' owner is refused, and on MySQL and
-     * PostgreSQL so is one by the writer granted `DELETE` beyond the documented
-     * grants, while the maintenance user deletes it, as a prune does, and the
-     * entries, the other artifact, every member and every seal stay.
+     * An artifact's delete is refused to all but the maintenance user, whose
+     * delete leaves every other row.
      *
      * @return void
      */
@@ -246,8 +230,8 @@ final class AppendOnlyTriggersTest extends TestCase
 
     /**
      * On MySQL and PostgreSQL the documented grants let the writer read and
-     * insert an artifact and nothing more, and the maintenance user read one
-     * but never update it: the engine, not a trigger, refuses the rest.
+     * insert an artifact and the maintenance user read one; the engine refuses
+     * the rest.
      *
      * @return void
      */
@@ -294,9 +278,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * Rows of `[column, value, sequence]`: each immutable checkpoint column
-     * changed to a value no stored seal has, on the genesis seal, whose
-     * previous fields are null, and those fields of the next seal made null.
+     * Rows of `[column, value, sequence]` changing each immutable checkpoint
+     * column, on the genesis seal and the next.
      *
      * @return iterable<string, array{0: string, 1: int|string|null, 2: int}>
      */
@@ -334,11 +317,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * Every column of the checkpoints table is classified, in the table's own
-     * order, as an immutable column the triggers and grants protect or as one
-     * of the four anchor columns the writer may update, so a column added to
-     * the migration fails here until the documented triggers and grants, and
-     * the lists every trigger and grant test draws on, say which it is.
+     * Every checkpoint column is classified as immutable or anchor, so a column
+     * added to the migration fails here until the triggers and grants cover it.
      *
      * @return void
      */
@@ -350,9 +330,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * The four anchor columns stay writable on the genesis seal, whose null
-     * previous fields a careless comparison would trip on: they are written,
-     * read back, and cleared again.
+     * The four anchor columns stay writable on the genesis seal, whose previous
+     * fields are null.
      *
      * @return void
      */
@@ -391,9 +370,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * A delete of an entry by the tables' owner is refused, and on MySQL and
-     * PostgreSQL so is one by the writer granted `DELETE` beyond the documented
-     * grants: the trigger, not the grant, refuses it.
+     * An entry's delete is refused by the trigger, even to a writer granted
+     * `DELETE`.
      *
      * @return void
      */
@@ -439,9 +417,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * On MySQL the delete trigger compares the client's name byte for byte, so
-     * a login whose name differs from the maintenance user's only in case is
-     * refused, though it holds the same grant.
+     * On MySQL the delete trigger compares the login byte for byte, so a case
+     * variant of the maintenance user is refused.
      *
      * @return void
      */
@@ -475,10 +452,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * On SQLite the documented prune, with a delete where the prune's own
-     * statements go, takes the lifecycle lock first, deletes the entry and
-     * leaves the delete trigger as it was, so the next delete is refused;
-     * members and seals stay, and the lock's one row holds the prune's token.
+     * On SQLite the documented prune takes the lifecycle lock, deletes the
+     * entry and restores the delete trigger.
      *
      * @return void
      */
@@ -504,9 +479,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * On SQLite the documented prune deletes an entry's artifact with the entry
-     * and leaves both delete triggers as they were, so the next artifact's
-     * delete is refused; the other artifact stays.
+     * On SQLite the documented prune deletes an entry's artifact with it and
+     * restores both delete triggers.
      *
      * @return void
      */
@@ -536,9 +510,8 @@ final class AppendOnlyTriggersTest extends TestCase
     }
 
     /**
-     * On SQLite a prune that fails after taking the lock, dropping the trigger
-     * and deleting an entry, rolled back, keeps the entry, the trigger and the
-     * lock's row as it was.
+     * On SQLite a failed prune rolled back keeps the entry, the trigger and the
+     * lock's row.
      *
      * @return void
      */

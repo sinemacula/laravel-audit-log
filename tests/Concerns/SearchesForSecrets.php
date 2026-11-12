@@ -8,19 +8,11 @@ use Illuminate\Contracts\Container\Container;
 use PHPUnit\Framework\Test;
 
 /**
- * Searches anything a capture left behind for a planted secret: arrays and
- * their keys, public and private properties by reflection, what a closure
- * holds, and what a throwable holds: its message, its previous chain, its trace
- * as a string and the scalar and array arguments of its frames.
+ * Searches anything a capture left behind for a planted secret: arrays, object
+ * properties, closures, and throwables with their traces.
  *
- * It does not descend into a container or a PHPUnit object: a delivery
- * closure's `$this` reaches the whole application, and the walk would be slow
- * and would find the test's own values. A `\SensitiveParameterValue` is what a
- * marked parameter leaves in a frame, so what it wraps is withheld by design
- * and never searched. An object passed straight to a frame is not searched
- * either, since a trace writes it as its class alone.
- *
- * A failure names where the search looked and never prints what it found.
+ * It stops at containers, PHPUnit objects and `\SensitiveParameterValue`, whose
+ * contents are withheld by design. A failure never prints what it found.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,9 +57,8 @@ trait SearchesForSecrets
     }
 
     /**
-     * Whether the text is in the value, each object being searched once. An
-     * object is kept in the visited set so that its id cannot be reused while
-     * the search runs.
+     * Whether the text is in the value, each object searched once; a visited
+     * object is kept so its id cannot be reused mid-search.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -207,9 +198,9 @@ trait SearchesForSecrets
     }
 
     /**
-     * The initialised instance properties of the object, public and private,
-     * dynamic ones and those its parents declare included. A throwable's base
-     * class is left out, since its own parts are read through its methods.
+     * The object's initialised instance properties, public, private, dynamic
+     * and inherited; a throwable's base class is left out, since its parts are
+     * read through its methods.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

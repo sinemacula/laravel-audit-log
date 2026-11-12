@@ -13,10 +13,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
-use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
-use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\KeyState;
@@ -35,22 +33,16 @@ use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyFieldReader;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
-use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\DefinesEvents;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\ServesRequestsThroughOctane;
 use Tests\TestCase;
 
 /**
- * Feature tests that no key outlives one operation: a long-running worker that
- * writes after an erasure never encrypts under the erased key, even through one
- * encrypter kept across records; a page read after an erasure shows the owner's
- * fragments erased, even through one reader kept across pages; an import after
- * an erasure drops the erased owner's fields; the write and read paths resolve
- * their encrypter and reader afresh for every record and every page; and
- * requests served by one Octane worker share no key.
+ * Feature tests that no key outlives one operation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,7 +54,7 @@ use Tests\TestCase;
 #[CoversClass(Eraser::class)]
 final class KeyCachingTest extends TestCase
 {
-    use MakesSubjectKeys, ReadsTheTrail, ServesRequestsThroughOctane;
+    use DefinesEvents, MakesSubjectKeys, ReadsTheTrail, ServesRequestsThroughOctane;
 
     /** @var string When every capture and erasure runs. */
     private const string NOW = '2026-11-04 10:00:00.000000';
@@ -80,8 +72,7 @@ final class KeyCachingTest extends TestCase
     private array $files = [];
 
     /**
-     * Freeze the clock, bind the package's key wrapper, encrypter and reader
-     * fresh on every resolution, as the provider will, and define the code.
+     * Freeze the clock, bind the key services afresh, and define the code.
      *
      * @return void
      */
@@ -124,10 +115,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * A worker that goes on writing after an erasure never encrypts under the
-     * erased key: its next record for the owner drops the field, and even one
-     * encrypter kept across records, as a worker could keep it, answers `null`
-     * for the next entry instead of the key it used before.
+     * A worker writing after an erasure never encrypts under the erased key.
      *
      * @return void
      */
@@ -151,10 +139,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * A page read after an erasure shows the owner's fragments erased: the
-     * trail read again, and one reader kept across pages, as a long-running
-     * reader could keep it, both answer `erased` for a field it revealed on the
-     * page before.
+     * A page read after an erasure shows the owner's fragments erased.
      *
      * @return void
      */
@@ -178,9 +163,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * An import after an erasure drops the erased owner's fields, as a capture
-     * does, and creates no key for the owner; another owner's line in the same
-     * import is encrypted under that owner's key.
+     * An import after an erasure drops the owner's fields and makes no key.
      *
      * @return void
      */
@@ -188,8 +171,7 @@ final class KeyCachingTest extends TestCase
     {
         $other = Reference::of('App\Models\User', '43');
 
-        // The source names the log every journal row is signed into, so it is
-        // set before the erasure's row is
+        // The source names the log journal rows are signed into
         app(ConfigRepository::class)->set('audit-log.source.id', 'app-eu-1');
 
         $this->chargeCard(self::owner());
@@ -218,9 +200,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * The write path resolves its encrypter afresh for every record, and the
-     * read path its reader afresh for every page, so no key one record or page
-     * used is held for the next.
+     * The encrypter is resolved per record and the reader per page.
      *
      * @return void
      */
@@ -261,10 +241,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * Requests served by one Octane worker share no key: the first request's
-     * owner is erased between requests, so the next request for that owner
-     * drops its field, while a request for another owner is encrypted under
-     * that owner's own key; each request resolves its own encrypter.
+     * Requests on one Octane worker share no key.
      *
      * @return void
      */
@@ -303,15 +280,13 @@ final class KeyCachingTest extends TestCase
         self::assertIsArray($third['card'] ?? null);
         self::assertNotSame($first['card']['k'] ?? null, $third['card']['k'] ?? null);
         self::assertSame($this->liveKeyOf(Reference::of('App\Models\User', '43'))->id, $third['card']['k'] ?? null);
-        // Each of the three records resolved one, and the erasure one more to
-        // know the bound encrypter
+        // One per record, and one the erasure resolves to know the binding
         self::assertCount(4, $encrypters);
         self::assertCount(4, array_unique($encrypters->getArrayCopy()));
     }
 
     /**
-     * Capture a charge of a card the actor owns, encrypted under the actor's
-     * key.
+     * Capture a card charge encrypted under the actor's key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $actor
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
@@ -333,8 +308,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * The card of the entry with the id, as a page of the category shows it to
-     * the viewer.
+     * The card of the entry, as a page shows it to the viewer.
      *
      * @param  string  $id
      * @return string
@@ -373,8 +347,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * The owner's live key in the code's category, with no tenant; the test
-     * fails without one.
+     * The owner's live key in the code's category; the test fails without one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow
@@ -390,8 +363,7 @@ final class KeyCachingTest extends TestCase
     }
 
     /**
-     * The context a card of the owner is encrypted in, at the entry: the owner
-     * alone, no tenant, the code's category, at the card's path.
+     * The context the owner's card is encrypted in at the entry.
      *
      * @param  string  $entryId
      * @return \SineMacula\Laravel\AuditLog\Privacy\FieldContext
@@ -454,26 +426,5 @@ final class KeyCachingTest extends TestCase
     private static function authority(): Authority
     {
         return new Authority(Reference::of('App\Models\User', '7'), 'case.review');
-    }
-
-    /**
-     * Make the definition the only one the facade's recorder and the container
-     * know, as an application registers it while it boots.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
-     * @return void
-     */
-    private static function define(EventDefinition $definition): void
-    {
-        $catalogue = new EventCatalogue;
-
-        $catalogue->define($definition);
-
-        $recorder = new Recorder($catalogue, new ContributorRegistry);
-
-        app()->instance(EventCatalogue::class, $catalogue);
-        app()->instance(Recorder::class, $recorder);
-
-        AuditLog::swap($recorder);
     }
 }

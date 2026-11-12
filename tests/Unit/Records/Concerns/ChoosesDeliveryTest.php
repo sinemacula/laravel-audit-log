@@ -13,10 +13,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 
 /**
- * Unit tests for a pending record's delivery state: no timing until one is
- * chosen, each timing and its connection kept, exactly one timing per record,
- * fail-closed resolving to immediate and never combining with after commit in
- * either order, and the connection names refused.
+ * Unit tests for a pending record's timing, connection and fail-closed state.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

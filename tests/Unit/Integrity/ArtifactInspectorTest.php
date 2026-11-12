@@ -13,11 +13,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the classification of a stored artifact against the descriptor
- * its entry signed: which values are exactly a descriptor, the finding each
- * difference of the stored columns gives, in the order they are checked, and
- * the finding each plaintext gives, read by the signed kind's own reader, for
- * every kind.
+ * Unit tests for classifying a stored artifact against its signed descriptor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,10 +42,8 @@ final class ArtifactInspectorTest extends TestCase
     private const string OTHER_DIGEST = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
     /**
-     * Rows of `[value, whether it is a descriptor]`: exactly a lower-case UUID
-     * artifact id, a kind the package knows, a 64 lower-case hex digest and an
-     * integer count, positive for a bulk operation and never negative, in any
-     * key order, and nothing else.
+     * Rows of `[value, whether it is a descriptor]`: an artifact id, a known
+     * kind, a digest and a count, in any key order, and nothing else.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -108,9 +102,8 @@ final class ArtifactInspectorTest extends TestCase
     }
 
     /**
-     * Rows of `[stored columns, finding]`: the artifact the descriptor names as
-     * an engine returns it, or `null` for none, and the finding it gives, each
-     * difference alone and, where two are combined, the one checked first.
+     * Rows of `[stored columns, finding]`: each difference alone and, where two
+     * combine, the one checked first.
      *
      * @return iterable<string, array{0: ?array<string, scalar|null>, 1: ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding}>
      */
@@ -138,9 +131,8 @@ final class ArtifactInspectorTest extends TestCase
     }
 
     /**
-     * Each difference of the stored columns from the descriptor gives its own
-     * finding, checked in order: missing, swapped, the wrong kind, then a
-     * mismatch; the row the descriptor signed gives none.
+     * Each difference of the stored columns gives its finding in order:
+     * missing, swapped, wrong kind, then mismatch.
      *
      * @param  ?array<string, scalar|null>  $stored
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $expected
@@ -154,10 +146,7 @@ final class ArtifactInspectorTest extends TestCase
 
     /**
      * Rows of `[kind, plaintext, signed count, signed digest, finding]`, for
-     * every kind: its canonical form as signed, plaintexts that are no
-     * canonical form of the kind, another kind's canonical form among them, and
-     * a canonical form of the kind other than the one signed, by its count or
-     * its digest.
+     * every kind.
      *
      * @formatter:off
      *
@@ -192,10 +181,8 @@ final class ArtifactInspectorTest extends TestCase
     }
 
     /**
-     * A plaintext the signed kind's reader does not read is malformed, even
-     * when it is another kind's canonical form signed as it is; a canonical
-     * form of the kind other than the one signed is tampered; and the signed
-     * form gives no finding.
+     * A plaintext the signed kind cannot read is malformed, another canonical
+     * form of the kind is tampered, and the signed form gives no finding.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  string  $plaintext
@@ -229,9 +216,7 @@ final class ArtifactInspectorTest extends TestCase
     }
 
     /**
-     * `ArtifactInspector` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *

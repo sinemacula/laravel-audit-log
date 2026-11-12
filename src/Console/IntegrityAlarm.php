@@ -11,18 +11,8 @@ use SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException;
 use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 
 /**
- * How `audit-log:seal` and `audit-log:verify` raise an integrity alarm: they
- * dispatch a payload-free `IntegrityCheckFailed`, then report the
- * `IntegrityCheckFailedException` the event gives, or the one the caller gives
- * for a run that stopped.
- *
- * The first bad id reaches a listener only when it is a lower-case UUID, the
- * only form the package writes, since an id read from a table that was altered
- * may hold anything, line breaks and control characters included. A listener
- * that fails is reported as it threw and goes no further, as a listener of any
- * of the package's events is, and the alarm is still reported after it. A
- * reporter that fails is ignored, since the failure is already printed and
- * there is nowhere left to say so.
+ * How `audit-log:seal` and `audit-log:verify` raise an integrity alarm:
+ * dispatch a payload-free `IntegrityCheckFailed`, then report its exception.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,7 +38,7 @@ final readonly class IntegrityAlarm
 
     /**
      * Dispatch the event and report the exception it gives, or the one given
-     * for a run that stopped before it could say.
+     * for a run that stopped.
      *
      * @param  \SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed  $event
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\IntegrityCheckFailedException  $stopped
@@ -63,8 +53,7 @@ final readonly class IntegrityAlarm
         try {
             $dispatch();
         } catch (\Throwable $exception) {
-            // A listener that fails is reported and must not hide the failure,
-            // which is still reported after it
+            // A failing listener is reported and must not hide the alarm
             $this->report($exception);
         }
 
@@ -82,13 +71,13 @@ final readonly class IntegrityAlarm
         try {
             $this->handler->report($exception);
         } catch (\Throwable) {
-            // The failure is already printed, and there is nowhere left to say
-            // so
+            // The failure is already printed; there is nowhere left to say so
         }
     }
 
     /**
-     * The event with its first bad id kept only when it is a lower-case UUID.
+     * The event with its first bad id kept only when it is a lower-case UUID,
+     * since an id read from an altered table may hold control characters.
      *
      * @param  \SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed  $event
      * @return \SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed

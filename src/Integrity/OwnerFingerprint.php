@@ -7,18 +7,10 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The keyed fingerprint an owner is named by in the journal: HMAC-SHA256, as
- * lower-case hex, of the canonical encoding of the owner's type and id, under a
- * key derived from a ring key's secret by HKDF-SHA256 with an info string of
- * its own, so it is never another of the package's keys.
- *
- * A fingerprint is given with the id of the ring key it was made under, since a
- * rotation of the ring changes it: `of()` uses the signing key, and `under()`
- * makes the fingerprint an earlier row recorded, under the key that row names.
- * It cannot be reversed without the ring, but anyone holding the ring and an
- * owner's reference can recompute it, so it is personal data for as long as it
- * can be linked to the owner. The fingerprint key is derived on every call and
- * never kept.
+ * The keyed fingerprint an owner is named by in the journal: HMAC-SHA256 of its
+ * type and id under a key of its own derived by HKDF. Anyone with the ring and
+ * the owner's reference can recompute it, so it is personal data while
+ * linkable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

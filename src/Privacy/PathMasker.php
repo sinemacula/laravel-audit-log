@@ -8,17 +8,9 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Definitions\FieldPath;
 
 /**
- * The path a removed branch is reported under: only what a definition already
- * declares, and `*` for everything else, so a dynamic key, which could be an
- * email address, never reaches a diagnostic.
- *
- * A property's segment is written only from the rule that decides that same
- * field, or failing that the first rule beneath it, never because the word
- * occurs in some other rule. A context has no rules, so only the first segment
- * can be written, and only when it is one of the fixed names the package itself
- * fills. A concrete key is never written: a literal appears because a rule or
- * the package wrote it, and a segment holds no dot, since a rule's path splits
- * on it.
+ * The path a removed branch is reported under: only what a definition or the
+ * package declares, and `*` elsewhere, so a dynamic key never reaches a
+ * diagnostic.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,10 +34,8 @@ final class PathMasker
     private function __construct() {}
 
     /**
-     * The masked path of a property at the concrete path: at each position, the
-     * segment of the rule deciding the field, or failing that of the first rule
-     * beneath it, when it has one there, and `*` otherwise. A wildcard in the
-     * rule stays `*`, whatever key it matched.
+     * The masked path of a property: at each position the segment of the rule
+     * deciding the field, or the first rule beneath it, and `*` otherwise.
      *
      * @param  list<int|string>  $path
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
@@ -64,9 +54,8 @@ final class PathMasker
     }
 
     /**
-     * The masked path of a context value at the concrete path: `context.`, then
-     * the first segment when it is one of the fixed names the package fills and
-     * `*` when it is not, then `*` for every later segment.
+     * The masked path of a context value: `context.`, then the first segment
+     * only when the package fills it, and `*` for the rest.
      *
      * @param  list<int|string>  $path
      * @return string

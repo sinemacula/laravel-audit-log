@@ -10,11 +10,9 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the subject keys table: one row for each generation of an owner's key
- * unit, the owner with a tenant and a category. A row is inserted by the
- * storage connection's writer when its key is created, and is never deleted;
- * only its state, its wrapped key, the wrapping key's id and the erasure that
- * destroyed it are ever updated, by the maintenance connection.
+ * Create the subject keys table: one row per generation of an owner's key unit,
+ * the owner with a tenant and a category. Never deleted, and updated only by
+ * the maintenance connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,37 +36,31 @@ return new class extends Migration {
         $mysql = $schema->getConnection()->getDriverName() === 'mysql';
 
         $schema->create($table, static function (Blueprint $blueprint) use ($table, $mysql): void {
-            // The key's own id, which every envelope it sealed names, never
-            // derived from its owner.
+            // Named by every envelope it sealed, never derived from its owner.
             $blueprint->uuid('id')->primary();
 
-            // The key unit: the owner, the tenant of the records it encrypts,
-            // if any, and their category.
             $blueprint->string('owner_type', 191);
             $blueprint->string('owner_id', 191);
             $blueprint->string('tenant_type', 191)->nullable();
             $blueprint->string('tenant_id', 191)->nullable();
             $blueprint->string('category', 64);
 
-            // The unit's digest, unique with the generation: a composite unique
-            // index over the nullable tenant columns would let two tenantless
-            // rows share a generation on every engine.
+            // A unique index over the nullable tenant columns would let two
+            // tenantless rows share a generation, so the unit's digest is used.
             $blueprint->string('unit', 64);
             $blueprint->integer('generation');
 
-            // Where the key stands, the data key wrapped under the wrapping key
-            // the id names, both null once it is erased.
+            // The wrapped key and its wrapping key's id are null once erased.
             $blueprint->string('state', 16);
             $blueprint->text('wrapped_key')->nullable();
             $blueprint->string('wrap_key_id', 191)->nullable();
 
-            // To the microsecond, when the key was created.
             $blueprint->dateTime('created_at', 6);
 
             // The journal row of the erasure that destroyed the key.
             $blueprint->uuid('erasure_id')->nullable();
 
-            // The signing key and the HMAC over the columns never changed.
+            // The HMAC covers only the columns never changed.
             $blueprint->string('key_id', 32);
             $blueprint->string('hmac', 64);
 
@@ -80,9 +72,6 @@ return new class extends Migration {
                 $blueprint->engine('InnoDB');
             }
 
-            // One key per unit and generation, an owner's keys found together,
-            // and the keys an erasure destroyed. Named short, so each fits
-            // PostgreSQL's 63 characters at the longest table name.
             $blueprint->unique(['unit', 'generation'], $table . '_unit_unique');
             $blueprint->index(['owner_type', 'owner_id'], $table . '_owner_index');
             $blueprint->index(['erasure_id'], $table . '_erasure_index');
@@ -102,8 +91,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * a key is beside the entries whose fields it encrypted.
+     * The storage connection, so a key is beside the entries it encrypted.
      *
      * @return ?string
      *

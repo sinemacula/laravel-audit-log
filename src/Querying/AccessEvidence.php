@@ -13,30 +13,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 
 /**
- * The evidence the record of a read of the trail must keep exactly: its
- * properties, in the order of the read's code, and the manifest of the artifact
- * it carries, a disclosure or an export's manifest, or none.
- *
- * Each read names its purpose, the keyed fingerprints of its filters and of the
- * scope the policy answered (`null` when none was), the id of the key that
- * keyed them, the class of the policy, and its own outcome again; a page names
- * where it started, how many entries it showed, whether its scope revealed the
- * encrypted fields and how many fragments it showed in each state, and its
- * disclosure each entry's id and HMAC. A page started at the newest entry is
- * `first`, one whose cursor gave no position, refused or never opened, is
- * `cursor`, and one after a position is that position only under a scope of
- * exactly one tenant, whose record is that tenant's; under any other scope it
- * is `next`, since the record is tenantless and the position could be another
- * tenant's entry, and the position itself is kept in the disclosure. A read
- * that was denied or failed showed nothing, so its evidence names no entry and
- * counts none, of entries or of fragments, whatever it is given; a page keeps
- * its scope's grant all the same. A policy name longer than `MAX_POLICY_BYTES`
- * would not be kept exactly, so it refuses the read with
- * `AuditReadRefusedException`. Evidence is never minimised away:
- * `assertKeptBy()` refuses a record whose properties, less the package's
- * metadata, do not encode canonically to exactly the evidence's, or whose
- * metadata is anything but the descriptor of its manifest, or nothing without
- * one.
+ * The evidence a read's record must keep exactly: its properties, in the order
+ * of the read's code, and the manifest of its artifact, if any.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,26 +26,20 @@ final readonly class AccessEvidence
     /** @var int Longest policy name kept, in bytes. */
     public const int MAX_POLICY_BYTES = 191;
 
-    /** @var string The key the package's metadata sits under in a record's properties. */
+    /** @var string The package's metadata key in a record's properties. */
     private const string METADATA_KEY = '_audit';
 
-    /** @var string The key of an artifact's descriptor in the package's metadata. */
+    /** @var string The artifact descriptor's key in the package's metadata. */
     private const string MANIFEST_KEY = 'manifest';
 
-    /** @var string The page of a read that started at the newest entry. */
+    /** @var string A page that started at the newest entry. */
     private const string FIRST_PAGE = 'first';
 
-    /** @var string The page of a read whose cursor gave no position: it was refused, or never opened. */
+    /** @var string A page whose cursor gave no position. */
     private const string CURSOR_PAGE = 'cursor';
 
-    /** @var string The page of a read after a position, under a scope that is not of exactly one tenant. */
+    /** @var string A page after a position, under a scope of not exactly one tenant. */
     private const string NEXT_PAGE = 'next';
-
-    /** @var string The verdict of a verification that found nothing wrong. */
-    private const string VERIFIED = 'verified';
-
-    /** @var string The verdict of a verification that found anything wrong. */
-    private const string NOT_VERIFIED = 'not_verified';
 
     /**
      * Constructor.
@@ -80,20 +52,13 @@ final readonly class AccessEvidence
         /** The properties the record keeps, in the order of the read's code. */
         public array $properties,
 
-        /** The manifest of the artifact the record carries, or `null` for none. */
+        /** The manifest of the record's artifact, or `null` for none. */
         public ?Manifest $manifest,
     ) {}
 
     /**
-     * The evidence of a page: where it started, how many entries it was to
-     * hold, the id and HMAC of each entry it showed, in the order shown,
-     * whether its scope revealed the encrypted fields and how many fragments it
-     * showed in each state, disclosed with the filters, the scope and the
-     * position it read after. A denied or failed page showed nothing, and keeps
-     * the grant with no fragment counted.
-     *
-     * Its parameters are the parts of the page's evidence, each from its own
-     * stage of the read, so none groups naturally with another.
+     * The evidence of a page; a denied or failed page discloses no entry and
+     * counts no fragment, but keeps its grant.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
      * @param  string  $policy
@@ -137,9 +102,7 @@ final readonly class AccessEvidence
     }
 
     /**
-     * The evidence of a count: how many entries it counted, disclosed with the
-     * filters and the scope and no entry. A denied or failed count counted
-     * none.
+     * The evidence of a count; a denied or failed count counted none.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
      * @param  string  $policy
@@ -160,14 +123,8 @@ final readonly class AccessEvidence
     }
 
     /**
-     * The evidence of an export: its format, how many lines it wrote and the
-     * digest of its file, with the export's manifest, which an export that
-     * succeeded or was denied must have. A failed export published nothing: it
-     * wrote no line, has no file digest, and is disclosed with the filters and
-     * the scope and no entry.
-     *
-     * Its parameters are the parts of the export's evidence, each from its own
-     * stage of the export, so none groups naturally with another.
+     * The evidence of an export, carrying its manifest unless the export
+     * failed, in which case it wrote no line and has no file digest.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
      * @param  string  $policy
@@ -198,10 +155,8 @@ final readonly class AccessEvidence
     }
 
     /**
-     * The evidence of the verification of an export: the export entry, when it
-     * was found, by its id, and disclosed by its id and HMAC; the findings, in
-     * the order the chain found them; and the verdict, `verified` when there
-     * are none. A denied or failed verification discloses no entry.
+     * The evidence of an export's verification; a denied or failed one
+     * discloses no entry.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
      * @param  string  $policy
@@ -224,15 +179,14 @@ final readonly class AccessEvidence
         return new self([
             ...$read,
             'export_entry' => $exportEntry[0] ?? null,
-            'verdict'      => $findings === [] ? self::VERIFIED : self::NOT_VERIFIED,
+            'verdict'      => $findings === [] ? 'verified' : 'not_verified',
             'findings'     => $findings,
             'outcome'      => $outcome->value,
         ], self::disclosure($terms, $members));
     }
 
     /**
-     * The evidence of an export whose file could not be published: the id of
-     * the entry that journalled it, and no artifact.
+     * The evidence of an export whose file could not be published.
      *
      * @param  string  $exportEntryId
      * @return self
@@ -243,10 +197,8 @@ final readonly class AccessEvidence
     }
 
     /**
-     * Refuse the record unless it keeps the evidence exactly: its properties,
-     * less the package's metadata, encode canonically to the very bytes of the
-     * evidence's, and its metadata is exactly the descriptor of the evidence's
-     * manifest, or absent without one.
+     * Refuse the record unless its properties and metadata encode canonically
+     * to exactly the evidence's.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return void
@@ -268,10 +220,8 @@ final readonly class AccessEvidence
     }
 
     /**
-     * The properties every read of the trail names first, in order: its
-     * purpose, the keyed fingerprints of its filters and of its scope, `null`
-     * when none was answered, the id of the key that keyed them, and the
-     * policy's name, refused beyond its limit.
+     * The properties every read names first; a policy name too long to keep
+     * exactly is refused.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose  $purpose
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
@@ -296,9 +246,8 @@ final readonly class AccessEvidence
     }
 
     /**
-     * Where a page started, as its record shows it: `first` without a cursor,
-     * `cursor` when its cursor gave no position, the position under a scope of
-     * exactly one tenant, and `next` under any other.
+     * Where a page started; the position shows only under a single-tenant
+     * scope, since a tenantless record could name another tenant's entry.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
      * @param  bool  $cursor
@@ -319,8 +268,7 @@ final readonly class AccessEvidence
     }
 
     /**
-     * The disclosure of a read: its normalised filters, its scope or `null`,
-     * the entries it showed, and the position a page read after, or `null`.
+     * The disclosure of a read's filters, scope, entries and page position.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ReadTerms  $terms
      * @param  list<array{0: string, 1: string}>  $members
@@ -335,8 +283,7 @@ final readonly class AccessEvidence
     }
 
     /**
-     * Whether the two values have the same canonical encoding; a value with
-     * none is never alike.
+     * Whether the two values have the same canonical encoding.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

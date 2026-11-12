@@ -21,40 +21,11 @@ use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 
 /**
- * Reads a page of the trail, or counts its entries, for a viewer, and records
- * the read before anything it found leaves the package.
+ * Reads a page of the trail, or counts it, for a viewer, and records the read
+ * before anything it found leaves the package.
  *
- * A page size outside 1 to `read.max_per_page` is refused before anything else,
- * and is not recorded; a page that names no size holds `DEFAULT_PER_PAGE`
- * entries, or `read.max_per_page` when that is fewer. The gate then lets the
- * read in or refuses it, and everything after runs inside the read guard's
- * window: the access policy is asked for the viewer's scope for the purpose; a
- * denied scope is answered with a uniform empty result before a cursor is
- * opened, so a viewer whose access was revoked between pages sees what an empty
- * trail shows; a page's cursor is then opened against the read it was issued
- * for; a scope the filters cannot meet is answered with an empty result and no
- * statement; and otherwise one statement reads the storage connection's entries
- * table, a replica when one is configured, narrowed by the scope compiler
- * alone. A page reads one row beyond its size to learn whether another page
- * follows; that row is dropped before it is decoded, so it is never shown,
- * disclosed or counted. The page's entries are projected together, their
- * encrypted fields revealed through one call to the field reader only when the
- * scope reveals them, so a field reader that fails is reported once for the
- * page, and the page's record keeps the scope's grant and how many fragments it
- * showed in each state.
- *
- * Every read after the gate is recorded under its code: a success with what it
- * returned, a denied scope as `denied` with `no_scope`, a refused cursor as
- * `denied` with `cursor_rejected`, and a policy, a statement or a row that
- * fails as `failure` with `policy_failed`, `query_failed` or `format_failed`. A
- * failure is recorded before anything is thrown: the policy's own exception
- * unchanged, the cursor's refusal, and otherwise `AuditReadRefusedException`
- * naming the class that failed and nothing it held. When that record cannot be
- * written, the refusal is thrown all the same and the recording failure is
- * reported once. A success whose record cannot be written returns nothing.
- *
- * It resolves everything from the container on every call, so it outlives
- * requests safely.
+ * A denied scope is answered before a cursor is opened, so a viewer revoked
+ * between pages sees what an empty trail shows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,22 +34,22 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
  */
 final readonly class TrailReader
 {
-    /** @var int How many entries a page holds when it names no size and `read.max_per_page` allows as many. */
+    /** @var int The page size when none is given, capped at `read.max_per_page`. */
     public const int DEFAULT_PER_PAGE = 50;
 
-    /** @var string Why a read whose scope the policy denied returned nothing. */
+    /** @var string The reason of a denied read. */
     private const string NO_SCOPE = 'no_scope';
 
-    /** @var string Why a read whose cursor was refused returned nothing. */
+    /** @var string The reason of a read whose cursor was refused. */
     private const string CURSOR_REJECTED = 'cursor_rejected';
 
-    /** @var string Why a read whose policy threw failed. */
+    /** @var string The reason of a read whose policy threw. */
     private const string POLICY_FAILED = 'policy_failed';
 
-    /** @var string Why a read whose statement failed failed. */
+    /** @var string The reason of a read whose statement failed. */
     private const string QUERY_FAILED = 'query_failed';
 
-    /** @var string Why a read whose rows could not be decoded or shown failed. */
+    /** @var string The reason of a read whose rows could not be shown. */
     private const string FORMAT_FAILED = 'format_failed';
 
     /**
@@ -88,15 +59,13 @@ final readonly class TrailReader
      */
     public function __construct(
 
-        /** The container everything a read needs is resolved from on every call. */
+        /** Resolved from on every call, so the reader outlives requests safely. */
         private Container $container,
     ) {}
 
     /**
-     * The page of entries the viewer may see under the filters, newest first,
-     * after the position the cursor holds, or from the newest without one, once
-     * the read is recorded; a page that names no size holds `DEFAULT_PER_PAGE`
-     * entries, or `read.max_per_page` when that is fewer.
+     * The page the viewer may see, newest first, once the read is recorded; a
+     * bad page size is refused unrecorded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -120,8 +89,7 @@ final readonly class TrailReader
     }
 
     /**
-     * How many entries the viewer may see under the filters, once the count is
-     * recorded.
+     * How many entries the viewer may see, once the count is recorded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -137,8 +105,7 @@ final readonly class TrailReader
     }
 
     /**
-     * Let the read in through the gate, then run it inside the read guard's
-     * window.
+     * Let the read in through the gate, then run it inside its window.
      *
      * @template TResult
      *
@@ -161,9 +128,7 @@ final readonly class TrailReader
     }
 
     /**
-     * Read and record a page: the scope, then nothing for a denied scope, the
-     * cursor, then nothing for a disjoint scope, or the one statement and its
-     * projection.
+     * Read and record a page.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -240,8 +205,7 @@ final readonly class TrailReader
     }
 
     /**
-     * Count and record a count: the scope, then nothing for a denied or
-     * disjoint scope, or the one `count(*)` statement.
+     * Count and record a count.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -275,9 +239,8 @@ final readonly class TrailReader
     }
 
     /**
-     * The scope the policy gives the viewer as the application gave it, for the
-     * purpose; a policy that throws is recorded as a failure with no scope, and
-     * what it threw propagates unchanged.
+     * The viewer's scope for the purpose; a policy that throws is recorded as a
+     * failure and what it threw propagates unchanged.
      *
      * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy  $policy
      * @param  \SineMacula\Laravel\AuditLog\Querying\Viewer  $viewer
@@ -301,8 +264,8 @@ final readonly class TrailReader
     }
 
     /**
-     * The position the cursor holds, once it is shown to have been issued for
-     * this read; a refused cursor is recorded as a denial, then refused.
+     * The cursor's position; a refused cursor is recorded as a denial, then
+     * refused.
      *
      * @param  string  $cursor
      * @param  \SineMacula\Laravel\AuditLog\Querying\CursorBinding  $binding
@@ -322,9 +285,7 @@ final readonly class TrailReader
     }
 
     /**
-     * Whether the read finds nothing without a statement, once it is recorded:
-     * a denied scope as a denial, and a scope the filters cannot meet as a
-     * success that returned nothing.
+     * Whether the read finds nothing without a statement, once recorded.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -351,8 +312,8 @@ final readonly class TrailReader
     }
 
     /**
-     * What the work returns; work that fails is recorded as a failure, then
-     * refused, naming the class that failed and nothing it held.
+     * What the work returns; a failure is recorded, then refused naming only
+     * its class.
      *
      * @template TResult
      *
@@ -374,10 +335,7 @@ final readonly class TrailReader
     }
 
     /**
-     * The rows of the one statement of a page, as the engine returned them:
-     * every column of the entries table, narrowed by the scope compiler to the
-     * scope, the filters and, after a cursor, the entries after its position,
-     * newest first, at most the limit.
+     * A page's rows after the position, newest first, at most the limit.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -404,10 +362,8 @@ final readonly class TrailReader
     }
 
     /**
-     * The page shown of the rows, each decoded as stored, then projected
-     * together, revealing their encrypted fields when the scope does, the
-     * stored entries, and the cursor of the last one when another page follows,
-     * which it does when a binding is given.
+     * The projected page, the stored entries, and the next cursor when a
+     * binding is given.
      *
      * @param  list<array<string, scalar|null>>  $rows
      * @param  bool  $reveal
@@ -437,8 +393,7 @@ final readonly class TrailReader
     }
 
     /**
-     * A query of the entries table on the storage connection, narrowed by the
-     * scope compiler to the scope and the filters.
+     * The entries on the storage connection, narrowed to the scope.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -456,8 +411,7 @@ final readonly class TrailReader
     }
 
     /**
-     * The terms of the read under the filters and the scope, fingerprinted
-     * under the ring's signing key.
+     * The read's terms, fingerprinted under the ring's signing key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
      * @param  ?\SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
@@ -474,8 +428,7 @@ final readonly class TrailReader
     }
 
     /**
-     * Record the refusal, then throw it; a recording that fails is reported
-     * once, through the report latch, and the refusal is thrown all the same.
+     * Record the refusal, then throw it, even when the recording fails.
      *
      * @param  \Closure(): void  $record
      * @param  \Throwable  $refusal
@@ -495,8 +448,7 @@ final readonly class TrailReader
     }
 
     /**
-     * Report the failure to record a refused read once, through the report
-     * latch, ignoring a reporter that fails.
+     * Report a failure to record the read once, ignoring a broken reporter.
      *
      * @param  \Throwable  $failure
      * @return void
@@ -510,14 +462,12 @@ final readonly class TrailReader
                 $handler->report($failure);
             });
         } catch (\Throwable) {
-            // The read is refused all the same; a broken reporter has nowhere
-            // left to say so, and must not replace the refusal
+            // A broken reporter must not replace the refusal
         }
     }
 
     /**
-     * Refuse a page size outside 1 to the most a page may ask for, naming the
-     * range.
+     * Refuse a page size outside 1 to the most a page may ask for.
      *
      * @param  int  $perPage
      * @param  int  $most

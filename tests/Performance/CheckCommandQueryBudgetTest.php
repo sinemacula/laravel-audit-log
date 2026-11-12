@@ -37,18 +37,8 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\SealsEntries;
 
 /**
- * Statement-budget contract for `audit-log:check`: a run makes a few reads of
- * the schema and, on MySQL, of the session and the table's engine, whatever the
- * tables hold, and writes nothing, not even an installation id that is missing;
- * it never begins a savepoint or rolls back. In sync mode the delivery checks
- * read configuration alone, so a run reads what the engine and schema checks of
- * the entries table, the schema checks of the artifacts table, the integrity
- * checks of the checkpoints, checkpoint members and integrity state tables, and
- * the lifecycle and privacy checks and notes read; in outbox mode they read the
- * outbox and deliveries tables' schema too, and still write nothing more. The
- * lifecycle subject's statements are fixed whatever the journal holds, beyond
- * the pages of its rows it reads, and the privacy subject's whatever the key
- * store holds, beyond the pages of its keys it reads.
+ * Statement budget for `audit-log:check`: a run makes a bounded number of reads
+ * whatever the tables hold, and writes nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,7 +54,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 {
     use MakesSubjectKeys, SealsEntries;
 
-    /** @var int The most statements a run makes on any engine, as counted on SQLite: four schema reads for each of the twelve tables, the lock row, the installation id, the latest seal, the seal of the highest journal commitment, a page of the journal and the holds projection, the two notes, and a page each of the journal's erasures, the keys and the keys named by a key use and no key row, and the distinct wrapping key ids of the keys that hold one. */
+    /** @var int Most statements a run makes on any engine, as counted on SQLite. */
     private const int MAX_STATEMENTS = 60;
 
     /** @var string The data key of every key a test stores by hand: thirty-two bytes. */
@@ -77,9 +67,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     private const int OUTBOX_FACTOR = 2;
 
     /**
-     * Register the command with the console kernel, which keeps the test
-     * independent of the provider, whose registration
-     * `AuditLogServiceProviderTest::testTheCheckCommandIsRegistered` pins.
+     * Register the command directly, keeping the test independent of the
+     * provider.
      *
      * @return void
      */
@@ -94,16 +83,14 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
         $kernel->registerCommand(new CheckCommand);
 
-        // The policy and the key wrapper the package binds by default, whether
-        // or not the provider has bound them yet
+        // The package's default bindings, in case the provider has not bound
+        // them yet
         app()->bindIf(RetentionPolicy::class, ConfiguredRetentionPolicy::class);
         app()->bindIf(KeyWrapper::class, LocalKeyWrapper::class);
     }
 
     /**
-     * A passing run makes at most fifty-nine statements and writes nothing,
-     * reading the installation id the migrations seed; it begins no savepoint
-     * and makes no rollback, on every engine.
+     * A passing run reads within the bound and writes nothing, on every engine.
      *
      * @return void
      */
@@ -124,9 +111,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A run that finds no installation id fails, and still writes nothing: the
-     * id is left missing, for the migrations or a seal run to write, and no
-     * savepoint or rollback is made, on every engine.
+     * A run that finds no installation id fails and still writes nothing.
      *
      * @return void
      */
@@ -146,8 +131,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A run reads no more with 200 entries in the table, every one of them
-     * sealed, than with none.
+     * A run reads no more with 200 sealed entries than with none.
      *
      * @return void
      */
@@ -157,7 +141,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
         $empty = $this->capturedStatements();
 
-        DB::table('audit_log_entries')->insert(array_map(self::row(...), range(1, 200)));
+        DB::table('audit_log_entries')->insert(array_map(self::entryRow(...), range(1, 200)));
 
         $this->sealAt('2026-11-02 00:00:00');
         $this->sealAll();
@@ -173,10 +157,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The lifecycle subject's statements are the same with a journal of one
-     * hold as with that hold and three hundred more rows: the journal is read a
-     * page of rows to a statement and the hold's payload in one more, so
-     * nothing is read per row.
+     * The lifecycle statements are fixed whatever the journal holds: it is read
+     * a page of rows at a time.
      *
      * @return void
      */
@@ -202,11 +184,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The privacy subject's statements are the same with an erased key and a
-     * live one as with three hundred keys, and a key store of more keys than a
-     * page is read in one statement more: the keys are read a page at a time,
-     * and the erasure rows a page's erased keys name in one statement, so
-     * nothing is read per key, and nothing is written.
+     * The privacy statements read the key store a page at a time and write
+     * nothing.
      *
      * @return void
      */
@@ -237,15 +216,14 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The integrity checks write nothing, begin no savepoint and make no
-     * rollback, whatever the integrity tables hold, and a run leaves every
-     * seal, member and state row as it was.
+     * The integrity checks write nothing and leave every integrity row as it
+     * was.
      *
      * @return void
      */
     public function testTheIntegrityChecksWriteNothing(): void
     {
-        DB::table('audit_log_entries')->insert(array_map(self::row(...), range(1, 20)));
+        DB::table('audit_log_entries')->insert(array_map(self::entryRow(...), range(1, 20)));
 
         $this->sealAt('2026-11-02 00:00:00');
         $this->sealAll();
@@ -268,10 +246,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A sync run reads exactly what the engine and schema checks of the entries
-     * table, the schema checks of the artifacts table, the integrity checks and
-     * the lifecycle and privacy checks and notes read on their own, so the
-     * delivery checks add no statement, and the bound still holds.
+     * A sync run reads no more than its engine, schema, integrity, lifecycle
+     * and privacy checks do alone, so the delivery checks add no statement.
      *
      * @return void
      */
@@ -304,8 +280,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An outbox run reads the outbox and deliveries tables' schema as well, so
-     * more than a sync run, but at most twice as much.
+     * An outbox run reads at most twice what a sync run does.
      *
      * @return void
      */
@@ -327,8 +302,8 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An outbox run writes nothing, begins no savepoint and makes no rollback,
-     * on every engine, whatever the outbox and deliveries tables hold.
+     * An outbox run writes nothing, whatever the outbox and deliveries tables
+     * hold.
      *
      * @return void
      */
@@ -369,8 +344,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Store the number of live keys, each of its own owner numbered from the
-     * first given, signed and wrapped as the package makes them, fifty rows to
+     * Store live keys of consecutive owners from the first given, fifty rows to
      * a statement.
      *
      * @param  int  $first
@@ -408,31 +382,5 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         }
 
         return $rows;
-    }
-
-    /**
-     * An entries row with every column a row must have, numbered so each row's
-     * id is its own.
-     *
-     * @param  int  $number
-     * @return array<string, int|string>
-     */
-    private static function row(int $number): array
-    {
-        return [
-            'id'                => sprintf('0195f4a2-7b1c-7000-8000-%012d', $number),
-            'record_version'    => 1,
-            'event'             => 'invoice.approved',
-            'event_version'     => 1,
-            'category'          => 'billing',
-            'outcome'           => 'success',
-            'provenance'        => 'captured',
-            'source_id'         => 'app',
-            'occurred_at'       => self::NOW,
-            'recorded_at'       => self::NOW,
-            'integrity_version' => 1,
-            'key_id'            => 'test-key',
-            'hmac'              => str_repeat('a', 64),
-        ];
     }
 }

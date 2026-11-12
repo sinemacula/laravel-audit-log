@@ -11,28 +11,12 @@ use SineMacula\Laravel\AuditLog\Contracts\Clock;
 
 /**
  * The request id and trace id of the work in hand, kept in hidden Context so a
- * queued job inherits them.
+ * queued job inherits them, and remembered here because `Context::scope()`
+ * drops an id first made inside it.
  *
- * A request id is what Context carries, or else a trusted inbound id, or else a
- * UUID v7 from the clock, and it is generated only when first asked for. A
- * trace id is what Context carries, or else a trusted `traceparent`; it is
- * never generated, so there may be none. A value that is found is stored, so it
- * stays the same for the rest of the work, a carried value that is malformed is
- * ignored, and a malformed request id is replaced.
- *
- * Context alone cannot keep that promise, because `Context::scope()` restores
- * hidden Context when it ends and would drop an id first made inside it, so the
- * ids are remembered here as well. Context still comes first, so a job's
- * hydrated ids win, and a remembered id is written back to Context. A job on a
- * worker forgets what an earlier job left here.
- *
- * An inbound header is trusted only from the HTTP frame anywhere on the stack,
- * with its flag on, from a trusted proxy, under exactly one value, and when it
- * is well formed. Anything else falls through silently: a header is never
- * reported or kept. `isFromTrustedProxy()` checks only the immediate peer, so
- * the trusted edge must overwrite or validate these headers. A malformed
- * setting is a refusal, not a fall-through, and fails closed whichever peer the
- * request came from.
+ * An inbound header is trusted only from a trusted proxy, with its flag on and
+ * one well-formed value. `isFromTrustedProxy()` checks only the immediate peer,
+ * so the trusted edge must overwrite these headers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,8 +58,8 @@ final class RequestIdentity
     ) {}
 
     /**
-     * The request id: the one Context carries, the one already known, a trusted
-     * inbound one, or a new UUID v7, stored in all but the first case.
+     * The request id: carried by Context, already known, trusted inbound, or a
+     * new UUID v7.
      *
      * @return string
      *
@@ -97,9 +81,8 @@ final class RequestIdentity
     }
 
     /**
-     * The trace id: the one Context carries, or the one already known or a
-     * trusted inbound one, which is stored; `null` when there is none of them,
-     * since none is ever generated.
+     * The trace id: carried by Context, already known or trusted inbound;
+     * `null` when none, since none is generated.
      *
      * @return ?string
      *
@@ -123,7 +106,7 @@ final class RequestIdentity
     }
 
     /**
-     * Forget the ids and the package's hidden keys, and nothing else in
+     * Forget the ids and the package's hidden keys, leaving the rest of
      * Context.
      *
      * @return void
@@ -138,9 +121,8 @@ final class RequestIdentity
     }
 
     /**
-     * Forget the ids this object remembers and leave Context as it is, for a
-     * job on a worker, whose Context Laravel has just hydrated from its
-     * payload.
+     * Forget the remembered ids but not Context, which Laravel has just
+     * hydrated for a worker's job.
      *
      * @return void
      */
@@ -187,8 +169,7 @@ final class RequestIdentity
     }
 
     /**
-     * The one value the header has on a request from a trusted proxy; `null`
-     * from any other peer, and with no value or more than one.
+     * The header's single value on a request from a trusted proxy, else `null`.
      *
      * @param  \Illuminate\Http\Request  $request
      * @param  string  $header

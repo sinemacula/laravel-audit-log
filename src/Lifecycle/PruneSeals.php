@@ -15,21 +15,11 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 
 /**
- * The seals a prune walks, each authenticated before any of its members is
- * planned, and the members of each still present.
+ * The seals a prune walks, each authenticated with its membership before any
+ * member is planned, so a forged seal gets no prune record.
  *
- * A seal loads only when its row reads as an envelope of a supported version
- * and signer, in the configured log, its stored digest is the one recomputed,
- * its signature verifies under the key it names, and its member rows, read in
- * one statement, are as many as it counts and give its members digest. Any
- * failure loads nothing, and the prune skips the seal for the run, so a seal
- * whose membership cannot be trusted is never given a prune record. The present
- * members are read in one statement, the members joined to the entries by the
- * members' primary key, and only plan the chunks: the chunk reads every
- * candidate again under the lifecycle lock before anything is decided.
- *
- * Every statement reads the connection's writer, so a lagging replica never
- * hides an entry or a member.
+ * Every statement reads the writer, so a lagging replica never hides an entry
+ * or a member.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,9 +50,7 @@ final readonly class PruneSeals
 
     /**
      * The authenticated seal at the sequence, or `null` when there is none or
-     * it fails authentication: its row unreadable, of an unsupported version or
-     * signer, in another log, its stored digest or its signature wrong, its key
-     * not in the ring, or its members not the ones it counts and digests.
+     * it fails authentication.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  int  $sequence
@@ -91,8 +79,8 @@ final readonly class PruneSeals
     }
 
     /**
-     * The seal's members still present, one row each with the columns a plan
-     * and a hold read, sorted bytewise by entry id, in one statement.
+     * The seal's members still present, with the columns a plan and a hold
+     * read, sorted bytewise by id.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneSeal  $seal
@@ -120,8 +108,8 @@ final readonly class PruneSeals
     }
 
     /**
-     * The envelope of the stored seal, or `null` when the seal fails
-     * authentication of its own row.
+     * The stored seal's envelope, or `null` when its own row fails
+     * authentication.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -152,9 +140,8 @@ final readonly class PruneSeals
     }
 
     /**
-     * The seal's members, the HMAC of each by its entry id, read in one
-     * statement, or `null` unless they are as many as the seal counts and give
-     * its members digest.
+     * Each member's HMAC by entry id, or `null` unless they match the seal's
+     * count and members digest.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal

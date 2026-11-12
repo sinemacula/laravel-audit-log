@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the checkpoints table: one signed seal per row, each chained to the
- * one before it, over the entries its members name and committing to the
- * lifecycle journal's head. A seal is written once and only its anchor columns
- * change after.
+ * Create the checkpoints table: one signed seal per row, chained to the one
+ * before. Only the anchor columns change after a seal is written.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +39,7 @@ return new class extends Migration {
             // returns it.
             $blueprint->uuid('id')->primary();
 
-            // 1, 2, 3 … with no gap, within the one log the seals belong to.
+            // Gapless within the one log the seals belong to.
             $blueprint->bigInteger('sequence');
             $blueprint->string('log_id', 64);
 
@@ -60,23 +58,19 @@ return new class extends Migration {
             $blueprint->dateTime('last_recorded_at', 6);
             $blueprint->dateTime('sealed_at', 6);
 
-            // How the seal is signed and by which key.
             $blueprint->string('signer', 16);
             $blueprint->string('key_id', 32);
             $blueprint->smallInteger('algorithm_version');
 
-            // The lifecycle journal's head when the seal was made, its sequence
-            // and its HMAC, both null when the journal was empty; signed with
-            // the seal. Nullable, so a seal written without them still inserts.
+            // The lifecycle journal's head the seal commits to; null when the
+            // journal was empty or the seal was written without it.
             $blueprint->bigInteger('journal_sequence')->nullable();
             $blueprint->string('journal_head', 64)->nullable();
 
-            // The signature over the seal, in hex.
             $blueprint->string('signature', 64);
 
-            // The only columns written after the row is inserted: a cache of
-            // the anchor's receipt, never the authority. Only the class of the
-            // last error is named.
+            // The only columns written after insert: a cache of the anchor's
+            // receipt, never the authority.
             $blueprint->string('anchor', 64)->nullable();
             $blueprint->json('anchor_receipt')->nullable();
             $blueprint->dateTime('anchored_at', 6)->nullable();
@@ -90,11 +84,8 @@ return new class extends Migration {
                 $blueprint->engine('InnoDB');
             }
 
-            // One seal per sequence, so two sealers can never both extend the
-            // head, what the anchorer reads: the seals not yet anchored, in
-            // order, and the highest commitment to the lifecycle journal, which
-            // every destructive operation checks. Named short, so each fits
-            // PostgreSQL's 63 characters at the longest table name.
+            // Two sealers can never both extend the head; the other indexes
+            // serve the anchorer's backlog and destructive operations' checks.
             $blueprint->unique(['sequence'], $table . '_sequence_unique');
             $blueprint->index(['anchored_at', 'sequence'], $table . '_anchored_index');
             $blueprint->index(['journal_sequence'], $table . '_journal_index');
@@ -114,8 +105,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * a seal is beside the entries it holds.
+     * The storage connection, so a seal is beside the entries it holds.
      *
      * @return ?string
      *

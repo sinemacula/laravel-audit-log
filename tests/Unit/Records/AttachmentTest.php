@@ -16,11 +16,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for a record's attachment: sealing a manifest of any kind once
- * under the encrypter, the kinds and counts it takes, the fields it refuses,
- * the four-key descriptor it answers to, the memberless attachment described
- * from a descriptor, which is never encoded, and the object a bundle carries it
- * as.
+ * Unit tests for a record's attachment and the descriptor that binds it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -151,9 +147,8 @@ final class AttachmentTest extends TestCase
     }
 
     /**
-     * The ciphertext is not the plaintext and holds no member, and sealing the
-     * same manifest twice gives two ciphertexts, so the members are sealed once
-     * and carried, never sealed again.
+     * The ciphertext holds no member and differs on each sealing, so the
+     * members are sealed once and carried.
      *
      * @return void
      *
@@ -334,9 +329,8 @@ final class AttachmentTest extends TestCase
     }
 
     /**
-     * An attachment describes exactly its own descriptor, in any key order:
-     * another id, kind, digest or count, a value of another type, a key missing
-     * or a key added is another descriptor.
+     * An attachment describes exactly its own descriptor, in any key order; any
+     * changed, missing or added key is another descriptor.
      *
      * @return void
      *
@@ -372,9 +366,8 @@ final class AttachmentTest extends TestCase
     }
 
     /**
-     * A descriptor without its kind, the three keys a record signed before
-     * artifacts had kinds, describes no attachment, nor does one whose kind
-     * names another kind of the same artifact.
+     * A descriptor without its kind, or naming another kind, describes no
+     * attachment.
      *
      * @return void
      */
@@ -390,9 +383,8 @@ final class AttachmentTest extends TestCase
     }
 
     /**
-     * An attachment described from a descriptor keeps its id, kind, count and
-     * digest, carries no members, is not sealed, and describes exactly the
-     * descriptor it was made from, in any key order.
+     * An attachment described from a descriptor keeps its fields, carries no
+     * members, is not sealed and describes that descriptor.
      *
      * @return void
      */
@@ -409,9 +401,8 @@ final class AttachmentTest extends TestCase
     }
 
     /**
-     * An attachment described from its entry is never encoded: asking for its
-     * envelope is a programming error, so it can never be stored, queued or
-     * spilled.
+     * An attachment described from its entry has no envelope, so it is never
+     * stored or queued.
      *
      * @return void
      */

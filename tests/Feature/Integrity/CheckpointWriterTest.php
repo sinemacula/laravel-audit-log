@@ -33,18 +33,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the checkpoint writer, on whichever engine the suite runs
- * against: one attempt seals the entries no seal holds, in `(recorded_at, id)`
- * order from its position and no later than its bound, chained onto the last
- * seal's recomputed digest; it refuses a last seal whose digest disagrees or
- * that belongs to another log, and one it cannot read; it inserts the
- * checkpoint before its members, the members in chunks, from values and never
- * from a select, without locking what it reads; it leaves out a candidate it
- * cannot seal; and a conflict leaves nothing of the attempt. The sweep's window
- * reads at most its limit of entries, sealed or not, and seals those that are
- * no seal's member. Every seal commits to the lifecycle journal's head, read
- * inside its own transaction after the last seal, or to none, and a head that
- * cannot be read refuses the seal.
+ * Feature tests for the checkpoint writer and the sweep's window, on whichever
+ * engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,9 +79,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * The first seal is the genesis: sequence 1, no previous seal, the
-     * configured log, the signing key, the version, the signer and the clock's
-     * time, under a lower-case UUID v7 id, with no anchoring.
+     * The first seal is the genesis: sequence 1, no previous seal, a lower-case
+     * UUID v7 id, the configured values and no anchoring.
      *
      * @return void
      */
@@ -126,8 +115,7 @@ final class CheckpointWriterTest extends TestCase
 
     /**
      * The next seal takes the next sequence and chains onto the last seal's id
-     * and the digest recomputed from its fields, which is the digest the
-     * attempt that wrote it returned.
+     * and its digest recomputed from its fields.
      *
      * @return void
      */
@@ -155,9 +143,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A last seal whose stored digest is not the digest of its fields is never
-     * extended: the attempt is refused naming the seal and the finding, and
-     * writes nothing.
+     * A last seal whose stored digest disagrees with its fields is never
+     * extended: the attempt is refused, naming it, and writes nothing.
      *
      * @return void
      */
@@ -177,9 +164,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A last seal of another log id is never extended, so one chain never mixes
-     * two logs: the attempt is refused naming the seal and the finding, and
-     * writes nothing.
+     * A last seal of another log is never extended: the attempt is refused,
+     * naming the seal and the finding, and writes nothing.
      *
      * @return void
      */
@@ -289,9 +275,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A seal of an empty journal commits to none: both its journal columns are
-     * `null`, and a row stored outside the chain, at a sequence below 1, is
-     * never taken for the head.
+     * A seal of an empty journal commits to none, and a row stored below
+     * sequence 1 is never taken for the journal's head.
      *
      * @return void
      */
@@ -335,8 +320,7 @@ final class CheckpointWriterTest extends TestCase
 
     /**
      * A journal head whose HMAC cannot be read refuses the seal, naming no
-     * value, and nothing is written: a seal never commits to a row it cannot
-     * name.
+     * value, and nothing is written.
      *
      * @param  string  $column
      * @param  string  $value
@@ -368,8 +352,7 @@ final class CheckpointWriterTest extends TestCase
 
     /**
      * Rows of `[how the journal goes behind the last seal's commitment]`: its
-     * committed tail removed, the whole journal emptied, and its committed row
-     * replaced by another at the same sequence.
+     * tail removed, emptied, or its committed row replaced.
      *
      * @return iterable<string, array{0: \Closure(self): void}>
      */
@@ -390,10 +373,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A journal behind the last seal's commitment refuses the seal, naming the
-     * last seal and the commitment it contradicts, and nothing is written:
-     * commitments never run backwards, so a truncated or replaced journal is
-     * never sealed over.
+     * A journal behind the last seal's commitment refuses the seal, naming
+     * both, and writes nothing: commitments never run backwards.
      *
      * @param  \Closure(self): void  $behind
      * @return void
@@ -509,9 +490,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * Candidates are taken in `(recorded_at, id)` order, an equal time broken
-     * by the id, so a batch is deterministic; what is sealed is the membership,
-     * digested in entry id order whatever order the rows were read in.
+     * Candidates are taken in `(recorded_at, id)` order, and the membership is
+     * digested in entry id order whatever order rows were read in.
      *
      * @return void
      */
@@ -540,10 +520,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * The keyset resumes strictly after its position: at an equal time, only
-     * the ids after the position's are read, and every later time is. The
-     * position's time also bounds the read on its own, so that an engine reads
-     * the index from there rather than gathering and sorting every later row.
+     * The keyset resumes strictly after its position, whose time also bounds
+     * the read alone so the engine reads the index from there.
      *
      * @return void
      */
@@ -701,9 +679,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * Within the attempt, the last seal is read first, then the candidates,
-     * then the journal's head, then the checkpoint is inserted, and only then
-     * its members.
+     * The last seal, the candidates and the journal's head are read before the
+     * checkpoint is inserted, and its members after it.
      *
      * @return void
      */
@@ -800,9 +777,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * An entry that became a member between the selection and the insert of the
-     * members makes the whole attempt fail with the duplicate: nothing of it
-     * remains, the checkpoint included, and no conflict is ignored.
+     * An entry that became a member before the members' insert fails the whole
+     * attempt with the duplicate, leaving nothing behind.
      *
      * @return void
      *
@@ -840,10 +816,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * Rows of `[column, value, engines it can be stored on]`: a candidate's id,
-     * HMAC or time that cannot be sealed. PostgreSQL stores an id as a UUID and
-     * a time as a timestamp, so neither can be malformed there, and MySQL
-     * stores a time as a datetime.
+     * Rows of `[column, value, engines it can be stored on]`: a candidate value
+     * that cannot be sealed, where the column's type allows it.
      *
      * @return iterable<string, array{0: string, 1: string, 2: list<string>}>
      */
@@ -859,9 +833,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A candidate that cannot be sealed is left out and counted, never sealed
-     * and never fatal: the rest of the batch seals, and the position passes it,
-     * so it never stops sealing.
+     * A candidate that cannot be sealed is skipped and counted, never fatal:
+     * the rest of the batch seals and the position passes it.
      *
      * @param  string  $column
      * @param  string  $value
@@ -894,9 +867,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A seal row stored at a sequence below 1 is outside the chain and never
-     * the head the writer extends: with no seal in the chain, the next seal is
-     * genesis.
+     * A seal row below sequence 1 is never the head the writer extends: with no
+     * seal in the chain, the next seal is genesis.
      *
      * @return void
      */
@@ -915,10 +887,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * Rows of `[column, value, limit]`: on SQLite, which keeps any text, a key
-     * that no position could name before, an id longer than a UUID or an empty
-     * time, or a time that is no instant, left as the last row of a batch of
-     * the limit given.
+     * Rows of `[column, value, limit]`: on SQLite, which keeps any text, a
+     * malformed key as the last row of a batch of the limit given.
      *
      * @return iterable<string, array{0: string, 1: string, 2: int}>
      */
@@ -932,10 +902,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A malformed key at the end of a batch never stops sealing: the batch
-     * still seals the rows before it, the position passes it exactly as stored,
-     * and the next batch reads on and seals the rest, so sealing never stalls
-     * on it.
+     * A malformed key at the end of a batch never stalls sealing: the position
+     * passes it as stored and the next batch seals the rest.
      *
      * @param  string  $column
      * @param  string  $value
@@ -972,9 +940,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * On SQLite, which keeps a number stored in a time column as a number, a
-     * candidate whose time is an integer or a real is skipped, and the position
-     * past it is its time as digits, so the next batch reads on after it.
+     * On SQLite, a candidate whose time is stored as a number is skipped, and
+     * the position past it is that number as digits.
      *
      * @return void
      */
@@ -1010,9 +977,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * The attempt is made once: a concurrency failure is rolled back whole and
-     * raised to the caller, never retried inside the attempt, so the caller
-     * decides whether to try again.
+     * A concurrency failure is rolled back whole and raised, never retried
+     * inside the attempt, so the caller decides whether to retry.
      *
      * @return void
      *
@@ -1072,9 +1038,8 @@ final class CheckpointWriterTest extends TestCase
     }
 
     /**
-     * A window reads at most its limit of entries whatever is sealed: the
-     * statement returns no more rows than the limit, and the rows it read are
-     * all counted.
+     * A window reads at most its limit of entries whatever is sealed, and
+     * counts every row it read.
      *
      * @return void
      */

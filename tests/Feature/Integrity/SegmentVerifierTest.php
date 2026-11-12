@@ -50,20 +50,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the verification of one segment, on whichever engine the
- * suite runs against: entries are stored and sealed as the package does, and
- * every tampering is applied through raw queries. They pin which finding each
- * change gives and which wins, the expected sequence, the chain over recomputed
- * digests, the members read in one statement and sorted rather than trusted,
- * the prune records that account for missing entries and the ones that do not,
- * the ledger asked after the members are read and the covered members read
- * again, so a member pruned meanwhile is pruned and one still there is
- * resurrected, the manifests of the bundles whose entries verified, checked
- * together, and anchoring as a separate answer: asked of the anchor, never of
- * the receipt, not asked once it has failed, contradicted by the anchor's head,
- * and awaiting its first anchoring within the grace; and every key a verified
- * entry's envelope names must have its key use, read for the seal's entries
- * together, and not at all for a seal with no envelope.
+ * Feature tests for the verification of one segment, every tampering applied
+ * through raw queries on whichever engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -131,9 +119,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A segment whose seal and entries are as sealed is valid, with every
-     * member row found, its recomputed digest the stored one, no finding, and
-     * unanchored with no anchor configured.
+     * A segment as sealed is valid: every member found, its digest the stored
+     * one, and unanchored with no anchor configured.
      *
      * @return void
      */
@@ -156,9 +143,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * Of a missing entry, an entry under a key the ring does not hold and an
-     * edited entry, the edit wins: the most severe status is reported, at the
-     * entry it was found at.
+     * Of a missing entry, an entry under an unknown key and an edited entry,
+     * the edit wins, reported at the entry it was found at.
      *
      * @return void
      */
@@ -210,9 +196,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A seal at another sequence than the one expected is a gap, so a walk that
-     * expects the first seal and finds the second has found a deletion, though
-     * the second links to a seal before it.
+     * A seal at another sequence than the one expected is a gap, though it
+     * links to a seal before it.
      *
      * @return void
      */
@@ -263,11 +248,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A seal this release reads never follows one it cannot, since versions
-     * only increase, so a link to a seal that cannot be read, and so has no
-     * digest, is a broken chain even when it names that seal's id: marking a
-     * seal unreadable turns the next one tampered, never anything less. A link
-     * to another id is broken as well.
+     * A link to a seal that cannot be read is broken even when it names that
+     * seal's id, since a readable seal never follows an unreadable one.
      *
      * @param  string  $column
      * @param  int|string  $value
@@ -294,10 +276,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A seal sealed after the run's clock, by a sealing server whose clock runs
-     * ahead or by a forger, is never awaiting its first anchoring, however
-     * close to the grace's start: the grace ends when the run began. One sealed
-     * exactly at the run's clock still awaits.
+     * A seal dated after the run's clock never awaits its first anchoring,
+     * since the grace ends when the run began; one at the clock still does.
      *
      * @return void
      */
@@ -316,9 +296,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * When the run's anchor head settles anchoring, a seal up to that head is
-     * anchored and one after it is not held, each with no call to the anchor
-     * and whatever its receipt columns hold.
+     * When the run's anchor head settles anchoring, seals up to it are anchored
+     * and later ones not held, with no call to the anchor.
      *
      * @return void
      */
@@ -342,8 +321,7 @@ final class SegmentVerifierTest extends TestCase
 
     /**
      * An anchor that failed earlier in the run is not asked again: the segment
-     * is unavailable with no call reaching the anchor, though it has a receipt
-     * the anchor would confirm.
+     * is unavailable though its receipt would confirm.
      *
      * @return void
      */
@@ -454,9 +432,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A seal of an algorithm version or a signer this release does not read is
-     * unverifiable, and nothing more is checked: no member row is read and no
-     * digest is recomputed.
+     * A seal of a version or signer this release does not read is unverifiable,
+     * with no member row read and no digest recomputed.
      *
      * @param  string  $column
      * @param  int|string  $value
@@ -747,10 +724,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The chain is checked over the digest recomputed from the seal before,
-     * never its stored digest: an edited stored digest, with the next seal
-     * re-signed to link to it, is that seal's `seal_digest` and the next one's
-     * `chain_broken`.
+     * The chain is checked over recomputed digests, never stored ones: an
+     * edited digest is `seal_digest` and the next seal's `chain_broken`.
      *
      * @return void
      */
@@ -919,9 +894,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * An extra member whose entry sorts after every sealed one still breaks the
-     * members digest: only the pairs the seal counts are kept, and those alone
-     * would give the sealed digest.
+     * An extra member sorting after every sealed one still breaks the members
+     * digest, since only the pairs the seal counts are kept.
      *
      * @return void
      */
@@ -1036,9 +1010,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * Rows of `[log id, seal id, seal digest, member count]`: a validly signed
-     * prune record bound to another log, seal, digest or member count than the
-     * seal's, `null` taking the seal's own.
+     * Rows of `[log id, seal id, seal digest, member count]`: a signed prune
+     * record bound to another value, `null` taking the seal's own.
      *
      * @return iterable<string, array{0: ?string, 1: ?string, 2: ?string, 3: ?int}>
      */
@@ -1255,10 +1228,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * Members are placed bytewise, never in the order the engine returns them:
-     * rows returned in reverse still give the record's position of the member
-     * pruned, and a record set at the position the engine's order would give it
-     * covers another member, which is still there.
+     * Members are placed bytewise, never in the engine's order: rows returned
+     * in reverse still give the pruned member the record's position.
      *
      * @return void
      */
@@ -1287,9 +1258,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * Every missing member is kept, not only the first: a record that covers
-     * the first two of three missing leaves the third `missing_entry`, and one
-     * that covers all three is pruned.
+     * Every missing member is kept: a record covering two of three leaves the
+     * third `missing_entry`, and one covering all three is pruned.
      *
      * @return void
      */
@@ -1313,9 +1283,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A seal whose members were pruned by two prunes, as two categories kept
-     * for different times are, has two disjoint records that cover its missing
-     * members together: pruned, its present members verified.
+     * A seal whose members two prunes removed has two disjoint records that
+     * cover them together, so it is pruned.
      *
      * @return void
      */
@@ -1337,9 +1306,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A member a valid record covers that is still there when read again, here
-     * pruned and then inserted again as it was, is `resurrected`, which is
-     * incomplete and never valid, at that member.
+     * A member a valid record covers that is still there when read again is
+     * `resurrected`, which is incomplete and never valid.
      *
      * @return void
      */
@@ -1362,9 +1330,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A member present when the members are read and gone when it is read again
-     * was pruned by a prune that committed between the two reads, so the record
-     * the ledger then gives accounts for it: the segment is pruned.
+     * A member gone between the two reads was pruned in between, so the record
+     * the ledger then gives accounts for it.
      *
      * @return void
      */
@@ -1387,9 +1354,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The ledger is asked even when no member is missing, so a seal whose every
-     * pruned member was inserted again is `resurrected`, at its first member,
-     * never valid.
+     * The ledger is asked even with no member missing, so a seal whose pruned
+     * members were all inserted again is `resurrected`.
      *
      * @return void
      */
@@ -1432,9 +1398,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The members and their entries are read first, the ledger is asked after,
-     * and the present members a valid record covers are read again after that,
-     * in one statement of their ids on the writer.
+     * The ledger is asked after the members are read, and the covered members
+     * still present are read again in one statement on the writer.
      *
      * @return void
      */
@@ -1467,9 +1432,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A worse finding still wins over pruning and over a resurrection: an entry
-     * edited beside a resurrected member is tampering, and two valid records
-     * that set one member are tampering though every missing member is covered.
+     * A worse finding still wins over pruning and resurrection, and two valid
+     * records setting one member are tampering.
      *
      * @return void
      */
@@ -1496,9 +1460,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A record never excuses a seal whose membership is not the one sealed:
-     * with a member row removed, the segment is tampering at its count, never
-     * pruned, though the record covers its only missing entry.
+     * A record never excuses a membership that is not the one sealed: with a
+     * member row removed, the segment is tampering, never pruned.
      *
      * @return void
      */
@@ -1656,9 +1619,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * Rows of `[receipt]`: stored receipts that are not a JSON object of string
-     * keys and scalars or `null`, each valid JSON so every engine's JSON column
-     * holds it.
+     * Rows of `[receipt]`: valid JSON, so every engine's JSON column holds it,
+     * that is no object of string keys to scalars or `null`.
      *
      * @return iterable<string, array{0: ?string}>
      */
@@ -1719,9 +1681,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The anchor's head at the seal's sequence with another digest than the
-     * recomputed one contradicts it, which is tampering; the same digest, or a
-     * head at another sequence, does not.
+     * The anchor's head at the seal's sequence with another digest contradicts
+     * it, which is tampering; the same digest or another sequence does not.
      *
      * @return void
      */
@@ -1748,9 +1709,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The boundary checks only the seal's own fields: an entry missing, a
-     * member removed or a receipt set changes nothing and costs no statement,
-     * while an edited digest is still found.
+     * The boundary checks only the seal's own fields, with no statement: an
+     * edited digest is found, a missing entry or member is not.
      *
      * @return void
      */
@@ -1834,9 +1794,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The members are sorted bytewise before their digest is taken, never
-     * trusted in the order the database returns them: rows returned in the
-     * reverse order still verify.
+     * The members are sorted bytewise before their digest is taken, so rows
+     * returned in reverse order still verify.
      *
      * @return void
      */
@@ -1922,10 +1881,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A segment whose bundle's artifact was swapped with another, stored as
-     * another kind, or given members that are no canonical form or another
-     * canonical form than the one signed, is tampered with that finding, named
-     * at the earliest bundle's entry that gives it.
+     * A bundle's artifact swapped, of another kind or with other members makes
+     * the segment tampered, at the earliest entry that gives it.
      *
      * @param  string  $change
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding
@@ -2002,9 +1959,7 @@ final class SegmentVerifierTest extends TestCase
 
     /**
      * A member whose entry does not verify is not trusted for its descriptor:
-     * its artifact is never asked for, so a deleted one adds no finding, and an
-     * entry under a key the ring no longer holds stays unverifiable rather than
-     * becoming tampered.
+     * its artifact is never asked for, and its own status stands.
      *
      * @return void
      */
@@ -2048,9 +2003,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A bundle's entry and its artifact deleted under a valid prune record of
-     * exactly that seal are pruned, with no manifest finding: a missing entry
-     * has no descriptor to check.
+     * A bundle's entry and artifact deleted under a valid prune record of the
+     * seal are pruned, with no manifest finding.
      *
      * @return void
      */
@@ -2089,9 +2043,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * An entry whose envelope names a key with no key use naming the entry is
-     * `key_use_missing` at that entry, tampered, and its segment's other
-     * entries, whose key uses are there, are not.
+     * An entry whose envelope names a key with no key use for it is
+     * `key_use_missing`, tampered, and the segment's other entries are not.
      *
      * @return void
      */
@@ -2114,9 +2067,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A key use is asked for only of an entry that verified: an entry that
-     * fails its HMAC is reported for that, and says nothing of its keys, so no
-     * key use is read.
+     * Key uses are asked for only of verified entries: one failing its HMAC is
+     * reported for that, and no key use is read.
      *
      * @return void
      */
@@ -2152,9 +2104,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A seal whose entries hold no envelope reads no key use, and one whose
-     * entries hold envelopes reads them all in one more statement, through the
-     * key uses' entry index.
+     * A seal with no envelope reads no key use, and one with envelopes reads
+     * them all in one statement through the entry index.
      *
      * @return void
      */
@@ -2197,10 +2148,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The report of the stored seal at the sequence, expected at the sequence
-     * given or its own, after the report given, by the verifier given or one
-     * with no anchor and no prune, under the context given or one with no
-     * remote and no grace.
+     * The report of the seal at the sequence, by default expected there, under
+     * a verifier and context with no anchor, prune, remote or grace.
      *
      * @param  int  $sequence
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\SegmentReport  $previous
@@ -2220,9 +2169,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * Store an entry, recorded and occurring at the instant, whose properties
-     * hold an envelope naming the key, as the store writes one with its key
-     * uses, and return its id.
+     * Store an entry at the instant whose properties hold an envelope naming
+     * the key, with its key uses, and return its id.
      *
      * @param  string  $keyId
      * @param  string  $at
@@ -2351,9 +2299,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * The valid prune record of the members given of the stored seal at the
-     * sequence, every member when none is given, their positions taken in
-     * member order, signed under the ring's signing key.
+     * The valid prune record of the given members of the seal at the sequence,
+     * every member by default, signed under the ring's key.
      *
      * @param  int  $sequence
      * @param  ?list<string>  $pruned
@@ -2397,9 +2344,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A prune ledger that runs the work given each time it is asked, then
-     * answers with the records given, or refuses a stored record it cannot read
-     * when it is given none.
+     * A prune ledger that runs the work each time it is asked, then answers the
+     * records, or refuses a stored record when given none.
      *
      * @param  \Closure(): void  $work
      * @param  ?list<\SineMacula\Laravel\AuditLog\Integrity\PruneRecord>  $records
@@ -2477,9 +2423,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * Make the storage connection one that returns every streamed statement's
-     * rows in the reverse order, on the same database, and return the member
-     * entry ids it streamed, in the order it returned them.
+     * Make the storage connection stream rows in reverse order, and return the
+     * member entry ids it streamed, in that order.
      *
      * @return \ArrayObject<int, string>
      */
@@ -2499,9 +2444,8 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
-     * A connection on the same database as the one given that returns every
-     * streamed statement's rows in the reverse order, recording the member
-     * entry ids it streams.
+     * A connection on the same database that streams rows in reverse order,
+     * recording the member entry ids it streams.
      *
      * @param  \Illuminate\Database\Connection  $testing
      * @param  \ArrayObject<int, string>  $streamed

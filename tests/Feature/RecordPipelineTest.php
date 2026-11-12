@@ -44,14 +44,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the record pipeline every write runs, explicit or captured:
- * the definition, the timing's checks, the contributors, the entry id minted
- * from the clock before minimising and kept, minimising for that entry,
- * sealing a manifest, and delivery; the default timing of each kind of record;
- * the refusals that leave the builder usable, a write while a mapper runs among
- * them; the definitions and contributors it was made with; and the package
- * write, the only way a reserved code is written: checked before delivery,
- * fail-closed and immediate, never a capture, and refused for any other code.
+ * Feature tests for the record pipeline every explicit and captured write runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -113,9 +106,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A write runs every stage: the registered definition's version and
-     * category, a contributor's tenant, minimising that drops an unlisted
-     * field, and delivery to the store of the record returned.
+     * A write runs the definition, contributors, minimiser and delivery.
      *
      * @return void
      */
@@ -136,8 +127,8 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * The entry id is minted before minimising: every value the record seals is
-     * sealed for the id the record is then built and stored with.
+     * The entry id is minted before minimising and every value is sealed for
+     * it.
      *
      * @return void
      */
@@ -161,8 +152,8 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * The id is a UUID version 7 of the clock's time, read once, so the id and
-     * `occurred_at` name the same instant.
+     * The id is a UUID v7 of the clock's time, the same instant as
+     * `occurred_at`.
      *
      * @return void
      */
@@ -178,8 +169,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * Fifty records written at one frozen instant have distinct ids that sort,
-     * as strings, in the order they were written.
+     * Records written at one instant have ids that sort in write order.
      *
      * @return void
      */
@@ -203,8 +193,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A record the package gave its own id is minimised for that id, so its
-     * values are sealed for the entry it is stored as.
+     * A record with its own id is minimised for that id.
      *
      * @return void
      */
@@ -223,10 +212,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * The tenant and category every value is sealed for are the stored entry's:
-     * the tenant a contributor filled after the first snapshot, and the
-     * category of the code's definition, so the key unit a value is sealed
-     * under is the unit erasure and `holdingDataOf()` read from the row.
+     * Values are sealed for the stored entry's tenant and category.
      *
      * @return void
      */
@@ -246,8 +232,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * An explicit record with no timing of its own waits for the transaction to
-     * commit.
+     * An explicit record with no timing waits for the commit.
      *
      * @return void
      */
@@ -263,8 +248,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A captured record with no timing of its own is written at once, inside
-     * the transaction, and its signal is told nothing.
+     * A captured record with no timing is written at once.
      *
      * @return void
      */
@@ -283,8 +267,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A captured record that chose to wait for the commit, as the package's
-     * model source does, keeps that timing, and its signal says it is deferred.
+     * A captured record keeps a deferred timing it chose.
      *
      * @return void
      */
@@ -303,9 +286,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A bulk record's manifest is sealed before the record is delivered: what
-     * the store receives carries the attachment, its members encrypted, and the
-     * descriptor the record signs.
+     * A bulk record's manifest is sealed before the record is delivered.
      *
      * @return void
      */
@@ -331,8 +312,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * The attachment is the manifest's own artifact: its id, kind, count and
-     * digest, and the record returned is the one carrying it.
+     * The attachment is the manifest's own artifact.
      *
      * @return void
      */
@@ -360,8 +340,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A builder with no code is refused before anything is consumed or stored,
-     * whether explicit or captured.
+     * A builder with no code is refused before anything is consumed.
      *
      * @return void
      */
@@ -385,9 +364,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * An encrypter that cannot seal the manifest is a refusal: nothing is
-     * stored and the builder stays usable, so it is written once an encrypter
-     * can seal it.
+     * A manifest that cannot be sealed is refused and the builder stays usable.
      *
      * @return void
      */
@@ -417,8 +394,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A captured record that is fail-closed, or transactional, is refused
-     * before anything is consumed and before any contributor runs.
+     * A fail-closed or transactional capture is refused before anything runs.
      *
      * @return void
      */
@@ -452,10 +428,8 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * While a mapper runs an explicit write is refused before anything is
-     * consumed, and the same builder is written once the window has closed. A
-     * captured write, which comes with its capture's signal, is written inside
-     * the window, since it is a capture of its own the mapper set off.
+     * Only an explicit write is refused while a mapper runs; a capture it sets
+     * off is written.
      *
      * @return void
      */
@@ -486,9 +460,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * The refusal while a mapper runs comes first, before the code is read or
-     * any contributor runs, so a builder with no code is refused for the write
-     * and not for its code.
+     * The refusal while a mapper runs comes before any other.
      *
      * @return void
      */
@@ -511,9 +483,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A pipeline writes with the definitions and contributors it was made with,
-     * never the application's: a code defined only in its own catalogue takes
-     * that definition, and its own contributor fills the tenant.
+     * A pipeline writes with its own definitions and contributors.
      *
      * @return void
      */
@@ -533,9 +503,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A captured record's failed write follows the `REPORT` rule under the
-     * `throw` mode: the record is returned, the failure reported once and its
-     * signal told once, and nothing is thrown.
+     * A captured write's failure is signalled, never thrown, under `throw`.
      *
      * @return void
      */
@@ -559,9 +527,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A package write's check runs on the built record before it is delivered,
-     * and the finalised record is handed over once the store has it; the record
-     * takes the package's own definition, dropping what it does not list.
+     * A package write is checked before delivery and acknowledged after.
      *
      * @return void
      */
@@ -589,8 +555,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * What the check throws propagates as it is, and nothing is delivered or
-     * acknowledged.
+     * A check that throws propagates and nothing is delivered.
      *
      * @return void
      */
@@ -620,8 +585,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A package write that is not fail-closed, or not immediate, is refused
-     * before anything is consumed or checked.
+     * A package write that is not fail-closed and immediate is refused.
      *
      * @return void
      */
@@ -647,8 +611,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A package write that comes with a capture's signal is refused, before
-     * anything is consumed, ahead of the refusal of a fail-closed capture.
+     * A package write with a capture's signal is refused.
      *
      * @return void
      */
@@ -661,9 +624,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A reserved code without a package write is refused before anything is
-     * consumed, so naming a package code on a builder the facade made, or on a
-     * captured one, records nothing.
+     * A reserved code without a package write is refused.
      *
      * @return void
      */
@@ -712,10 +673,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A lifecycle code without a package write is refused as a read's is,
-     * before anything is consumed: a fail-closed, immediate builder from the
-     * facade, and one written with or without a capture's signal, record
-     * nothing.
+     * A lifecycle code without a package write is refused.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
      * @return void
@@ -754,9 +712,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A lifecycle code with a package write is written under the package's own
-     * definition: the `audit` category, version 1, its evidence kept and
-     * everything it does not list dropped.
+     * A lifecycle code with a package write uses the package's own definition.
      *
      * @return void
      */
@@ -784,8 +740,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A package write of a code outside the reserved prefix is refused before
-     * anything is consumed, a code that only resembles the prefix included.
+     * A package write of a code outside the reserved prefix is refused.
      *
      * @return void
      */
@@ -803,8 +758,8 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * Bind the scoped capture state as the provider does, so the pipeline and a
-     * test share one mapping window.
+     * Bind the scoped capture state so the pipeline and test share a mapping
+     * window.
      *
      * @param  mixed  $app
      * @return void
@@ -818,8 +773,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * Bind an encrypter that records what it seals for, encrypting the address
-     * too, and return it.
+     * Bind and return an encrypter that records what it seals for.
      *
      * @return \Tests\Fixtures\Privacy\RecordingFieldEncrypter
      */
@@ -835,8 +789,7 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * A pipeline of a test's own, with the invoice definitions and the
-     * contributors given.
+     * A pipeline with the invoice definitions and the contributors given.
      *
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\ContextContributor>  ...$contributors
      * @return \SineMacula\Laravel\AuditLog\RecordPipeline
@@ -866,9 +819,8 @@ final class RecordPipelineTest extends TestCase
     }
 
     /**
-     * Assert that writing the builder with a package write, and the signal when
-     * one is given, is refused with the message before anything is consumed,
-     * checked or acknowledged.
+     * Assert the package write is refused with the message before anything
+     * runs.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  string  $message

@@ -10,21 +10,8 @@ use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
 
 /**
- * The owners' key settings, read from configuration on every call and validated
- * as they are read: the explicit wrapping ring (`audit-log.privacy.keys`, a map
- * of key ids to secrets), the key that wraps (`audit-log.privacy.current`), the
- * application keys (`app.key`, then `app.previous_keys`) the default ring is
- * derived from when no explicit ring is set, and which an explicit ring keeps
- * to unwrap only, and the number of keys a rewrap changes in one batch
- * (`audit-log.privacy.rewrap_batch`).
- *
- * The ring is read as the integrity ring is: every secret is its own bytes, or
- * the strict decoding of what follows a `base64:` prefix, of at least 32
- * bytes; the ring and its current key are set together or not at all; and an
- * empty `current`, which an empty environment line gives, reads as none. Every
- * malformed value fails closed with an `InvalidArgumentException` naming the
- * setting and never the secret, so a malformed explicit ring is never replaced
- * by the derived one.
+ * The owners' key settings, read and validated on every call; a malformed value
+ * fails closed naming the setting, never the secret.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,14 +26,14 @@ final readonly class KeySettings
     /** @var array{0: int, 1: int, 2: int} Default, least and greatest number of keys in a rewrap batch. */
     private const array REWRAP_BATCH = [500, 100, 10000];
 
-    /** @var string Why a current key id or an empty one is refused beside a ring that does not hold it. */
+    /** @var string Refusal for a current key id the ring does not hold. */
     private const string CURRENT_NOT_IN_RING = '`audit-log.privacy.current` must name a key in `audit-log.privacy.keys`.';
 
-    /** @var string Why a current key id is refused beside an empty ring. */
+    /** @var string Refusal for a current key id beside an empty ring. */
     private const string CURRENT_WITHOUT_KEYS = '`audit-log.privacy.current` names a key, but `audit-log.privacy.keys` is empty;'
         . ' set both, or neither to derive the wrapping key from `app.key`.';
 
-    /** @var string Why a key id outside the grammar is refused. */
+    /** @var string Refusal for a key id outside the grammar. */
     private const string MALFORMED_ID = '`audit-log.privacy.keys` has a key id that is not 1 to 32 letters, digits, dots, underscores or hyphens,'
         . ' starting with a letter or a digit.';
 
@@ -66,10 +53,8 @@ final readonly class KeySettings
     ) {}
 
     /**
-     * The explicit wrapping ring: each key id with its decoded secret, or an
-     * empty array when `audit-log.privacy.keys` is not set or is empty. A
-     * numeric id is the integer key PHP makes of it, so a caller reads every id
-     * as a string.
+     * The explicit ring's decoded secrets by key id, or empty when unset; PHP
+     * makes a numeric id an integer key.
      *
      * @return array<int|string, string>
      *
@@ -89,9 +74,8 @@ final readonly class KeySettings
     }
 
     /**
-     * The id of the key that wraps, validated against the explicit ring: an id
-     * in the ring when one is set, and `null` when none is, the key then being
-     * derived from `app.key`.
+     * The id of the key that wraps, or `null` when no explicit ring is set and
+     * the key derives from `app.key`.
      *
      * @return ?string
      *
@@ -116,9 +100,8 @@ final readonly class KeySettings
     }
 
     /**
-     * The decoded application keys the default ring is derived from: `app.key`
-     * first, then each of `app.previous_keys` in order, read as the integrity
-     * settings read them.
+     * The decoded application keys, `app.key` first, then `app.previous_keys`
+     * in order.
      *
      * @return non-empty-list<string>
      *
@@ -146,10 +129,8 @@ final readonly class KeySettings
     }
 
     /**
-     * Read every owners' key setting, failing on the first malformed one: the
-     * explicit ring and the current key id, the application keys when no ring
-     * is set, and the rewrap batch. An explicit ring never reads the
-     * application keys.
+     * Read every setting, failing on the first malformed one; an explicit ring
+     * never reads the application keys.
      *
      * @return void
      *

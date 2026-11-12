@@ -15,11 +15,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Unit\Stubs\Enums\StubActivity;
 
 /**
- * Unit tests for a caller's filters on a read of the trail: each dimension
- * replaces itself, codes and a prefix are one dimension, the owner holding data
- * in the entries is a dimension of its own, lists are validated, kept once and
- * sorted, times are UTC to the microsecond, the normalised form and its
- * fingerprint are pinned, and no refusal names the value it refused.
+ * Unit tests for a caller's filters on a read of the trail.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,8 +53,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * Each dimension replaces itself and leaves every other alone, and the
-     * filters it was called on are unchanged.
+     * Each dimension replaces only itself, leaving the original unchanged.
      *
      * @return void
      */
@@ -116,8 +111,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * A reference filter is on the actor, the subject, the principal or the
-     * tenant, and nothing else.
+     * A reference filter is on the actor, subject, principal or tenant only.
      *
      * @return void
      */
@@ -130,8 +124,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * Codes, given as strings or string-backed cases, are held to the code
-     * grammar, kept once each and sorted bytewise.
+     * Codes, as strings or backed cases, are validated, unique and sorted.
      *
      * @return void
      */
@@ -153,8 +146,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * A code under the reserved prefix is accepted: a read may look for the
-     * package's own codes, though nothing may record one.
+     * A reserved code is accepted, since reads may look for the package's own.
      *
      * @return void
      */
@@ -164,8 +156,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * Fifty codes are held, and fifty-one, or none, are refused, naming the
-     * limit.
+     * Fifty codes are held; fifty-one or none are refused, naming the limit.
      *
      * @return void
      */
@@ -187,8 +178,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * Rows of `[prefix]`: prefixes that are not lower-case dotted segments
-     * ending in a dot, or are too long.
+     * Rows of `[prefix]`: not dotted lower-case segments, or too long.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -209,8 +199,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * A prefix that is not dotted segments ending in a dot, or is longer than
-     * 190 bytes, is refused.
+     * A prefix that is not dotted or longer than 190 bytes is refused.
      *
      * @param  string  $prefix
      * @return void
@@ -225,8 +214,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * A prefix of one segment, of several, with underscores and digits, and of
-     * exactly 190 bytes is accepted.
+     * Dotted prefixes up to 190 bytes are accepted.
      *
      * @return void
      */
@@ -256,8 +244,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * A window that ends where or before it starts is refused, and both ends
-     * `null` clears the window.
+     * A window ending at or before its start is refused; `null` ends clear it.
      *
      * @return void
      */
@@ -290,8 +277,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * Each end of the window is converted to UTC, its microseconds kept,
-     * whatever its own time zone.
+     * Each window end is converted to UTC, keeping its microseconds.
      *
      * @return void
      */
@@ -329,8 +315,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * A correlation id the builder would refuse is refused, and the builder
-     * refuses it too, so the filter holds the builder's grammar.
+     * A correlation id the builder refuses is refused by the filter too.
      *
      * @param  string  $correlationId
      * @return void
@@ -367,8 +352,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * Categories are held to the definitions' grammar, kept once and sorted,
-     * from one to fifty.
+     * Categories are validated, deduplicated and sorted, from one to fifty.
      *
      * @return void
      */
@@ -399,8 +383,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * Outcomes are kept once each, as stored, sorted, and at least one is
-     * needed.
+     * Outcomes are deduplicated and sorted, and at least one is needed.
      *
      * @return void
      */
@@ -415,9 +398,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * The normalised form names every dimension, its keys sorted, each
-     * reference as its type and id, and its canonical encoding is pinned here
-     * as text; filters given the same in another order have the same form.
+     * The normalised form and its canonical encoding ignore input order.
      *
      * @return void
      */
@@ -457,9 +438,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * The owner holding data in the entries is a dimension of its own: naming
-     * it leaves the actor and the subject alone, naming them leaves it alone,
-     * and it is not a dimension a reference filter can name.
+     * The data owner is a dimension apart from the actor and the subject.
      *
      * @return void
      */
@@ -484,8 +463,7 @@ final class TrailFiltersTest extends TestCase
     }
 
     /**
-     * The owner is a sensitive parameter: a reference to whoever the read is
-     * about.
+     * The owner is a sensitive parameter.
      *
      * @return void
      */

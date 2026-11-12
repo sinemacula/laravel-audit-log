@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle\Enums;
 
 /**
- * Why a line of an import file was rejected rather than imported. A rejected
- * line is counted under its reason and writes nothing; the import goes on with
- * the next line.
+ * Why a line of an import file was rejected; a rejected line is counted under
+ * its reason and writes nothing.
  *
  * @api
  *
@@ -44,12 +43,10 @@ enum ImportRejection: string
     // The line's occurrence time is not an instant in the package's form
     case INVALID_TIME = 'invalid_time';
 
-    // The line claims to have happened further ahead of the clock than the skew
-    // allows
+    // The line claims a time further ahead of the clock than the skew allows
     case FUTURE_TIME = 'future_time';
 
-    // The line's source is this installation, whose own records come back
-    // through replay, never as an import
+    // The line's source is this installation, whose records return by replay
     case OWN_SOURCE = 'own_source';
 
     // The line names a source other than the import's

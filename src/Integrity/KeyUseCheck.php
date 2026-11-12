@@ -10,17 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 
 /**
- * Whether the key uses are complete for the entries of a segment: every key an
- * entry's envelopes name must have its `(key, entry)` key use, which is how an
- * erasure finds the entries a key encrypted, so one missing hides an entry from
- * the erasure of its owner.
- *
- * The key uses of the entries given are read by entry, through the entry index,
- * in one statement on the storage connection's writer for each 500 entries, and
- * none for none, so a replica's lag never reads as a missing use. Only a key
- * and an entry that are canonical lower-case UUIDs, the only form a key use
- * names, are asked for, so no engine is asked to compare a UUID column with
- * anything else.
+ * Finds a segment's entries missing a key use for a key their envelopes name,
+ * which would hide the entry from its owner's erasure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -100,9 +91,9 @@ final readonly class KeyUseCheck
     }
 
     /**
-     * The entries that can have a key use, each with the keys that can be named
-     * by one: an entry whose id is not a canonical lower-case UUID is never
-     * given one, and neither is such a key, so neither is asked for.
+     * The entries that can have a key use, with their keys; a non-canonical id
+     * is never given one, so no engine compares a UUID column with anything
+     * else.
      *
      * @param  array<int|string, list<string>>  $expected
      * @return array<int|string, non-empty-list<string>>

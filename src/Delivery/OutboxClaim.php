@@ -5,13 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Delivery;
 
 /**
- * A drain's claim on one outbox row: the row's id, the token that fences every
- * later change to it, the encrypted payload it holds and the attempts counted
- * on it, this one included.
- *
- * The token is unique to the claim, so once the lease has passed and another
- * drain has claimed the row, nothing this claim asks for changes it. The token
- * and the payload are hidden from every stack frame.
+ * A drain's claim on one outbox row; its token fences every later change, so a
+ * claim that lost the row changes nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,14 +25,14 @@ final readonly class OutboxClaim
      */
     public function __construct(
 
-        /** The id of the claimed row, which is the id of the record it holds. */
+        /** The row's id, which is its record's id. */
         public string $id,
 
-        /** The token the claim wrote to the row, which every later change requires. */
+        /** The token every later change to the row requires. */
         #[\SensitiveParameter]
         public string $token,
 
-        /** The row's payload: the record's envelope, encrypted. */
+        /** The record's envelope, encrypted. */
         #[\SensitiveParameter]
         public string $payload,
 

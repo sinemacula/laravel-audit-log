@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the artifacts table: one row per artifact, a bulk operation's
- * subjects, a read's disclosure or an export's manifest, holding the encrypted
- * canonical form its entry's signed manifest describes. An artifact is written
- * with its entry and never changed.
+ * Create the artifacts table: the encrypted canonical form of each entry's
+ * artifact, written with its entry and never changed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,14 +35,12 @@ return new class extends Migration {
         $mysql = $schema->getConnection()->getDriverName() === 'mysql';
 
         $schema->create($table, static function (Blueprint $blueprint) use ($table, $mysql): void {
-            // The artifact's own id and the entry whose manifest names it, both
-            // written lower-case.
+            // Both written lower-case.
             $blueprint->uuid('id')->primary();
             $blueprint->uuid('entry_id');
 
-            // What the artifact holds (`bulk`, `disclosure` or `export`), how
-            // many members it lists, none for an empty disclosure or export,
-            // and the SHA-256 of its canonical form, in hex.
+            // `bulk`, `disclosure` or `export`; the digest is the hex SHA-256
+            // of the canonical form.
             $blueprint->string('kind', 16);
             $blueprint->unsignedInteger('member_count');
             $blueprint->string('digest', 64);
@@ -64,8 +60,7 @@ return new class extends Migration {
                 $blueprint->engine('InnoDB');
             }
 
-            // An entry has at most one artifact. Named short, so it fits
-            // PostgreSQL's 63 characters at the longest table name.
+            // An entry has at most one artifact.
             $blueprint->unique(['entry_id'], $table . '_entry_unique');
         });
     }
@@ -83,8 +78,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * an artifact is beside the entry that names it.
+     * The storage connection, so an artifact is beside the entry that names it.
      *
      * @return ?string
      *

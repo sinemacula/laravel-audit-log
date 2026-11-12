@@ -8,9 +8,8 @@ use Illuminate\Console\Command;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 
 /**
- * A console command that records one activity, runs what a test gives it (a
- * nested Artisan call, a sync-queue job), and records another: what it records
- * after shows the frame it got back, whether the inner work succeeded or threw.
+ * A console command that records, runs the inner work a test gives it, and
+ * records again, so the second record shows the frame it got back.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

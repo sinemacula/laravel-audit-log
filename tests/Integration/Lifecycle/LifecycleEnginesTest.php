@@ -34,16 +34,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for the lifecycle as the package ships it, on whichever
- * engine the suite runs against: a hold keeps its entries through a prune, its
- * release lets the next prune take them, and verification passes after each,
- * the seal holding a record of each prune; an import held on its start keeps
- * its batch through a prune that takes the entries beside it, until the hold is
- * released, after which the same file imports as new rows; and a pruned entry
- * put back below the package is found `resurrected`.
- *
- * Every operation goes through `AuditLog::lifecycle()` or a command, on the
- * provider's default bindings.
+ * Integration tests for the lifecycle as shipped, on every engine, through
+ * `AuditLog::lifecycle()` and commands on the default bindings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,8 +65,7 @@ final class LifecycleEnginesTest extends TestCase
     private array $files = [];
 
     /**
-     * Freeze the clock, name this installation's source, keep every category
-     * thirty days and report to a recording handler.
+     * Freeze the clock, name the source, keep thirty days and record reports.
      *
      * @return void
      */
@@ -94,8 +85,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, put the clock back and remove
-     * the files this test wrote.
+     * Roll back a left-open transaction, put the clock back, remove the files.
      *
      * @return void
      */
@@ -122,10 +112,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * On each engine a hold keeps its entry through a prune that takes the
-     * entry beside it, and verification passes; once it is released, the next
-     * prune takes the entry it kept, the seal holds a record of each prune, and
-     * verification passes again with the seal `pruned`.
+     * A hold outlives a prune, and its release lets the next take it.
      *
      * @return void
      */
@@ -157,10 +144,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * On each engine an import held on its start keeps every entry of its
-     * batch, past retention on arrival, through a prune that takes the entry
-     * beside them; once the hold is released the next prune takes them, the
-     * same file then imports as new rows, and verification passes throughout.
+     * An import held on its start keeps its batch through a prune.
      *
      * @return void
      */
@@ -203,10 +187,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * On each engine an entry pruned under a signed record and then put back
-     * below the package, as a restore or a direct insert would, is found:
-     * verification calls its seal `incomplete`, `resurrected` at that entry,
-     * and fails.
+     * A pruned entry put back below the package is found `resurrected`.
      *
      * @return void
      */
@@ -235,9 +216,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * On each engine a second prune after a pruned entry was put back never
-     * deletes it again: the seal is skipped, no second record sets its member,
-     * and verification still reports it `resurrected`, never `prune_record`.
+     * A resurrected entry is never pruned again and stays `resurrected`.
      *
      * @return void
      */
@@ -267,8 +246,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * Store a captured record with the fields given over its own, happening at
-     * the instant given and recorded at the test's time, and return its id.
+     * Store a record with the fields given, occurring at the instant given.
      *
      * @param  string  $occurredAt
      * @param  array<string, ?string>  $fields
@@ -295,8 +273,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * Run `audit-log:verify --json` and return its exit code and each segment's
-     * integrity, in order.
+     * Run `audit-log:verify --json`.
      *
      * @return array{0: int, 1: list<string>}
      *
@@ -370,8 +347,7 @@ final class LifecycleEnginesTest extends TestCase
     }
 
     /**
-     * A file of a line of the import format for each record id, each past
-     * retention, and its path.
+     * Write an import file of a past-retention line per record id.
      *
      * @param  list<string>  $recordIds
      * @return string

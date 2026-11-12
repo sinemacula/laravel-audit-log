@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the authority a lifecycle operation is asked for under: the
- * operator, the reason and the external reference it keeps exactly as given,
- * the reasons and external references it refuses, each naming its field and
- * never the value, and the array the journal and a record keep.
+ * Unit tests for the authority a lifecycle operation is asked for under.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +29,7 @@ final class AuthorityTest extends TestCase
     private const string REFUSED_REFERENCE = 'An authority\'s external reference must be from 1 to 191 characters, with no control characters.';
 
     /**
-     * The operator, the reason and the external reference are kept exactly as
-     * given.
+     * The operator, the reason and the external reference are kept as given.
      *
      * @return void
      */
@@ -105,8 +101,7 @@ final class AuthorityTest extends TestCase
     }
 
     /**
-     * Each reason outside the grammar is refused, naming the field and the
-     * grammar, never the value.
+     * A reason outside the grammar is refused, naming the field, not the value.
      *
      * @param  string  $reason
      * @return void
@@ -121,8 +116,7 @@ final class AuthorityTest extends TestCase
     }
 
     /**
-     * Rows of `[external reference]`: external references that are empty,
-     * longer than the column, or not already clean text.
+     * Rows of `[external reference]`: empty, too long or not clean text.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -140,9 +134,7 @@ final class AuthorityTest extends TestCase
     }
 
     /**
-     * Each external reference that is empty, longer than the column or not
-     * already clean is refused rather than cleaned or cut, naming the field and
-     * the limit, never the value.
+     * An empty, too long or unclean external reference is refused, never cut.
      *
      * @param  string  $externalReference
      * @return void
@@ -161,9 +153,7 @@ final class AuthorityTest extends TestCase
     }
 
     /**
-     * An external reference of exactly 191 characters is kept, counted in
-     * characters rather than bytes, so 191 multibyte characters fit: protects
-     * against a mutation that measures bytes or moves the bound by one.
+     * 191 multibyte characters fit: the limit counts characters, not bytes.
      *
      * @return void
      */
@@ -179,8 +169,7 @@ final class AuthorityTest extends TestCase
     }
 
     /**
-     * The array holds the operator's type and id, the reason and the external
-     * reference, in that order, with `null` for no external reference.
+     * The array holds operator, reason and external reference, in that order.
      *
      * @return void
      */

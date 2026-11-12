@@ -15,19 +15,11 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The deliveries table, on the storage connection's writer beside the entries
- * it describes: one receipt per record and destination, saying how many
- * attempts reached for the destination, whether it has the record, and the
- * class of the last error it raised.
+ * The deliveries table on the storage connection's writer: one receipt per
+ * record and destination, naming an error by class, never message.
  *
  * An attempt is counted before its call, so a call that never returns still
- * counts: the first makes the receipt, and a first attempt that finds the
- * receipt made already, by a racing owner, counts on it instead. A delivered
- * receipt is never changed again, by any method, so its time stays the time the
- * destination first had the record, and a reset after a failure reaches only
- * the destinations that do not have it. A receipt names an error by its class,
- * never its message, and holds nothing of the record. Receipts are kept once
- * their record is delivered.
+ * counts, and a delivered receipt never changes again.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,7 +28,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
  */
 final readonly class Receipts
 {
-    /** @var int Entries reset by one statement, so a long list never exceeds what an engine binds. */
+    /** @var int Entries reset per statement, below what an engine binds. */
     private const int RESET_CHUNK = 500;
 
     /**
@@ -47,7 +39,7 @@ final readonly class Receipts
      */
     public function __construct(
 
-        /** The connections the storage connection is resolved from on every call. */
+        /** Resolves the storage connection on every call. */
         private ConnectionResolverInterface $connections,
 
         /** The clock the times of attempts and deliveries are read from. */
@@ -74,8 +66,7 @@ final readonly class Receipts
     }
 
     /**
-     * The receipts of the entry, keyed by destination; none when no attempt has
-     * been made.
+     * The entry's receipts by destination; none before the first attempt.
      *
      * @param  string  $entryId
      * @return array<string, \SineMacula\Laravel\AuditLog\Delivery\Receipt>
@@ -87,8 +78,8 @@ final readonly class Receipts
     {
         $receipts = [];
 
-        // An integer column reads back as an integer and a string or time
-        // column as a string, on every engine
+        // Integer columns read back as integers and string or time columns as
+        // strings on every engine
         /** @var list<object{destination: string, attempts: int, delivered_at: ?string, last_error_class: ?string}&\stdClass> $rows */
         $rows = $this->table()
             ->where('entry_id', $entryId)
@@ -104,10 +95,9 @@ final readonly class Receipts
     }
 
     /**
-     * Count an attempt to reach the destination with the entry, before the call
-     * is made: with no receipt yet, an insert of one with one attempt, first
-     * made now; otherwise, and when a racing owner made the receipt first, one
-     * more attempt on it. A delivered receipt is left as it is.
+     * Count an attempt before the call: insert the receipt on the first,
+     * otherwise, or when a racing owner made it first, add one; a delivered
+     * receipt is left alone.
      *
      * @param  string  $entryId
      * @param  string  $destination
@@ -128,8 +118,8 @@ final readonly class Receipts
     }
 
     /**
-     * Mark the destination as having the entry, now, and clear its last error,
-     * unless it was marked so already.
+     * Mark the destination as having the entry now and clear its last error,
+     * unless already marked.
      *
      * @param  string  $entryId
      * @param  string  $destination
@@ -147,8 +137,8 @@ final readonly class Receipts
     }
 
     /**
-     * Name the class of the error the destination raised for the entry, unless
-     * the destination has the entry already.
+     * Name the class of the destination's error, unless it already has the
+     * entry.
      *
      * @param  string  $entryId
      * @param  string  $destination
@@ -166,9 +156,8 @@ final readonly class Receipts
     }
 
     /**
-     * Reset the receipts of the entries that are not delivered, so a replay
-     * starts their attempts again with no error named; a delivered receipt is
-     * kept as it is. Returns how many receipts were reset.
+     * Reset the undelivered receipts of the entries for a replay, leaving
+     * delivered ones; returns how many were reset.
      *
      * @param  list<string>  $entryIds
      * @return int
@@ -191,9 +180,9 @@ final readonly class Receipts
     }
 
     /**
-     * Insert the receipt of a first attempt, alone outside a transaction and in
-     * a savepoint inside one, so a receipt a racing owner made first leaves the
-     * transaction as it was. Returns whether this insert made it.
+     * Insert a first attempt's receipt, in a savepoint when a transaction is
+     * open, so a racing owner's receipt leaves the transaction as it was;
+     * returns whether this insert made it.
      *
      * @param  string  $entryId
      * @param  string  $destination
@@ -222,15 +211,13 @@ final readonly class Receipts
 
             return $connection->transaction(static fn (Connection $nested): bool => $nested->table($table)->insert($receipt));
         } catch (UniqueConstraintViolationException) {
-            // A racing owner made the receipt first, so the attempt is counted
-            // on it instead
+            // A racing owner made the receipt first; the attempt counts on it
             return false;
         }
     }
 
     /**
-     * A query of the destination's receipt for the entry while it is not
-     * delivered.
+     * A query of the destination's undelivered receipt for the entry.
      *
      * @param  string  $entryId
      * @param  string  $destination

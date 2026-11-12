@@ -9,17 +9,8 @@ use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 
 /**
- * The key uses: which key encrypted a field of which entry, one row per
- * distinct key of each entry, written with the entry it describes and never
- * changed or removed, so an owner's entries are found through its keys and
- * verification proves every envelope has its row.
- *
- * A row is made only for a key that is a canonical lower-case UUID, whatever
- * encrypter named it, and for an entry whose id is one. Rows are inserted many
- * to a statement, at most 400 on SQLite and 10,000 elsewhere, so even an import
- * chunk of several owners stays under the placeholders every engine allows;
- * a row that is already there is never ignored, so a conflict surfaces as the
- * unique violation it is.
+ * Append-only rows of which key encrypted a field of which entry; a duplicate
+ * is never ignored, so a conflict surfaces as a unique violation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,8 +31,8 @@ final class KeyUses
     private function __construct() {}
 
     /**
-     * The rows that record the keys the entry's envelopes name: one per
-     * distinct key that is a canonical lower-case UUID, sorted by key.
+     * One row per distinct canonical lower-case UUID key the entry names,
+     * sorted by key.
      *
      * @param  string  $entryId
      * @param  array<array-key, string>  $keyIds
@@ -63,8 +54,7 @@ final class KeyUses
     }
 
     /**
-     * Insert the rows on the connection, as many to a statement as the engine
-     * allows, and nothing when there are none.
+     * Insert the rows, as many to a statement as the engine allows.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<array{key_id: string, entry_id: string}>  $rows

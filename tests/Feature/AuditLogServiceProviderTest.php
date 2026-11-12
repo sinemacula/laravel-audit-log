@@ -126,15 +126,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Feature tests for the package AuditLogServiceProvider: the configuration it
- * merges, the defaults it binds, the files it publishes under each tag, the
- * migrations it never loads, the translations it loads without reading them at
- * boot, the commands it registers and the runs it schedules in the console
- * only, the listeners and middleware it adds, the package's codes it defines,
- * and that it freezes registration at boot.
- *
- * The class runs no migration of its own, so the migrator's paths are what the
- * provider leaves there.
+ * Feature tests for the package's service provider. The class runs no
+ * migration, so the migrator holds only what the provider leaves.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -173,22 +166,24 @@ final class AuditLogServiceProviderTest extends TestCase
         '2026_11_02_001300_create_audit_log_key_uses_table.php',
     ];
 
-    /** @var array<string, class-string> Each lifecycle command the provider registers, by name, with its class. */
-    private const array LIFECYCLE_COMMANDS = [
+    /** @var array<string, class-string> Each command the provider registers, by name, with its class. */
+    private const array COMMANDS = [
+        'audit-log:check'     => CheckCommand::class,
+        'audit-log:drain'     => DrainCommand::class,
+        'audit-log:erase'     => EraseCommand::class,
+        'audit-log:export'    => ExportCommand::class,
         'audit-log:hold'      => HoldCommand::class,
         'audit-log:holds'     => HoldsCommand::class,
         'audit-log:import'    => ImportCommand::class,
+        'audit-log:keys'      => KeysCommand::class,
         'audit-log:prune'     => PruneCommand::class,
         'audit-log:reconcile' => ReconcileCommand::class,
-        'audit-log:release'   => ReleaseCommand::class,
-    ];
-
-    /** @var array<string, class-string> Each privacy command the provider registers, by name, with its class. */
-    private const array PRIVACY_COMMANDS = [
-        'audit-log:erase'     => EraseCommand::class,
-        'audit-log:keys'      => KeysCommand::class,
         'audit-log:reinstate' => ReinstateCommand::class,
+        'audit-log:release'   => ReleaseCommand::class,
+        'audit-log:replay'    => ReplayCommand::class,
         'audit-log:rewrap'    => RewrapCommand::class,
+        'audit-log:seal'      => SealCommand::class,
+        'audit-log:verify'    => VerifyCommand::class,
     ];
 
     /**
@@ -222,8 +217,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The configuration file is published to the application's config directory
-     * under the package's tag.
+     * The configuration file is published under the package's tag.
      *
      * @return void
      */
@@ -255,8 +249,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The migrations tag publishes every shipped migration, from the package to
-     * the application's migrations, under its own file name.
+     * The migrations tag publishes every shipped migration under its own name.
      *
      * @return void
      */
@@ -283,9 +276,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The provider publishes every migration the package ships, and nothing
-     * else, in the order their names run in: the four lifecycle tables after
-     * the seven before them, the import batches last.
+     * The provider publishes exactly the shipped migrations, in run order.
      *
      * @return void
      */
@@ -301,9 +292,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The provider never loads the migrations from the package: the class runs
-     * none of its own, so the migrator knows no path, and the application runs
-     * only what it published.
+     * The provider never loads the package's migrations.
      *
      * @return void
      */
@@ -317,129 +306,33 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The check is registered as an Artisan command when the application runs
-     * in the console.
-     *
-     * @return void
-     */
-    public function testTheCheckCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:check', Artisan::all());
-        self::assertInstanceOf(CheckCommand::class, Artisan::all()['audit-log:check']);
-    }
-
-    /**
-     * Running in the console, as a test does, the drain command is there.
-     *
-     * @return void
-     */
-    public function testTheDrainCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:drain', Artisan::all());
-        self::assertInstanceOf(DrainCommand::class, Artisan::all()['audit-log:drain']);
-    }
-
-    /**
-     * Running in the console, as a test does, the replay command is there.
-     *
-     * @return void
-     */
-    public function testTheReplayCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:replay', Artisan::all());
-        self::assertInstanceOf(ReplayCommand::class, Artisan::all()['audit-log:replay']);
-    }
-
-    /**
-     * Running in the console, as a test does, the seal command is there.
-     *
-     * @return void
-     */
-    public function testTheSealCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:seal', Artisan::all());
-        self::assertInstanceOf(SealCommand::class, Artisan::all()['audit-log:seal']);
-    }
-
-    /**
-     * Running in the console, as a test does, the verify command is there.
-     *
-     * @return void
-     */
-    public function testTheVerifyCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:verify', Artisan::all());
-        self::assertInstanceOf(VerifyCommand::class, Artisan::all()['audit-log:verify']);
-    }
-
-    /**
-     * Running in the console, as a test does, the export command is there.
-     *
-     * @return void
-     */
-    public function testTheExportCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:export', Artisan::all());
-        self::assertInstanceOf(ExportCommand::class, Artisan::all()['audit-log:export']);
-    }
-
-    /**
-     * Rows of `[name, class]`: each lifecycle command the provider registers.
+     * Rows of `[name, class]`: each command the provider registers.
      *
      * @return iterable<string, array{0: string, 1: class-string}>
      */
-    public static function provideLifecycleCommands(): iterable
+    public static function provideCommands(): iterable
     {
-        foreach (self::LIFECYCLE_COMMANDS as $name => $class) {
+        foreach (self::COMMANDS as $name => $class) {
             yield $name => [$name, $class];
         }
     }
 
     /**
-     * Running in the console, as a test does, each lifecycle command is there
-     * under its name, as its own class.
+     * Each command is registered in the console as its own class.
      *
      * @param  string  $name
      * @param  class-string  $class
      * @return void
      */
-    #[DataProvider('provideLifecycleCommands')]
-    public function testTheLifecycleCommandsAreRegistered(string $name, string $class): void
+    #[DataProvider('provideCommands')]
+    public function testEachCommandIsRegistered(string $name, string $class): void
     {
         self::assertArrayHasKey($name, Artisan::all());
         self::assertInstanceOf($class, Artisan::all()[$name]);
     }
 
     /**
-     * Rows of `[name, class]`: each privacy command the provider registers.
-     *
-     * @return iterable<string, array{0: string, 1: class-string}>
-     */
-    public static function providePrivacyCommands(): iterable
-    {
-        foreach (self::PRIVACY_COMMANDS as $name => $class) {
-            yield $name => [$name, $class];
-        }
-    }
-
-    /**
-     * Running in the console, as a test does, each privacy command is there
-     * under its name, as its own class.
-     *
-     * @param  string  $name
-     * @param  class-string  $class
-     * @return void
-     */
-    #[DataProvider('providePrivacyCommands')]
-    public function testThePrivacyCommandsAreRegistered(string $name, string $class): void
-    {
-        self::assertArrayHasKey($name, Artisan::all());
-        self::assertInstanceOf($class, Artisan::all()[$name]);
-    }
-
-    /**
-     * The package registers exactly its sixteen commands, the six lifecycle
-     * ones and the four privacy ones among them, and no other under its prefix.
+     * The package registers exactly its sixteen commands under its prefix.
      *
      * @return void
      */
@@ -490,9 +383,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Rows of `[abstract, the default it resolves to]`: every abstract the
-     * package's provider binds once per application; the field encrypter and
-     * the field reader, made afresh on every resolution, are pinned apart.
+     * Rows of `[abstract, the default it resolves to]` for each shared binding.
      *
      * @return iterable<string, array{0: class-string, 1: class-string}>
      */
@@ -536,10 +427,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The field encrypter is the package's, keyed by owner, and the field
-     * reader the one that opens what it seals; each resolution is a new one, so
-     * the data keys one holds never outlive the record or the page it serves,
-     * and neither is kept as a shared instance.
+     * The field encrypter and reader are new per resolution, so no data key
+     * outlives its use.
      *
      * @return void
      */
@@ -561,9 +450,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The key wrapper is the local one, over the wrapping ring, shared because
-     * it holds no key: every wrap reads the ring afresh, so a wrapping key
-     * configured after it resolves is the one the next wrap uses.
+     * The key wrapper is shared, as it holds no key and reads the ring on every
+     * wrap.
      *
      * @return void
      */
@@ -585,8 +473,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * An application that chooses never to encrypt binds `NoFieldEncrypter`
-     * before the provider registers, and the provider keeps it.
+     * A `NoFieldEncrypter` bound before the provider registers is kept.
      *
      * @return void
      */
@@ -600,8 +487,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The anchor is the null anchor when none is configured, made afresh on
-     * each resolution, so a changed setting takes effect on the next one.
+     * The anchor is the null anchor by default, made afresh on each resolution.
      *
      * @return void
      */
@@ -614,8 +500,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The anchor follows the settings from one resolution to the next, and a
-     * malformed driver fails closed when the anchor is resolved, not before.
+     * The anchor follows the settings and fails closed when resolved.
      *
      * @return void
      */
@@ -634,10 +519,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Running in the console, the application's schedule holds sealing every
-     * five minutes, the sweep and the strict verification daily, and nothing
-     * else of the package's: with the shipped retention everything is kept
-     * forever, so no prune is scheduled.
+     * The schedule holds sealing, the sweep and verification; shipped retention
+     * schedules no prune.
      *
      * @return void
      */
@@ -651,8 +534,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Once retention keeps a category for less than forever, the schedule also
-     * holds the prune, daily, after the three runs.
+     * Retention shorter than forever also schedules the daily prune.
      *
      * @return void
      */
@@ -668,8 +550,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Outside the console the provider schedules nothing: it adds no callback
-     * for when the schedule is resolved.
+     * Outside the console the provider schedules nothing.
      *
      * @return void
      *
@@ -719,9 +600,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * A malformed schedule stops neither boot nor the schedule: the application
-     * boots, its schedule resolves with the other two runs, and the malformed
-     * setting is reported by its key.
+     * A malformed schedule stops neither boot nor the other runs, and is
+     * reported.
      *
      * @return void
      */
@@ -754,8 +634,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The trail and the describer are never shared: each resolution is a new
-     * one, so nothing a read resolves outlives it.
+     * The trail and the describer are new per resolution.
      *
      * @return void
      */
@@ -766,8 +645,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * A policy and a field reader the application bound before the provider
-     * registers are kept, and the provider's defaults never replace them.
+     * A policy and field reader bound before the provider registers are kept.
      *
      * @return void
      */
@@ -786,8 +664,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * isPackageDefault() is true while the contract resolves to the package's
-     * own default, resolved or not, and false for anything bound over it.
+     * isPackageDefault() is true only while the contract resolves to the
+     * package's default.
      *
      * @return void
      */
@@ -819,10 +697,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The runtime state dies with its scope: forgetting scoped instances gives
-     * new frames and a new identity, as Octane and a queue worker do. Within a
-     * scope each is one instance, so a read guard opened by one class is the
-     * one another class asks, and could never be a fresh, inactive one.
+     * The runtime state is scoped: one instance per scope, forgotten as Octane
+     * and queue workers do.
      *
      * @return void
      */
@@ -872,9 +748,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The events captured so far die with their scope, as Octane and a queue
-     * worker forget it, so an event object claimed in one request is free in
-     * the next.
+     * The capture state is scoped, so an event claimed in one request is free
+     * in the next.
      *
      * @return void
      */
@@ -922,8 +797,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Each event has the package's listener, registered once however it is
-     * read, so a frame is entered once and a job carries one envelope.
+     * Each event has the package's listener registered once.
      *
      * @param  class-string  $event
      * @param  class-string  $listener
@@ -954,9 +828,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * A capture listener holds nothing and has no binding of the provider's: it
-     * takes nothing when it is built, so the container that builds it, which
-     * under Octane is the worker's, leaves nothing in it.
+     * A capture listener holds nothing, so the Octane worker container leaves
+     * nothing in it.
      *
      * @param  class-string  $listener
      * @return void
@@ -972,9 +845,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * A capture listener made by the root container captures with the current
-     * container, as Octane's request sandbox is: the event is claimed in the
-     * sandbox's capture state, never the root's.
+     * A capture listener captures in the current container, as Octane's sandbox
+     * is.
      *
      * @return void
      */
@@ -1007,8 +879,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The events the package never records are never listened to, and nothing
-     * routes mapped events until something is mapped.
+     * Unrecorded events are never listened to, and nothing routes mapped events
+     * until one is mapped.
      *
      * @SuppressWarnings("php:S3011")
      *
@@ -1034,8 +906,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The commit queue's probe hears each commit about to happen, once, so an
-     * aborted PostgreSQL transaction is caught before its callbacks run.
+     * The commit probe listens once, catching an aborted PostgreSQL transaction
+     * early.
      *
      * @return void
      */
@@ -1048,8 +920,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The commit queue hears each rollback once, so work held past a rollback
-     * is written once the rollback has finished.
+     * The commit queue hears each rollback once.
      *
      * @return void
      */
@@ -1062,8 +933,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The middleware is at the head of the kernel's global stack, once, so a
-     * record in any other global middleware has its request.
+     * The frame middleware heads the global stack once, so other middleware has
+     * its request.
      *
      * @return void
      */
@@ -1082,9 +953,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The provider adds no route and no view path. Serving local files is off,
-     * because the framework then adds its own routes for them, on whichever
-     * version's skeleton turns it on.
+     * The provider adds no route or view path; local file serving is off as it
+     * adds routes.
      *
      * @return void
      */
@@ -1115,9 +985,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The package's translations are loaded under their namespace, so a code's
-     * title is found through the translator, a code of the package's own reads
-     * included.
+     * The package's translations are loaded under their namespace.
      *
      * @return void
      */
@@ -1128,8 +996,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The translations tag publishes the package's language directory to the
-     * vendor directory the translator reads an application's overrides from.
+     * The translations tag publishes the language directory to the vendor
+     * overrides.
      *
      * @return void
      */
@@ -1144,9 +1012,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Booting reads no translation: the translator is not resolved once the
-     * application has booted, nor by booting the provider again, and the
-     * package's translations are added when it is.
+     * Booting never resolves the translator.
      *
      * @return void
      */
@@ -1161,8 +1027,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Every code of the package's own reads is in the catalogue from the start,
-     * as its definition says, without the provider defining it.
+     * Every code of the package's own reads is in the catalogue from the start.
      *
      * @return void
      */
@@ -1190,8 +1055,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Once the application has booted, the event mappers and the model watcher
-     * refuse more too.
+     * Once booted, the event mappers and model watcher refuse more.
      *
      * @return void
      */
@@ -1202,9 +1066,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Every one of the package's codes is defined while it boots, as its
-     * definition says, so an application's definition of one that differs is
-     * refused at boot.
+     * Every package code is defined at boot.
      *
      * @return void
      */
@@ -1221,8 +1083,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * A catalogue that already holds a package code defined differently makes
-     * the provider's boot fail, naming the code.
+     * A package code already defined differently fails the boot, naming the
+     * code.
      *
      * @return void
      */
@@ -1241,9 +1103,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * A provider booted again once the application has booted defines nothing
-     * more and is not refused, since its codes were defined on the first boot
-     * and the catalogue is frozen.
+     * Booting the provider again defines nothing more and is not refused.
      *
      * @return void
      */
@@ -1260,9 +1120,8 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * An event mapper and a watched model registered from a provider's `boot()`
-     * are accepted and kept, and a mapped event dispatched afterwards is
-     * captured through the listener the mapping added.
+     * Mapping and watching from a provider's `boot()` are accepted and
+     * captured.
      *
      * @return void
      */
@@ -1282,9 +1141,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Booting reads no capture setting: an application with every capture
-     * setting malformed boots, its registration is frozen with the package's
-     * codes defined, and `audit-log:check` can report the settings.
+     * Booting reads no capture setting, so malformed ones still boot.
      *
      * @return void
      */
@@ -1299,7 +1156,7 @@ final class AuditLogServiceProviderTest extends TestCase
 
     /**
      * Definitions and contributors registered from a provider's `boot()` are
-     * accepted and kept.
+     * kept.
      *
      * @return void
      */
@@ -1314,9 +1171,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Booting reads no setting that could stop it: an application with every
-     * new setting malformed boots and is frozen, and `audit-log:check` can
-     * report the settings.
+     * Booting reads no setting that could stop it.
      *
      * @return void
      */
@@ -1329,8 +1184,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Register an enum and a contributor from another provider's `boot()`,
-     * which runs before the application has finished booting.
+     * Register an enum and a contributor from another provider's `boot()`.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -1354,8 +1208,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Map an event and watch a model from another provider's `boot()`, which
-     * runs before the application has finished booting.
+     * Map an event and watch a model from another provider's `boot()`.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -1453,8 +1306,7 @@ final class AuditLogServiceProviderTest extends TestCase
     #[\Override]
     protected function defineDatabaseMigrations(): void
     {
-        // The provider must load no migration, which the class checks, so
-        // nothing else loads one
+        // The provider must load no migration, which this class checks
     }
 
     /**
@@ -1469,8 +1321,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The package's runs on the schedule, each command after `artisan` with its
-     * cron expression.
+     * The package's scheduled commands with their cron expressions.
      *
      * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
      * @return array<string, string>
@@ -1494,8 +1345,7 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The package command a scheduled event runs, as it follows `artisan`, or
-     * `null` for any other event.
+     * The package command a scheduled event runs, or `null` for any other.
      *
      * @param  \Illuminate\Console\Scheduling\Event  $event
      * @return ?string

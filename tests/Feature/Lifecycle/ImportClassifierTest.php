@@ -26,11 +26,7 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\TestCase;
 
 /**
- * Feature tests for classifying a chunk's lines, on whichever engine the suite
- * runs against: new lines, duplicates and conflicts against the stored rows and
- * within the chunk, the digest compared under the stored row's key, a row under
- * a removed key a conflict, a definition changed between imports never hiding a
- * duplicate, and the stored rows read a source and 500 ids to a statement.
+ * Feature tests for classifying a chunk's lines as new, duplicate or conflict.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,7 +50,7 @@ final class ImportClassifierTest extends TestCase
 
     /**
      * Freeze the clock, sign under the first of two keys, and give the
-     * container a catalogue of its own.
+     * container its own catalogue.
      *
      * @return void
      */
@@ -86,9 +82,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * A line no row holds is new, with its digest under the signing key; one a
-     * row holds with its digest is a duplicate, and one a row holds with
-     * another digest a conflict.
+     * A line is new, a duplicate or a conflict against the stored rows.
      *
      * @return void
      */
@@ -109,8 +103,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * Within one chunk, the first line of a source identity no row holds is new
-     * and every later one with its digest a duplicate.
+     * Within one chunk, a repeated line with the same digest is a duplicate.
      *
      * @return void
      */
@@ -125,8 +118,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * Within one chunk, a later line of a source identity with another digest
-     * than its first line's is a conflict, and its first line is still new.
+     * Within one chunk, a later line with another digest is a conflict.
      *
      * @return void
      */
@@ -141,8 +133,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * The same record id of different sources is a different identity, and each
-     * is classified on its own.
+     * The same record id of different sources is a different identity.
      *
      * @return void
      */
@@ -158,8 +149,8 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * A record id of digits is looked up as text, never as a number, so it
-     * finds its row on every engine.
+     * A record id of digits is looked up as text, so it finds its row on every
+     * engine.
      *
      * @return void
      */
@@ -174,9 +165,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * A line's digest is compared under the key the stored row names: a row
-     * signed before a rotation is still a duplicate of the same line, and a
-     * conflict of another.
+     * A line's digest is compared under the key the stored row names.
      *
      * @return void
      */
@@ -196,8 +185,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * A stored row whose key the ring no longer holds is a conflict, never a
-     * duplicate, even of the line it was made from.
+     * A stored row under a key the ring no longer holds is a conflict.
      *
      * @return void
      */
@@ -215,9 +203,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * A definition changed between two imports, which changes what the row
-     * stores, never changes the digest of what the line asserts: the repeated
-     * line is still a duplicate.
+     * A definition changed between imports still finds the duplicate.
      *
      * @return void
      */
@@ -236,9 +222,8 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * The stored rows are read a source and 500 record ids to a statement, on
-     * the storage connection's writer: 501 lines of one source are two reads,
-     * and one line of another source a third.
+     * Stored rows are read a source and 500 record ids to a statement, on the
+     * writer.
      *
      * @return void
      */
@@ -281,8 +266,7 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
-     * Store the line's record as an import stores it: its digest and its row
-     * under the ring's signing key.
+     * Store the line's record as an import stores it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine  $line
      * @return void

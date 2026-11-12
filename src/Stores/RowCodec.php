@@ -9,25 +9,11 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The one conversion between a finalised record and a row of the entries table:
- * the record encoded for its insert, the attachment of a record with an
- * artifact, of any kind, encoded as the row of the artifacts table written with
- * it, and a stored row decoded back to the envelope it holds.
+ * Converts a finalised record to its entries and artifacts rows, and a stored
+ * row back to its envelope, never a record, since a stored row is evidence.
  *
- * A row is written with its JSON in fixed flags, its integers as they are, and
- * its times in UTC as `Y-m-d H:i:s.u`, written out explicitly because the
- * grammar's own date format drops microseconds. A row is read back with every
- * column required: an integer the engine returns as a digit string reads as the
- * integer, JSON decodes to `stdClass` objects so `{}` and numeric keys survive,
- * and a JSON number is never turned into a string, so a fraction or an integer
- * beyond PHP's range decodes as a float that verification refuses. A record
- * rebuilt from an envelope gives its JSON columns as objects where they were
- * objects, and they are written as objects. Decoding returns the envelope,
- * never a record: a stored row is evidence. The codec never trims, folds case
- * or normalises a value. An artifact's row is the attachment as it was sealed,
- * naming the record's id as its entry, with the record's recorded time as its
- * own, stored as the entry stores it. An attachment described from a stored
- * entry carries no members and is refused, never stored.
+ * Times are written in UTC as `Y-m-d H:i:s.u`, since the grammar's own date
+ * format drops microseconds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -81,9 +67,7 @@ final readonly class RowCodec
     private const int JSON_FLAGS = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR;
 
     /**
-     * The record as the row its insert writes, in table order: strings and
-     * integers as they are, JSON columns encoded with the fixed flags or left
-     * `null`, and times in UTC as `Y-m-d H:i:s.u`.
+     * The record as its insert row, in table order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return array<string, int|string|null>
@@ -104,11 +88,8 @@ final readonly class RowCodec
     }
 
     /**
-     * The record's attachment as the row of the artifacts table its insert
-     * writes, in table order: its id, the record's id as its entry, its kind,
-     * member count, digest and sealed members as they are, and the record's
-     * recorded time in UTC as `Y-m-d H:i:s.u`. Only a record with an artifact
-     * has one, and only a sealed attachment is stored.
+     * The record's sealed attachment as its artifacts row, with the record's id
+     * as its entry and the record's recorded time.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return array{id: string, entry_id: string, kind: string, member_count: int, digest: string, members: string, created_at: string}
@@ -126,9 +107,8 @@ final readonly class RowCodec
     }
 
     /**
-     * The envelope a stored row holds, in table order: every column required,
-     * each read as its kind; keys the row has beyond the table's columns are
-     * dropped.
+     * The envelope a stored row holds, every column required; keys beyond the
+     * table's columns are dropped.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -153,9 +133,8 @@ final readonly class RowCodec
     }
 
     /**
-     * The JSON column's value as the insert writes it: `null` stays `null`, and
-     * an array or an object is encoded with the fixed flags, so a decoded
-     * record's `{}` and maps with sequential numeric keys stay objects.
+     * The JSON column as written, so a decoded record's `{}` and numeric-keyed
+     * maps stay objects.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -170,8 +149,7 @@ final readonly class RowCodec
     }
 
     /**
-     * The stored value of the column read as its kind, or a refusal naming the
-     * column and what it must hold.
+     * The stored value read as its column's kind.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -194,8 +172,8 @@ final readonly class RowCodec
     }
 
     /**
-     * The stored JSON decoded with objects as `stdClass` and every number as
-     * JSON reads it, or `null` for a `null` column.
+     * The stored JSON with objects as `stdClass` and numbers never stringified,
+     * so an out-of-range integer decodes as a float verification refuses.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

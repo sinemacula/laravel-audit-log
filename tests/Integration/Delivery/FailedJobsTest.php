@@ -44,15 +44,8 @@ use Tests\TestCase;
 
 /**
  * What a failed delivery leaves in the queue's tables, through a database queue
- * and the real `queue:work` command, which is what writes `failed_jobs`, on the
- * engine the suite runs against: a drain dispatches no job, so a destination
- * that keeps failing leaves a receipt and a failed row, and nothing a job could
- * fail with; run from a job, it completes the job. A record that throws inside
- * a job does fail it, and Laravel stores that exception's text and trace, which
- * hold only the sanitised exception's fixed text, however the store failed.
- *
- * The whole class turns `zend.exception_ignore_args` off, so a stored trace
- * writes every frame's arguments.
+ * and the real `queue:work` command. Frame arguments are kept so stored traces
+ * show every argument.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,7 +85,7 @@ final class FailedJobsTest extends TestCase
     /** @var string What the store's failure says, besides the secret. */
     private const string FAILURE = 'SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry';
 
-    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter, the worker's among them, is asked to report. */
+    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler The application's reporter, the worker's included. */
     private RecordingExceptionHandler $reporter;
 
     /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditWriteFailed> The failed writes said, in order. */
@@ -102,8 +95,8 @@ final class FailedJobsTest extends TestCase
     private string $ignoreArgs = '';
 
     /**
-     * Create the queue's tables, keep every frame's arguments, stop the clock,
-     * and keep what is reported and said.
+     * Create the queue's tables, keep frame arguments, stop the clock, and
+     * record reports and events.
      *
      * @return void
      */
@@ -129,7 +122,7 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * Drop the queue's tables, and put the setting and the clock back.
+     * Drop the queue's tables, and restore the setting and the clock.
      *
      * @return void
      */
@@ -147,9 +140,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * Rows of `[connections the destination joins]`: one called on its own, and
-     * one that shares a transaction with its receipt, which that failure rolls
-     * back, so the receipt must be written after it.
+     * Rows of `[connections the destination joins]`: none, or a transaction
+     * shared with its receipt.
      *
      * @return iterable<string, array{0: list<string>}>
      */
@@ -162,10 +154,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * A destination that fails every attempt leaves a receipt that counts them
-     * and names the failure's class, is never marked delivered, and has its row
-     * failed and kept, its payload whole, for a replay; only the last attempt
-     * is reported and said.
+     * A destination failing every attempt leaves a counting receipt and a
+     * failed row kept for replay, reported once.
      *
      * @param  list<string>  $joins
      * @return void
@@ -210,8 +200,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * A destination that keeps failing leaves the receipt of one that succeeded
-     * as it was, and a further drain calls only the one that failed.
+     * A failing destination leaves the other's delivered receipt alone, and a
+     * further drain calls only the failing one.
      *
      * @return void
      */
@@ -244,10 +234,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * With a secret in the record's context and in what the destination fails
-     * with, a drain leaves `failed_jobs` empty, whether a job or the scheduler
-     * ran it, because it is no job's to fail: run from a job, the job
-     * completes, though the row is failed and reported.
+     * A drain leaves `failed_jobs` empty whether a job or the scheduler ran it,
+     * and the job completes.
      *
      * @return void
      */
@@ -295,8 +283,7 @@ final class FailedJobsTest extends TestCase
 
     /**
      * Delivering pushes nothing onto a queue, whether the row delivers or
-     * fails: the real queue's table stays empty, and no job is said to be
-     * queued.
+     * fails.
      *
      * @param  string  $command
      * @param  array<string, bool>  $options
@@ -371,11 +358,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * A queued job whose record throws, under the `throw` mode, is failed by
-     * the worker, and `failed_jobs` then holds what Laravel stores of an
-     * exception: only the sanitised exception's fixed text, one exception with
-     * no `Next`, and a trace whose frames that took the record show the
-     * stand-in.
+     * A queued job whose record throws is failed, and `failed_jobs` holds only
+     * the sanitised fixed text and a trace showing the stand-in.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void
@@ -411,8 +395,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * A job whose record only reports its failed write completes: nothing is
-     * failed, and nothing of the record is on the queue.
+     * A job whose record only reports its failed write completes, and nothing
+     * is failed or queued.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void
@@ -436,7 +420,7 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * Configure a database queue with a table of failed jobs, and spill to a
+     * Configure a database queue with a failed jobs table, and spill to a
      * channel that writes nowhere.
      *
      * @param  mixed  $app
@@ -457,8 +441,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * Create the queue's table and the failed jobs' table, as Laravel's own
-     * migrations shape them.
+     * Create the queue and failed jobs tables as Laravel's own migrations shape
+     * them.
      *
      * @return void
      */
@@ -489,10 +473,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * Fail unless the text Laravel stored of an exception is the one the worker
-     * reported, whose message is built from the diagnostics alone, followed by
-     * its trace, with no exception chained after it and the stand-in in the
-     * frames that took the record.
+     * Assert the stored text is the reported exception's fixed text and trace,
+     * with nothing chained and the stand-in in the record's frames.
      *
      * @param  string  $stored
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
@@ -553,8 +535,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * Run the next job through the real `queue:work` command, which alone
-     * writes a job that fails to `failed_jobs`, trying it once.
+     * Run the next job once through the real `queue:work` command, which alone
+     * writes `failed_jobs`.
      *
      * @return void
      */
@@ -588,8 +570,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * A store whose every call fails quoting the row it was given and the
-     * secret, joining the connections given.
+     * A store whose every call fails quoting the row and the secret, joining
+     * the given connections.
      *
      * @param  list<string>  $joins
      * @return \Tests\Fixtures\Stores\CallbackStore
@@ -602,8 +584,8 @@ final class FailedJobsTest extends TestCase
     }
 
     /**
-     * A real query failure, as Laravel throws one, quoting the row and the
-     * secret in its message and its bindings.
+     * A real query failure quoting the row and the secret in its message and
+     * bindings.
      *
      * @param  string  $row
      * @return \Illuminate\Database\QueryException

@@ -17,9 +17,7 @@ use Tests\Unit\Stubs\StubAuthUser;
 use Tests\Unit\Stubs\StubDocument;
 
 /**
- * The README's first snippet is what an application developer tries first, so
- * it must be there as this test holds it, and that very call must write one row
- * with the ambient actor, guard, client and request filled in.
+ * The README's first snippet is present and records the ambient values.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,8 +53,7 @@ final class ReadmeSnippetTest extends TestCase
     }
 
     /**
-     * The snippet's call, in an authenticated request, writes one row holding
-     * what it was given and everything the README says is filled in.
+     * The snippet writes one row with what it was given and the ambient values.
      *
      * @return void
      */

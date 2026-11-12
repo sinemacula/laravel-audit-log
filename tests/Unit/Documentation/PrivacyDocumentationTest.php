@@ -9,20 +9,11 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
- * A drift guard for the privacy note and for every document's claims about
- * personal data and erasure: the note has its sections in order, makes each
- * statement the owners' keys, reading and erasure depend on, names every value
- * of an erasure's refusals and statuses where it describes them, and lists
- * every table the package keeps in its inventory of stores; and no document,
- * the README, a guide or a note, claims that a store holds no personal data, or
- * that an erasure, a hold or a trigger stops what database credentials can do,
- * however the words are wrapped. A sentence that disclaims such a claim, as the
- * record model's note does, is not one.
- *
- * It catches an omission or a rename, not wrong prose: what the documentation
- * says about each of them is held to the code by review.
+ * A drift guard for the privacy note and every document's claims about personal
+ * data and erasure: it catches an omission or a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,6 +23,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
 #[CoversNothing]
 final class PrivacyDocumentationTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var string The privacy note, from the repository's root. */
     private const string PRIVACY_NOTE = '/docs/design/privacy.md';
 
@@ -88,8 +81,7 @@ final class PrivacyDocumentationTest extends TestCase
     private const string PREVENTION_SUBJECT = '/\b(?:eras\w*|hold\w*|trigger\w*|keys?|journal\w*|markers?|credentials?|wrap\w*)\b/i';
 
     /**
-     * The privacy note is titled and has the standard sections around its own,
-     * in order, and no other.
+     * The privacy note has exactly the standard sections around its own.
      *
      * @return void
      */
@@ -104,8 +96,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[section, statement]`: what the privacy note must say and where,
-     * each a rule or a limit a reader would otherwise find out the hard way.
+     * Rows of `[section, statement]`: what the privacy note states, and where.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -126,8 +117,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * The privacy note makes each of those statements in its section, however
-     * its lines are wrapped.
+     * The privacy note makes each statement in its section, however wrapped.
      *
      * @param  string  $section
      * @param  string  $statement
@@ -140,8 +130,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[value, section]`: every reason an erasure is refused for and
-     * every status it ends in, with the section of the note that names it.
+     * Rows of `[value, section]`: every erasure refusal and status, by section.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -157,8 +146,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * Every refusal and status of an erasure is named, in code type, in the
-     * section of the note that describes it.
+     * Every erasure refusal and status is named, in code type, in its section.
      *
      * @param  string  $value
      * @param  string  $section
@@ -173,9 +161,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * Every setting naming a table the package keeps, wherever it sits in the
-     * shipped configuration, is named in the note's inventory of stores, so a
-     * new table cannot ship without saying what it holds and why.
+     * Every table setting is in the note's inventory of stores.
      *
      * @return void
      */
@@ -196,9 +182,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * No document, the README, a guide or a note, claims that a store, a record
-     * or a value holds no personal data, however the words are wrapped: the
-     * privacy note's inventory says what each holds instead.
+     * No document claims a store, a record or a value holds no personal data.
      *
      * @return void
      */
@@ -213,10 +197,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * The claim pattern finds each form of the claim, across a wrapped line,
-     * and spares a sentence that disclaims it, such as the record model's
-     * "nothing claims it holds no personal data", a sentence saying something
-     * is personal data, and a claim about anything but personal data.
+     * The claim pattern finds each form, across lines, and spares a disclaimer.
      *
      * @return void
      */
@@ -254,9 +235,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * The prevention pattern finds each way of saying an erasure, a hold or a
-     * trigger stops destruction, across a wrapped line, and spares a negated
-     * one, a claim of something else, and one about none of them.
+     * The prevention pattern finds each form and spares a negation.
      *
      * @return void
      */
@@ -293,10 +272,8 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * No document claims that an erasure, a hold, a trigger or the journal
-     * stops whoever holds the database credentials from destroying, changing or
-     * restoring keys or rows, however the words are wrapped: each makes that
-     * detectable, never impossible.
+     * No document claims an erasure, hold, trigger or the journal stops what
+     * credentials can do.
      *
      * @return void
      */
@@ -310,8 +287,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * The sentences of the Markdown that claim something holds no personal data
-     * and do not disclaim the claim, each with its whitespace collapsed.
+     * Sentences claiming something holds no personal data, disclaimers aside.
      *
      * @param  string  $markdown
      * @return list<string>
@@ -325,9 +301,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * The sentences of the Markdown that claim an erasure, a hold, a trigger, a
-     * key, the journal or a marker stops destruction, each with its whitespace
-     * collapsed.
+     * The sentences claiming something stops destruction, whitespace collapsed.
      *
      * @param  string  $markdown
      * @return list<string>
@@ -341,9 +315,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * The sentences of the Markdown, its code blocks left out, each with its
-     * whitespace collapsed: split after a full stop, a question mark or an
-     * exclamation mark followed by whitespace, and at every blank line.
+     * Sentences outside code blocks, split at sentence ends and blank lines.
      *
      * @param  string  $markdown
      * @return list<string>
@@ -367,8 +339,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * Every document a reader of the repository sees: the README and every
-     * Markdown file under docs, by its path from the root.
+     * The README and every Markdown file under docs, by path from the root.
      *
      * @return list<string>
      */
@@ -394,8 +365,7 @@ final class PrivacyDocumentationTest extends TestCase
     }
 
     /**
-     * The dotted paths of the configuration's settings: every key whose value
-     * is not a map of further settings, a list and an empty array included.
+     * The configuration's leaf paths, lists and empty arrays included.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -421,68 +391,5 @@ final class PrivacyDocumentationTest extends TestCase
         }
 
         return $keys;
-    }
-
-    /**
-     * The text of the section under the heading, up to the next section.
-     *
-     * @param  string  $markdown
-     * @param  string  $heading
-     * @return string
-     */
-    private static function section(string $markdown, string $heading): string
-    {
-        $pattern = '/^## ' . preg_quote($heading, '/') . '\n(.*?)(?=^## |\z)/ms';
-
-        return preg_match($pattern, $markdown, $matches) === 1 ? $matches[1] : '';
-    }
-
-    /**
-     * The Markdown without its fenced code blocks, so a `#` comment in a code
-     * block is never read as a heading or a sentence.
-     *
-     * @param  string  $markdown
-     * @return string
-     */
-    private static function withoutCodeBlocks(string $markdown): string
-    {
-        return (string) preg_replace('/^ *(```|~~~)[^\n]*\n.*?^ *\1[ \t]*$/ms', '', $markdown);
-    }
-
-    /**
-     * The text with every run of whitespace made one space, so a sentence is
-     * found however its lines are wrapped.
-     *
-     * @param  string  $text
-     * @return string
-     */
-    private static function collapsed(string $text): string
-    {
-        return (string) preg_replace('/\s+/', ' ', $text);
-    }
-
-    /**
-     * A file of the repository, by its path from the root.
-     *
-     * @param  string  $path
-     * @return string
-     */
-    private static function read(string $path): string
-    {
-        $contents = file_get_contents(self::root() . $path);
-
-        self::assertIsString($contents, sprintf('%s cannot be read.', $path));
-
-        return $contents;
-    }
-
-    /**
-     * The repository's root directory.
-     *
-     * @return string
-     */
-    private static function root(): string
-    {
-        return dirname(__DIR__, 3);
     }
 }

@@ -38,14 +38,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for what `audit-log:verify` finds once the owners' key store is
- * altered below the package, by someone who can write to its database and has
- * dropped whatever trigger stood in the way: a deleted key use is found at its
- * entry; a key destroyed without a journalled erasure is found and its fields
- * read unreadable; a key put back after its erasure is found restored, though
- * it decrypts until the erasure is applied again; a deleted owner marker lets a
- * key be created for an erased owner, and verification still finds it; and a
- * key row copied over another's is found substituted. Each failing run exits
- * non-zero and alarms with its first finding.
+ * altered below the package by a database writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -110,9 +103,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * A key use deleted below the package hides its entry from the erasure of
-     * the key's owner, and verification finds it at that entry: its segment is
-     * tampered, `key_use_missing`, and the run fails and alarms.
+     * A key use deleted below the package hides its entry from the owner's
+     * erasure, and verify finds it at that entry: `key_use_missing`.
      *
      * @return void
      */
@@ -132,9 +124,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * A key destroyed below the package, tombstoned with no erasure the journal
-     * holds, is found `key_destroyed_unjournalled`, and its fields read
-     * unreadable, never erased.
+     * A key tombstoned with no journalled erasure is
+     * `key_destroyed_unjournalled`, its fields unreadable, never erased.
      *
      * @return void
      */
@@ -153,10 +144,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * A key put back as it was before its erasure is found `key_restored`,
-     * while the erasure left alone verifies and reads erased; the restored key
-     * decrypts again until the erasure is applied again, which is what the
-     * finding is for.
+     * A key put back after its erasure is `key_restored`, and decrypts again
+     * until the erasure is applied again; the erasure still verifies.
      *
      * @return void
      */
@@ -188,10 +177,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * An owner marker deleted below the package lets the key creator make a key
-     * for an erased owner, since a marker is not verified on its own; the
-     * journal still says the owner was erased, so verification finds the new
-     * key `key_restored`.
+     * A deleted owner marker lets a key be made for an erased owner, but the
+     * journal still holds the erasure, so verify finds `key_restored`.
      *
      * @return void
      */
@@ -214,11 +201,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * A key row copied over another's, every column but its id, so the first
-     * owner's key now answers to the second's id, no longer verifies and is
-     * found `key_substituted`; the key it was copied from, deleted to make
-     * room, leaves its key use naming no key, `key_missing`. Both fields read
-     * unreadable.
+     * A key row copied over another's is `key_substituted`, and the deleted
+     * source leaves its key use `key_missing`; both fields read unreadable.
      *
      * @return void
      */
@@ -245,10 +229,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * A key's state flipped outside a rewrap is found, since the journal binds
-     * the state: a live key set `superseded` by hand, and once a rotation has
-     * journalled it superseded, the same key set `live` again, are each
-     * `key_substituted`; the rotation itself is clean.
+     * A key's state flipped outside a rewrap is `key_substituted`, whether to
+     * superseded or back to live after a rotation, which is clean.
      *
      * @return void
      */
@@ -280,10 +262,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * A key's row as it was before a rotation onto a new wrapping key, put back
-     * while the old wrapping key is still in the ring, still unwraps and still
-     * verifies its signature, but is not what the journalled rewrap left: it is
-     * `key_substituted`.
+     * A key's pre-rotation row put back while its old wrapping key is held
+     * still unwraps and verifies, but is `key_substituted`.
      *
      * @return void
      */
@@ -329,9 +309,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * Make the owner's key, and store an entry holding a field sealed under it
-     * at the card's path, through the database store, which writes its key use:
-     * the key, the entry's id and the envelope.
+     * Make the owner's key and store an entry with a field sealed under it
+     * through the database store; return the key, entry id and envelope.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return array{0: \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow, 1: string, 2: array{v: int, k: string, c: string}}
@@ -352,9 +331,8 @@ final class KeyStoreTamperingTest extends TestCase
     }
 
     /**
-     * Run `audit-log:verify --json`, and return its exit code, each segment
-     * that failed as its integrity, finding and first id, and each finding of
-     * the run by its name, with its first id and count.
+     * Run `audit-log:verify --json` and return its exit code, each failed
+     * segment's integrity, finding and first id, and the run's findings.
      *
      * @return array{0: int, 1: list<array{0: string, 1: string, 2: string}>, 2: array<string, array{0: ?string, 1: int}>}
      */

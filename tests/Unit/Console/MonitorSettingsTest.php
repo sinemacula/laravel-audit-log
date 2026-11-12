@@ -11,9 +11,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Console\MonitorSettings;
 
 /**
- * Unit tests for the monitoring settings: the default of each, the bounds each
- * accepts, read again on every call, and the exact message each malformed value
- * fails closed with.
+ * Unit tests for the monitoring settings: each default, its bounds and the
+ * message a malformed value fails closed with.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

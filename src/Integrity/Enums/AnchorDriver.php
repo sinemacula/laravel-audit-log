@@ -5,9 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
 
 /**
- * Which anchor the package keeps seals in, as
- * `audit-log.integrity.anchor.driver` names it: none, or a write-once namespace
- * on a filesystem disk.
+ * Which anchor keeps seals, as `audit-log.integrity.anchor.driver` names it.
  *
  * @api
  *

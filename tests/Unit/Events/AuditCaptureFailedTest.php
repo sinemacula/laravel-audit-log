@@ -10,9 +10,8 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 
 /**
- * Unit tests for the event dispatched when a capture fails: it carries the
- * classes of the event, of what translated it and of the exception, and nothing
- * that could leak a value of the event to a listener.
+ * Unit tests for the capture failure event, which carries class names and no
+ * value of the event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,9 +22,8 @@ use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 final class AuditCaptureFailedTest extends TestCase
 {
     /**
-     * The event carries the three class names it is given, each under its own
-     * name, and they are all it has, so a new property has to be argued for
-     * here; an ambiguity names no mapper.
+     * The event carries the three class names it is given and nothing else; an
+     * ambiguity names no mapper.
      *
      * @return void
      */

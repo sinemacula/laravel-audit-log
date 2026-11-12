@@ -5,15 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 /**
- * What a run of erasures, one owner after another, carries from each erasure to
- * the next: whether the installation was confirmed, which a run does once, and
- * the journal replay the last committed erasure left.
- *
- * The first erasure of a run verifies the whole journal; every later one
- * advances the replay it is given from that head, so a run of many owners reads
- * each journal row once rather than once per owner. A replay is kept only once
- * its erasure's transaction has committed, so a refused or failed erasure
- * leaves the replay the run held before it, whose head is still the journal's.
+ * What a run of erasures carries from one to the next, so the installation is
+ * confirmed once and each journal row is read once rather than per owner.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,15 +15,14 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
  */
 final class ErasureRun
 {
-    /** @var ?\SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay The replay the last committed erasure left, or `null` before the first. */
+    /** @var ?\SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay The last committed erasure's replay. */
     private ?JournalReplay $replay = null;
 
     /** @var bool Whether the installation was confirmed for the run. */
     private bool $confirmed = false;
 
     /**
-     * The replay the last committed erasure of the run left, or `null` when
-     * none has committed yet.
+     * The last committed erasure's replay, or `null` before the first.
      *
      * @return ?\SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay
      */
@@ -40,7 +32,7 @@ final class ErasureRun
     }
 
     /**
-     * Keep the replay a committed erasure left, for the next to advance.
+     * Keep a committed erasure's replay for the next to advance.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay  $replay
      * @return void

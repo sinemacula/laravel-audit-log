@@ -22,13 +22,9 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 
 /**
- * Statement-budget contract for revealing a page of the trail, each budget
- * measured against a page read in the same process: a page whose fields are
- * revealed costs what the same page costs sealed plus one select of its keys,
- * however many entries, fields and owners it holds; a page that is not revealed
- * costs what a page with no encrypted field costs and reads no key; and a page
- * holding erased keys adds one select of the journal, however many erased keys
- * and erasures it holds.
+ * Statement budget for revealing a page of the trail, measured against a page
+ * read in the same process: revealing adds one key select, and erased keys one
+ * journal select, however many entries it holds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,10 +66,8 @@ final class RevealedPageBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A revealed page of twenty entries, each holding a field of each of three
-     * owners, costs the statements of the same page sealed and one select of
-     * the keys, and so does a revealed page of one entry: the keys are asked
-     * for once a page, never once a field, an entry or an owner.
+     * A revealed page asks for its keys once a page, never per field, entry or
+     * owner.
      *
      * @return void
      */
@@ -100,10 +94,8 @@ final class RevealedPageBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The largest page, of 500 entries each sealing a field of three owners of
-     * its own, names 1,500 distinct keys, more than SQLite's oldest builds bind
-     * in one statement: on SQLite its keys are read 400 to a statement, and on
-     * any other engine in one, and every field is revealed.
+     * The largest page names 1,500 keys, more than SQLite's oldest builds bind
+     * at once: SQLite reads them 400 to a statement, other engines in one.
      *
      * @return void
      */
@@ -150,8 +142,8 @@ final class RevealedPageBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A page that is not revealed costs what the same page cost before it held
-     * any encrypted field, and reads neither a key nor the journal.
+     * A page that is not revealed costs what it did with no encrypted field,
+     * reading no key or journal.
      *
      * @return void
      */
@@ -172,9 +164,8 @@ final class RevealedPageBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A revealed page holding an erased key costs one select of the journal
-     * more than the same page before the erasure, and a page holding two
-     * owners' erased keys, under two erasures, still only one.
+     * An erased key adds one journal select, and two owners' erased keys under
+     * two erasures still only one.
      *
      * @return void
      */
@@ -216,9 +207,8 @@ final class RevealedPageBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Seed the encrypted entries, each holding one field of each owner sealed
-     * under the owner's key, made first; each occurs a microsecond after the
-     * one before, after every entry already seeded.
+     * Seed the encrypted entries, each field sealed under its owner's key, each
+     * a microsecond after every entry already seeded.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Records\Reference>  $owners
      * @return void
@@ -243,9 +233,8 @@ final class RevealedPageBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The statements a page of the trail asks of the connection, read for the
-     * viewer under the bound policy, its fields shown as the policy's scope
-     * says.
+     * The statements a page of the trail asks for, read for the viewer under
+     * the bound policy.
      *
      * @param  int  $perPage
      * @return list<string>
@@ -260,8 +249,8 @@ final class RevealedPageBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The statements that name the table, quoted as an engine's grammar quotes
-     * it, so a table whose name begins with the table's is not counted.
+     * The statements naming the table as its engine quotes it, so a table whose
+     * name starts with it is not counted.
      *
      * @param  list<string>  $statements
      * @param  string  $table

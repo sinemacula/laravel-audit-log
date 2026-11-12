@@ -7,24 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Support\Facades\Config;
 
 /**
- * Where the package's tables live: the connection the shipped model reads and
- * the store writes, and the one the shipped migration creates the entries table
- * on, so the two cannot disagree.
- *
- * The entries live on `audit-log.storage.connection` (`null` or empty for the
- * default connection). Pruning, holds, the lifecycle journal and an import's
- * journal rows run through `audit-log.storage.maintenance_connection` when it
- * names one, and through the storage connection otherwise, each in a
- * transaction of its own behind the lifecycle lock: a connection of their own
- * lets them use credentials of their own, with privileges the writer never
- * holds, but it must reach the same physical database as the storage
- * connection, which every lifecycle operation confirms by the installation id
- * before it takes the lock.
- *
- * The settings must stay the same for the life of a process: moving the tables
- * is a deploy, with a worker restart and a migration the application performs,
- * not a runtime switch. Connections are compared by name, a configured one or
- * the default one, so no connection is opened.
+ * The connections the package's tables live on, compared by name without
+ * opening one; the settings must not change during a process's life.
  *
  * @api
  *
@@ -52,10 +36,8 @@ final class StorageConnection
     }
 
     /**
-     * The connection pruning, holds, the lifecycle journal and an import's
-     * journal rows run through: the one
-     * `audit-log.storage.maintenance_connection` names, or the storage
-     * connection.
+     * The connection for lifecycle and import writes, or the storage connection
+     * when unset; both must reach one database.
      *
      * @return ?string
      *
@@ -67,8 +49,7 @@ final class StorageConnection
     }
 
     /**
-     * The name of the storage connection: the configured one, or the default
-     * one.
+     * The storage connection's name, falling back to the default connection.
      *
      * @return string
      *
@@ -82,8 +63,8 @@ final class StorageConnection
     }
 
     /**
-     * The name of the maintenance connection: the configured one, the storage
-     * connection, or the default one.
+     * The maintenance connection's name, falling back to the storage, then the
+     * default connection.
      *
      * @return string
      *
@@ -97,9 +78,8 @@ final class StorageConnection
     }
 
     /**
-     * Read a connection setting under `audit-log`: a name, or `null` for what
-     * an empty one means. Anything else fails closed rather than falling back
-     * to another connection.
+     * A connection setting under `audit-log`, `null` when empty; anything but a
+     * string fails closed.
      *
      * @param  string  $key
      * @param  string  $fallback

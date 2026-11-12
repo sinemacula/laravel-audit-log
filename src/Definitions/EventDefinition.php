@@ -10,23 +10,12 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * What an application declares about one event code: the version of its payload
- * contract, the category stored on every row, the rules for the fields of its
- * properties, with how a field no rule names is handled, and the mapper, if
- * any, that classifies its records in OCSF.
+ * What an application declares about one event code: its payload version,
+ * category, field rules and OCSF mapper. Immutable: every fluent method returns
+ * a new instance.
  *
- * A definition is immutable: every fluent method returns a new instance and
- * leaves the original as it was. A registered code drops the fields no rule
- * names unless `unlisted()` says otherwise, and an unregistered code takes the
- * permissive default, which retains them. The most specific rule matching a
- * field's path, or a prefix of it, decides the field: a rule on a map covers
- * everything beneath it. A rule that could never apply, beneath a rule that
- * decides its whole branch, is refused whichever is added first, and so is a
- * second rule for a path. Rules are kept in path order, so definitions built in
- * any order are equal.
- *
- * Applying the rules to a payload is the redaction pipeline's work: global
- * redaction of secret keys comes first, and `retain` never undoes it.
+ * The most specific rule matching a field's path or a prefix of it decides the
+ * field, and `retain` never undoes global redaction of secret keys.
  *
  * @api
  *
@@ -44,7 +33,7 @@ final readonly class EventDefinition
     /** @var string Category of a definition that names none. */
     public const string DEFAULT_CATEGORY = 'general';
 
-    /** @var string Pattern of a category slug: a lower-case letter, then up to 63 lower-case letters, digits or underscores; the one grammar every category is held to. */
+    /** @var string Pattern of a category slug, the one grammar every category is held to. */
     public const string CATEGORY_PATTERN = '/\A[a-z][a-z0-9_]{0,63}\z/';
 
     /**
@@ -76,7 +65,7 @@ final readonly class EventDefinition
         /** How a field no rule names is handled. */
         public FieldHandling $unlisted,
 
-        /** The class of the mapper that classifies the code's records in OCSF, at this version only; `null` for none. */
+        /** The OCSF mapper's class, applied at this version only; `null` for none. */
         public ?string $ocsfMapper = null,
     ) {
         if ($version < self::MIN_VERSION || $version > self::MAX_VERSION) {
@@ -93,9 +82,8 @@ final readonly class EventDefinition
     }
 
     /**
-     * The definition of a caller's code, given as a string or as a
-     * string-backed enum case: version 1, the `general` category, no rules, and
-     * every unlisted field dropped.
+     * The definition of a caller's code, a string or string-backed enum case:
+     * version 1, `general`, no rules and unlisted fields dropped.
      *
      * @param  \BackedEnum|string  $code
      * @return self
@@ -108,10 +96,9 @@ final readonly class EventDefinition
     }
 
     /**
-     * The definition an unregistered code takes: version 1, the `general`
-     * category, no rules, and every field retained. The code is already
-     * validated, so this is also where the definition of one of the package's
-     * own codes starts, which `for()` refuses.
+     * The definition an unregistered code takes, retaining every field; also
+     * where the package's own codes' definitions start, since `for()` refuses
+     * them.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\EventCode  $code
      * @return self
@@ -193,9 +180,9 @@ final readonly class EventDefinition
     }
 
     /**
-     * The definition with the field at the path encrypted under its owner's
-     * key: `KeyOwner::ACTOR`, `KeyOwner::SUBJECT` or the path of a property
-     * holding a reference. The owner is required.
+     * The definition with the field encrypted under its required owner's key:
+     * `KeyOwner::ACTOR`, `KeyOwner::SUBJECT` or a property path holding a
+     * reference.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner|string|null  $owner
@@ -222,10 +209,9 @@ final readonly class EventDefinition
     }
 
     /**
-     * The definition with a rule for the path. Repeating an identical rule
-     * changes nothing; a different rule for a path that has one, and a rule
-     * that could never apply because one that decides its whole branch may
-     * cover it, are refused, whichever of the two is added first.
+     * The definition with a rule for the path; an identical rule changes
+     * nothing, and a conflicting or unreachable one is refused whichever came
+     * first.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling  $handling
@@ -255,8 +241,8 @@ final readonly class EventDefinition
     }
 
     /**
-     * The definition with every field no rule names handled so: any handling
-     * but `encrypt`, since an encrypted field names its owner.
+     * The definition with every unnamed field handled so; never `encrypt`,
+     * which needs an owner.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\Enums\FieldHandling  $handling
      * @return self
@@ -269,11 +255,8 @@ final readonly class EventDefinition
     }
 
     /**
-     * The definition with its records classified in OCSF by the mapper, a class
-     * implementing `OcsfMapper` that the formatter makes from the container.
-     * The mapping applies only to records of the definition's version: a record
-     * of any other version is projected as a Base Event. A definition keeps the
-     * class name, never an instance.
+     * The definition classified in OCSF by the mapper class, at this version
+     * only; records of other versions project as a Base Event.
      *
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\OcsfMapper>  $mapper
      * @return self
@@ -305,9 +288,8 @@ final readonly class EventDefinition
     }
 
     /**
-     * The rule that decides the field at the concrete path: of the rules
-     * matching a prefix of it as long as themselves, the most specific, or
-     * `null` when none does.
+     * The most specific rule matching a prefix of the path as long as itself,
+     * or `null` when none does.
      *
      * @param  list<int|string>  $path
      * @return ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule
@@ -334,10 +316,8 @@ final readonly class EventDefinition
     }
 
     /**
-     * The first rule, in path order, that names a field beneath the concrete
-     * path: it has more segments than the path and its leading segments match
-     * it, or `null` when no rule does. A rule at or above the path decides the
-     * path itself, and is the answer of `ruleFor()`, not of this.
+     * The first rule, in path order, naming a field beneath the path, or
+     * `null`; a rule at or above the path is `ruleFor()`'s.
      *
      * @param  list<int|string>  $path
      * @return ?\SineMacula\Laravel\AuditLog\Definitions\FieldRule
@@ -392,8 +372,7 @@ final readonly class EventDefinition
     }
 
     /**
-     * Whether the other definition has a rule equal to each of this one's, and
-     * no other.
+     * Whether the other definition has exactly this one's rules.
      *
      * @param  self  $other
      * @return bool
@@ -414,8 +393,8 @@ final readonly class EventDefinition
     }
 
     /**
-     * Refuse a pair of rules where one decides its whole branch and may cover
-     * the other, naming the longer path first.
+     * Refuse a pair of rules where a terminal one may cover the other, naming
+     * the longer path first.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\FieldRule  $added
      * @param  \SineMacula\Laravel\AuditLog\Definitions\FieldRule  $existing

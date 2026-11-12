@@ -17,17 +17,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the store under a least-privilege writer, on MySQL and
- * PostgreSQL: a login granted `SELECT` and `INSERT` on the entries and
- * artifacts tables and nothing else (on PostgreSQL also `CONNECT` and the
- * schema's `USAGE`, which grant no table privilege) stores records and bundles
- * and resolves their duplicates, outside and inside a transaction, and is
- * refused every update and delete of an entry or an artifact. On MySQL, the
- * shared locking read the store resolves a duplicate with inside a transaction
- * needs only `SELECT`, where `FOR UPDATE` would need more.
- *
- * Each worker creates a login of its own, `audit_writer_<token>`, and drops it
- * when the test ends.
+ * Integration tests for the store under a `SELECT` and `INSERT` writer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,8 +42,8 @@ final class LeastPrivilegeWriterTest extends TestCase
     private string $login = '';
 
     /**
-     * Create the least-privilege login and make its connection the storage
-     * connection, on MySQL and PostgreSQL only.
+     * Create the least-privilege login as the storage connection, on MySQL and
+     * PostgreSQL only.
      *
      * @return void
      */
@@ -108,9 +98,7 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
-     * The writer stores a record and resolves its duplicate outside a
-     * transaction, and inside one stores another, resolves its duplicate and
-     * the first's, and commits.
+     * A minimal writer stores records and resolves their duplicates.
      *
      * @return void
      */
@@ -136,9 +124,7 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
-     * The writer stores a bundle and resolves its duplicate outside a
-     * transaction, and inside one stores another, resolves its duplicate and
-     * the first's, and commits: each an entry and an artifact.
+     * A minimal writer stores bundles and resolves their duplicates.
      *
      * @return void
      */
@@ -165,8 +151,7 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
-     * The writer can neither update nor delete an entry: the engine refuses
-     * both, and the entry is left as it was.
+     * The engine refuses the writer any update or delete of an entry.
      *
      * @return void
      */
@@ -198,8 +183,7 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
-     * The writer can neither update nor delete an artifact: the engine refuses
-     * both, and the artifact is left as it was stored with its entry.
+     * The engine refuses the writer any update or delete of an artifact.
      *
      * @return void
      */
@@ -236,9 +220,7 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
-     * On MySQL the writer resolves a duplicate inside a host transaction, which
-     * reads with a shared lock, while the same writer's `FOR UPDATE` read is
-     * refused with error 1142: the store's locking read needs only `SELECT`.
+     * On MySQL the locking read needs only `SELECT`, unlike `FOR UPDATE`.
      *
      * @return void
      */
@@ -270,8 +252,7 @@ final class LeastPrivilegeWriterTest extends TestCase
     }
 
     /**
-     * Create the login, granted `SELECT` and `INSERT` on the entries and
-     * artifacts tables alone.
+     * Create the login with `SELECT` and `INSERT` on entries and artifacts.
      *
      * @return void
      */

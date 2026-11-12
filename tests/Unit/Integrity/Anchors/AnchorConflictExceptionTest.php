@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\AnchorConflictException;
 
 /**
- * Unit tests for the anchor conflict exception: the message naming the
- * sequence, the sequence it keeps for a caller, the class it specialises, and
- * the absence of any exception it could carry.
+ * Unit tests for the anchor conflict exception.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

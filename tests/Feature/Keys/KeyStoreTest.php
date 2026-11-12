@@ -23,12 +23,7 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
- * Feature tests for where the owners' keys are read: every live unit of a
- * record in one statement, each verified, a key that fails its signature or
- * names an unknown signing key refused; keys and erasure rows by id in one
- * statement each, through the writer and unverified, ids of another form and
- * rows too malformed to read left out; an owner's keys in every unit and
- * state; a unit's live key and largest generation; and a page of every key.
+ * Feature tests for where the owners' keys are read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,10 +63,8 @@ final class KeyStoreTest extends TestCase
     }
 
     /**
-     * The live key of every unit of a record that has one is read in one
-     * statement, keyed by the unit's digest, each unit asked for once however
-     * often it is given; a unit with no key is absent, and no unit at all asks
-     * nothing.
+     * Every unit's live key is read in one statement, keyed by the unit's
+     * digest, each unit asked for once; a unit with no key is absent.
      *
      * @return void
      */
@@ -106,9 +99,8 @@ final class KeyStoreTest extends TestCase
     }
 
     /**
-     * Only live keys are found: a superseded unit's live generation is, a unit
-     * whose one key is superseded has none, and an erased owner's units have
-     * none.
+     * Only live keys are found: none for a unit whose one key is superseded,
+     * nor for an erased owner's units.
      *
      * @return void
      */
@@ -144,9 +136,8 @@ final class KeyStoreTest extends TestCase
     }
 
     /**
-     * A live key that fails its signature, or names a signing key the ring does
-     * not hold, is refused whenever it is read to encrypt with, naming neither
-     * the key nor its owner.
+     * A live key that fails its signature or names an unknown signing key is
+     * refused, naming neither the key nor its owner.
      *
      * @return void
      */
@@ -177,10 +168,8 @@ final class KeyStoreTest extends TestCase
     }
 
     /**
-     * Keys are read by id in one statement through the storage connection's
-     * writer, never a replica, in any state and unverified, keyed by id: an id
-     * no key has, an id that is no canonical UUID and a row too malformed to
-     * read are left out, and no id at all asks nothing.
+     * Keys are read by id in one statement on the writer, in any state and
+     * unverified; unknown, non-UUID and malformed ids are left out.
      *
      * @return void
      */
@@ -258,10 +247,8 @@ final class KeyStoreTest extends TestCase
     }
 
     /**
-     * An erased key's erasure rows are read by id in one statement through the
-     * storage connection's writer, with their payloads and unverified, keyed by
-     * id: an id no row has, an id that is no canonical UUID and a row too
-     * malformed to read are left out, and no id at all asks nothing.
+     * Erasure rows are read by id in one statement on the writer, unverified;
+     * unknown, non-UUID and malformed ids are left out.
      *
      * @return void
      */
@@ -375,9 +362,8 @@ final class KeyStoreTest extends TestCase
     }
 
     /**
-     * Put the storage connection on a read/write split of two SQLite files,
-     * each given the journal and the key tables, so a key made through the
-     * split lands on the primary alone.
+     * Put the storage connection on a read/write split of two SQLite files, so
+     * a key made through it lands on the primary alone.
      *
      * @return void
      */

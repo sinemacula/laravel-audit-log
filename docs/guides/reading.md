@@ -130,8 +130,8 @@ $scope = AccessScope::tenants(Reference::to($organisation))
   rows by actor or subject only; it is not a complete disclosure policy. An entry about one person can name another,
   and an entry whose principal or tenant is the person is not selected.
 - A list left empty, given empty or emptied by an intersection, denies; it never means unrestricted.
-- PHP lets a static factory be reached through an instance. A static factory reached through an instance starts a fresh
-  scope: `$scope->tenants($other)` or `$scope->all()` discards every restriction `$scope` held.
+- A static factory reached through an instance starts a fresh scope: `$scope->tenants($other)` or `$scope->all()`
+  discards every restriction `$scope` held.
 - The scope is applied to every statement before the caller's filters, which can only narrow it. A filter outside the
   scope, such as `forTenant()` with a tenant the viewer does not see, gives the same empty result as a tenant that does
   not exist, and a scope or filters that can match nothing run no statement at all.

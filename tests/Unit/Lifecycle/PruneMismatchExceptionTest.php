@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\PruneMismatchException;
 
 /**
- * Unit tests for the exception a prune chunk's mismatched delete throws: its
- * message names the two counts alone, and it carries nothing else.
+ * Unit tests for the exception a prune chunk's mismatched delete throws.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\PruneMismatchException;
 final class PruneMismatchExceptionTest extends TestCase
 {
     /**
-     * The message names the rows the delete affected and the ids it named, in
-     * that order, and the exception is a runtime failure with no previous one.
+     * The message names the rows affected and the ids named, in that order.
      *
      * @return void
      */

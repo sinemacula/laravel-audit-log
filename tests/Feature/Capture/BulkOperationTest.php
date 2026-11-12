@@ -29,18 +29,14 @@ use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\LogAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
+use Tests\Concerns\SortsJsonObjectKeys;
 use Tests\Concerns\TampersWithTheLog;
 use Tests\Fixtures\Capture\Models\Tag;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for a bulk operation through the facade and the database store:
- * a thousand subjects written as one entry and one artifact listing each of
- * them once, whose decrypted members hash to the digest the entry signs; a
- * stack with a destination that keeps no attachments refusing the operation up
- * front; a manifest over either bound refused, never truncated, with nothing
- * written; and a sealed bulk entry verifying.
+ * Feature tests for a bulk operation through the facade and the database store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,7 +47,7 @@ use Tests\TestCase;
 #[CoversClass(DatabaseAuditStore::class)]
 final class BulkOperationTest extends TestCase
 {
-    use TampersWithTheLog;
+    use SortsJsonObjectKeys, TampersWithTheLog;
 
     /** @var string The code every bulk operation records. */
     private const string CODE = 'tag.archived';
@@ -69,8 +65,7 @@ final class BulkOperationTest extends TestCase
     private const string VERIFIED_AT = '2026-11-01 14:00:00';
 
     /**
-     * Create the tags' table and a thousand tags in it, written without a model
-     * event.
+     * Create the tags' table and a thousand tags, without model events.
      *
      * @return void
      */
@@ -87,10 +82,7 @@ final class BulkOperationTest extends TestCase
     }
 
     /**
-     * A thousand subjects, some given twice, are one entry and one artifact of
-     * a thousand members: each tag once, in canonical order, whose canonical
-     * form, decrypted, hashes to the digest the entry and the artifact both
-     * hold.
+     * A thousand subjects are one entry and one artifact listing each once.
      *
      * @return void
      */
@@ -118,8 +110,7 @@ final class BulkOperationTest extends TestCase
     }
 
     /**
-     * The descriptor is signed with the entry: the stored row verifies, and the
-     * same row with another digest, count or artifact id does not.
+     * The bulk descriptor is signed with the entry.
      *
      * @return void
      */
@@ -144,9 +135,8 @@ final class BulkOperationTest extends TestCase
     }
 
     /**
-     * A stack with a destination that keeps no attachments refuses a bulk
-     * operation before reading a subject, naming the stack, and nothing is
-     * written.
+     * A stack with a destination that keeps no attachments refuses bulk up
+     * front.
      *
      * @return void
      */
@@ -179,9 +169,7 @@ final class BulkOperationTest extends TestCase
     }
 
     /**
-     * A manifest over its count or its byte bound is refused, never truncated,
-     * and nothing is written; the same subjects within the bounds are recorded
-     * whole.
+     * A manifest over its count or byte bound is refused, never truncated.
      *
      * @return void
      */
@@ -206,8 +194,7 @@ final class BulkOperationTest extends TestCase
     }
 
     /**
-     * A sealed bulk entry verifies beside a plain one, its artifact checked
-     * with its seal.
+     * A sealed bulk entry verifies beside a plain one.
      *
      * @return void
      */
@@ -234,8 +221,7 @@ final class BulkOperationTest extends TestCase
     }
 
     /**
-     * Assert the bulk operation of the subjects is refused with the message,
-     * before anything is written.
+     * Assert the bulk operation is refused with the message before any write.
      *
      * @param  iterable<array-key, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference>  $subjects
      * @param  string  $message
@@ -305,8 +291,7 @@ final class BulkOperationTest extends TestCase
     }
 
     /**
-     * Create the tags' table on the test's connection, and drop it before the
-     * application is destroyed.
+     * Create the tags' table, dropped before the application is destroyed.
      *
      * @return void
      */
@@ -323,28 +308,5 @@ final class BulkOperationTest extends TestCase
         $this->beforeApplicationDestroyed(static function (): void {
             Schema::connection(self::CONNECTION)->dropIfExists(Tag::TABLE);
         });
-    }
-
-    /**
-     * The value with every map's keys sorted, at any depth, so a map read back
-     * from a JSON column compares the same on every engine: MySQL keeps a JSON
-     * object's keys in an order of its own.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $value
-     * @return mixed
-     */
-    private static function keysSorted(mixed $value): mixed
-    {
-        if (!is_array($value)) {
-            return $value;
-        }
-
-        if (!array_is_list($value)) {
-            ksort($value, SORT_STRING);
-        }
-
-        return array_map(self::keysSorted(...), $value);
     }
 }

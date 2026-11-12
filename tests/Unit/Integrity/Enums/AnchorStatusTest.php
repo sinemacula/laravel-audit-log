@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 
 /**
- * Unit tests for the anchoring status enum: its cases and their values, and the
- * one status that confirms a seal.
+ * Unit tests for the anchoring status enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,9 +36,7 @@ final class AnchorStatusTest extends TestCase
     }
 
     /**
-     * Only `anchored` confirms a seal: a seal the anchor could not be asked
-     * about, or that it contradicts, is no more confirmed than one never
-     * anchored.
+     * Only `anchored` confirms a seal.
      *
      * @return void
      */

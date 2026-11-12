@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Access\ScopeValues;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the lists an access scope holds: references each exact pair
- * once, sorted by type then id bytewise and refused beyond their limit,
- * categories held to the definitions' grammar, each once, sorted bytewise and
- * refused beyond theirs, and references shown as their type and id.
+ * Unit tests for the reference and category lists an access scope holds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -116,9 +113,7 @@ final class ScopeValuesTest extends TestCase
     }
 
     /**
-     * `ScopeValues` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *

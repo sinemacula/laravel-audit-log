@@ -35,14 +35,8 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * Integration tests for what minimising leaves of a record, recorded through
- * the facade on the engine the suite runs against: a marker, a pseudonym, an
- * envelope, a hashed or encrypted address, a cut string and the diagnostics all
- * store, read back as what capture returned, and verify, whatever the engine
- * does to its JSON, and an edit to any of them does not.
- *
- * Definitions are registered on a recorder of a test's own, put behind the
- * facade, since the application's has frozen by the time a test runs.
+ * Integration tests for minimised records stored and verified; definitions go
+ * on a recorder of each test's own, as the application's is frozen.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -97,9 +91,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The values of secret-shaped keys are stored as the marker, at any depth,
-     * in the properties and the context alike, and the raw values are stored
-     * nowhere in the row.
+     * Secret-shaped keys store as the marker at any depth; raw values nowhere.
      *
      * @return void
      */
@@ -118,9 +110,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A retained value, a marker, a pseudonym, an envelope and a removal all
-     * store side by side, and the raw value of each handled field is nowhere in
-     * the row.
+     * Every handling stores side by side, with no handled raw value in the row.
      *
      * @return void
      */
@@ -168,8 +158,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * An encrypted address of exactly the column's bytes is stored whole, on
-     * the engines whose column would refuse or cut one a byte longer.
+     * An encrypted address of exactly the column's bytes is stored whole.
      *
      * @return void
      */
@@ -185,8 +174,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * An envelope a byte longer than the column is never cut and never reaches
-     * the engine: the address is dropped and diagnosed, and the record stores.
+     * An envelope too long for its column is dropped and diagnosed, never cut.
      *
      * @return void
      */
@@ -199,8 +187,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A garbage address longer than the column reaches no engine: the record
-     * stores with no address, `$ip` is in its diagnostics, and it verifies.
+     * A garbage address too long for its column stores as null, diagnosed.
      *
      * @return void
      */
@@ -217,14 +204,13 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * An IPv6 address truncates to its /48, in the form a string column keeps
-     * as given.
+     * An IPv6 address truncates to its /48, in the form a string column keeps.
      *
      * @return void
      */
     public function testATruncatedIpv6StoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'truncate');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'truncate');
 
         $stored = $this->storedAndVerified(self::fromAddress('2001:db8:abcd:12::1')->immediately()->record());
 
@@ -232,14 +218,13 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A hashed address is its fingerprint and HMAC, and the address is stored
-     * nowhere in the row.
+     * A hashed address is its fingerprint and HMAC; the address is nowhere.
      *
      * @return void
      */
     public function testAHashedIpStoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'hash');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'hash');
 
         $record = self::fromAddress(self::IP)->immediately()->record();
         $stored = $this->storedAndVerified($record);
@@ -262,8 +247,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * An address that is not valid stores as nothing, even in full, and is
-     * diagnosed.
+     * An invalid address stores as nothing, even in full, and is diagnosed.
      *
      * @return void
      */
@@ -276,9 +260,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The diagnostics of an address, a note and more fields than the list holds
-     * store together: every removal counted, the first 32 paths sorted
-     * bytewise.
+     * Address, note and overflow diagnostics store together, paths sorted.
      *
      * @return void
      */
@@ -300,8 +282,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A list a rule removed the first element of stays a list through the
-     * engine, not a map keyed from 1, whose canonical encoding would differ.
+     * A list a rule reindexed stays a list through the engine.
      *
      * @return void
      */
@@ -320,8 +301,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A string of 4-byte emoji, offset so the 1024th byte falls inside one, is
-     * cut before that character, so the engine is never given a split sequence.
+     * A multibyte string is cut before the character its byte limit splits.
      *
      * @return void
      */
@@ -339,8 +319,8 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The identifier's hash stores in the reserved area, and the identifier
-     * nowhere in the row, in any case.
+     * The identifier's hash stores in the reserved area, the identifier
+     * nowhere.
      *
      * @return void
      */
@@ -355,8 +335,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A note with no owner and one sealed under its owner both store in the
-     * reserved area, and the sealed note's text is nowhere in the row.
+     * Plain and sealed notes both store; the sealed note's text is nowhere.
      *
      * @return void
      */
@@ -376,16 +355,13 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Under the package's default encrypter a field and the address sealed for
-     * the actor store and verify whatever the engine does to its JSON: each is
-     * an envelope naming the actor's one key, the entry has that key's one key
-     * use, and neither value is anywhere in the row.
+     * Default-encrypter envelopes store and verify with one actor key use.
      *
      * @return void
      */
     public function testTheDefaultEncryptersEnvelopesStoreAndVerify(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'encrypt');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'encrypt');
 
         $pending = self::underDefinition(EventDefinition::for(self::CODE)->retain('amount')->encrypt('ssn', KeyOwner::ACTOR))
             ->by(Reference::of('user', '7'))
@@ -414,15 +390,13 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The largest application key of a context over its budget goes, the
-     * package's own name stays, and what is left fits, with the removal
-     * diagnosed under the context's prefix in the properties.
+     * A context over its budget loses its largest application key, diagnosed.
      *
      * @return void
      */
     public function testAContextOverItsBudgetStoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.max_context_bytes', 1024);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_context_bytes', 1024);
 
         $kept = str_repeat('b', 900);
 
@@ -440,14 +414,13 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Properties over their budget lose their largest keys and keep the rest,
-     * with the metadata beside them, within the budget once stored.
+     * Properties over their budget lose their largest keys and fit once stored.
      *
      * @return void
      */
     public function testPropertiesOverTheirBudgetStoreAndVerify(): void
     {
-        self::config()->set('audit-log.redaction.max_bytes', 8192);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_bytes', 8192);
 
         $fields = [];
 
@@ -471,8 +444,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Keys PHP makes integers sit beside the metadata as a map, on the engines
-     * that reorder JSON keys and those that keep them.
+     * Integer keys beside the metadata store as a map on every engine.
      *
      * @return void
      */
@@ -487,8 +459,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * What is deeper than the deepest kept is stored as its marker, and a
-     * retained empty container stays an empty list.
+     * Too-deep data stores as its marker, and empty containers stay lists.
      *
      * @return void
      */
@@ -509,14 +480,13 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A record deferred to a commit stores what capture minimised: a key
-     * changed while it waits changes nothing, and nothing raw rests in the row.
+     * A deferred record stores what capture minimised, despite a key change.
      *
      * @return void
      */
     public function testADeferredRecordStoresWhatWasMinimisedAtCapture(): void
     {
-        self::config()->set('audit-log.redaction.key', str_repeat('a', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('a', 32));
 
         $hash       = app(IdentifierHasher::class)->identifier('alice@example.com');
         $connection = DB::connection();
@@ -527,7 +497,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
 
         self::assertSame(0, $this->entryCount());
 
-        self::config()->set('audit-log.redaction.key', str_repeat('b', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('b', 32));
 
         $connection->commit();
 
@@ -537,11 +507,8 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Rows of `[column, dotted path, value]`: one leaf of what minimising left
-     * changed, or one part of it removed where the value is `null`, from the
-     * stored value, with everything else and the HMAC left as they were. So a
-     * signature that skipped any part fails the row that names it. The address
-     * is a plain column, so it has no path.
+     * Rows of `[column, path, value]`: one part changed, or removed when
+     * `null`; the address has no path.
      *
      * @return iterable<string, array{0: string, 1: ?string, 2: int|string|null}>
      */
@@ -571,7 +538,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     #[DataProvider('provideEdits')]
     public function testAnEditedMinimisedValueFailsVerification(string $column, ?string $path, int|string|null $value): void
     {
-        self::config()->set('audit-log.redaction.ip', 'hash');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'hash');
 
         app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
 
@@ -602,16 +569,14 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A key longer than MySQL allows in JSON, with room for it in both budgets,
-     * is removed with its branch at every depth, so the record stores and
-     * verifies alike on every engine, and only masked paths say that it went.
+     * A key past MySQL's JSON limit goes at every depth, so the record stores.
      *
      * @return void
      */
     public function testAKeyPastWhatAnEngineAllowsStoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.max_bytes', self::RAISED_BUDGET);
-        self::config()->set('audit-log.redaction.max_context_bytes', self::RAISED_BUDGET);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_bytes', self::RAISED_BUDGET);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_context_bytes', self::RAISED_BUDGET);
 
         $key     = str_repeat('k', self::PAST_ANY_ENGINE_BYTES);
         $pending = AuditLog::event(self::CODE)->withProperties([$key => 'v', 'outer' => [$key => 'v'], 'kept' => 1]);
@@ -625,8 +590,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A key at the ceiling is the longest kept, and it stores and verifies on
-     * every engine, nested and in the context as well, with no diagnostic.
+     * A key at the ceiling is kept and stores and verifies on every engine.
      *
      * @return void
      */
@@ -644,14 +608,13 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Every field of the record capture returned is what the engine gives back,
-     * so what a caller holds and what is stored are one record.
+     * What capture returned is exactly what the engine gives back.
      *
      * @return void
      */
     public function testTheStoredPropertiesEqualTheReturnedRecord(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'truncate');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'truncate');
 
         app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
 
@@ -675,8 +638,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Read back the row of a captured record, assert it verifies and holds the
-     * properties, context and address capture returned; the decoded row.
+     * A captured record's decoded row, asserted to verify and match capture.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -696,8 +658,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * The stored JSON with the one part changed, or removed when the value is
-     * `null`.
+     * The stored JSON with one part changed, or removed when `null`.
      *
      * @param  string  $json
      * @param  string  $path
@@ -731,15 +692,14 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * Record an address in the `encrypt` mode, under an encrypter returning an
-     * envelope with the ciphertext, `k` as its key and 1 as its version.
+     * Record an address in `encrypt` mode, the ciphertext as its envelope.
      *
      * @param  string  $ciphertext
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      */
     private function recordedWithAnEnvelope(string $ciphertext): AuditRecord
     {
-        self::config()->set('audit-log.redaction.ip', 'encrypt');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'encrypt');
 
         app()->instance(FieldEncrypter::class, new MalformedFieldEncrypter(['v' => 1, 'k' => 'k', 'c' => $ciphertext]));
 
@@ -762,8 +722,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     }
 
     /**
-     * A builder of the definition's code, from the facade, behind which is a
-     * recorder holding the definition.
+     * A builder of the definition's code, behind a recorder holding it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
@@ -777,15 +736,5 @@ final class MinimisedEntryRoundTripTest extends TestCase
         AuditLog::swap($recorder);
 
         return AuditLog::event($definition->code);
-    }
-
-    /**
-     * The application's configuration.
-     *
-     * @return \Illuminate\Config\Repository
-     */
-    private static function config(): ConfigRepository
-    {
-        return app(ConfigRepository::class);
     }
 }

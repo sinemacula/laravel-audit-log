@@ -7,16 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Keys;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityKey;
 
 /**
- * A key of the wrapping ring: the id a key row's `wrap_key_id` stores, 1 to 32
- * column-safe characters starting with a letter or a digit, and the secret the
- * owners' data keys are wrapped under, at least 32 bytes.
- *
- * The secret is no part of the key's visible state: it is kept wrapped in a
- * `\SensitiveParameterValue`, private, and read through `secret()` alone. A
- * stack trace never shows it, since the constructor marks it sensitive, and
- * neither does a debug dump, PHP's own or Symfony's behind `dump()` and `dd()`,
- * nor a JSON encoding or an export, which show the id and, at most, the empty
- * wrapper.
+ * A wrapping ring key; its secret is held in a `\SensitiveParameterValue` so no
+ * trace, dump, encoding or export of the key shows it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,8 +39,7 @@ final readonly class WrappingKey
         /** The key's id, as a key row's `wrap_key_id` stores it; never a secret. */
         public string $id,
 
-        // The wrapping secret, as bytes; never shown in a message, a trace or a
-        // dump.
+        // Kept wrapped in `$this->secret` so no dump or export shows it
         #[\SensitiveParameter]
         string $secret,
     ) {

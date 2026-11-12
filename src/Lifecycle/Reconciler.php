@@ -22,43 +22,11 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Writes again the activity records the journal says are missing: for every
- * prune run that finished, every hold, every release, every import that
- * finished, every erasure, every reinstatement and every rewrap run within the
- * days looked back, the record of its code is written through
- * `LifecycleRecorder` unless an entry of that code already names the operation,
- * or the record's id, derived from its code and its operation, is already
- * stored or, in outbox mode, queued in the outbox.
+ * Writes again, through `LifecycleRecorder`, the activity records the journal
+ * says are missing within the days looked back.
  *
- * The journal's rows of those kinds, and the starts of runs and imports, are
- * read by kind and time on the storage connection's writer, a page at a time;
- * each row's signature and payload digest are verified, and a row that does not
- * verify, or an operation whose start row is not among the verified rows, is
- * counted `unverifiable` and never recorded. A start before the window is
- * looked for backwards from it, a page at a time, only when its finish is in
- * the window. The entries of the seven codes within the window are read by
- * event and time, and the operation each names is read from its decoded
- * properties in PHP, never by a JSON path query, so every engine reads them
- * alike. The derived ids are looked for by primary key in the entries and, in
- * outbox mode, in the outbox, a page at a time, so a record still waiting for
- * its delivery counts as recorded; in sync mode no record is ever queued there,
- * and the writer holds no grant on the outbox, so it is never read. An
- * operation is recorded at most once per run, so a second run records nothing,
- * whether or not the outbox drained between them; a prune run that started and
- * has not finished has nothing to record and is counted `unfinished`.
- *
- * A record is written again with the properties its journal rows give, built by
- * `ReconciledOperations`: a prune's tenants affected and the reason a failed
- * prune gave included, since its finish row holds them, and a rewrap run's
- * counts summed over its batches in the window; one the rows do not hold is
- * `null`. A refused erasure or reinstatement wrote no row, so it is never
- * reconciled; a rewrap that failed after committing batches, whose own failure
- * record is missing, is recorded from those batches. Nothing here takes the
- * lifecycle lock, so the reconciler is never scheduled; but a record keeps its
- * derived id however it is written, so two runs at once, or a run alongside an
- * operation still writing its own record, never write it twice: the second
- * write meets the outbox's or the entries' primary key and is counted `failed`,
- * or is the record stored already.
+ * It takes no lifecycle lock, so it is never scheduled; a record's derived id
+ * makes a concurrent second write fail on the primary key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -107,8 +75,8 @@ final readonly class Reconciler
     ) {}
 
     /**
-     * Record every operation journalled within the days looked back, from 1 to
-     * 3650, that no entry records, and return the tally.
+     * Record every operation journalled within the days looked back, 1 to 3650,
+     * that no entry records.
      *
      * @param  int  $sinceDays
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\ReconcileResult
@@ -148,9 +116,8 @@ final readonly class Reconciler
     }
 
     /**
-     * The operations journalled since the time, each as the record it needs, in
-     * journal order, with the rows and operations that do not verify and the
-     * prune runs that have not finished counted.
+     * The records the operations journalled since the time need, with the
+     * unverifiable and unfinished counts.
      *
      * @formatter:off
      *
@@ -209,10 +176,8 @@ final readonly class Reconciler
     }
 
     /**
-     * The record the verified row's operation needs, `null` when the row, or
-     * the start row it needs, does not describe its operation, and `false` for
-     * a row that records no operation of its own: a start, or a rewrap batch,
-     * whose run is recorded from all of its batches together.
+     * The record the row's operation needs; `null` when it does not describe
+     * one, `false` for a start or a rewrap batch.
      *
      * @formatter:off
      *
@@ -246,9 +211,8 @@ final readonly class Reconciler
     }
 
     /**
-     * The verified rows of the kinds that record or start an operation since
-     * the time, each with its payload, in time order, and how many rows did not
-     * verify.
+     * The verified rows that record or start an operation since the time, and
+     * how many did not verify.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -290,10 +254,8 @@ final readonly class Reconciler
     }
 
     /**
-     * The verified start rows of the kind before the time that name the wanted
-     * ids under the payload key, each by its id, read backwards from the time,
-     * a page at a time, until each is found; a row that does not verify is
-     * passed over.
+     * The verified start rows before the time naming the wanted ids, read
+     * backwards until each is found.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -336,10 +298,8 @@ final readonly class Reconciler
     }
 
     /**
-     * Each operation recorded already, by its code and its operation id: those
-     * an entry of the four codes since the time names in its decoded
-     * properties, and those among the operations given whose record's derived
-     * id the entries hold, or the outbox in outbox mode.
+     * Each operation recorded already, by code and operation id; properties are
+     * decoded in PHP, never by JSON path, so every engine reads them alike.
      *
      * @formatter:off
      *
@@ -406,9 +366,8 @@ final readonly class Reconciler
     }
 
     /**
-     * The row with its decoded payload, when its signature and its payload's
-     * digest verify; `null` for a row that cannot be read, is signed under a
-     * key the ring does not hold, or does not verify.
+     * The row with its decoded payload when its signature and payload digest
+     * verify, else `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -432,8 +391,7 @@ final readonly class Reconciler
     }
 
     /**
-     * The payloads of the start rows of the kind among the verified rows, each
-     * by the id under the payload key.
+     * The payloads of the kind's start rows, by id.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -460,8 +418,7 @@ final readonly class Reconciler
     }
 
     /**
-     * The ids of the operations the finish rows of the kind among the verified
-     * rows finish, but those whose start is among the starts given.
+     * The ids the kind's finish rows finish, except those whose start is given.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -488,9 +445,7 @@ final readonly class Reconciler
     }
 
     /**
-     * The id under the payload key of a row that starts an operation of the
-     * kind, a prune run's start row or an import's, or `null` for any other
-     * row.
+     * The id of a start row of the kind, or `null` for any other row.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -508,8 +463,8 @@ final readonly class Reconciler
     }
 
     /**
-     * The id of the operation a finish row finishes, a prune run's under
-     * `run_id` or an import's under `batch_id`, or `null` for any other row.
+     * The id a prune run's or an import's finish row finishes, or `null` for
+     * any other row.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -529,10 +484,8 @@ final readonly class Reconciler
     }
 
     /**
-     * Hand each row of the query to the callback, in time and then id order,
-     * oldest or newest first, a page to a statement, each page seeking past the
-     * last row of the one before, until the rows run out or the callback
-     * answers `false`.
+     * Hand each row to the callback in time then id order, a keyset page at a
+     * time, until it answers `false`.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  bool  $ascending

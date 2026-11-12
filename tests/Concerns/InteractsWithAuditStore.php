@@ -18,18 +18,13 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Stores records through the database store and reads back what it wrote: a
- * finaliser on a frozen clock, the store as the container builds it, a stored
- * row decoded through the row codec, and the two forced failures of the store's
- * tests.
+ * Stores records through the database store, reads back what it wrote, and
+ * forces the store's two failures for real on every engine.
  *
- * The forced failures are real ones on every engine. A unique index on
- * `request_id`, which the shipped table does not have, makes a violation of an
- * index other than the id's. The probe table has every column of the entries
- * table as nullable `text`, and a `probe` column that is `NOT NULL` without a
- * default, which the store never writes, so an insert into it fails with the
- * engine's own `NOT NULL` violation, never a unique one. A class that adds
- * either removes it in its `tearDown()`.
+ * A test-only unique index on `request_id` breaks an index other than the id's,
+ * and the probe table's `NOT NULL` `probe` column, which the store never
+ * writes, fails an insert. A class that adds either removes it in its
+ * `tearDown()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -107,6 +102,16 @@ trait InteractsWithAuditStore
     }
 
     /**
+     * The number of rows in the artifacts table.
+     *
+     * @return int
+     */
+    protected function artifactCount(): int
+    {
+        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
+    }
+
+    /**
      * Add a unique index on the entries table's `request_id`, so two records
      * with one request id violate an index other than the id's.
      *
@@ -139,10 +144,9 @@ trait InteractsWithAuditStore
     }
 
     /**
-     * Create the probe table on the storage connection and make it the entries
-     * table, so the store's next insert fails on its `NOT NULL` column. Its
-     * `id` is a UUID, as the entries table's is, so a statement joining it to
-     * another table's entry id runs on PostgreSQL too.
+     * Make the probe table the entries table, so the store's next insert fails
+     * on its `NOT NULL` column; its `id` is a UUID so joins on it run on
+     * PostgreSQL.
      *
      * @return void
      */

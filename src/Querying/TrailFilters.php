@@ -12,18 +12,11 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * What a caller narrows a read of the trail to, validated as it is given: who
- * acted, on what, for whom and in which tenant, which codes or which codes
- * under a prefix, which categories and outcomes, when, under which correlation
- * id, and which owner holds an encrypted fragment in each entry.
+ * What a read is narrowed to, validated as given; each `with...()` replaces its
+ * dimension, and a refusal names the filter, never the value.
  *
- * Each dimension is replaced, never merged, by its own `with...()` method, and
- * the exact codes and a prefix are one dimension, so either replaces the other.
- * Lists are kept each value once and sorted, and times in UTC to the
- * microsecond, so the normalised form names the filters however they were
- * given, and a read's record fingerprints that form under a key. Nothing here
- * becomes SQL text: the scope compiler binds every value. A refusal names the
- * filter, never the value given.
+ * Lists are deduplicated and sorted so the normalised form, which a read's
+ * record fingerprints, is the same however the filters were given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,10 +31,10 @@ final readonly class TrailFilters
     /** @var int Most categories a filter holds. */
     public const int MAX_CATEGORIES = 50;
 
-    /** @var int Longest event code prefix, in bytes: one short of the `event` column, so a code can follow it. */
+    /** @var int Longest event code prefix, in bytes: one short of the `event` column. */
     public const int MAX_PREFIX_BYTES = 190;
 
-    /** @var string Pattern of an event code prefix: lower-case dotted segments, each a letter, then letters, digits or underscores, ending in a dot. */
+    /** @var string Lower-case dotted segments ending in a dot. */
     private const string PREFIX_PATTERN = '/\A[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.\z/';
 
     /** @var list<string> The dimensions a reference filters on. */
@@ -77,28 +70,28 @@ final readonly class TrailFilters
         /** The tenant the entries name, or `null` for any. */
         public ?Reference $tenant = null,
 
-        /** The exact codes the entries have, sorted, or none for any code. */
+        /** The exact codes, sorted, or none for any. */
         public array $events = [],
 
-        /** The prefix every code the entries have begins with, or `null` for any. */
+        /** The code prefix, or `null` for any. */
         public ?string $eventPrefix = null,
 
-        /** The categories the entries are in, sorted, or none for any. */
+        /** The categories, sorted, or none for any. */
         public array $categories = [],
 
-        /** The outcomes the entries have, as stored, sorted, or none for any. */
+        /** The stored outcomes, sorted, or none for any. */
         public array $outcomes = [],
 
-        /** The earliest time an entry occurred, inclusive, as an instant, or `null` for no limit. */
+        /** The inclusive start instant, or `null` for no limit. */
         public ?string $from = null,
 
-        /** The time every entry occurred before, exclusive, as an instant, or `null` for no limit. */
+        /** The exclusive end instant, or `null` for no limit. */
         public ?string $to = null,
 
         /** The correlation id the entries carry, or `null` for any. */
         public ?string $correlationId = null,
 
-        /** The owner whose key sealed a fragment of each entry, or `null` for any. */
+        /** The owner whose key sealed a fragment of each entry, or `null`. */
         public ?Reference $holding = null,
     ) {}
 
@@ -113,8 +106,7 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to those naming the reference as
-     * their actor, subject, principal or tenant, replacing any earlier one.
+     * The filters narrowed to the reference in the dimension.
      *
      * @param  string  $dimension
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $reference
@@ -132,10 +124,8 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to these exact codes, under any
-     * prefix, the reserved one included: each held to the code grammar, kept
-     * once and sorted, from one to the limit. They replace any earlier codes
-     * and any prefix.
+     * The filters narrowed to these exact codes, reserved ones included,
+     * replacing any codes or prefix.
      *
      * @param  list<\BackedEnum|string>  $codes
      * @return self
@@ -160,9 +150,8 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to the codes under the prefix: one
-     * or more lower-case dotted segments ending in a dot, at most 190 bytes. It
-     * replaces any earlier prefix and any exact codes.
+     * The filters narrowed to codes under the prefix, replacing any codes or
+     * prefix.
      *
      * @param  string  $prefix
      * @return self
@@ -181,9 +170,7 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to these categories, each held to
-     * the definitions' grammar, kept once and sorted, from one to the limit,
-     * replacing any earlier ones.
+     * The filters narrowed to these categories.
      *
      * @param  list<string>  $categories
      * @return self
@@ -208,8 +195,7 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to these outcomes, at least one,
-     * each kept once, replacing any earlier ones.
+     * The filters narrowed to these outcomes.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Records\Enums\Outcome>  $outcomes
      * @return self
@@ -228,10 +214,8 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to those that occurred from the
-     * first time, inclusive, before the second, exclusive, each in UTC to the
-     * microsecond; either may be `null` for no limit, and both `null` clears
-     * the window. A window that ends where or before it starts is refused.
+     * The filters narrowed to `[from, to)`; `null` is unbounded, and both
+     * `null` clears the window.
      *
      * @param  ?\DateTimeInterface  $from
      * @param  ?\DateTimeInterface  $to
@@ -252,9 +236,7 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to those carrying the correlation
-     * id, held to the grammar a record's builder holds it to, replacing any
-     * earlier one.
+     * The filters narrowed to the correlation id.
      *
      * @param  string  $correlationId
      * @return self
@@ -271,9 +253,8 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters with the entries narrowed to those holding a fragment sealed
-     * under one of the owner's keys, whatever its tenant, category or
-     * generation, erased or not, replacing any earlier owner.
+     * The filters narrowed to entries holding a fragment sealed under any of
+     * the owner's keys, erased or not.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return self
@@ -284,9 +265,7 @@ final readonly class TrailFilters
     }
 
     /**
-     * The filters' normalised form, its keys sorted: each reference, the owner
-     * holding data included, as its type and id or `null`, each list sorted,
-     * each time an instant or `null`.
+     * The filters' normalised form, keys sorted.
      *
      * @formatter:off
      *
@@ -317,8 +296,7 @@ final readonly class TrailFilters
     }
 
     /**
-     * Every field of the filters by its constructor's name, for a copy that
-     * replaces some of them.
+     * Every field by its constructor name, for a copy that replaces some.
      *
      * @formatter:off
      *

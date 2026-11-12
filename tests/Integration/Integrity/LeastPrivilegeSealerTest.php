@@ -30,23 +30,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for sealing, anchoring and verification under the grants
- * the storage note documents, run exactly as written by the tables' owner, on
- * MySQL and PostgreSQL: a writer granted those privileges and nothing else
- * records, seals, anchors, verifies strictly and completes a sweep, which
- * forgets its cursor; a bundle's artifact is verified by a user granted only
- * `SELECT` on it; it reads the lifecycle journal and the holds and writes
- * neither; it cannot change an immutable checkpoint column, update or delete a
- * member, delete a seal, truncate any of the package's tables or run any DDL;
- * and the maintenance user may delete an entry, read the evidence and the
- * state, insert a journal row, place and remove a hold and take the lock, and
- * nothing more.
- *
- * Each worker creates logins of its own, `audit_writer_<token>`,
- * `audit_maintenance_<token>` and `audit_verifier_<token>`, which the
- * documented grants name, and drops them when the test ends. No trigger is
- * installed: the grants alone refuse each of these. SQLite has no privileges,
- * so these tests are skipped there.
+ * Integration tests for sealing, anchoring and verification under the
+ * documented grants alone, with no trigger, on MySQL and PostgreSQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,10 +61,9 @@ final class LeastPrivilegeSealerTest extends TestCase
     private array $names = [];
 
     /**
-     * Create this worker's logins, run the documented grants for them as the
-     * tables' owner, make the writer's connection the storage connection,
-     * register both commands, stop the clock and anchor to a faked disk, on
-     * MySQL and PostgreSQL only.
+     * Create this worker's logins, run the documented grants, and use the
+     * writer as the storage connection with a stopped clock and a faked disk
+     * anchor.
      *
      * @return void
      */
@@ -136,10 +120,8 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * The writer records through the store, `audit-log:seal` writes the
-     * installation's id, then seals and anchors what it recorded, and a strict
-     * `audit-log:verify`, which reads the journal, passes and records its
-     * completion in the integrity state table.
+     * The writer records, seals, anchors and strictly verifies, recording the
+     * run's completion.
      *
      * @return void
      */
@@ -169,9 +151,8 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * A sweep over more than one window seals every entry, writes its cursor
-     * after each window and, once complete, forgets it, which is the state
-     * table's `DELETE`; a second sweep completes again from the beginning.
+     * A sweep over several windows writes its cursor after each and deletes it
+     * once complete.
      *
      * @return void
      */
@@ -193,9 +174,8 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * The writer can change none of the 17 immutable checkpoint columns, each
-     * refused by the column grants, while an anchor column stays writable; the
-     * seal is left as it was.
+     * The writer can change none of the 17 immutable checkpoint columns, while
+     * an anchor column stays writable.
      *
      * @return void
      */
@@ -240,9 +220,8 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * The writer can truncate none of the entries, the checkpoints, the members
-     * or the integrity state, though it may delete the state's rows: every row
-     * stays.
+     * The writer can truncate none of the package's tables, though it may
+     * delete the state's rows.
      *
      * @return void
      */
@@ -297,9 +276,8 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * The writer reads the lifecycle journal and the holds, which sealing,
-     * verification and the checks read, and can write neither, nor touch the
-     * lock.
+     * The writer reads the lifecycle journal and the holds but writes neither,
+     * nor touches the lock.
      *
      * @return void
      */
@@ -328,12 +306,9 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * The maintenance user reads the entries, the seals, the members and the
-     * integrity state, deletes an entry and a receipt, as a prune does, inserts
-     * a journal row, places and removes a hold and takes the lock; it can
-     * insert or update no entry, delete no member or seal, write no anchor
-     * column, update or delete no journal row, insert no lock row and truncate
-     * no table.
+     * The maintenance user reads the evidence, deletes entries and receipts,
+     * inserts journal rows, places and removes holds and takes the lock, and
+     * nothing more.
      *
      * @return void
      */
@@ -384,10 +359,8 @@ final class LeastPrivilegeSealerTest extends TestCase
     }
 
     /**
-     * A bundle the writer stores is sealed and verified strictly, and its
-     * segment, artifact included, verifies on the maintenance user's
-     * connection, which holds no privilege on the artifacts but `SELECT` and
-     * `DELETE`, and no `INSERT` it could have used.
+     * A bundle's artifact verifies on the maintenance user's connection, which
+     * holds only `SELECT` and `DELETE` on the artifacts.
      *
      * @return void
      */

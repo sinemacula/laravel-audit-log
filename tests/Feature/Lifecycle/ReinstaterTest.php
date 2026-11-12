@@ -7,13 +7,11 @@ namespace Tests\Feature\Lifecycle;
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Query\Builder;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
-use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
@@ -32,17 +30,12 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalBrokenException;
 use SineMacula\Laravel\AuditLog\Lifecycle\ReinstatementRefusedException;
 use SineMacula\Laravel\AuditLog\Lifecycle\Reinstater;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
- * Feature tests for reinstating an erased owner, on whichever engine the suite
- * runs against: a `reinstate` row and a `reinstated` marker under the row's id,
- * at the erasure's floor, committed together; an owner that is not erased
- * refused, writing nothing; a marker the verified chain does not back refused
- * as a broken journal, writing nothing; the next key above the floor and an
- * erased generation never reopened; and the installation confirmed before the
- * lock.
+ * Feature tests for reinstating an erased owner.
  *
  * Owners are erased by hand, as an erasure commits it, and their next keys made
  * through the key creator, so the eraser and the encrypter are not relied on.
@@ -55,16 +48,13 @@ use Tests\TestCase;
 #[CoversClass(Reinstater::class)]
 final class ReinstaterTest extends TestCase
 {
-    use MakesSubjectKeys;
+    use ConnectsSecondDatabases, MakesSubjectKeys;
 
     /** @var string When every operation runs. */
     private const string NOW = '2026-11-04 10:00:00.123456';
 
     /** @var string The operation every reinstatement runs under. */
     private const string OPERATION = '01932b4e-9000-7000-8000-0000000000a1';
-
-    /** @var string The connection a test points the maintenance connection at when it must reach another database. */
-    private const string OTHER = 'audit_other';
 
     /**
      * Freeze the clock.
@@ -99,10 +89,8 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * An erased owner is reinstated: a `reinstate` row naming the operation,
-     * the authority, the owner's fingerprint under the ring's signing key and
-     * the erasure's floor, appended after the erasure; the result names the row
-     * and is committed but not yet recorded.
+     * An erased owner is reinstated with a `reinstate` row at the erasure's
+     * floor.
      *
      * @return void
      */
@@ -133,8 +121,7 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * The `reinstated` marker shares its journal row's id, sequence and time,
-     * keeps the erasure's floor, and is now the owner's latest.
+     * The `reinstated` marker shares its journal row's id, sequence and time.
      *
      * @return void
      */
@@ -160,8 +147,7 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * An owner never erased, and one already reinstated, is refused
-     * `not_erased`, and nothing is written.
+     * An owner never erased, or already reinstated, is refused `not_erased`.
      *
      * @return void
      *
@@ -191,9 +177,7 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * Rows of `[how the latest marker is forged, the finding]`: a marker that
-     * names no row of the verified chain by its id and sequence, or a row that
-     * is not a signed erasure of the owner at the marker's floor.
+     * Rows of `[how the latest marker is forged, the finding]`.
      *
      * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding}>
      */
@@ -211,7 +195,7 @@ final class ReinstaterTest extends TestCase
 
     /**
      * An erased marker the verified chain does not back is refused as a broken
-     * journal, naming the finding, and nothing is written.
+     * journal.
      *
      * @param  string  $forgery
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding
@@ -244,8 +228,7 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * A journal that fails verification refuses the reinstatement before the
-     * marker is read, and nothing is written.
+     * A broken journal refuses the reinstatement before the marker is read.
      *
      * @return void
      *
@@ -272,9 +255,8 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * Reinstatement creates no key; the owner's next key, in any unit, is made
-     * one above the erasure's floor, the largest generation the owner had, even
-     * in a unit whose own largest generation is lower.
+     * Reinstatement creates no key, and the next key in any unit is one above
+     * the floor.
      *
      * @return void
      */
@@ -301,9 +283,7 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * An erased generation never reopens: after the reinstatement the erased
-     * key is still erased with no wrapped key, and the unit's next key is a new
-     * row at a new generation.
+     * An erased generation never reopens.
      *
      * @return void
      */
@@ -328,8 +308,7 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * An owner erased, reinstated and erased again is reinstated again, at the
-     * floor of the later erasure.
+     * An owner is reinstated after each erasure, at the later erasure's floor.
      *
      * @return void
      */
@@ -349,9 +328,8 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * The installation is confirmed before the lock is taken: a maintenance
-     * connection that reaches another database is refused, and neither the
-     * lock, the journal nor the markers are touched.
+     * An installation mismatch is refused before the lock is taken, touching
+     * nothing.
      *
      * @return void
      *
@@ -418,8 +396,8 @@ final class ReinstaterTest extends TestCase
     }
 
     /**
-     * Another owner's erasure row at the same floor, its own marker removed so
-     * the owner's marker can take its id.
+     * Another owner's erasure row at the same floor, its marker removed to free
+     * its id.
      *
      * @return \SineMacula\Laravel\AuditLog\Integrity\JournalRow
      */
@@ -434,32 +412,6 @@ final class ReinstaterTest extends TestCase
         $this->keyConnection()->table(KeyTables::ownerErasuresTable())->where('id', $row->id)->delete();
 
         return $row;
-    }
-
-    /**
-     * Configure `OTHER`, a connection to another database whose integrity state
-     * table holds no installation id.
-     *
-     * @return void
-     */
-    private function otherDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        DB::purge(self::OTHER);
-
-        $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
-
-        $schema = DB::connection(self::OTHER)->getSchemaBuilder();
-
-        $schema->dropIfExists(IntegrityTables::stateTable());
-        $schema->create(IntegrityTables::stateTable(), static function (Blueprint $table): void {
-            $table->string('name', 64)->primary();
-            $table->text('value');
-            $table->dateTime('updated_at', 6);
-        });
-
-        $this->beforeApplicationDestroyed(static fn () => DB::connection(self::OTHER)->getSchemaBuilder()->dropIfExists(IntegrityTables::stateTable()));
     }
 
     /**

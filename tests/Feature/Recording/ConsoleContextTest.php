@@ -25,10 +25,7 @@ use Tests\Fixtures\Providers\AuditsFrameEndsProvider;
 use Tests\TestCase;
 
 /**
- * End-to-end tests for a record made from a real Artisan command: its origin
- * and name, a nested call restoring its caller on success and on failure, a
- * command inside a request, and that Laravel's placeholder console request is
- * never read.
+ * End-to-end tests for a record made from a real Artisan command.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -81,8 +78,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * A command's record has the console origin and the command's name, and its
-     * frame is gone when it ends.
+     * A command records the console origin and its name; its frame then ends.
      *
      * @return void
      */
@@ -161,8 +157,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * Inside a request, a command's record is console with the request's id and
-     * no client, and the request's own frame comes back when it ends.
+     * A command in a request records console, the request's id and no client.
      *
      * @return void
      */
@@ -219,8 +214,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * A command whose record is the request's first still has the request's
-     * trusted id, so nothing replaces it for the rest of the request.
+     * A command recording first in a request keeps the request's trusted id.
      *
      * @return void
      */
@@ -244,8 +238,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * `$this->call()` dispatches no console event, so what it runs keeps the
-     * name of the command that called it.
+     * `$this->call()` dispatches no console event, so the caller's name stays.
      *
      * @return void
      */
@@ -257,8 +250,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * Laravel's placeholder console request, however it is dressed, is never a
-     * frame: a command's record has no client, route or method from it.
+     * Laravel's placeholder console request is never a frame.
      *
      * @return void
      */
@@ -293,8 +285,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * Recording goes by the frame and not by `runningInConsole()`, which is
-     * true here, so a request is still `http`.
+     * Recording follows the frame, not `runningInConsole()`.
      *
      * @return void
      */
@@ -310,9 +301,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * A listener on `CommandFinished` that a provider's `boot()` adds runs
-     * before the frame ends, so what it records has the command's origin and
-     * name.
+     * A `CommandFinished` listener added in `boot()` runs in the command frame.
      *
      * @return void
      */
@@ -331,8 +320,7 @@ final class ConsoleContextTest extends TestCase
     }
 
     /**
-     * List the provider that audits a command's end, booted after the package's
-     * as an application's is.
+     * Add the provider that audits a command's end, after the package's.
      *
      * @param  mixed  $app
      * @return array<int, class-string<\Illuminate\Support\ServiceProvider>>

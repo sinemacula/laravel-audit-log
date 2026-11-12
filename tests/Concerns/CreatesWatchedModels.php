@@ -12,15 +12,12 @@ use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Capture\Models\WatchedInvoice;
 
 /**
- * Creates the watched models' tables on the test's connection before each test,
- * and on a second connection when a test asks for one, and drops them before
- * the application is destroyed.
+ * Creates the watched models' tables on the test's connection, and on a second
+ * connection when a test asks, and drops them before the application is
+ * destroyed.
  *
- * The second connection is on the test's database with a table prefix of its
- * own, so on MySQL and PostgreSQL it is another session writing other tables,
- * and on in-memory SQLite another database. Any transaction a test leaves open
- * on either connection is rolled back before the tables are dropped. The
- * shipped migrations are left as the base test case runs them.
+ * The second connection has its own table prefix, so it is another session on
+ * MySQL and PostgreSQL and another database on in-memory SQLite.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

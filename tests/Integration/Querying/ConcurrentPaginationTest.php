@@ -18,16 +18,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for paging the trail while another process writes to it, on
- * whichever engine the suite runs against, as another server would: a walk of
- * every page never repeats an entry and never skips one present when it began,
- * whatever is inserted before, inside and after the part already walked; an
- * entry inserted late into the part already walked is not revisited, which is
- * the documented limit; and entries of one microsecond page in a total order on
- * every engine.
- *
- * SQLite runs on a file in WAL mode, as the operations guidance advises, so the
- * parent reads while the child writes.
+ * Integration tests for paging the trail while another process writes to it: no
+ * entry repeats or is skipped, within the documented limit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,14 +44,14 @@ final class ConcurrentPaginationTest extends TestCase
     /** @var int The entries in each batch. */
     private const int PER_BATCH = 20;
 
-    /** @var int The microseconds between two entries a batch inserts, spreading the batches across the trail and past both ends. */
+    /** @var int The microseconds between two entries a batch inserts. */
     private const int SPREAD = 3;
 
     /** @var int The microseconds before the first present entry the child's first entry occurs. */
     private const int LEAD = 50;
 
     /**
-     * Bind the read path and a policy that lets the viewer see every entry.
+     * Bind the read path and let the viewer see every entry.
      *
      * @return void
      */
@@ -86,11 +78,7 @@ final class ConcurrentPaginationTest extends TestCase
     }
 
     /**
-     * A walk of pages of fifty over five hundred entries, while another process
-     * inserts two hundred more between the pages, spread before the first
-     * entry, among the entries, sharing their microseconds, and after the last,
-     * shows each of the five hundred exactly once, no entry twice, nothing that
-     * was never stored, and in strictly descending order.
+     * Another process inserting between pages causes no repeat or skip.
      *
      * @return void
      */
@@ -134,10 +122,7 @@ final class ConcurrentPaginationTest extends TestCase
     }
 
     /**
-     * An entry inserted by another process into the part of the trail a walk
-     * has already passed is not revisited by that walk, though one inserted
-     * into the part ahead of it is reached, and a fresh walk shows both: the
-     * limit the guarantee documents.
+     * A row inserted behind a walk is not revisited by it, as documented.
      *
      * @return void
      */
@@ -179,9 +164,7 @@ final class ConcurrentPaginationTest extends TestCase
     }
 
     /**
-     * A hundred and twenty entries of one microsecond page by their ids alone,
-     * in pages of seven, each once and in descending id order, compared in the
-     * engine's migrated type.
+     * Entries of one microsecond page by id alone, once each, on every engine.
      *
      * @return void
      */
@@ -225,9 +208,7 @@ final class ConcurrentPaginationTest extends TestCase
     }
 
     /**
-     * Every page of the trail of the size given, from the first by each page's
-     * cursor, in order, running the step given after each page but the last
-     * with the page's index.
+     * Every page of the trail in order, running the step between pages.
      *
      * @param  int  $perPage
      * @param  ?\Closure(int): void  $between
@@ -263,9 +244,7 @@ final class ConcurrentPaginationTest extends TestCase
     }
 
     /**
-     * Assert every entry the pages show comes strictly after the one before it
-     * in the trail's order: an earlier occurrence, or the same one and a
-     * smaller id.
+     * Assert the pages' entries are in strictly descending trail order.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Querying\TrailPage>  $pages
      * @return void
@@ -288,8 +267,8 @@ final class ConcurrentPaginationTest extends TestCase
     }
 
     /**
-     * The instant the number of microseconds after the first entry seeded
-     * together occurs, before it when negative.
+     * The instant that many microseconds after the first seeded entry, before
+     * it when negative.
      *
      * @param  int  $microseconds
      * @return string

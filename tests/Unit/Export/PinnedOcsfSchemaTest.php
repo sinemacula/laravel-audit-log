@@ -11,16 +11,11 @@ use Tests\Fixtures\Export\OcsfSchemaBuilder;
 use Tests\Fixtures\Export\OcsfValidator;
 
 /**
- * Pins the OCSF schema built from the upstream tag: every file built matches
- * the checksum its provenance records, no file is there that the provenance
- * does not list, the provenance names the tag, its commit and the upstream
- * files read, the version is the formatter's, every file is written in the
- * house layout, every type a class reaches is defined, and no file holds a
- * description or names a third-party product.
+ * Pins the OCSF schema built from the upstream tag to its provenance and the
+ * house layout.
  *
- * The classes are not resolved again here: that needs the upstream checkout,
- * which the tests do not have offline. `ocsf/build.php` rebuilds them from a
- * checkout, and the checksums pinned here catch any hand edit since.
+ * Classes are not resolved again offline: `ocsf/build.php` rebuilds them from a
+ * checkout, and the checksums catch any hand edit.
  *
  * It covers nothing: it checks test fixtures, not the package's code.
  *
@@ -83,9 +78,8 @@ final class PinnedOcsfSchemaTest extends TestCase
     }
 
     /**
-     * The provenance names the repository, the tag, the commit the tag points
-     * to, the licence, how the files were modified, and the checksum of each
-     * upstream file the build read; the licence and the notice are there.
+     * The provenance names the repository, tag, commit, licence, modifications
+     * and each upstream file's checksum.
      *
      * @return void
      *
@@ -153,10 +147,8 @@ final class PinnedOcsfSchemaTest extends TestCase
     }
 
     /**
-     * Every type an attribute of a class or of an object it reaches has is a
-     * type the dictionary defines, an object the class reaches, or the generic
-     * object, so leaving a profile out left nothing pointing at an object that
-     * is not there.
+     * Every type a class reaches is defined, so no left-out profile leaves a
+     * dangling object.
      *
      * @return void
      *
@@ -197,9 +189,8 @@ final class PinnedOcsfSchemaTest extends TestCase
     }
 
     /**
-     * No file names any of the vendors or products the schema's upstream text
-     * named, in any case, nor the abbreviation for their field as a word. The
-     * names are kept encoded, so this file never holds them either.
+     * No file names an upstream vendor or product; the names are kept encoded
+     * so this file holds none either.
      *
      * @return void
      */

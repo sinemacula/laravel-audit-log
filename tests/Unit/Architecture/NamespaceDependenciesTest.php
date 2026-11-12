@@ -10,37 +10,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Holds the package's namespaces to the dependency rules its design states:
- * which classes may not name which others. Each rule is data in `RULES`, so a
- * change that moves a class or narrows a dependency adds or tightens a rule
- * there. A rule applies to the classes in its `from` namespaces or classes (`*`
- * for every class of the package) except those in `except`, and forbids them to
- * name anything in its `forbids` namespaces or classes except what `allows`
- * lists; every name is relative to the package. The capture layer names neither
- * the stores nor the read model, and only its coordinator, the recorder and the
- * access recorder reach the record pipeline, so nothing a mapper or a listener
- * runs can write a record of its own. The read path names neither the console
- * nor the stores' writers, and access control names nothing of the package but
- * the values it compiles and the key tables an owner's filter reads.
- *
- * The same scanner holds the package to the framework: `FRAMEWORK_RULES` are
- * read the same way, with `forbids` and `allows` relative to the framework, so
- * nothing ships a route or a view, nothing reads authentication state, and the
- * domain reaches for no facade or container. Only the contributors, the cached
- * user, the core capture listeners, the user reference and the service provider
- * read authentication state, as the classes that touch `Auth` and the guards,
- * name its events or read the user an event carries; naming the authenticatable
- * type alone, as a viewer of the trail and an access policy do, reads none. And
- * no class names another package of the suite: anything under the suite's
- * namespace but outside this package's is refused.
- *
- * A class names another through an import (`use`, grouped or aliased), a
- * qualified or fully qualified name in its code, or a fully qualified type in a
- * docblock. Names resolve as PHP resolves them, without regard to case, and a
- * qualified name only through a class or namespace import. The source is
- * tokenised, not parsed, so a name built at run time (a class name in a string,
- * say) and an unqualified name of a class in the same namespace are not seen:
- * the test is a backstop for the rules, not a proof of them.
+ * Holds the package to the dependency rules in `RULES` and `FRAMEWORK_RULES`.
+ * Names are read from tokens, so one built at run time is not seen.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -497,9 +468,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * Every namespace or class of the framework a framework rule forbids or
-     * allows exists in the installed framework, so a misspelt name fails rather
-     * than forbidding nothing.
+     * Every framework name a framework rule forbids or allows exists, so a
+     * misspelt one fails.
      *
      * @param  list<string>  $from
      * @param  list<string>  $except
@@ -547,11 +517,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * The scanner finds a package name however a class names it: imported
-     * alone, aliased, grouped, as a function or a constant (alone or within a
-     * group), through an alias or relative to its namespace, fully qualified in
-     * code or in a docblock; and nothing for an unqualified name, a closure's
-     * `use`, or a name outside the package.
+     * The scanner finds a package name however a class names it, and nothing
+     * for an unqualified name, a closure's `use` or an outside name.
      *
      * @return void
      */
@@ -618,10 +585,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * The scanner reads the imports of a bracketed namespace as imports, gives
-     * each namespace its own aliases, reads a closure's `use` at the top of a
-     * namespace as code, and resolves names in the global namespace from its
-     * root.
+     * The scanner gives each bracketed namespace its own imports and aliases,
+     * and resolves global names from the root.
      *
      * @return void
      */
@@ -668,11 +633,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * A qualified name resolves through the class or namespace import its first
-     * segment names, whatever its case, and not through a function's or a
-     * constant's import of the same name, alone or within a group; a rule
-     * catches a forbidden name whatever its case, fully qualified in code or in
-     * a docblock.
+     * A qualified name resolves through a class or namespace import in any
+     * case, never through a function's or a constant's import.
      *
      * @return void
      */
@@ -735,9 +697,7 @@ final class NamespaceDependenciesTest extends TestCase
 
     /**
      * The scanner finds names under whichever prefix it is given, in code and
-     * in docblocks alike, so the one tokeniser serves the package rules, the
-     * suite check and the framework rules; a name of another package of the
-     * suite is found under the suite's prefix and not under the package's.
+     * docblocks, so one tokeniser serves every rule.
      *
      * @return void
      */
@@ -816,9 +776,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * Each capture rule refuses what it forbids and leaves what it allows, or
-     * what a class it excepts names, so a rule that held over nothing, or one
-     * widened to let a listener or a mapper reach the record pipeline, fails.
+     * Each capture rule refuses what it forbids and leaves what it allows or
+     * excepts, so an empty or widened rule fails.
      *
      * @param  string  $rule
      * @param  string  $class
@@ -929,13 +888,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * The distinct names under the prefix the source names, relative to the
-     * prefix.
-     *
-     * An import is read as one statement, so its names are not read again as
-     * names in code; each namespace's body, whether it ends at the next
-     * `namespace` or at its closing brace, has its own aliases. The names of a
-     * trait's or a closure's `use` are read as names in code.
+     * The distinct names under the prefix the source names, relative to it. A
+     * trait's or a closure's `use` is read as names in code.
      *
      * @param  string  $source
      * @param  string  $prefix
@@ -992,9 +946,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * Whether the `use` at the index is an import: one directly in the
-     * namespace's body, not a trait's in a class or a closure's after its
-     * parameters.
+     * Whether the `use` at the index is an import, not a trait's or a
+     * closure's.
      *
      * @param  list<array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  list<int>  $depths
@@ -1085,10 +1038,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * The names an import statement imports, recording the alias each class or
-     * namespace import gives by its lower case. A qualified name resolves only
-     * through those, without regard to case: a function's or a constant's
-     * import of the same name is kept apart from them.
+     * The names an import statement imports, recording each class or namespace
+     * alias by its lower case.
      *
      * @param  string  $statement
      * @param  array<string, string>  $aliases
@@ -1127,10 +1078,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * What the import imports, `function`, `const` or `''` for a class or a
-     * namespace, and the import without the word that gives it: a whole
-     * statement's, or one member's of a group, which imports what its statement
-     * does unless it gives its own.
+     * What the import imports (`function`, `const` or `''`) and the import
+     * without that word.
      *
      * @param  string  $import
      * @param  string  $kind
@@ -1146,9 +1095,8 @@ final class NamespaceDependenciesTest extends TestCase
     }
 
     /**
-     * The fully qualified name a name token stands for: a qualified name
-     * through the alias its first segment names, whatever its case, or else
-     * relative to the namespace; `null` for any other token.
+     * The fully qualified name a name token stands for, resolved as PHP does,
+     * or `null` for any other token.
      *
      * @param  int  $id
      * @param  string  $text

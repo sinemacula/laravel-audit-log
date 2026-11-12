@@ -15,34 +15,11 @@ use SineMacula\Laravel\AuditLog\Integrity\PruneCoverage;
 use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 
 /**
- * Which records retention has already pruned: an id a seal holds as a member
- * whose entry is no longer in the entries table, and whose position a valid
- * prune record of that seal sets. A seal's members and its prune records
- * outlive its entries, so they are the tombstones every path that hands the
- * store an id it did not mint now checks first: the outbox drain, the spill
- * replay and the store's conflict path. A pruned record is completed as pruned
- * there, never stored again.
+ * Which records retention has pruned: absent seal members a valid prune record
+ * covers, so the drain, replay and conflict path never store them again.
  *
- * An absent member that no valid record covers was removed by something other
- * than retention, which verification reports `missing_entry`; it is never taken
- * for pruned, so the drain and the replay hand it to the store, which stores
- * the authentic row again, and a deletion is never relabelled as authorised. A
- * record covers a member only as verification counts it: it binds the seal's
- * log, id, digest and member count and its signature verifies under the key it
- * names, the seal's members authenticate against its members digest, and the
- * member's position in member order is set in its bitmap.
- *
- * It reads the storage connection's writer, so an entry pruned a moment ago is
- * never read as present from a lagging replica: one statement per 500 ids, the
- * members joined to the entries by id, keeping the members with no entry, and
- * for each seal those fall in, its row, its members and its records from the
- * bound ledger. An id that is not a lower-case UUID, the one form every record
- * id takes, is never a member, so it is never pruned and never queried. An id
- * no seal holds is never pruned either: an unsealed record that is missing was
- * never stored, or was removed by something other than retention.
- *
- * It resolves the storage connection on every call, so it outlives requests
- * safely.
+ * An absent member no record covers is stored again, never relabelled as
+ * pruned; reads use the writer, so a lagging replica hides no prune.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,8 +55,7 @@ final readonly class PruneTombstones
 
     /**
      * The ids among those given that retention has pruned, each once, in the
-     * order given: a seal holds each as a member, the entries table holds none
-     * of them, and a valid prune record of its seal covers each.
+     * order given.
      *
      * @param  list<string>  $ids
      * @return list<string>
@@ -101,9 +77,7 @@ final readonly class PruneTombstones
     }
 
     /**
-     * Whether retention has pruned the record with the id: a seal holds it as a
-     * member, the entries table does not hold it, and a valid prune record of
-     * its seal covers it.
+     * Whether retention has pruned the record with the id.
      *
      * @param  string  $id
      * @return bool
@@ -116,10 +90,7 @@ final readonly class PruneTombstones
     }
 
     /**
-     * The ids of the chunk a seal holds, the entries table does not, and a
-     * valid prune record of the seal covers: the absent members read in one
-     * statement on the storage connection's writer, then each seal they fall in
-     * checked.
+     * The chunk's ids that are absent seal members a valid prune record covers.
      *
      * @param  list<string>  $chunk
      * @return list<string>
@@ -158,9 +129,8 @@ final readonly class PruneTombstones
     }
 
     /**
-     * The absent members of the seal its valid prune records cover; none when
-     * the seal cannot be read or its records cannot be read, since then no
-     * record is known to cover them.
+     * The seal's absent members its valid prune records cover; none when the
+     * seal or its records cannot be read.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $sealId

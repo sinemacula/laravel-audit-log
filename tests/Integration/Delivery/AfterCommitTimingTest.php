@@ -24,15 +24,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for the default timing through the public API, on the
- * engine the suite runs against: a record is written when the transaction it
- * selected commits and dropped when that transaction rolls back, whichever
- * connection the transaction is on, a name pins that connection, and a write
- * that fails under the `throw` mode does so after the business data has
- * committed, stopping the callbacks behind it.
- *
- * Storage is the default connection unless a test defines it as a connection of
- * its own. The second transacting connection needs no tables.
+ * Integration tests for the default after-commit timing through the public API,
+ * on the engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,10 +96,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A read or write selector is a valid name for a connection, and it names
-     * the same connection, so the record waits for that connection's commit.
-     * Comparing the selector with the transaction's name would match nothing
-     * and write at once.
+     * A read or write selector names the same connection, so the record waits
+     * for that connection's commit.
      *
      * @return void
      */
@@ -126,8 +117,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A record pinned with a selector goes with the transaction it pinned: it
-     * cannot outlive a rollback.
+     * A record pinned with a selector is dropped on rollback.
      *
      * @return void
      */
@@ -143,8 +133,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A selector pins its own connection and no other: another connection's
-     * transaction neither delays nor cancels the record.
+     * A selector pins its own connection and no other.
      *
      * @return void
      */
@@ -179,7 +168,7 @@ final class AfterCommitTimingTest extends TestCase
 
     /**
      * Rolling back the inner transaction the record selected drops it, though
-     * the outer transaction goes on to commit.
+     * the outer one commits.
      *
      * @return void
      */
@@ -198,9 +187,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * Rolling back an inner transaction drops only its own record, not one the
-     * outer transaction selected before it began: protects against level
-     * arithmetic, which cannot tell the two apart.
+     * An inner rollback keeps a record the outer transaction selected before
+     * the inner one began.
      *
      * @return void
      */
@@ -222,8 +210,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * An inner commit is not the end of the work, so the record waits for the
-     * outer commit.
+     * An inner commit does not write the record; the outer commit does.
      *
      * @return void
      */
@@ -275,8 +262,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * `record()` returns the captured record while nothing has been written, so
-     * returning does not mean stored.
+     * `record()` returns the captured record before it is written.
      *
      * @return void
      */
@@ -295,8 +281,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * The occurrence time is read when the record is captured and the recording
-     * time when it is written, so a late commit shows in the gap between them.
+     * The occurrence time is the capture time and the recording time is the
+     * write time.
      *
      * @return void
      */
@@ -320,8 +306,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A rolled-back transaction's record leaves nothing behind for the next
-     * transaction, whose records are all written on its commit.
+     * A rolled-back transaction's record does not carry over to the next
+     * transaction.
      *
      * @return void
      */
@@ -388,10 +374,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * With no name the record selects whichever transaction began last: the
-     * storage connection's commit writes it though the other connection stays
-     * open, and the other connection's rollback does not reach it. When the
-     * other connection began last, it alone decides.
+     * With no name the record selects whichever transaction began last, on any
+     * connection.
      *
      * @return void
      */
@@ -422,8 +406,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * Nested on two connections, the innermost's commit writes the record, with
-     * the outer transaction still open and uncommitted.
+     * Nested on two connections, the innermost's commit writes the record while
+     * the outer stays open.
      *
      * @return void
      */
@@ -447,9 +431,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A write the innermost's commit makes on the storage connection is inside
-     * the transaction still open there, so that transaction's rollback takes it
-     * away: selecting the innermost promises nothing about an outer one.
+     * A write made on the innermost's commit rolls back with a transaction
+     * still open on the storage connection.
      *
      * @return void
      */
@@ -468,8 +451,7 @@ final class AfterCommitTimingTest extends TestCase
 
     /**
      * A record pinned to a connection waits for that connection's commit while
-     * another connection's transaction is the innermost, and that commit writes
-     * nothing.
+     * another is innermost.
      *
      * @return void
      */
@@ -490,8 +472,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A record pinned to a connection with no transaction is written now,
-     * whatever another connection has open, and stays when that one rolls back.
+     * A record pinned to a connection with no transaction is written now and
+     * survives another connection's rollback.
      *
      * @return void
      */
@@ -527,8 +509,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A pinned record is not dropped by the rollback of a connection it does
-     * not name.
+     * A pinned record survives the rollback of a connection it does not name.
      *
      * @return void
      */
@@ -546,8 +527,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A pinned name selects that connection's innermost, so its inner rollback
-     * drops the record and its outer transaction commits nothing.
+     * A pinned record is dropped by an inner rollback on its connection.
      *
      * @return void
      */
@@ -567,8 +547,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * A name no connection answers to is refused, and nothing is written, not
-     * at once and not on the host's commit.
+     * A name no connection answers to is refused, and nothing is written.
      *
      * @return void
      */
@@ -590,10 +569,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * Under the `throw` mode a failed write surfaces from the host's commit,
-     * after the business data has committed, and neither the data nor the
-     * connection is affected: the write sits outside the transaction it waited
-     * for.
+     * Under the `throw` mode a failed write surfaces from the commit, after the
+     * business data has committed.
      *
      * @return void
      */
@@ -621,8 +598,7 @@ final class AfterCommitTimingTest extends TestCase
 
     /**
      * Under the `throw` mode a failed write stops the after-commit callbacks
-     * registered behind it and has no effect on those before it, since Laravel
-     * runs them in order and nothing catches the exception.
+     * registered behind it.
      *
      * @return void
      */
@@ -666,9 +642,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * On a dedicated storage connection a default record still selects the
-     * host's transaction, so the host's rollback drops it, though nothing would
-     * have rolled it back had it been written.
+     * On a dedicated storage connection a default record is dropped by the
+     * host's rollback.
      *
      * @return void
      */
@@ -689,7 +664,7 @@ final class AfterCommitTimingTest extends TestCase
 
     /**
      * On a dedicated storage connection a default record is written on the
-     * host's commit, on the storage connection.
+     * host's commit.
      *
      * @return void
      */
@@ -709,8 +684,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * Pinned to a dedicated storage connection with no transaction, a record is
-     * written now and outlives the host's rollback.
+     * A record pinned to an idle dedicated storage connection is written now
+     * and survives the host's rollback.
      *
      * @return void
      */
@@ -730,7 +705,7 @@ final class AfterCommitTimingTest extends TestCase
 
     /**
      * Register the second transacting connection and the dedicated storage
-     * connection, each with a table prefix of its own.
+     * connection, each with its own table prefix.
      *
      * @param  mixed  $app
      * @return void
@@ -797,7 +772,7 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * Register a host's after-commit callback that notes its name when it runs.
+     * Register a host after-commit callback that notes its name when it runs.
      *
      * @param  string  $name
      * @return void
@@ -810,9 +785,8 @@ final class AfterCommitTimingTest extends TestCase
     }
 
     /**
-     * Commit the host's transaction, whose deferred insert into the probe table
-     * fails on its `NOT NULL` column with the engine's own `QueryException`,
-     * sanitised.
+     * Commit the host's transaction, whose deferred insert fails on a `NOT
+     * NULL` column with the engine's `QueryException`, sanitised.
      *
      * @return void
      *

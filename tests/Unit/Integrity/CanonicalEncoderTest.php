@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use Tests\Unit\Stubs\Enums\StubColour;
 
 /**
- * Unit tests for the canonical encoder of integrity version 1: the golden
- * vectors it writes byte for byte, the bytewise key order, the list and map
- * distinction it keeps, the flags of its strings, and the floats, objects and
- * invalid UTF-8 it refuses without ever repairing what it is given.
+ * Unit tests for the canonical encoder of integrity version 1.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,9 +22,8 @@ use Tests\Unit\Stubs\Enums\StubColour;
 final class CanonicalEncoderTest extends TestCase
 {
     /**
-     * Rows of `[value, expected]`: values and their canonical encodings,
-     * computed with a reference implementation and byte-identical on PHP 8.3,
-     * 8.4 and 8.5.
+     * Rows of `[value, expected]`: encodings from a reference implementation,
+     * byte-identical on PHP 8.3, 8.4 and 8.5.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -78,8 +74,7 @@ final class CanonicalEncoderTest extends TestCase
     }
 
     /**
-     * The line and paragraph separators are written as the six ASCII characters
-     * of their escapes, never as the raw characters, so the encoding is the
+     * The line and paragraph separators are escaped, so the encoding is the
      * same wherever JSON is read as JavaScript.
      *
      * @return void
@@ -160,9 +155,8 @@ final class CanonicalEncoderTest extends TestCase
     }
 
     /**
-     * A string is encoded as it is given: a bidirectional override is kept, and
-     * a control character is escaped rather than stripped, which kills a mutant
-     * that reruns the text sanitiser.
+     * A string is encoded as given: a bidirectional override is kept and a
+     * control character escaped, never stripped.
      *
      * @return void
      */
@@ -323,9 +317,7 @@ final class CanonicalEncoderTest extends TestCase
     }
 
     /**
-     * `CanonicalEncoder` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *

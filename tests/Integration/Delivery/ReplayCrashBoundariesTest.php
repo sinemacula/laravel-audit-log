@@ -27,13 +27,8 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Integration tests for a replay killed by `SIGKILL` at its own boundaries. A
- * replay resets the undelivered receipts, requeues the failed rows and then
- * drains, as separate steps, so each kill leaves a state of its own: receipts
- * cleared on a row still failed, or a due row with its attempts reset. A second
- * replay or a drain recovers either, giving one entry and no row, with the
- * delivered destination's receipt unchanged to the microsecond and that
- * destination not called again.
+ * Integration tests for a replay killed by `SIGKILL` between its reset, requeue
+ * and drain steps, and the replay or drain that recovers it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,7 +67,7 @@ final class ReplayCrashBoundariesTest extends TestCase
     private const string SIEM_UP = 'siem-up';
 
     /**
-     * Stop the clock, and keep what a report would say out of the output.
+     * Stop the clock, and keep report output quiet.
      *
      * @return void
      */
@@ -88,8 +83,8 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Release the clock, and remove what the children shared once the
-     * migrations have rolled back.
+     * Release the clock, and remove the children's shared files after the
+     * migrations roll back.
      *
      * @return void
      */
@@ -104,8 +99,8 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Rows of `[kill before, kill after, the row left failed, the failed receipt
-     * left reset]`: each boundary of a replay.
+     * Rows of `[kill before, kill after, row left failed, failed receipt left
+     * reset]`, one per replay boundary.
      *
      * @return iterable<string, array{0: ?string, 1: ?string, 2: bool, 3: bool}>
      */
@@ -120,9 +115,7 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A kill at each boundary leaves what that boundary says: the delivered
-     * receipt untouched and the destination's failure cleared or not, the row
-     * failed or due, and no destination called.
+     * A kill at each boundary leaves its state without calling any destination.
      *
      * @param  ?string  $before
      * @param  ?string  $after
@@ -182,8 +175,8 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A drain alone recovers from a kill after the row was requeued, since the
-     * row is due again and needs no second replay.
+     * A drain alone recovers a kill after the requeue, since the row is due
+     * again.
      *
      * @return void
      */
@@ -203,8 +196,7 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A drain alone leaves a row a kill left failed: only a replay may requeue
-     * it, so the record is still there for one.
+     * A drain leaves a row a kill left failed, for a replay to requeue.
      *
      * @return void
      */
@@ -237,9 +229,8 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Bind a stack of the database and a failing destination, and fail a row in
-     * a drain, so one receipt says delivered and one says failed, then move the
-     * clock on. Gives back the row's id and its delivered receipt as it stands.
+     * Fail a row in a drain through a stack of the database and a failing
+     * destination, then move the clock on; return its id and delivered receipt.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -261,7 +252,7 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Run a replay in a child killed at the point given, and assert it was.
+     * Run a replay in a child killed at the given point, and assert it was.
      *
      * @param  ?string  $before
      * @param  ?string  $after
@@ -275,9 +266,8 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Assert the record is safe: one entry, no row, the delivered receipt as it
-     * was to the microsecond, that destination never called again, and the
-     * other delivered.
+     * Assert one entry, no row, the delivered receipt unchanged and its
+     * destination not called again, and the other destination delivered.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -296,9 +286,8 @@ final class ReplayCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Bind the stack: the database, which names each call in a file first, and
-     * a destination that names each call and fails until the file says it is
-     * back.
+     * Bind a stack of the logging database and a destination that fails until
+     * the file says it is back.
      *
      * @return void
      */

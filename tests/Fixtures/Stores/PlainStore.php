@@ -9,8 +9,7 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
  * An audit store that implements the store contract alone, saying nothing of
- * durability or transactions, and keeps every record it is given, so a test can
- * count its calls and read what it received.
+ * durability or transactions, and keeps every record it is given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

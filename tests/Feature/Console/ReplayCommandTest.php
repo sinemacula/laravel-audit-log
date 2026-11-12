@@ -29,12 +29,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:replay`: it refuses to run with nothing named
- * and has no way to replay an unsigned line, prints the counts, a record
- * retention pruned among them, and then line numbers, ids and classes and never
- * a value or a message, keeps a hostile id off the console, exits non-zero when
- * a line was skipped or a record failed, and runs the spill and then the outbox
- * when told both.
+ * Feature tests for `audit-log:replay`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +46,7 @@ final class ReplayCommandTest extends TestCase
     private array $files = [];
 
     /**
-     * Stop the clock and register the command with the console kernel, which
-     * keeps the test independent of the provider.
+     * Freeze the clock and register the command without the provider.
      *
      * @return void
      */
@@ -73,8 +67,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, put the clock back and remove
-     * the files the test wrote.
+     * Roll back an open transaction, put the clock back and remove the files.
      *
      * @return void
      */
@@ -153,8 +146,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * A run prints the count of each outcome, then each event: its line number,
-     * its outcome and its id.
+     * A run prints each outcome's count, then each event's line and id.
      *
      * @return void
      */
@@ -194,9 +186,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * A spill line and an outbox row whose records retention pruned are printed
-     * as pruned, by line and id for the spill, and exit zero: neither is stored
-     * again.
+     * Pruned spill lines and outbox rows are printed as pruned and exit zero.
      *
      * @return void
      */
@@ -239,8 +229,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * A failed store prints the class of its failure, and no secret planted in
-     * a record or in the failure's message reaches the output.
+     * A failed store prints its class and no planted secret.
      *
      * @return void
      */
@@ -266,8 +255,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * An id that is not a lower-case UUID reaches no console, escape sequences
-     * included, whichever way the line is refused.
+     * An id that is no lower-case UUID never reaches the console.
      *
      * @return void
      */
@@ -354,8 +342,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * Told both, a failure of either is the run's, in either order, and neither
-     * stops the other: protects against a code taken from the last run alone.
+     * Told both, a failure of either fails the run and neither stops the other.
      *
      * @return void
      */
@@ -374,8 +361,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * A file that cannot be read is named, the run exits non-zero, and the
-     * outbox is still replayed.
+     * An unreadable file is named and fails the run; the outbox still replays.
      *
      * @return void
      */
@@ -393,8 +379,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * Whatever else stops a run is named by its class alone, never its message,
-     * which for a query holds its bindings.
+     * What stops a run is named by its class, never its message.
      *
      * @return void
      */
@@ -453,8 +438,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * Bind a store that throws the failure from every call and joins no
-     * transaction.
+     * Bind a store that throws the failure always and joins no transaction.
      *
      * @param  \Throwable  $failure
      * @return void
@@ -465,9 +449,7 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
-     * Make the record one retention pruned: stored, sealed, its entry deleted
-     * and a signed record of its prune bound, which is what the tombstones
-     * read.
+     * Make the record one retention pruned, with a signed prune record bound.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return void

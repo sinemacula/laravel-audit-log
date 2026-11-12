@@ -14,13 +14,9 @@ use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Puts records in the outbox as the outbox write path does: each finalised
- * once, encoded as its envelope, encrypted as a string with the application's
- * encrypter and seeded under its own id, so a drain reads back exactly what
- * that path would have written.
- *
- * A class using it also uses `InteractsWithOutbox`, whose `seedOutboxRow()`
- * writes the row.
+ * Puts records in the outbox as its write path does, each finalised once and
+ * encrypted with the application's encrypter, so a drain reads back what that
+ * path would have written.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

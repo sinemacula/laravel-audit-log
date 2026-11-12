@@ -15,14 +15,10 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
- * The lines `audit-log:verify` prints as text: a verified seal's, a finding's
- * of the run as a whole, and the summary's coverage, counts, journal and key
- * store.
+ * The lines `audit-log:verify` prints as text.
  *
- * Each names ids, counts, sequences and a class, never a value of an entry or a
- * key, and an id or a class, which a table that was altered may make anything,
- * is repaired, stripped of control characters and escaped, so nothing in it is
- * read as a style.
+ * An id or class an altered table may hold is sanitised and escaped, so nothing
+ * in it is read as a style.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,14 +31,13 @@ final class VerifyLines
     public const string NONE = 'none';
 
     /**
-     * Disallow instantiation; utility container only.
+     * Disallow instantiation.
      */
     private function __construct() {}
 
     /**
-     * The line of a verified seal: its sequence and id, its integrity and
-     * anchoring, the member rows found, whether it awaits its first anchoring,
-     * and the finding and the id it was found at, if any.
+     * The line of a verified seal: its sequence, id, statuses and members,
+     * whether it awaits anchoring, and any finding with its first id.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SegmentReport  $report
      * @return string
@@ -86,10 +81,8 @@ final class VerifyLines
     }
 
     /**
-     * The id as a line of text shows it: repaired and stripped of control
-     * characters, with nothing in it read as a style, or `none` when there is
-     * no id to name, since an id read from a table that was altered may hold
-     * anything.
+     * The id as a line shows it, sanitised and escaped since an altered table
+     * may hold anything, or `none` when there is no id.
      *
      * @param  ?string  $id
      * @return string
@@ -157,9 +150,8 @@ final class VerifyLines
     }
 
     /**
-     * The line of the owners' key store: the keys verified, how many of them
-     * were erased and the key findings; or that it was skipped, naming the
-     * bound field encrypter that is not the package's.
+     * The line of the owners' key store: keys verified, erased and findings, or
+     * that it was skipped for a field encrypter that is not the package's.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary  $keys
      * @return string

@@ -13,16 +13,12 @@ use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
 
 /**
- * Fills the request id and trace id, always, and what only an innermost HTTP
- * frame knows: the client's IP address and user agent, the method and the
- * route's name. A command or job inside a request therefore has the request's
- * identity and no client or route, and Laravel's placeholder console request is
- * never read. A URL, a path or a query string is never filled.
+ * Fills the request id and trace id, and from an innermost HTTP frame the
+ * client's IP address and user agent, the method and the route's name; never a
+ * URL, a path or a query string.
  *
- * The method can be chosen by the client, through `_method` or a method
- * override header on a POST, and before routing nothing has refused it yet. It
- * is stored only when it is a standard method: a long or malformed override
- * leaves it out, and neither reaches the row nor stops the record.
+ * A client can choose the method through `_method` or an override header, so it
+ * is stored only when it is a standard method.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

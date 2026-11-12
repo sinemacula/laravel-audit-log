@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use Tests\TestCase;
 
 /**
- * Feature tests for where the delivery tables live and what they are called:
- * the two table names, their defaults and the names each refuses, and the
- * outbox connection, which follows the storage connection unless it names its
- * own.
+ * Feature tests for the delivery table names and the outbox connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,9 +40,7 @@ final class DeliveryTablesTest extends TestCase
     private const string CONNECTION_MESSAGE = '`audit-log.delivery.outbox.connection` must be a connection name, or null or empty for the storage connection.';
 
     /**
-     * `DeliveryTables` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it so the line is covered.
      *
      * @return void
      *
@@ -109,9 +104,7 @@ final class DeliveryTablesTest extends TestCase
     }
 
     /**
-     * Rows of `[setting, value]`: per setting, a capital, a leading digit, one
-     * character too many, a value that is no string, and a `null` set
-     * explicitly.
+     * Rows of `[setting, value]`: per setting, the values a table name refuses.
      *
      * @return iterable<string, array{0: string, 1: int|list<string>|string|null}>
      */
@@ -172,9 +165,8 @@ final class DeliveryTablesTest extends TestCase
     }
 
     /**
-     * With no outbox connection named, the outbox is on the storage connection:
-     * the default one, reported as `null`, when no storage connection is named
-     * either, and the named one when it is.
+     * With no outbox connection named, the outbox follows the storage
+     * connection, reported as `null` when neither is named.
      *
      * @return void
      */
@@ -250,9 +242,8 @@ final class DeliveryTablesTest extends TestCase
     }
 
     /**
-     * An outbox connection that is not a name fails closed, naming the setting
-     * and what an empty one means, rather than falling back to the storage
-     * connection, in both readers.
+     * An outbox connection that is not a name fails closed in both readers,
+     * naming the setting.
      *
      * @param  bool|int|list<string>  $value
      * @return void

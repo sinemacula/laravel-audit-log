@@ -8,9 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\EraseCommand;
@@ -33,20 +31,14 @@ use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyFieldReader;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:erase`: it erases the owner its arguments name,
- * prints the erasure, the owner's fingerprint and never the owner, and exits 0
- * for a complete, partial or already erased owner; a refusal, a block, a
- * pending delivery or a custom encrypter, exits 1 naming its reason, and
- * `--partial` and `--pending` go ahead over them; a failure exits 1 printing
- * its class and never its message; `--reapply` erases every owner a file names
- * and exits 0 once the restore is reconciled and 1 otherwise; and every
- * malformed argument or option exits 2 before any statement.
+ * Feature tests for `audit-log:erase`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,7 +48,7 @@ use Tests\TestCase;
 #[CoversClass(EraseCommand::class)]
 final class EraseCommandTest extends TestCase
 {
-    use MakesSubjectKeys, ReadsTheTrail;
+    use CountsStatements, MakesSubjectKeys, ReadsTheTrail;
 
     /** @var array<string, string> The options of the authority every erasure is asked for on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.erasure'];
@@ -74,10 +66,7 @@ final class EraseCommandTest extends TestCase
     private array $files = [];
 
     /**
-     * Freeze the clock, report to a recording handler, bind the package's key
-     * wrapper, encrypter and reader, define the card charge, and register the
-     * command with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, bind the package's services and register the command.
      *
      * @return void
      */
@@ -135,8 +124,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * An owner is erased, printed by its fingerprint and its counts, recorded,
-     * and exits 0; nothing printed names the owner.
+     * An owner is erased, printed by fingerprint and counts, and never named.
      *
      * @return void
      */
@@ -162,8 +150,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * An erasure a hold blocks is refused and exits 1, naming its reason and
-     * the hold; with `--partial` the kept key is reported and it exits 0.
+     * A held erasure exits 1 naming the hold; `--partial` goes ahead.
      *
      * @return void
      */
@@ -185,8 +172,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * Outbox rows older than the erasure refuse it and exit 1; with `--pending`
-     * it goes ahead, says it accepted them, and exits 0.
+     * Older outbox rows refuse an erasure; `--pending` goes ahead.
      *
      * @return void
      */
@@ -220,8 +206,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * A failure exits 1 and prints its class, never its message, which can
-     * carry a statement's bindings.
+     * A failure prints its class, never its message, which can carry bindings.
      *
      * @return void
      *
@@ -239,8 +224,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * An erasure whose record could not be written still erases, says so, and
-     * exits 0.
+     * An erasure whose record could not be written still erases and warns.
      *
      * @return void
      */
@@ -253,8 +237,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * `--reapply` erases every owner its file names, prints the counts and the
-     * reconciliation, and exits 0.
+     * `--reapply` erases every owner its file names and exits 0.
      *
      * @return void
      */
@@ -270,8 +253,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * A reapply that leaves the restore unreconciled, here over a line that
-     * names no owner, exits 1 and says why.
+     * A reapply that leaves the restore unreconciled exits 1 and says why.
      *
      * @return void
      */
@@ -300,8 +282,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[arguments and options, message]`: each malformed argument or
-     * option, and the refusal it prints.
+     * Rows of `[arguments and options, message]`: each malformed input.
      *
      * @return iterable<string, array{0: array<string, bool|string|null>, 1: string}>
      */
@@ -355,8 +336,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * Capture a charge of a card the owner owns, encrypted under the owner's
-     * key.
+     * Capture a card charge encrypted under the owner's key.
      *
      * @return void
      */
@@ -366,25 +346,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
-    }
-
-    /**
-     * Erase the owner every test erases, with the options given over the
-     * authority's, and return the exit code.
+     * Erase the test owner with the options given and return the exit code.
      *
      * @param  array<string, bool|string>  $options
      * @return int
@@ -395,8 +357,7 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
-     * Run the command with the arguments and options given, over the
-     * authority's, keep what it printed, and return its exit code.
+     * Run the command over the authority's options and return its exit code.
      *
      * @param  array<string, bool|string>  $given
      * @return int

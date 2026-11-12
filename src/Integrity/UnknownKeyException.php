@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * Thrown when a row names an integrity key the ring does not hold, so its
- * signature can be neither confirmed nor denied: the row is unverifiable, never
- * reported as tampered, until the key is configured again.
+ * Thrown when a row names an integrity key the ring does not hold: the row is
+ * unverifiable, never tampered, until the key is configured again.
  *
  * @api
  *

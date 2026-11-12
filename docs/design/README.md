@@ -1,10 +1,9 @@
 # Design Notes
 
 These notes document the package's record, definition, redaction, storage, integrity, lifecycle, privacy, delivery,
-reading, context, composition and testing contracts that are easy to miss if you only read the quick-start material or
-skim the test suite. Task-oriented guides are in `docs/guides`.
+reading, context, composition and testing contracts. Task-oriented guides are in `docs/guides`.
 
-Each note is intentionally short and follows the same structure:
+Each note follows the same structure:
 
 - `Purpose`
 - `Invariants`
@@ -14,7 +13,7 @@ Each note is intentionally short and follows the same structure:
 - `Authoritative Tests`
 - `Change Triggers`
 
-The current note set is:
+The notes:
 
 - `record-model.md`: the captured record, its envelope and versions, references and absent values, codes, outcomes,
   origin and provenance, normalisation and sanitising, the reserved metadata, the builder's single use, and how a record

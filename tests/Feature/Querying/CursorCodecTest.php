@@ -22,11 +22,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\TestCase;
 
 /**
- * Feature tests for the page cursor: its four parts, a MAC computed here from
- * the ring key's secret by the documented derivation, the order refusals are
- * made in, a payload parsed only once its MAC matches and then to exactly one
- * position, every bound field and every unknown or rotated key, no query, and
- * one message whatever the cause.
+ * Feature tests for the page cursor's format, binding and refusals.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,10 +61,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A cursor is `v1`, the key id, the payload and the MAC, each unpadded
-     * base64url: the payload the canonical encoding of the position, and the
-     * MAC HMAC-SHA256 of the binding's input under HKDF-SHA256 of the signing
-     * key's secret, with an empty salt and the cursor's own info string.
+     * A cursor is `v1`, key id, payload and MAC, each unpadded base64url.
      *
      * @return void
      */
@@ -102,9 +95,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * Without an explicit ring, a cursor is issued under the key derived from
-     * `app.key`, and one issued before `app.key` is rotated still opens while
-     * the old key stays among `app.previous_keys`.
+     * A derived ring signs with `app.key` and still opens under a previous key.
      *
      * @return void
      */
@@ -129,10 +120,8 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A cursor of more than 512 bytes is refused before any key is looked up,
-     * and one of exactly 512 is not refused for its length: the ring is made
-     * malformed, so a cursor that reaches it fails with the ring's own
-     * exception.
+     * A cursor over 512 bytes is refused before reaching the ring, which is
+     * made malformed to show it.
      *
      * @return void
      */
@@ -162,8 +151,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[cursor]`: cursors of the wrong shape, with a valid MAC part
-     * wherever one fits, refused before any key is looked up.
+     * Rows of `[cursor]`: cursors of the wrong shape.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -194,8 +182,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * Each malformed cursor is refused, with the one message, and before any
-     * key is looked up: the ring is made malformed, and is never read.
+     * A malformed cursor is refused with the one message before any key lookup.
      *
      * @param  string  $cursor
      * @return void
@@ -212,8 +199,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[MAC part]`: a MAC part that does not decode strictly to 32
-     * bytes.
+     * Rows of `[MAC part]`: MAC parts that do not decode strictly to 32 bytes.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -227,8 +213,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A MAC part that is not 32 bytes, strictly encoded, is refused under a key
-     * the ring holds.
+     * A MAC part that is not 32 strictly encoded bytes is refused.
      *
      * @param  string  $mac
      * @return void
@@ -243,9 +228,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[payload part]`: payloads that are not exactly a position's,
-     * each to be sent under a MAC the test computes, so only the payload's own
-     * parsing refuses it.
+     * Rows of `[payload part]`: payloads that are not exactly a position's.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -276,9 +259,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A payload under a MAC that matches is still parsed to exactly one key
-     * holding two strings, two levels deep, that make a position, and anything
-     * else is refused with the one message.
+     * A payload under a matching MAC is refused unless exactly a position.
      *
      * @param  string  $payload
      * @return void
@@ -295,8 +276,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A payload the test encodes itself, canonically, under a MAC it computes,
-     * opens: protects the check above from passing by refusing everything.
+     * A payload encoded here opens, so the check above cannot refuse all.
      *
      * @return void
      */
@@ -309,8 +289,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A cursor naming a key the ring does not hold is refused with the one
-     * message, never the ring's own exception, whatever its MAC.
+     * A cursor naming an unknown key is refused with the one message.
      *
      * @return void
      */
@@ -329,10 +308,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A cursor's payload swapped for another position's, its MAC kept, is
-     * refused by the MAC; so is a MAC with one byte changed, or one computed
-     * under the ring key's secret itself rather than the cursor key derived
-     * from it.
+     * A swapped payload, an altered MAC or one under the raw secret is refused.
      *
      * @return void
      */
@@ -361,8 +337,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[another binding]`: a read that differs from the one the cursor
-     * was issued for in exactly one bound field.
+     * Rows of `[another binding]`: reads differing in exactly one bound field.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Querying\CursorBinding}>
      */
@@ -382,8 +357,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A cursor opens for no read but its own: another viewer, purpose, set of
-     * filters, scope, page size, connection or table refuses it.
+     * A cursor opens for no read but its own.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Querying\CursorBinding  $other
      * @return void
@@ -426,9 +400,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * A cursor issued under a key that has since stopped signing, but stays in
-     * the ring to verify, still opens; once the key leaves the ring, it is
-     * refused like any other.
+     * A cursor from a previous key opens until the key leaves the ring.
      *
      * @return void
      */
@@ -458,8 +430,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * Every refusal, whatever its cause, has the one message, no code and no
-     * previous exception, so it tells a caller nothing of why.
+     * Every refusal has the one message, no code and no previous exception.
      *
      * @return void
      */
@@ -560,9 +531,7 @@ final class CursorCodecTest extends TestCase
     }
 
     /**
-     * The MAC part of a cursor, computed here: HMAC-SHA256 of the input under
-     * HKDF-SHA256 of the secret, 32 bytes, with the cursor's info string and an
-     * empty salt, as unpadded base64url.
+     * The MAC part: HMAC-SHA256 under HKDF-SHA256 of the secret, as base64url.
      *
      * @param  string  $secret
      * @param  string  $input

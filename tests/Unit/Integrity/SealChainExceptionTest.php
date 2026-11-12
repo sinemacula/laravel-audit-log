@@ -10,10 +10,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\SealChainException;
 
 /**
- * Unit tests for the seal chain exception: the message for a last seal whose
- * digest disagrees, for one of another log, and for a journal head that cannot
- * be read, the seal and finding each names, the class it specialises, and the
- * absence of any exception it could carry.
+ * Unit tests for the seal chain exception.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,9 +64,8 @@ final class SealChainExceptionTest extends TestCase
     }
 
     /**
-     * A journal behind the last seal's commitment is refused with the fixed
-     * message, naming the last seal, with the commitment finding, and carrying
-     * nothing else.
+     * A journal behind the last seal's commitment names that seal with the
+     * commitment finding.
      *
      * @return void
      */

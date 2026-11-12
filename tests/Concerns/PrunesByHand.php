@@ -14,11 +14,9 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 
 /**
- * Prunes sealed entries as retention would, without a run: their entries
- * deleted, their seals and members kept, and for each seal they fall in a prune
- * record signed under the seal key that sets exactly their positions, kept in
- * an in-memory ledger the container binds, so the tombstones and verification
- * both find them pruned.
+ * Prunes sealed entries as retention would, without a run: deletes the entries
+ * and records signed prune records for their seals in an in-memory ledger the
+ * container binds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

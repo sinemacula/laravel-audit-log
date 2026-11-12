@@ -9,9 +9,7 @@ use Illuminate\Foundation\Queue\Queueable;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 
 /**
- * A queued job a request dispatches onto the sync queue, which records an
- * activity and then fails, so the exception reaches the request that dispatched
- * it.
+ * A sync-queued job that records an activity, then fails.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -16,10 +16,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Unit tests for who reads the trail: a model, an authenticatable user and a
- * reference are each referenced exactly as capture references a user, the
- * viewer as given is kept for the access policy, and a viewer that cannot be
- * referenced is refused, never read as anonymous.
+ * Unit tests for who reads the trail.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,8 +46,7 @@ final class ViewerTest extends TestCase
     }
 
     /**
-     * A model viewer is referenced as capture references a user: its morph
-     * class and its key.
+     * A model viewer is referenced by its morph class and key, as capture does.
      *
      * @return void
      */
@@ -65,8 +61,7 @@ final class ViewerTest extends TestCase
     }
 
     /**
-     * Rows of `[identifier, the id the reference keeps]`: the identifiers an
-     * authenticatable user that is not a model is referenced by.
+     * Rows of `[identifier, kept id]` for an authenticatable that is no model.
      *
      * @return iterable<string, array{0: int|string, 1: string}>
      */
@@ -81,8 +76,7 @@ final class ViewerTest extends TestCase
     }
 
     /**
-     * An authenticatable user that is not a model is referenced by its class
-     * and its identifier.
+     * A non-model authenticatable is referenced by its class and identifier.
      *
      * @param  int|string  $identifier
      * @param  string  $id
@@ -109,8 +103,7 @@ final class ViewerTest extends TestCase
     }
 
     /**
-     * The viewer as the application gave it is kept, the same object, for the
-     * access policy.
+     * The viewer object as given is kept for the access policy.
      *
      * @return void
      */
@@ -124,8 +117,7 @@ final class ViewerTest extends TestCase
     }
 
     /**
-     * A model without a key cannot be referenced, so it is refused rather than
-     * read as anonymous.
+     * A model without a key is refused, never read as anonymous.
      *
      * @return void
      */
@@ -156,8 +148,7 @@ final class ViewerTest extends TestCase
     }
 
     /**
-     * An identifier that is neither a string nor an integer, or one a reference
-     * refuses, is refused, with a message that never names it.
+     * A bad identifier is refused with a message that never names it.
      *
      * @param  array<int, int>|bool|float|object|string|null  $identifier
      * @return void

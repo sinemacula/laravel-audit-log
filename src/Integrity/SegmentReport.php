@@ -9,19 +9,8 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 
 /**
- * What verification established about one segment of the log, the entries one
- * seal covers: its integrity and its anchoring as two separate answers, how
- * many member rows it found, the finding it reports and the first id that
- * finding was found at, and the digest it recomputed from the seal's fields.
- *
- * Of several findings, the segment reports the one of the most severe status,
- * then the first of those in the order `Finding` lists them, then the first id
- * in member order, the entry ids sorted bytewise. A segment whose missing
- * entries a valid prune record accounts for is `pruned` with no finding of its
- * own, unless another check fails. A segment awaiting its first anchoring is
- * `unanchored`, sealed so recently before the run began that a strict run does
- * not fail on it. The report names ids, statuses and counts, never a value of
- * an entry.
+ * What verification established about one segment, its integrity and anchoring
+ * apart. It names ids and counts, never an entry's value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,11 +63,8 @@ final readonly class SegmentReport
     ) {}
 
     /**
-     * The verdict of a segment's checks: its integrity status, the finding it
-     * reports and the first id that finding was found at, from each finding
-     * with the id it was found at and whether a valid prune record accounts for
-     * its missing entries. The most severe status wins, then the first finding
-     * in enum order, then the first id in member order.
+     * The segment's status, finding and first id: the most severe status wins,
+     * then the first finding in enum order, then the first id.
      *
      * @formatter:off
      *
@@ -110,9 +96,7 @@ final readonly class SegmentReport
     }
 
     /**
-     * The report as its line of output: the segment, its integrity and
-     * anchoring, whether it awaits its first anchoring, the member rows found,
-     * and the finding and first id, if any.
+     * The report as its line of output.
      *
      * @formatter:off
      *

@@ -19,50 +19,10 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * `audit-log:verify`: verifies the whole log, or the seals from `--from` to
- * `--to` by sequence, and prints a line for each seal as it is verified, then a
- * line for each finding of the run as a whole, then the summary: the exact
- * range checked, the head observed and the anchor's, the seals in each
- * integrity and anchoring status, those awaiting their first anchoring, the
- * lifecycle journal's section, and, for the whole log, the key store's section
- * and the unsealed entries. `--json` writes each line as one JSON object, the
- * summary last. `--sweep-first` runs `audit-log:seal --sweep` before verifying,
- * so an entry inserted late since the last sweep, such as a replayed record, is
- * sealed rather than found overdue; the scheduled verification sweeps first.
- * With `--json` the sweep prints nothing, and a sweep that fails has already
- * alarmed and makes the run exit non-zero.
+ * `--to`, with the lifecycle journal and, for the whole log, the key store.
  *
- * Every run, a ranged one included, verifies the whole lifecycle journal: its
- * chain, each row's signature and the transitions it makes, and each seal's
- * commitment to it. Its section says how many rows it read, the sequence of the
- * chain's head and the sequence the latest seal commits to, and what it finds
- * (`journal_gap`, `journal_signature`, `journal_commitment`,
- * `journal_transition`, `journal_key` and `journal_malformed`) is a finding of
- * the run, printed and failing it as any other.
- *
- * A run of the whole log also verifies the owners' key store: every key row's
- * signature and wrapping, what the journal says of its owner, and every key a
- * key use names. Its section says how many keys it verified and how many of
- * them were erased, and how many key findings it made, which are findings of
- * the run like any other; or that it was skipped, naming the bound field
- * encrypter that does not use the package's key store.
- *
- * A ranged run says it does not establish the integrity of the whole log. An
- * option that is not a sequence, a first seal after the last, an end beyond the
- * head and a range of a log with no seal are refused before anything is
- * verified, and exit with `INVALID`, alarming nothing.
- *
- * A run fails on any seal or finding that is tampered, incomplete or
- * unverifiable, and, with `--strict` and an anchor configured, on anything the
- * anchor does not confirm, a seal still awaiting its first anchoring excepted.
- * A failure prints its verdict, dispatches a payload-free
- * `IntegrityCheckFailed` whose maps list every status, and reports an
- * `IntegrityCheckFailedException`; a run that stops is named by the class of
- * what stopped it, and alarms the same way, with no finding. The verifier is
- * resolved inside the run, so an anchor that cannot be built from its settings
- * stops the run and alarms. Each exits non-zero. A listener that fails is
- * reported and hides nothing, and a reporter that fails hides nothing. Nothing
- * the package prints, dispatches or reports holds a message of a failure, a
- * statement, a binding or a value of an entry.
+ * Nothing printed, dispatched or reported holds a failure's message, a
+ * statement, a binding or an entry value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -87,9 +47,8 @@ final class VerifyCommand extends Command
     protected $description = 'Verify the audit log\'s seals, the entries they hold and their anchoring';
 
     /**
-     * Verify the range the options give, after a sweep when asked, printing
-     * each seal as it is verified, then the findings and the summary, and alarm
-     * on a failure.
+     * Verify the range the options give, after a sweep when asked, and alarm on
+     * a failure.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @param  \SineMacula\Laravel\AuditLog\Console\IntegrityAlarm  $alarm
@@ -124,8 +83,8 @@ final class VerifyCommand extends Command
     }
 
     /**
-     * Print the findings of the run and its summary, and alarm when it fails.
-     * The exit code the run earns is returned.
+     * Print the run's findings and summary, alarm when it fails, and return the
+     * exit code.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationSummary  $summary
      * @param  bool  $strict
@@ -194,9 +153,7 @@ final class VerifyCommand extends Command
     }
 
     /**
-     * Print each finding of the run, then the summary as text: the coverage,
-     * the counts, the journal, the key store and the unsealed entries of a run
-     * of the whole log or the caveat of a ranged run, and the verdict.
+     * Print each finding of the run, then the summary and the verdict as text.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationSummary  $summary
      * @param  bool  $strict
@@ -236,10 +193,8 @@ final class VerifyCommand extends Command
     }
 
     /**
-     * Print that the run stopped with a failure, named by its class alone,
-     * alarm with the seals verified before it stopped and no finding, and
-     * return the exit code a stopped run earns. A refused range instead prints
-     * why and alarms nothing.
+     * Print and alarm for a run that stopped, naming the failure by its class;
+     * a refused range prints why and alarms nothing.
      *
      * @param  \Throwable  $exception
      * @param  \SineMacula\Laravel\AuditLog\Integrity\VerificationTally  $tally
@@ -267,9 +222,8 @@ final class VerifyCommand extends Command
     }
 
     /**
-     * Sweep the table before verifying when asked, printing what the sweep did
-     * unless each line is JSON. Whether the sweep, if any, succeeded is
-     * returned; one that failed has already alarmed.
+     * Run the sweep first when asked, silently with `--json`, and return
+     * whether it succeeded; a failed sweep has already alarmed.
      *
      * @return bool
      */
@@ -324,10 +278,8 @@ final class VerifyCommand extends Command
     }
 
     /**
-     * Whether the failure is the range's own refusal: an end that is not a
-     * sequence, a first seal after the last, an end beyond the head the run
-     * observed, or a range of a log with no seal. Only the range raises one, so
-     * it is told apart by where it was raised, and never by its text.
+     * Whether the failure is the range's own refusal, told apart by where it
+     * was raised, never by its text.
      *
      * @param  \Throwable  $exception
      * @return bool

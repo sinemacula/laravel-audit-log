@@ -7,17 +7,11 @@ namespace SineMacula\Laravel\AuditLog\Events;
 use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 
 /**
- * Dispatched when an event could not be captured, carrying the class of the
- * event, the class of what translated it and the class of the exception the
- * capture failed with, and nothing else: no value of the event, of the record
- * it would have made or of the exception, whose message can hold them, reaches
- * a listener.
+ * Dispatched once for each event that could not be captured, carrying class
+ * names only, never a value of the event, its record or the exception.
  *
- * It is dispatched once for each capture that failed, synchronously as the
- * capture fails or, for a model change written after its commit, when that
- * commit runs the write. The capture itself returns nothing and the code that
- * dispatched the event goes on. The event is dispatched inside the write guard,
- * so a record made by a listener is refused rather than written.
+ * It is dispatched inside the write guard, so a record made by a listener is
+ * refused rather than written.
  *
  * @api
  *

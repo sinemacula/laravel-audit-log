@@ -14,9 +14,7 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 use Tests\Concerns\SearchesForSecrets;
 
 /**
- * Unit tests for the diagnostics of a failed write: the class, SQLSTATE, driver
- * code and connection alias each failure gives, what is dropped as malformed,
- * the cut of a long class name, and that nothing else of the failure is read.
+ * Unit tests for the diagnostics of a failed write, which hold nothing secret.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,8 +33,7 @@ final class WriteDiagnosticsTest extends TestCase
     private const string STORE = 'SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore';
 
     /**
-     * Any failure gives its class, with no SQLSTATE or driver code even when
-     * its code looks like one, and keeps what the caller gives.
+     * Any failure gives its class, with no SQLSTATE or driver code.
      *
      * @return void
      */
@@ -59,8 +56,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * With neither given, the connection and the destination are `null`, and so
-     * may the event code be, for a record that could not be read.
+     * The connection, the destination and the event code may each be `null`.
      *
      * @return void
      */
@@ -75,8 +71,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * An anonymous class is named by what it extends, never by the file that
-     * declares it or the NUL byte its own name holds.
+     * An anonymous class is named by its parent, never its path or NUL byte.
      *
      * @return void
      */
@@ -91,9 +86,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A query exception gives the SQLSTATE and the driver code of the PDO
-     * failure it wraps, and its own connection's alias, which replaces the one
-     * given.
+     * A query exception gives its PDO SQLSTATE, driver code and its own alias.
      *
      * @return void
      */
@@ -111,8 +104,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A query exception whose connection is not a string keeps the alias the
-     * caller gives.
+     * A query exception without a string alias keeps the one given.
      *
      * @return void
      */
@@ -144,8 +136,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A PDO failure that no query wraps, as a failed `SAVEPOINT` statement is,
-     * gives its SQLSTATE and driver code from its error information.
+     * A PDO failure with no query, as a failed `SAVEPOINT` is, gives its state.
      *
      * @return void
      */
@@ -168,9 +159,8 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * Rows of `[error information, code, the SQLSTATE given]`: the error
-     * information's state wins, the code stands in when that is not a state,
-     * and a state is five digits or capital letters given as a string.
+     * Rows of `[error information, code, SQLSTATE]`: error information wins,
+     * then the code.
      *
      * @return iterable<string, array{0: ?list<int|string|null>, 1: int|string, 2: ?string}>
      */
@@ -207,8 +197,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * Rows of `[driver code as the driver gives it, the driver code kept]`: an
-     * integer, or a string of digits that fits one, and nothing else.
+     * Rows of `[driver code given, kept]`: an integer or a digit string.
      *
      * @return iterable<string, array{0: int|string|null, 1: ?int}>
      */
@@ -247,8 +236,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A failure that is not a database failure gives no SQLSTATE, even when its
-     * code is set to one.
+     * A failure not from the database gives no SQLSTATE, whatever its code.
      *
      * @return void
      */
@@ -288,8 +276,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A class name longer than the cap is cut to it without splitting a
-     * character, so the name stays valid UTF-8; one at the cap is kept whole.
+     * A long class name is cut to the cap on a character boundary.
      *
      * @return void
      */
@@ -310,11 +297,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A query exception whose message, SQL, bindings, driver message,
-     * connection details and previous exception all hold the secret, and whose
-     * every accessor but the class, the code, the error information and the
-     * connection's alias throws, still gives its diagnostics, and they hold
-     * nothing of the secret.
+     * Only the class, code, error information and alias are read.
      *
      * @return void
      */
@@ -331,8 +314,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * The failure is marked sensitive on the way in and on each helper that
-     * reads it, so a stack trace through the diagnostics never shows it.
+     * The failure is marked sensitive on entry and on each helper.
      *
      * @return void
      */
@@ -361,8 +343,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A PDO failure with the error information and the code a driver would give
-     * it.
+     * A PDO failure with the error information and code a driver gives.
      *
      * @param  string  $message
      * @param  ?list<int|string|null>  $errorInfo
@@ -390,9 +371,7 @@ final class WriteDiagnosticsTest extends TestCase
     }
 
     /**
-     * A query exception holding the secret everywhere but its class, code,
-     * error information state and driver code, and alias, whose accessors of
-     * the rest throw.
+     * A query exception whose accessors of the secret throw.
      *
      * @param  \PDOException  $previous
      * @return \Illuminate\Database\QueryException

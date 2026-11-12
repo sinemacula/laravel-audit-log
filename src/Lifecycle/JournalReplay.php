@@ -17,32 +17,11 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The lifecycle journal as a destructive decision reads it: the whole chain
- * verified, and from the verified rows the holds still active, the policy
- * versions already journalled, and where to find the last prune run's finish.
+ * The lifecycle journal verified whole, and the active holds, policy versions
+ * and prune runs a destructive decision reads from it.
  *
- * `verify()` reads every row's small columns in sequence order, a page at a
- * time, through one `JournalChain`, so every signature, link and transition is
- * checked without reading a payload; the payloads of the policy, hold and
- * release rows alone are then read, a page of such rows to a statement, each
- * checked against the digest its verified row signs. The latest seal's
- * commitment, and the highest commitment any seal makes, must each name a row
- * of the chain, by its sequence and HMAC, so a journal truncated or restored
- * behind a seal is refused even after a later seal committed to the shorter
- * journal. `advance()` rereads the row at the replay's head, whose HMAC must be
- * unchanged, so a truncated or replaced tail is found even before a seal
- * commits to it, then reads the rows after it the same way. Any finding throws
- * a `JournalBrokenException` naming it and the row it was found at: the
- * operation fails closed. Runs and batches are not paired here, since their
- * payloads are not read and decide nothing destructive; `audit-log:verify`
- * pairs them.
- *
- * A replay is a value: `verify()`, `advance()` and `accept()` each return a new
- * replay over a copy of the chain and the holds, and leave the one they were
- * called on as it was. An operation keeps only the replay a committed
- * transaction returned, so a rolled-back or retried attempt never leaves it
- * ahead of the database. What a replay holds grows with the active holds, the
- * policy versions and the prune runs, never with the rest of the journal.
+ * A replay is a value: an operation keeps only the one a committed transaction
+ * returned, so a rolled-back attempt never leaves it ahead of the database.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,7 +30,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
  */
 final readonly class JournalReplay
 {
-    /** @var int Journal rows read by one statement, and payloads read by one statement. */
+    /** @var int Journal rows, or payloads, read by one statement. */
     public const int PAGE = 500;
 
     /** @var list<string> Every column of a journal row but its payload. */
@@ -76,23 +55,23 @@ final readonly class JournalReplay
      */
     private function __construct(
 
-        /** The signer each row's HMAC is verified with. */
+        /** Verifies each row's HMAC. */
         private JournalSigner $signer,
 
         /** The log every row must belong to. */
         private string $logId,
 
-        /** The chain the rows so far were read through; never changed once the replay holds it. */
+        /** The chain read so far; never changed once the replay holds it. */
         private JournalChain $chain,
 
-        /** The active holds, by id, in the order they were placed. */
+        /** The active holds by id, in placement order. */
         #[\SensitiveParameter]
         private array $holds,
 
         /** The policy versions journalled. */
         private array $policies,
 
-        /** The payload digest of every prune run row, by its sequence. */
+        /** The payload digest of every prune run row, by sequence. */
         private array $runs,
 
         /** The row this replay accepted last, or `null` when it accepted none. */
@@ -101,8 +80,7 @@ final readonly class JournalReplay
     ) {}
 
     /**
-     * A replay of nothing yet, of the log given, which `verify()` reads the
-     * journal into.
+     * An empty replay of the log, for `verify()` to read the journal into.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalSigner  $signer
      * @param  string  $logId
@@ -114,9 +92,8 @@ final readonly class JournalReplay
     }
 
     /**
-     * A replay of the whole journal, read through a fresh chain, and the latest
-     * seal's commitment and the highest commitment of any seal checked against
-     * it; whatever this replay holds is not used.
+     * A fresh replay of the whole journal, checked against the latest and the
+     * highest seal commitments.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return self
@@ -127,8 +104,7 @@ final readonly class JournalReplay
      */
     public function verify(Connection $connection): self
     {
-        // The seals are read first, so a seal made after the rows are read can
-        // never commit to a row this replay did not read
+        // Seals first, so no later seal can commit to a row this replay missed
         $seals   = $connection->table(IntegrityTables::checkpointsTable())->useWritePdo();
         $latest  = (clone $seals)->where('sequence', '>=', 1)->orderByDesc('sequence')->first(['id', 'journal_sequence', 'journal_head']);
         $highest = (clone $seals)->where('journal_sequence', '>=', 1)->orderByDesc('journal_sequence')->first(['id', 'journal_sequence', 'journal_head']);
@@ -147,9 +123,8 @@ final readonly class JournalReplay
     }
 
     /**
-     * The replay advanced to the journal's head: the row at this replay's head
-     * read again, whose HMAC must be the one verified, then every row after it
-     * read as `verify()` reads them.
+     * The replay advanced to the journal's head, refusing a head row whose HMAC
+     * changed.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return self
@@ -174,9 +149,8 @@ final readonly class JournalReplay
     }
 
     /**
-     * The replay with the signed row accepted after its head: a row the chain
-     * refuses throws, and nothing is accepted. `Journal::append()` alone calls
-     * this, with the row it is about to store.
+     * The replay with the signed row accepted after its head; only
+     * `Journal::append()` calls this.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
      * @return self
@@ -192,8 +166,7 @@ final readonly class JournalReplay
         $policies = $this->policies;
         $runs     = $this->runs;
 
-        // The chain reads it as it reads a stored row, without its payload, so
-        // runs and batches are not paired against rows it never paired
+        // Read without its payload, as the chain reads a stored row
         self::refuse($chain->accept(self::rowOf($row->toRow(), false)));
 
         if ($row->kind === JournalKind::PRUNE_RUN) {
@@ -218,8 +191,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * The active holds, in the order they were placed, each rebuilt from its
-     * verified row and payload.
+     * The active holds in placement order.
      *
      * @return list<\SineMacula\Laravel\AuditLog\Lifecycle\Hold>
      */
@@ -229,8 +201,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * The active hold of the id, or `null` when the chain holds none active
-     * under it: never placed, or released.
+     * The active hold of the id, or `null` when none is active under it.
      *
      * @param  string  $holdId
      * @return ?\SineMacula\Laravel\AuditLog\Lifecycle\Hold
@@ -241,8 +212,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * Whether the chain ever placed a hold of the id, active or released; hold
-     * ids are never reused.
+     * Whether the chain ever placed a hold of the id, active or released.
      *
      * @param  string  $holdId
      * @return bool
@@ -264,9 +234,8 @@ final readonly class JournalReplay
     }
 
     /**
-     * The payload of the last prune run row whose phase is `finish`, or `null`
-     * when no run has finished: the run rows read by their sequences, latest
-     * first, each payload checked against the digest its verified row signs.
+     * The verified payload of the last finished prune run, or `null` when none
+     * has finished.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -309,9 +278,8 @@ final readonly class JournalReplay
     }
 
     /**
-     * A new replay of this one and every row after the sequence, a page of
-     * small columns at a time, with the payloads of the policy, hold and
-     * release rows read a page of such rows at a time and replayed in order.
+     * A new replay of this one and every row after the sequence, reading only
+     * the payloads that decide something.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  int  $after
@@ -355,9 +323,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * Read a page of rows' small columns through the chain, in order, noting
-     * each prune run row's payload digest and keeping each policy, hold and
-     * release row for its payload, and return the last row's sequence, or
+     * Read a page of rows through the chain and return the last sequence, or
      * `null` for an empty page.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalChain  $chain
@@ -396,10 +362,8 @@ final readonly class JournalReplay
     }
 
     /**
-     * Refuse a latest seal whose commitment the chain contradicts: one half of
-     * it set without the other, a sequence past the head, or a head that is not
-     * the HMAC of the row at its sequence. A seal that committed to nothing is
-     * no contradiction: the rows may all have followed it.
+     * Refuse a seal whose commitment the chain contradicts, so a journal
+     * truncated or restored behind a seal is caught.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \stdClass  $seal
@@ -434,8 +398,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * Read the payloads of the pending rows in one statement, each checked
-     * against the digest its verified row signs, and replay them in sequence
+     * Read and verify the pending rows' payloads, replaying them in sequence
      * order.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
@@ -470,9 +433,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * Replay the verified row's payload: a policy's version is journalled, a
-     * hold is active and a release's hold is not. A payload that does not say
-     * what its row records is malformed.
+     * Replay the verified row's payload into the policies or the holds.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
      * @param  array<string, \SineMacula\Laravel\AuditLog\Lifecycle\Hold>  $holds
@@ -509,8 +470,7 @@ final readonly class JournalReplay
 
     /**
      * The hold the verified row and its payload place, or `null` when they do
-     * not describe one: the payload names the row's hold id, a scope, a basis
-     * and a review date, and the row an authority and a reason.
+     * not describe one.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -554,8 +514,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * The journal row of the stored columns, with its payload when asked; one
-     * that cannot be read is malformed, by its id when it has one.
+     * The journal row of the stored columns, with its payload when asked.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -575,7 +534,7 @@ final readonly class JournalReplay
     }
 
     /**
-     * Refuse the first of the findings the chain gave, if it gave any.
+     * Refuse the first of the chain's findings.
      *
      * @param  list<array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: ?string}>  $findings
      * @return void

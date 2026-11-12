@@ -9,21 +9,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The manifest of an export of the trail, as the canonical form of an `export`
- * artifact: the format, the viewer, the fingerprints of the scope and the
- * filters, the snapshot the entries were read in, the number of lines, the
- * first and last positions exported, and the digests of the file and of its
- * membership. An export of no line is valid, with no first or last position.
- *
- * The canonical form is the canonical encoding of a map of exactly the keys of
- * its version, `export_manifest_version` among them, so the same export always
- * gives the same bytes and the same digest. A first or last position is the
- * entry's recorded instant and its id, and both are `null` exactly when there
- * are no lines. Reading dispatches on the version a plaintext names, which this
- * release must read, holds it to exactly that version's keys and kinds, and
- * requires its bytes to be the canonical encoding of what they hold. Reading
- * never throws for a malformed plaintext and reads no catalogue, setting or
- * container: a manifest from an earlier release parses by its own version.
+ * The manifest of an export of the trail, as an `export` artifact's canonical
+ * form.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,7 +25,7 @@ final class ExportManifest
     /** @var list<int> The versions of the manifest this release reads. */
     public const array SUPPORTED_VERSIONS = [1];
 
-    /** @var list<string> The keys of a version 1 manifest, sorted: exactly these and nothing else. */
+    /** @var list<string> The keys of a version 1 manifest, sorted. */
     public const array KEYS = [
         'export_manifest_version',
         'file_sha256',
@@ -62,10 +49,10 @@ final class ExportManifest
     /** @var list<string> The keys of a manifest that are each a lower-case hex SHA-256. */
     private const array DIGESTS = ['file_sha256', 'membership_sha256', 'query_fingerprint', 'scope_fingerprint'];
 
-    /** @var list<string> The keys of the snapshot an export was read in, sorted: exactly these, each a non-empty string. */
+    /** @var list<string> The keys of the snapshot an export was read in, sorted. */
     private const array SNAPSHOT_KEYS = ['connection', 'consistency', 'database', 'engine', 'table'];
 
-    /** @var list<string> The keys of the viewer an export was made for, sorted: a reference's. */
+    /** @var list<string> The keys of the viewer an export was made for, sorted. */
     private const array VIEWER_KEYS = ['id', 'type'];
 
     /** @var int How deep a plaintext is decoded: the manifest, its snapshot, viewer and positions, and their values. */
@@ -83,14 +70,8 @@ final class ExportManifest
     private function __construct() {}
 
     /**
-     * The canonical manifest of an export, each value held to its kind: a
-     * format the package writes, 64 lower-case hex digests, a snapshot of
-     * exactly its five non-empty names, a count of lines from 0, and a first
-     * and last position, each a recorded instant and a lower-case UUID, both
-     * `null` exactly when there are no lines.
-     *
-     * Its parameters are the manifest's fields, each from its own stage of the
-     * export, so none groups naturally with another.
+     * The canonical manifest of an export, each value held to its kind; first
+     * and last are `null` exactly when there are no lines.
      *
      * @formatter:off
      *
@@ -153,8 +134,7 @@ final class ExportManifest
     }
 
     /**
-     * The manifest of an export as an `export` artifact: its canonical form,
-     * counted by its lines.
+     * The manifest of an export as an `export` artifact, counted by its lines.
      *
      * @formatter:off
      *
@@ -199,9 +179,8 @@ final class ExportManifest
     }
 
     /**
-     * The count, digest and fields of a plaintext that is exactly an export's
-     * canonical manifest, in a version this release reads, or `null` for any
-     * other plaintext. The count is its lines.
+     * The count, digest and fields of a plaintext that is exactly a supported
+     * export manifest's canonical form, or `null` for any other.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -227,8 +206,7 @@ final class ExportManifest
     }
 
     /**
-     * Why the fields are not a version 1 manifest, or `null` when they are:
-     * exactly its keys, then each value of its kind.
+     * Why the fields are not a version 1 manifest, or `null` when they are.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -291,8 +269,7 @@ final class ExportManifest
 
     /**
      * Why the first or the last position is not of its kind, or `null` when
-     * both are: `null` exactly when there are no lines, and otherwise a
-     * recorded instant and a lower-case UUID.
+     * both are.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -313,8 +290,8 @@ final class ExportManifest
     }
 
     /**
-     * Why the snapshot is not of its kind, or `null` when it is exactly its
-     * five names, each a non-empty string.
+     * Why the snapshot is not exactly its five non-empty names, or `null` when
+     * it is.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -339,8 +316,8 @@ final class ExportManifest
     }
 
     /**
-     * Why the viewer is not of its kind, or `null` when it is exactly a
-     * reference's id and type.
+     * Why the viewer is not exactly a reference's id and type, or `null` when
+     * it is.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -365,8 +342,8 @@ final class ExportManifest
     }
 
     /**
-     * Whether the value is a position: a list of exactly a recorded instant and
-     * a lower-case UUID.
+     * Whether the value is a position: a recorded instant and a lower-case
+     * UUID.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -401,8 +378,7 @@ final class ExportManifest
     }
 
     /**
-     * The plaintext decoded with objects as arrays, or `null` when it is not
-     * JSON or nests deeper than a manifest.
+     * The plaintext decoded, or `null` when it is not JSON or nests too deep.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

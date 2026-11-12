@@ -8,22 +8,8 @@ use Illuminate\Contracts\Encryption\StringEncrypter;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 
 /**
- * An artifact that travels with its record, of any kind: a bulk operation's
- * subjects, a disclosure's evidence or an export's manifest, described by its
- * id, kind, member count and digest, with its canonical form sealed under the
- * application's encrypter. A bulk operation counts at least one member; a
- * disclosure or an export may count none.
- *
- * The members are encrypted once, when the record is captured, and the same
- * ciphertext is carried by every retry, drain and replay, so a duplicate is
- * told by its description, never by its bytes. An attachment is not signed: it
- * is bound to its record by the descriptor the record signs at
- * `properties._audit.manifest`, which names exactly its id, kind, digest and
- * count.
- *
- * An attachment described from a stored entry's descriptor alone carries no
- * members: it keeps a record rebuilt for reading bound to its descriptor, and
- * is never stored, queued or spilled, since it has nothing to store.
+ * An artifact that travels with its record, its members encrypted once at
+ * capture and bound by the descriptor the record signs.
  *
  * @api
  *
@@ -38,10 +24,10 @@ final readonly class Attachment
     /** @var string SHA-256 as lower-case hex. */
     private const string DIGEST_PATTERN = '/\A[0-9a-f]{64}\z/';
 
-    /** @var list<string> The keys of a descriptor, sorted: exactly these and nothing else. */
+    /** @var list<string> The keys of a descriptor, sorted. */
     private const array DESCRIPTOR_KEYS = ['artifact_id', 'count', 'digest', 'kind'];
 
-    /** @var string The refusal of a descriptor that is not exactly its four keys, each of its type. */
+    /** @var string The refusal of a malformed descriptor. */
     private const string DESCRIPTOR_MESSAGE = 'A manifest descriptor is exactly a string `artifact_id`, `kind` and `digest` and an integer `count`.';
 
     /**
@@ -63,13 +49,13 @@ final readonly class Attachment
         /** What kind of artifact it is: `bulk`, `disclosure` or `export`. */
         public string $kind,
 
-        /** How many members it holds: at least one for `bulk`, and never fewer than none. */
+        /** How many members it holds; at least one for `bulk`. */
         public int $memberCount,
 
         /** Lower-case hex SHA-256 of the members' canonical form. */
         public string $digest,
 
-        /** The members' canonical form, encrypted under the application's encrypter; `null` only when described from an entry. */
+        /** The members' canonical form, encrypted; `null` when described from an entry. */
         #[\SensitiveParameter]
         public ?string $members,
     ) {
@@ -93,8 +79,7 @@ final readonly class Attachment
     }
 
     /**
-     * The manifest sealed: its canonical form encrypted once, beside its id,
-     * kind, count and digest.
+     * The manifest sealed, its canonical form encrypted once.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
      * @param  \Illuminate\Contracts\Encryption\StringEncrypter  $encrypter
@@ -111,8 +96,8 @@ final readonly class Attachment
     }
 
     /**
-     * The attachment a bundle's `attachment` object holds, each field of its
-     * type and checked as any other; its `entry_id` is the codec's to check.
+     * The attachment a bundle's `attachment` object holds; the codec checks its
+     * `entry_id`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -137,10 +122,8 @@ final readonly class Attachment
     }
 
     /**
-     * The attachment a stored entry's signed descriptor describes, for a record
-     * rebuilt to be read: its id, kind, count and digest, and no members, so it
-     * is never stored or encoded. A descriptor that is not exactly an artifact
-     * id, a kind, a digest and a count, each well formed, is refused.
+     * The attachment, without members, that a stored entry's signed descriptor
+     * describes, for a record rebuilt to be read.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -171,8 +154,7 @@ final readonly class Attachment
     }
 
     /**
-     * Whether the descriptor is exactly this attachment's: its artifact id,
-     * kind, digest and count, and nothing else.
+     * Whether the descriptor is exactly this attachment's and nothing more.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -187,8 +169,7 @@ final readonly class Attachment
     }
 
     /**
-     * Whether the attachment carries its sealed members, as every attachment
-     * but one described from its entry does.
+     * Whether the attachment carries its sealed members.
      *
      * @return bool
      */
@@ -198,9 +179,7 @@ final readonly class Attachment
     }
 
     /**
-     * The attachment as a bundle carries it, naming the entry it belongs to. An
-     * attachment described from its entry has no members to carry and is
-     * refused, so it is never stored, queued or spilled.
+     * The attachment as a bundle carries it; one without members is refused.
      *
      * @param  string  $entryId
      * @return array{id: string, entry_id: string, kind: string, member_count: int, digest: string, members: string}
@@ -224,7 +203,7 @@ final readonly class Attachment
     }
 
     /**
-     * The bundle's field, which must be a string; a missing field is not.
+     * The bundle's field, which must be a string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -242,8 +221,7 @@ final readonly class Attachment
     }
 
     /**
-     * The refusal of a malformed field, naming the field and what it must be,
-     * never its value.
+     * The refusal of a malformed field, naming the field but never its value.
      *
      * @param  string  $field
      * @param  string  $what

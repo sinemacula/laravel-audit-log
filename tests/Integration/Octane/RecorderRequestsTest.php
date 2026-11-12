@@ -51,12 +51,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * End-to-end tests for the recorder served by one Laravel Octane worker, which
- * resolves it at boot: it outlives every request and holds nothing of any, so
- * each record has the user, the client, the identifiers, the origin and the
- * context of its own request alone, on the database the worker's connection
- * reaches. A command or a sync job a request runs, on success and on failure,
- * leaves no frame behind, and a store bound later is the one used.
+ * End-to-end tests for a recorder resolved at boot and served by one Octane
+ * worker: each record holds its own request's state alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -150,8 +146,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Forget the trusted proxies, and roll back any transaction a test left
-     * open.
+     * Forget the trusted proxies and roll back a transaction a test left open.
      *
      * @return void
      */
@@ -171,9 +166,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A recorder resolved before the worker boots serves two requests with
-     * different users and headers, each record with its own, in the response
-     * and in the row.
+     * A recorder resolved at boot gives each request its own user and headers.
      *
      * @return void
      */
@@ -224,8 +217,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A guest's request after a user's has no actor and no guard: the guard's
-     * user went with the first request.
+     * A guest request after a user's has no actor and no guard.
      *
      * @return void
      */
@@ -242,8 +234,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * An explicit `by()` in one request settles that record alone: the next
-     * guest's record has no actor.
+     * An explicit `by()` in one request does not reach the next.
      *
      * @return void
      */
@@ -259,8 +250,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Each request generates its own request id, a UUID v7, which every record
-     * in that request shares and no other request has.
+     * Each request has its own UUID v7 request id, shared by its records.
      *
      * @return void
      */
@@ -284,9 +274,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * An identity the booted application made before the worker started serves
-     * no request: the first request replaces it, though it shares the booted
-     * application's scoped instances.
+     * An identity made at boot does not reach the first request.
      *
      * @return void
      */
@@ -308,9 +296,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A trusted inbound request id belongs to its request: the next, with no
-     * header, generates its own, and an untrusted peer's header is not believed
-     * for it either.
+     * A trusted inbound request id does not reach the next request.
      *
      * @return void
      */
@@ -330,8 +316,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A trace id belongs to its request: the next, with no `traceparent`, has
-     * none, since one is never generated.
+     * A trace id does not reach the next request; none is ever generated.
      *
      * @return void
      */
@@ -348,9 +333,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Each request has its own origin and context: neither the first's channel
-     * and route name nor its method reach the next, and nothing added to
-     * Context survives either.
+     * Neither the origin nor the context of one request reaches the next.
      *
      * @return void
      */
@@ -368,8 +351,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Each request has its own client: an address and a user agent the first
-     * sent are not kept for the next, which sends no user agent at all.
+     * A request's address and user agent do not reach the next.
      *
      * @return void
      */
@@ -390,8 +372,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A client a trusted proxy forwarded belongs to its request: the next, from
-     * the proxy with nothing forwarded, has the proxy's own address.
+     * A client forwarded by a trusted proxy does not reach the next request.
      *
      * @return void
      */
@@ -408,8 +389,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A command a request calls records in its own frame, gives the request
-     * back its own when it finishes, and leaves nothing for the next.
+     * A command records in its request's frame and leaves no frame behind.
      *
      * @return void
      */
@@ -431,8 +411,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A command that throws leaves its frame too: the request that caught the
-     * exception and the next are both back to their own.
+     * A command that throws also leaves no frame behind.
      *
      * @return void
      */
@@ -453,8 +432,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A sync job that fails records in its own frame, gives the request back
-     * its own, and leaves nothing for the next.
+     * A failing sync job records in its own frame and leaves none behind.
      *
      * @return void
      */
@@ -475,8 +453,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A sync job that fails with nothing to catch it becomes the request's
-     * error response, and the next request is still its own.
+     * An uncaught sync job failure is an error response; the next is its own.
      *
      * @return void
      */
@@ -492,10 +469,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A job that lost its guard records the actor it carried from the request
-     * that dispatched it. The request itself has no actor once the job has
-     * left, and neither the actor nor anything carried reaches the next
-     * request, even when that request dispatches the same job as a guest.
+     * A sync job's carried actor reaches neither its request nor the next.
      *
      * @return void
      */
@@ -525,8 +499,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A failure in a route that has a user, a record and Context becomes the
-     * request's error response, and the next request has none of them.
+     * A route's failure leaves no user, record or Context for the next request.
      *
      * @return void
      */
@@ -544,9 +517,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A record made once the response has gone keeps the request it belongs to,
-     * since the frame outlives the response, and the next request has its own
-     * identity and client.
+     * A record made after the response keeps its request; the next has its own.
      *
      * @return void
      */
@@ -567,9 +538,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A fake bound on the booted application after the recorder is resolved,
-     * and after the worker has booted, takes every request's record: the
-     * recorder keeps no store.
+     * A fake bound after the recorder resolves takes every record.
      *
      * @return void
      */
@@ -587,8 +556,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A fake bound in a request is that request's: the next writes to the
-     * database, because the store is resolved from the request's container.
+     * A fake bound in a request does not reach the next.
      *
      * @return void
      */
@@ -607,9 +575,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * An after-commit write resolves its store from the container of the
-     * request it was captured in, at the moment of the commit, and the next
-     * request's write is untouched.
+     * An after-commit write resolves its store from its request's container.
      *
      * @return void
      */
@@ -629,8 +595,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * A record rolled back in one request is never written, by it or by any
-     * later request's commit.
+     * A record rolled back in a request is never written.
      *
      * @return void
      */
@@ -649,8 +614,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Every request resolves the one recorder the booted application resolved,
-     * through the container and through the facade.
+     * Every request resolves the one recorder of the booted application.
      *
      * @return void
      */
@@ -669,8 +633,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Each request resolves frames and an identity of its own, and its frames
-     * hold the request it was given.
+     * Each request resolves its own frames and identity.
      *
      * @return void
      */
@@ -698,11 +661,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Walking everything the recorder holds finds its registration data and
-     * nothing else, during a request that ran a command and a job and after the
-     * worker is done with it: its registries and the frozen definitions the
-     * package registers at boot, but no request, no container, no guard and no
-     * frames.
+     * The recorder holds its registration data, and no request or frame.
      *
      * @SuppressWarnings("php:S3011")
      *
@@ -722,9 +681,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * The walk finds a request however it is held: through an array in a
-     * property, through a closure and through a parent's private property, so
-     * an empty walk cannot pass the test above.
+     * The walk finds a request however it is held, so an empty walk counts.
      *
      * @SuppressWarnings("php:S3011")
      *
@@ -756,10 +713,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * The listeners a dispatcher built with the booted application runs reach
-     * the request's container: a command and a job a request runs enter that
-     * request's frames, a job carries that request's id, and the booted
-     * application never resolves frames or an identity of its own.
+     * The listeners reach the request's container, never the booted one's.
      *
      * @return void
      */
@@ -981,9 +935,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Trust both clients' addresses as proxies, through the middleware that
-     * sets them on every request, and turn both trust flags on, on the booted
-     * application, so every request's configuration sandbox has them.
+     * Trust both clients as proxies on the booted application.
      *
      * @return void
      */
@@ -998,8 +950,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Resolve the recorder on the booted application, then boot the worker on
-     * it, and return the recorder.
+     * Resolve the recorder on the booted application, then boot the worker.
      *
      * @return \SineMacula\Laravel\AuditLog\Recorder
      */
@@ -1030,8 +981,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * The row the code wrote under the request id, decoded through the row
-     * codec; there must be exactly one.
+     * The one row the code wrote under the request id, decoded.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1049,9 +999,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * The request succeeded, and each field of the response's record is there
-     * with exactly the value expected: an error body or a missing key would
-     * otherwise pass for an expected `null`.
+     * Assert the request succeeded and each field is present with its value.
      *
      * @param  array<string, array<string, string>|string|null>  $expected
      * @param  \Illuminate\Testing\TestResponse<\Symfony\Component\HttpFoundation\Response>  $response
@@ -1072,9 +1020,8 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Each field of the decoded row has exactly the value expected. The context
-     * column decodes as an object, and an engine is free to reorder its keys,
-     * so a map is compared whatever its order.
+     * Assert each field of the row; context maps compare in any key order, as
+     * an engine may reorder them.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1138,8 +1085,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * The classes of every object reachable from the object, itself included,
-     * sorted and each once.
+     * The classes of every object reachable from the object, sorted, each once.
      *
      * @param  object  $object
      * @return list<class-string>
@@ -1188,9 +1134,7 @@ final class RecorderRequestsTest extends TestCase
     }
 
     /**
-     * Everything the object holds directly: every property of its class and its
-     * parents, whatever its visibility, or a closure's bound object and the
-     * variables it captured.
+     * Everything the object holds directly, whatever the visibility.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

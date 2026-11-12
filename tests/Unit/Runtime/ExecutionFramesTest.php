@@ -17,10 +17,8 @@ use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrame;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 
 /**
- * Unit tests for the stack of execution frames: the origin and request outside
- * any frame, the innermost frame deciding, leaving by the owner's identity, a
- * request replacing the stack and never being popped, and the two questions
- * that look beneath the innermost frame.
+ * Unit tests for the stack of execution frames, where the innermost frame
+ * decides.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -347,9 +345,8 @@ final class ExecutionFramesTest extends TestCase
     }
 
     /**
-     * Only an innermost request's frame gives the request, so a command or a
-     * job inside a request fills no client or route; it comes back when they
-     * end.
+     * Only an innermost request frame gives the request, which comes back when
+     * an inner command or job ends.
      *
      * @return void
      */
@@ -441,8 +438,7 @@ final class ExecutionFramesTest extends TestCase
     }
 
     /**
-     * The innermost job decides whose actor is carried, a job carrying none
-     * included, and the outer job's comes back when it ends. A command inside a
+     * The innermost job decides whose actor is carried, and a command inside a
      * job keeps the job's.
      *
      * @return void

@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\UnknownHoldException;
 
 /**
- * Unit tests for the exception a release of a hold that is not active is
- * refused with: its message names the hold id, and it carries no previous
- * exception.
+ * Unit tests for refusing to release a hold that is not active.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

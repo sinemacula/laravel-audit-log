@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\MarkerTransition;
 
 /**
- * Unit tests for the marker transition enum: its cases and their stored values,
- * each of which fits the marker's `transition` column.
+ * Unit tests for the marker transition enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

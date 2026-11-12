@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity\Enums;
 
 /**
- * What verification established about a segment's anchoring, apart from its
- * integrity: the anchor confirms the seal, the seal has not been confirmed, the
- * anchor could not be asked, or the anchor holds something else.
- *
- * A receipt kept beside a seal is only a cache, so one that does not confirm
- * leaves the seal `unanchored`, never `contradicted`: only what the anchor
- * itself returns can contradict the local log. With no anchor configured, every
- * segment is `unanchored`, which is then informational.
+ * A segment's anchoring as verification found it. A receipt that does not
+ * confirm leaves a seal `unanchored`: only the anchor can contradict it.
  *
  * @api
  *
@@ -35,7 +29,7 @@ enum AnchorStatus: string
     case CONTRADICTED = 'contradicted';
 
     /**
-     * Whether the status confirms the seal: only `anchored` does.
+     * Whether the status confirms the seal.
      *
      * @return bool
      */

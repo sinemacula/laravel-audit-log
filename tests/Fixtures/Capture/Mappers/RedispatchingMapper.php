@@ -9,9 +9,9 @@ use SineMacula\Laravel\AuditLog\Contracts\EventMapper;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 
 /**
- * A mapper that dispatches the event it is mapping again before returning the
- * builder it was given. It counts its runs, and refuses to run inside itself,
- * so a capture that recursed fails rather than running without end.
+ * A mapper that dispatches the event it is mapping again; it counts its runs
+ * and refuses to run inside itself, so a recursing capture fails instead of
+ * looping.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

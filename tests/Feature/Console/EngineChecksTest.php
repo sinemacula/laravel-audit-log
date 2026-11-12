@@ -22,10 +22,7 @@ use Tests\Fixtures\Database\VersionReportingPdo;
 use Tests\TestCase;
 
 /**
- * Feature tests for the engine checks of `audit-log:check`: the drivers and
- * MySQL versions the package supports, a connection that cannot be opened,
- * named without its message, and on MySQL strict mode and the entries table's
- * engine.
+ * Feature tests for the engine checks of `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,8 +51,7 @@ final class EngineChecksTest extends TestCase
     private const string NOT_INNODB = 'The entries table uses the MyISAM engine; it must use InnoDB.';
 
     /**
-     * Rows of `[a server version, whether it is supported]`: MySQL 8.4 and
-     * later only, and never MariaDB, however it reports itself.
+     * Rows of `[a server version, whether it is supported]`.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -90,8 +86,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * The engine the suite runs against is supported, opens, and on MySQL is
-     * strict and keeps the table on InnoDB.
+     * The suite's engine is supported, opens, and on MySQL is strict InnoDB.
      *
      * @return void
      */
@@ -102,8 +97,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * A table that does not exist is left to the schema checks, so the engine
-     * has no problem with it.
+     * A missing table is left to the schema checks.
      *
      * @return void
      */
@@ -113,8 +107,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * On MySQL a connection that is not in strict mode is a problem, since a
-     * value that does not fit would be cut instead of refused.
+     * On MySQL a non-strict connection is a problem, since it truncates values.
      *
      * @return void
      */
@@ -132,8 +125,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * On MySQL a connection in strict mode by `STRICT_ALL_TABLES` alone is
-     * strict.
+     * On MySQL `STRICT_ALL_TABLES` alone is strict.
      *
      * @return void
      */
@@ -149,8 +141,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * On MySQL an entries table on another engine than InnoDB is a problem,
-     * since its writes would not be transactional.
+     * On MySQL a non-InnoDB entries table is a problem: it is not atomic.
      *
      * @return void
      */
@@ -209,8 +200,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * A connection on a driver the package does not support is the one problem,
-     * and the connection is never opened to find it.
+     * An unsupported driver is a problem found without opening the connection.
      *
      * @param  string  $driver
      * @return void
@@ -235,8 +225,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * A connection that cannot be opened is the one problem, naming the class
-     * of what was thrown and never its message, which holds the path.
+     * An unopenable connection is named by its exception class alone.
      *
      * @return void
      */
@@ -254,8 +243,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * A server that refuses the connection is named by the class of what was
-     * thrown, never by the host or the user its message holds.
+     * A refused connection is named by its exception class, never host or user.
      *
      * @return void
      */
@@ -276,8 +264,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * A connection that cannot even be built, on a driver Laravel has no
-     * connection for, is a problem named by its class, never a crash.
+     * A connection Laravel cannot build is a problem, not a crash.
      *
      * @return void
      */
@@ -289,11 +276,8 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * Rows of
-     * `[the server's version, the session's SQL mode, the table's engine, the problems a MySQL server answering so has]`,
-     * checked on any engine the suite runs against through a MySQL connection
-     * whose PDO reports the version as a server would, so Laravel's stripping
-     * of MariaDB's markers is part of every row.
+     * Rows of `[version, SQL mode, table engine, problems]` a MySQL server
+     * answering so has; Laravel strips MariaDB's markers in every row.
      *
      * @return iterable<string, array{0: ?string, 1: ?string, 2: ?string, 3: list<string>}>
      */
@@ -318,8 +302,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * A MySQL connection's problems are those of its server's version, then of
-     * its session's SQL mode and its table's engine.
+     * A MySQL connection is checked for its version, then SQL mode and engine.
      *
      * @param  ?string  $version
      * @param  ?string  $modes
@@ -336,8 +319,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * Only a MySQL server too old to support, or MariaDB, stops the other
-     * checks; strict mode and the engine do not.
+     * Only an unsupported MySQL version or MariaDB stops the other checks.
      *
      * @return void
      */
@@ -355,10 +337,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * MariaDB reached through the `mysql` driver is refused by the version its
-     * server reports, although Laravel's `getServerVersion()` strips the
-     * markers that name it on that driver, which a check reading it would pass
-     * as MySQL 10.11.
+     * MariaDB is refused by its reported version, which Laravel strips.
      *
      * @return void
      */
@@ -371,9 +350,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * On MySQL a connection split between a writer and a replica is checked on
-     * its writer: a strict replica does not hide a writer that is not, since
-     * the writer is where the store's values are cut or refused.
+     * On MySQL the writer is checked, since that is where values are cut.
      *
      * @return void
      */
@@ -392,9 +369,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * On MySQL the session's SQL mode and the table's engine are one statement
-     * each, both asked of the writer and never of a replica, the engine read
-     * for the table under the connection's prefix.
+     * On MySQL the SQL mode and engine are one writer statement each.
      *
      * @return void
      */
@@ -424,8 +399,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * A connection on another supported driver is not asked about a SQL mode or
-     * an engine, and its server's version is not read as MySQL's.
+     * Another supported driver is asked nothing about SQL mode or engine.
      *
      * @param  string  $driver
      * @return void
@@ -454,11 +428,8 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * Register a connection named `fake` of the driver's own connection class,
-     * whose PDO reports the server's version as given and which answers the
-     * session's SQL mode and the table's engine as given, with no server behind
-     * it, and return the statements it is asked, each with whether it was asked
-     * of a replica.
+     * Register a fake MySQL-answering connection with no server behind it and
+     * return the statements it is asked, each flagged if asked of a replica.
      *
      * @param  string  $driver
      * @param  array{0: ?string, 1: ?string, 2: ?string}  $answers
@@ -493,8 +464,7 @@ final class EngineChecksTest extends TestCase
     }
 
     /**
-     * The row of a strict server keeping the table on InnoDB whose version
-     * alone is refused.
+     * The row of a strict InnoDB server refused for its version alone.
      *
      * @param  string  $version
      * @return array{0: string, 1: string, 2: string, 3: list<string>}

@@ -19,10 +19,7 @@ use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\TestCase;
 
 /**
- * Feature tests for the owner markers on the storage connection: an owner's
- * latest marker read by journal sequence alone, in one statement through the
- * writer, never another owner's, none for an owner with no marker, and a marker
- * inserted as its row.
+ * Feature tests for the owner markers on the storage connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,9 +48,8 @@ final class OwnerMarkersTest extends TestCase
     }
 
     /**
-     * The latest marker is the one of the greatest journal sequence, whatever
-     * order the markers were written in and whatever their times and ids say,
-     * read in one statement.
+     * The latest marker is the one of greatest journal sequence, whatever its
+     * time, id or write order, read in one statement.
      *
      * @return void
      */

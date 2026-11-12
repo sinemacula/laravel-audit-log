@@ -8,18 +8,12 @@ use Illuminate\Http\Request;
 use SineMacula\Laravel\AuditLog\Runtime\Enums\FrameKind;
 
 /**
- * One level of what the current code is running in: an HTTP request, an Artisan
- * command or a queued job, with the object that owns the frame and, where one
- * is known, the name of the command or job.
+ * One level of what the current code runs in, matched to its end by its owner's
+ * identity; holding the owner keeps that identity from being reused.
  *
- * The owner is what the event ending the frame carries, so a frame is matched
- * to its end by identity, and it is held for as long as the frame is, so its
- * identity cannot be reused meanwhile. Only a frame of a request has a request.
- *
- * A job's frame also keeps what the job started with, since neither stays where
- * Laravel leaves it: the actor it carried, because a sync job inside it
- * hydrates its own into the one Context, and the users a worker's guards still
- * held, because Laravel's guards outlive a job.
+ * A job's frame keeps the actor it carried and the users the guards held at its
+ * start, since a sync job overwrites Context and Laravel's guards outlive a
+ * job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,7 +43,7 @@ final readonly class ExecutionFrame
         /** The object that owns the frame, matched by identity when it ends. */
         public object $owner,
 
-        // The command or job's name, of which an empty one is kept as none.
+        // Not promoted: an empty name is kept as none.
         ?string $name = null,
 
         /** The request a frame of a request stands for. */
@@ -76,8 +70,8 @@ final readonly class ExecutionFrame
     }
 
     /**
-     * The frame of an Artisan command, owned by its input, the one object its
-     * starting and finishing events share.
+     * The frame of an Artisan command, owned by its input, which its start and
+     * finish events share.
      *
      * @param  object  $input
      * @param  string  $name

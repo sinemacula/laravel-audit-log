@@ -22,13 +22,7 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the record signer: signing under the ring's signing key and
- * version 1, pinned byte for byte by the golden entry; verification that fails
- * for a tampered column and only then answers `false`, refusing an unknown key,
- * an unsupported version, a missing column, a malformed HMAC and a value with
- * no canonical form; the source digest of an imported record, signed and
- * captured; and the captured-content digest that leaves out the finalisation
- * columns.
+ * Unit tests for the record signer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,10 +97,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * A record is signed under the ring's current key and integrity version 1,
-     * finalised at the time given, with the HMAC-SHA256 of its canonical
-     * envelope under that key's secret; with no explicit ring, the key derived
-     * from `app.key` signs.
+     * A record is signed under the ring's current key and version 1, falling
+     * back to the key derived from `app.key`.
      *
      * @return void
      */
@@ -130,9 +122,7 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * The golden v1 record, finalised under the golden key and time, signs byte
-     * for byte: its canonical envelope is the pinned string, and its HMAC is
-     * the pinned one, which PHP's own HMAC of that string confirms.
+     * The golden v1 record signs byte for byte to the pinned envelope and HMAC.
      *
      * @return void
      *
@@ -172,9 +162,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * The signed envelope is the finalised record's envelope without its HMAC:
-     * the 36 signed columns, the finalisation columns included, and nothing
-     * else.
+     * The signed envelope is the finalised record's 36 signed columns, without
+     * its HMAC.
      *
      * @return void
      */
@@ -211,8 +200,7 @@ final class RecordSignerTest extends TestCase
 
     /**
      * Rows of `[column, stored value]`: each signed column but the integrity
-     * version, changed, emptied to `null`, or given a value where it held
-     * `null`.
+     * version, altered.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -226,10 +214,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * Changing any signed column of a stored row fails verification, answering
-     * `false`; the integrity version is the one exception, since every other
-     * version is refused (see `testAnUnsupportedIntegrityVersionIsUnexpected()`
-     * and `testTheIntegrityVersionIsSigned()`).
+     * Changing any signed column fails verification; the integrity version is
+     * refused instead, so it is left out.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -280,9 +266,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * A nested property changed, nested list members reordered, and a time
-     * moved by one microsecond each fail verification, while nested keys
-     * reordered, as an engine may return them, still verify.
+     * A nested change, a list reorder or a microsecond fails verification;
+     * reordered keys still verify.
      *
      * @return void
      *
@@ -327,9 +312,7 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * A row signed under a key the ring does not hold is unverifiable, never
-     * tampered: the unknown key exception names the key id, and an explicit
-     * ring never verifies with the derived key.
+     * A row under a key the ring does not hold is unverifiable, never tampered.
      *
      * @return void
      */
@@ -349,9 +332,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * A row signed under a key that has since stopped signing still verifies:
-     * an explicit key whose `current` has moved on, and a key derived from an
-     * `app.key` that was rotated into `app.previous_keys`.
+     * A row signed under a retired key, explicit or rotated `app.key`, still
+     * verifies.
      *
      * @return void
      */
@@ -371,9 +353,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * An integrity version this release does not verify is refused, naming the
-     * version, or its type when it is not an integer, so a digit string or a
-     * `null` is never read as version 1.
+     * An unsupported integrity version is refused, so a digit string or `null`
+     * is never read as version 1.
      *
      * @return void
      */
@@ -516,8 +497,7 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * A malformed row is refused in a fixed order: a missing column, then the
-     * HMAC, then the integrity version, then the key id, then the ring's
+     * A malformed row is refused in order: column, HMAC, version, key id, then
      * unknown key.
      *
      * @return void
@@ -549,9 +529,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * A string property edited in the stored JSON into the bare number it
-     * spells decodes as a float, which has no canonical form: the row is
-     * malformed, never verified as the original string.
+     * A string property edited into a bare number decodes as a float, so the
+     * row is malformed, never verified.
      *
      * @return void
      *
@@ -630,9 +609,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * Verification never normalises: a user agent holding a control character
-     * the text sanitiser would strip, signed as it is, verifies as it is, and
-     * the row's bytes are left unchanged.
+     * Verification never normalises: a row with a control character verifies as
+     * signed.
      *
      * @return void
      */
@@ -653,9 +631,7 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * The captured-content digest leaves out the finalisation columns: the same
-     * record finalised at another time, under another key or version, has one
-     * digest, the SHA-256 of its captured envelope.
+     * The captured-content digest leaves out the finalisation columns.
      *
      * @return void
      */
@@ -763,11 +739,8 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * An imported record's source digest is signed and captured: its row
-     * verifies as signed, a digest edited, emptied or set where there was none
-     * fails verification and changes the captured digest, and two imports of
-     * one assertion, with their own ids and batches, have one source digest and
-     * two captured digests.
+     * An imported record's source digest is signed and captured; two imports of
+     * one assertion share it.
      *
      * @return void
      */
@@ -796,7 +769,7 @@ final class RecordSignerTest extends TestCase
 
     /**
      * The signed columns are the envelope without `hmac`, and the captured
-     * columns are the captured record's, both in table order (S1).
+     * columns are the captured record's, both in table order.
      *
      * @return void
      */
@@ -811,9 +784,7 @@ final class RecordSignerTest extends TestCase
     }
 
     /**
-     * Signing propagates refusals: a malformed ring signs and verifies nothing,
-     * and a time before the activity occurred is the finalised record's
-     * refusal.
+     * Signing propagates the ring's and the finalised record's refusals.
      *
      * @return void
      */

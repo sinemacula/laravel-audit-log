@@ -21,25 +21,7 @@ use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\TestCase;
 
 /**
- * Feature tests for the snapshot an export is read in: the statements each
- * engine begins it with, the dedicated session made from the storage
- * connection's reader, in-memory SQLite read on the storage connection itself,
- * the testing manager's base transaction read inside and named honestly, any
- * other open transaction refused, the commit or rollback that ends it and the
- * purge of the session, an engine the export cannot read refused before
- * anything, and what the manifest says of it.
- *
- * The sessions made here are of SQLite files, and in-memory SQLite is a
- * connection of its own, so they read the same on every engine the suite runs
- * against; the statements MySQL and PostgreSQL begin with are pinned as
- * strings, and run against those engines in the integration tests. The testing
- * manager's transaction and the semantics are read on the storage connection
- * itself, whichever engine it is.
- *
- * Whether a SQLite session is inside a transaction is asked of the database,
- * never of `PDO::inTransaction()`: before PHP 8.4, pdo_sqlite reports only a
- * transaction begun through `PDO::beginTransaction()`, never one a statement
- * begins, as the snapshot begins its own.
+ * Feature tests for the snapshot an export is read in, on each engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -82,11 +64,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Each engine begins its snapshot with its own statements: PostgreSQL a
-     * repeatable read, read-only transaction, MySQL a consistent snapshot,
-     * read-only, at repeatable read, and SQLite a deferred transaction, each
-     * named in the manifest. On SQLite the session runs exactly its begin, and
-     * its commit when the snapshot closes.
+     * Each engine opens its snapshot with its own statements.
      *
      * @return void
      */
@@ -119,11 +97,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Over a read/write split the session is a connection of its own, under a
-     * name of its own, with one PDO, configured with the reader's settings and
-     * with no `read` or `write` of its own, so it reads the replica, where a
-     * table the primary does not have is found. The storage connection is left
-     * as it was.
+     * Over a read/write split the session is dedicated and reads the replica.
      *
      * @return void
      */
@@ -154,9 +128,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * A storage connection configured by `url`, as `DB_URL` configures every
-     * stock connection, is read through the database the URL names, as the
-     * connection itself reads it, never the fallback `database` beside it.
+     * The session reads the database a `url` names, never the fallback.
      *
      * @return void
      */
@@ -192,9 +164,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * The session's configuration takes the host, port and database from the
-     * connection's `url` over the fallback keys, as the database manager does,
-     * then a reader's own settings, its `url` resolved too, over those.
+     * Session configuration resolves every `url` as the database manager does.
      *
      * @return void
      *
@@ -230,8 +200,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * A reader given as a list is one of them, picked as Laravel picks a
-     * reader.
+     * A list of readers gives one, picked as Laravel picks a reader.
      *
      * @return void
      */
@@ -255,8 +224,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * A storage connection made at run time, with no configuration of its own,
-     * is copied from the settings it was made with.
+     * A run-time connection is copied from the settings it was made with.
      *
      * @return void
      */
@@ -284,10 +252,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * In-memory SQLite, which a second PDO cannot see, is read on the storage
-     * connection itself, in a deferred transaction of its own begun outside
-     * Laravel's transaction count, committed when the snapshot closes, and the
-     * connection is kept.
+     * In-memory SQLite, invisible to a second PDO, shares the connection.
      *
      * @return void
      */
@@ -314,8 +279,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Rows of `[database]`: in-memory SQLite named as a URI, its mode first or
-     * after another parameter.
+     * Rows of `[database]`: in-memory SQLite named as a URI.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -328,8 +292,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * In-memory SQLite named as a URI is read on the storage connection itself,
-     * as `:memory:` is.
+     * In-memory SQLite named as a URI shares the connection as `:memory:` does.
      *
      * @param  string  $database
      * @return void
@@ -355,11 +318,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * A storage connection holding the testing manager's base transaction is
-     * read inside it: no session is made, nothing is begun or committed, a row
-     * the transaction holds is seen, the consistency is named
-     * `testing_transaction`, and the transaction is still open once the
-     * snapshot closes.
+     * A testing base transaction is read inside, named `testing_transaction`.
      *
      * @return void
      */
@@ -401,9 +360,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Any other transaction open on the storage connection is refused before
-     * anything, as the read gate refuses it: under Laravel's own manager, and
-     * one nested in the testing manager's base transaction.
+     * Any other transaction open on the storage connection is refused first.
      *
      * @return void
      */
@@ -448,8 +405,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Closing commits the snapshot and purges the session; closing again, or
-     * abandoning once closed, does nothing.
+     * Closing commits and purges the session; closing again does nothing.
      *
      * @return void
      */
@@ -473,9 +429,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Abandoning rolls the snapshot back and purges the session; abandoning
-     * again, or closing once abandoned, does nothing. A rollback that fails is
-     * swallowed, never thrown, and the session is purged all the same.
+     * Abandoning rolls back and purges, swallowing a failed rollback.
      *
      * @return void
      */
@@ -526,10 +480,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * On a connection that reports errors silently, a begin the connection says
-     * did not run is refused, so no snapshot is claimed that was not begun; a
-     * commit it says did not run is thrown once the snapshot is ended, and a
-     * rollback it says did not run is swallowed.
+     * A silent failed begin is refused, a commit thrown, a rollback swallowed.
      *
      * @return void
      */
@@ -572,8 +523,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * A session that cannot begin, here because its database file is gone, is
-     * purged before the failure is thrown, so no session is left behind.
+     * A session that cannot begin is purged before the failure is thrown.
      *
      * @return void
      */
@@ -596,9 +546,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * An engine other than MySQL, PostgreSQL and SQLite is refused before any
-     * session is made or any statement runs, naming the connection and the
-     * driver.
+     * An unsupported engine is refused before any session or statement.
      *
      * @return void
      */
@@ -623,9 +571,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * The engine can be checked alone, before anything else, running no
-     * statement and making no session: an engine the export reads passes, and
-     * any other is refused as opening refuses it.
+     * The engine can be checked alone, with no statement or session.
      *
      * @return void
      */
@@ -657,10 +603,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * The manifest names the storage connection, the snapshot's consistency,
-     * the database the session reads, the engine and the entries table as
-     * configured, on the storage connection's own engine and on a split of
-     * SQLite files.
+     * The manifest describes the snapshot on each engine.
      *
      * @return void
      */
@@ -704,8 +647,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Assert the snapshot is refused for the storage connection's open
-     * transaction, opening no session.
+     * Assert the snapshot is refused for the open transaction, with no session.
      *
      * @return void
      */
@@ -722,8 +664,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Assert the work is refused for a statement the connection says did not
-     * run.
+     * Assert the work is refused for a statement the connection did not run.
      *
      * @param  string  $statement
      * @param  \Closure(): void  $work
@@ -740,8 +681,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Make a connection to in-memory SQLite the storage connection, and return
-     * it.
+     * Make in-memory SQLite the storage connection, and return it.
      *
      * @return \Illuminate\Database\Connection
      */
@@ -756,8 +696,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Put the storage connection on the replica's file, a SQLite database a
-     * second PDO can open, with no read/write split.
+     * Put the storage connection on the replica's file, with no split.
      *
      * @return void
      */
@@ -806,8 +745,7 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Bind the manager Laravel's testing traits install, over the storage
-     * connection.
+     * Bind the transactions manager Laravel's testing traits install.
      *
      * @return void
      */
@@ -821,10 +759,8 @@ final class ExportSnapshotTest extends TestCase
     }
 
     /**
-     * Whether the SQLite connection is inside a transaction, asked of the
-     * database by beginning another: SQLite refuses a transaction within a
-     * transaction and changes nothing, and a begin it accepts is rolled back at
-     * once. The begin is sent through the PDO, so no statement is heard.
+     * Whether the SQLite connection is in a transaction, by trying to begin
+     * one: before PHP 8.4 `PDO::inTransaction()` misses one a statement began.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return bool

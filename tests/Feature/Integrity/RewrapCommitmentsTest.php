@@ -17,11 +17,7 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
- * Feature tests for what the journal's rewrap rows commit each key to: a key
- * no rewrap lists must be live; a listed key must hold the state, wrapping key
- * and wrapped key its latest listing left; a later listing replaces an
- * earlier one; and rows of other kinds, and listings that are not well formed,
- * commit nothing.
+ * Feature tests for what the journal's rewrap rows commit each key to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,9 +62,8 @@ final class RewrapCommitmentsTest extends TestCase
     }
 
     /**
-     * A listed key must be as its latest listing left it, whose later listing
-     * replaces the earlier: its state, its wrapping key id and its wrapped key
-     * each compared.
+     * A listed key must match its latest listing's state, wrapping key id and
+     * wrapped key; a later listing replaces an earlier one.
      *
      * @return void
      */

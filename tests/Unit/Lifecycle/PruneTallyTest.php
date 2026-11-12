@@ -21,11 +21,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the running count of a prune: committed chunks counted by
- * seal, category and tenant; the status a run ends with; the skipped seals,
- * bounded; the cursor and what is left; the time budget; a dry run's plan; and
- * the finish row, the progress and the result it ends with, bounded whatever
- * the tenants.
+ * Unit tests for the running count of a prune.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,9 +44,7 @@ final class PruneTallyTest extends TestCase
     private const string MIDNIGHT = '2026-11-04 15:00:00';
 
     /**
-     * A tally that counted nothing ends complete, with nothing deleted, its
-     * cursor and what it left as it started, and no plan unless it is a dry
-     * run.
+     * An empty tally is complete, deletes nothing and plans only on a dry run.
      *
      * @return void
      */
@@ -75,8 +69,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * A tally that has not started owes no finish row, and a dry run never
-     * starts one, so neither is committed.
+     * Only a started run owes its finish row, and a dry run never starts.
      *
      * @return void
      */
@@ -97,10 +90,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * Committed chunks are counted: the entries deleted, each seal deleted from
-     * once however many of its chunks did, the held and pending entries, the
-     * deletions per category of the planned rows, and the distinct tenants
-     * deleted from, a tenantless entry counting none.
+     * Committed chunks are counted by seal, category and tenant.
      *
      * @return void
      */
@@ -127,9 +117,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * Rows of `[what happens to the tally, the status it ends with]`: each
-     * thing that leaves work for the next run makes it partial, and a failure
-     * makes it failed whatever else happened.
+     * Rows of `[what happens, the status]`: left work is partial.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Lifecycle\PruneTally): void, 1: \SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus}>
      */
@@ -183,8 +171,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * Every skipped seal is counted, the first hundred named, and a seal with
-     * no id to name is counted alone.
+     * Every skipped seal is counted and the first hundred named.
      *
      * @return void
      */
@@ -207,8 +194,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * The cursor follows the last seal walked, and what is left is the seals
-     * from it to the boundary, never below none.
+     * The cursor follows the last seal; what is left never goes below none.
      *
      * @return void
      */
@@ -232,9 +218,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * The budget ends the given seconds after the start, and not a second
-     * before; an unlimited tally never runs out, and the batch is the one
-     * given.
+     * The budget ends the given seconds after the start, unless unlimited.
      *
      * @return void
      */
@@ -254,10 +238,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * A dry run's plan counts each eligible entry under its pair, in the order
-     * the pairs were first planned, with the pair's cut-off, and under its
-     * seal; a held entry is counted as held alone, and its pair is still
-     * listed.
+     * A dry run plans each eligible entry under its pair and its seal.
      *
      * @return void
      */
@@ -288,10 +269,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * The finish row carries the run's status, counts, cursor and what it left,
-     * its deletions per category bounded, the number of pairs decided, the
-     * distinct decisions with the pairs sharing each, sorted bytewise, and the
-     * digest of every pair's decision in the order first decided.
+     * The finish row carries the run, its bounded categories and its decisions.
      *
      * @return void
      */
@@ -335,10 +313,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * The finish row is bounded whatever the tenants: a thousand tenants of one
-     * category share one decision, counted as a thousand pairs, and more than a
-     * thousand distinct decisions keep the first thousand bytewise and count
-     * the rest.
+     * The finish row stays bounded however many tenants there are.
      *
      * @return void
      */
@@ -371,8 +346,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * The progress names the run, its status, what it deleted and its cursor,
-     * at the instant given.
+     * The progress names the run, status, deletions and cursor.
      *
      * @return void
      */
@@ -391,8 +365,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * The outcome of a committed chunk that deleted the ids and kept the counts
-     * given.
+     * The outcome of a committed chunk that deleted the ids given.
      *
      * @param  list<string>  $deleted
      * @param  int  $held
@@ -408,8 +381,7 @@ final class PruneTallyTest extends TestCase
     }
 
     /**
-     * The decisions of a run at the test's midnight under a policy keeping
-     * `security` a day and everything else thirty days.
+     * Decisions at the test's midnight: `security` kept a day, the rest thirty.
      *
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions
      */

@@ -8,9 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\ReleaseCommand;
@@ -19,18 +17,14 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:release`: it releases an active hold, prints it
- * and exits 0; exits 1 for a hold that is not active, recorded `denied`, and
- * for any other refusal, named by its class; refuses a hold id that is not a
- * lower-case UUID v7, and every malformed option, with exit 2 before any
- * statement; warns when the record could not be written; and prints no value of
- * the hold's scope.
+ * Feature tests for `audit-log:release`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,7 +34,7 @@ use Tests\TestCase;
 #[CoversClass(ReleaseCommand::class)]
 final class ReleaseCommandTest extends TestCase
 {
-    use ReadsTheTrail, WritesTheJournal;
+    use CountsStatements, ReadsTheTrail, WritesTheJournal;
 
     /** @var array<string, string> The options of the authority every release is asked for on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.closed'];
@@ -52,9 +46,7 @@ final class ReleaseCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, report to a recording handler, and register the command
-     * with the console kernel, which keeps the test independent of the
-     * provider.
+     * Freeze the clock, record reports, and register the command.
      *
      * @return void
      */
@@ -137,8 +129,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * A release refused at run time for any other reason, here on a journal
-     * that fails verification, exits 1, named by the class of the refusal.
+     * A release refused at run time for another reason exits 1, named by class.
      *
      * @return void
      */
@@ -153,8 +144,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[hold, options, message]`: a hold id that is not a lower-case
-     * UUID v7, and each malformed option, with the refusal it prints.
+     * Rows of `[hold, options, message]`: each malformed input.
      *
      * @return iterable<string, array{0: string, 1: array<string, string>, 2: string}>
      */
@@ -192,8 +182,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * A release whose record could not be written still releases, says so, and
-     * exits 0.
+     * A release whose record could not be written still releases and warns.
      *
      * @return void
      */
@@ -244,25 +233,7 @@ final class ReleaseCommandTest extends TestCase
     }
 
     /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
-    }
-
-    /**
-     * Run the command on the hold, with the options given over the authority's,
-     * keep what it printed, and return its exit code.
+     * Run the command on the hold and return its exit code.
      *
      * @param  string  $holdId
      * @param  array<string, string>  $options

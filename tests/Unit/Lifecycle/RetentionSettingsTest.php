@@ -11,11 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 
 /**
- * Unit tests for the retention settings: the default of each, the values each
- * accepts, the exact message each malformed value fails closed with, the maps
- * of days and the keys they refuse, the schedule that `null` or empty turns
- * off, whether anything is kept for less than forever, the retention shorter
- * than its preservation that is refused, and the reader of every setting.
+ * Unit tests for the retention settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,7 +21,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 #[CoversClass(RetentionSettings::class)]
 final class RetentionSettingsTest extends TestCase
 {
-    /** @var array<string, array{0: string, 1: int, 2: int, 3: int}> Each numeric reader, by its key under `audit-log.retention.`: its method, default, least and greatest value. */
+    /** @var array<string, array{0: string, 1: int, 2: int, 3: int}> Each numeric reader by key: its method, default, least and greatest value. */
     private const array NUMBERS = [
         'after_days'  => ['afterDays', 0, 0, 36500],
         'batch'       => ['batch', 1000, 100, 10000],
@@ -38,13 +34,11 @@ final class RetentionSettingsTest extends TestCase
     /** @var string The refusal of a key of a map that is no category, by the map's key. */
     private const string CATEGORY = '`audit-log.retention.%s` must be keyed by categories of 1 to 64 lower-case letters, digits or underscores, starting with a letter.';
 
-    /** @var string The refusal of a retention shorter than its preservation, by the retention's key and the category. */
+    /** @var string The refusal of a retention shorter than its preservation. */
     private const string CONFLICT = '`audit-log.retention.%s` is shorter than `audit-log.retention.preserve.%s`; a category must be kept at least as long as it is preserved.';
 
     /**
-     * Raise every PHP warning as an exception, so each setting is also read
-     * quietly: inside a Laravel application a warning becomes an exception,
-     * which would turn reading the settings into an error.
+     * Raise warnings as exceptions, as Laravel does, so settings read quietly.
      *
      * @return void
      */
@@ -72,9 +66,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * With nothing set, or none of the package's configuration at all, each
-     * setting takes its default: kept forever, no category's days and no
-     * preservation, chunks of 1000, fifty minutes, and half past three daily.
+     * With nothing set, every setting takes its default.
      *
      * @return void
      */
@@ -95,9 +87,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Each number accepts its least and greatest value, and each map accepts 0
-     * and 36500 days for a category, and every setting is read again on every
-     * call.
+     * Each setting accepts its bounds and is read again on every call.
      *
      * @return void
      */
@@ -125,8 +115,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Each number, and each day count of a map, accepts the digit string an
-     * environment line gives for it.
+     * Each number and day count accepts an environment digit string.
      *
      * @return void
      */
@@ -162,8 +151,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Each malformed day count is refused wherever it is set, naming the key
-     * that holds it: the default retention, or the category of a map.
+     * A malformed day count is refused, naming the key that holds it.
      *
      * @param  float|int|string  $value
      * @return void
@@ -191,8 +179,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: values of a map setting that are no map of categories,
-     * a list of days among them.
+     * Rows of `[value]`: map settings that are no map of categories.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -212,8 +199,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * A map setting that is a list, or no array at all, is refused, naming the
-     * map's key.
+     * A map setting that is a list or no array is refused, naming its key.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -235,8 +221,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[key]`: keys of a map that are not categories of the event
-     * definitions' grammar.
+     * Rows of `[key]`: map keys outside the category grammar.
      *
      * @return iterable<string, array{0: int|string}>
      */
@@ -256,8 +241,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * A key of a map that is not a category is refused, naming the map's key
-     * and never the bad key, which could be anything.
+     * A map key outside the category grammar is refused without naming the key.
      *
      * @param  int|string  $key
      * @return void
@@ -279,8 +263,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * The chunk size is refused below 100 and above 10000, or as anything that
-     * names no integer.
+     * The chunk size is refused below 100, above 10000 or as a non-integer.
      *
      * @return void
      */
@@ -298,8 +281,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * The time budget is refused below a minute and above a day, or as anything
-     * that names no integer.
+     * The time budget is refused below a minute, above a day or non-integer.
      *
      * @return void
      */
@@ -317,8 +299,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * The schedule is its default when unset, any cron expression as given,
-     * none when `null` or empty, and anything else is refused, naming the key.
+     * The schedule is a cron expression, or none when `null` or empty.
      *
      * @return void
      */
@@ -342,9 +323,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Something is kept for less than forever when the default retention is a
-     * number of days, or any category's is, and never when only a category kept
-     * forever or a preservation is set.
+     * Something is kept for less than forever only when a retention is finite.
      *
      * @return void
      */
@@ -359,9 +338,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[retention, the key the refusal names as the retention]`: a
-     * category kept for fewer days than it is preserved, by its own retention
-     * or by the default.
+     * Rows of `[retention, the key named]`: kept less than preserved.
      *
      * @return iterable<string, array{0: array<string, array<string, int>|int>, 1: string}>
      */
@@ -376,9 +353,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * A category kept for a finite time shorter than its preservation is
-     * refused by validation, naming the retention that applies and the
-     * preservation it falls short of.
+     * Validation refuses a retention shorter than its preservation.
      *
      * @param  array<string, array<string, int>|int>  $retention
      * @param  string  $kept
@@ -396,9 +371,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * A retention as long as its preservation, or longer, or forever, passes,
-     * and a category with its own retention kept forever passes beside a short
-     * default.
+     * A retention at least its preservation, or forever, passes.
      *
      * @return void
      */
@@ -421,8 +394,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * A category preserved forever must be kept forever: any finite retention
-     * of it, its own or the default, is refused, however long.
+     * A category preserved forever must be kept forever.
      *
      * @return void
      */
@@ -445,8 +417,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Validation reads every setting, so a malformed one fails it whichever it
-     * is, and passes when all are well formed.
+     * Validation reads every setting, failing on any malformed one.
      *
      * @return void
      */
@@ -523,8 +494,7 @@ final class RetentionSettingsTest extends TestCase
     }
 
     /**
-     * Retention settings over configuration holding the retention section
-     * given.
+     * Retention settings over the retention section given.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

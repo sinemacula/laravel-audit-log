@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationContext;
 
 /**
- * Unit tests for what every segment of one run shares: the anchor's head,
- * whether the anchor may be asked, and when the anchoring grace starts, kept as
- * given, with the anchor no longer asked once it has failed.
+ * Unit tests for what every segment of one run shares.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,9 +51,8 @@ final class VerificationContextTest extends TestCase
     }
 
     /**
-     * Without the anchor, the context no longer asks it, and keeps the head,
-     * the grace and whether the head settles anchoring; the original is
-     * unchanged.
+     * Without the anchor the context stops asking it and keeps the rest; the
+     * original is unchanged.
      *
      * @return void
      */
@@ -90,9 +87,8 @@ final class VerificationContextTest extends TestCase
     }
 
     /**
-     * A grace whose start or end is not an instant in the package's form is
-     * refused, since each is compared with signed times as text, and so is one
-     * that starts after it ends.
+     * A grace whose ends are not instants in the package's form, or that runs
+     * backwards, is refused.
      *
      * @param  string  $from
      * @param  string  $to
@@ -108,8 +104,7 @@ final class VerificationContextTest extends TestCase
     }
 
     /**
-     * A grace that starts and ends at the same instant is accepted, protecting
-     * against a mutation that refuses an equal start and end.
+     * A grace that starts and ends at the same instant is accepted.
      *
      * @return void
      */

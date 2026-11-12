@@ -8,24 +8,8 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * An encrypted fragment of a stored entry, as a field reader is handed it: the
- * entry it belongs to, where in the entry it sits, and the envelope it was
- * sealed in, its version, the reference of the key that sealed it and the
- * ciphertext.
- *
- * Where it sits is its segments: the column, `properties`, `context` or `ip`,
- * then each map key down to the envelope as a string and each list index as an
- * integer, the index the element is stored at, as the envelope's additional
- * data binds them; its path is their dotted form, `ip` for an address stored
- * under the `encrypt` mode. An envelope is held to the rules it was sealed
- * under: a version from 1 to the largest integer every reader of the stored
- * JSON keeps exactly, and a key reference and a ciphertext that are non-empty
- * clean text.
- *
- * Only the projector builds one, through `fromEnvelope()`, and only from an
- * entry whose row verified its signature under a scope that reveals the
- * encrypted fields, so no caller can hand a field reader an envelope of its own
- * through the read path.
+ * An encrypted fragment of a stored entry as a field reader is handed it; only
+ * the projector builds one, from a verified entry.
  *
  * @api
  *
@@ -72,10 +56,9 @@ final readonly class EncryptedField
     }
 
     /**
-     * The fragment the value holds at the segments when it is exactly an
-     * envelope, of exactly `v`, `k` and `c` in any order, each as its rules
-     * require, or `null` for any other value. Segments that are not a column
-     * followed by strings and indexes from 0 are refused.
+     * The fragment the value holds when it is exactly a well-formed envelope,
+     * or `null`; segments that are not a column then strings and indexes from 0
+     * are refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -100,10 +83,8 @@ final readonly class EncryptedField
     }
 
     /**
-     * Whether the value is exactly an envelope, of exactly `v`, `k` and `c` in
-     * any order, each as its rules require: what `fromEnvelope()` builds a
-     * field of. It builds nothing, so the projector can tell a malformed
-     * envelope from one it shows sealed without making a field of either.
+     * Whether the value is exactly a well-formed envelope, without building a
+     * field.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -118,14 +99,8 @@ final readonly class EncryptedField
     }
 
     /**
-     * The path segment of a member's key, as the writer that seals the member
-     * and the reader that opens it both name it: an integer key from 0, which
-     * every list index and every map key PHP reads as such is, as that integer,
-     * and any other key as a string. Both sides name a member by its PHP key
-     * rather than by its container's shape, which minimisation can change after
-     * a member is sealed: a map left holding the keys 0 to n - 1 in order is
-     * stored as a list, and the metadata turns a list of properties into a map,
-     * and either way its members' segments are the same.
+     * The path segment of a member's key, an integer from 0 or a string, so it
+     * holds whether minimisation stores the container as a list or a map.
      *
      * @param  int|string  $key
      * @return int|string
@@ -138,15 +113,17 @@ final readonly class EncryptedField
     }
 
     /**
-     * The envelope's version, key reference and ciphertext when it is exactly
-     * an envelope, each as its rules require, or `null`.
+     * The envelope's version, key reference and ciphertext when it is well
+     * formed, or `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<array-key, mixed>|\stdClass  $envelope
      * @return ?array{v: int, k: string, c: string}
+     *
+     * @internal
      */
-    private static function parts(#[\SensitiveParameter] array|\stdClass $envelope): ?array
+    public static function parts(#[\SensitiveParameter] array|\stdClass $envelope): ?array
     {
         $parts = $envelope instanceof \stdClass ? get_object_vars($envelope) : $envelope;
         $keys  = array_map(strval(...), array_keys($parts));
@@ -167,8 +144,8 @@ final readonly class EncryptedField
     }
 
     /**
-     * Whether the segments are a non-empty list whose first is a non-empty
-     * string, the column, and each of the rest a string or an integer from 0.
+     * Whether the segments are a non-empty column, then strings and integers
+     * from 0.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -209,8 +186,7 @@ final readonly class EncryptedField
     }
 
     /**
-     * Whether the value is a non-empty string that cleaning would not change,
-     * as the sealer required of it when it was stored.
+     * Whether the value is a non-empty string that cleaning would not change.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

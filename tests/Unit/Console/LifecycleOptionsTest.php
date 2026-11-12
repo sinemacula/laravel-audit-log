@@ -13,11 +13,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use Symfony\Component\Console\Input\ArrayInput;
 
 /**
- * Unit tests for the options the lifecycle commands share: the authority they
- * assert, the owner two arguments name, a reference split on its first colon,
- * an instant given as an ISO-8601 time or a date, and a hold's basis, each form
- * accepted and each refused, every refusal naming the option and never the
- * value.
+ * Unit tests for the options the lifecycle commands share, each refusal naming
+ * the option and never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -328,9 +325,7 @@ final class LifecycleOptionsTest extends TestCase
     }
 
     /**
-     * `LifecycleOptions` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *

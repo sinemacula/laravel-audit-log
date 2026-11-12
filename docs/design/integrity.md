@@ -2,16 +2,15 @@
 
 ## Purpose
 
-This note records the audit log's integrity, from one row to the whole log: how every entry is signed when it is
-finalised, the one canonical encoding the signature is computed over, the key ring that signs and verifies, and what
-verifying a stored row answers; then how entries are sealed into a signed chain of membership manifests, how each seal
-is anchored outside the application's writable trust boundary, how pruning keeps the log verifiable, and what
+This note records the audit log's integrity, from one row to the whole log: how each entry is signed over one canonical
+encoding, the key ring that signs and verifies, how entries are sealed into a signed chain of membership manifests and
+anchored outside the application's writable trust boundary, how pruning keeps the log verifiable, and what
 `audit-log:verify` establishes and reports. A row's signature shows that the row is as it was written; a seal shows
 which rows it holds and that none of them has since changed or gone; an anchor shows that the seals themselves were not
 rewritten or cut short; and a bulk entry's signed manifest shows that its artifact lists what the operation affected.
-The encodings, the columns and fields they cover and the keys that verify them are fixed here and versioned, by
-`integrity_version` for a row and by `v` and `algorithm_version` for a seal; a change to any of them is a new version,
-never an edit of the old one. What none of this promises is in `threat-model.md`.
+The encodings, the fields they cover and the keys that verify them are versioned, by `integrity_version` for a row and
+by `v` and `algorithm_version` for a seal; a change to any of them is a new version, never an edit of the old one. What
+none of this promises is in `threat-model.md`.
 
 ## Invariants
 
@@ -91,8 +90,8 @@ never an edit of the old one. What none of this promises is in `threat-model.md`
   keeps an uncommitted row out of every seal, and the bound is fixed once, when the run starts.
 - Each seal is one attempt in one outermost transaction on the storage connection's writer, and sealing refuses to run
   inside a transaction already open there. The attempt reads the head afresh, selects with a plain `SELECT`, never a
-  locking read, and inserts the checkpoint and then every member with parameterised `INSERT … VALUES`, never
-  `INSERT … SELECT` and never an insert that ignores a conflict, so a concurrent sealer's seal of the same sequence or
+  locking read, and inserts the checkpoint and then every member with parameterised `INSERT ... VALUES`, never
+  `INSERT ... SELECT` and never an insert that ignores a conflict, so a concurrent sealer's seal of the same sequence or
   the same entry fails the attempt as a whole.
 - An attempt lost to a concurrent writer (a duplicate seal or member, a deadlock, a serialisation failure, a lock wait
   timeout, PostgreSQL's `lock_timeout` by its SQLSTATE `55P03`, or a locked SQLite database, which covers its busy
@@ -206,7 +205,7 @@ UUID v7), `sequence`, `previous_id`, `previous_digest`, `member_count`, `members
   (`SealChainException::forJournalBehind()`, `journal_commitment`), so commitments never run backwards and a journal
   whose tail was removed or replaced is never sealed over.
 
-- `members_digest` is the lower-case hex SHA-256 of the canonical encoding of the list `[[entry_id, hmac], …]`, sorted
+- `members_digest` is the lower-case hex SHA-256 of the canonical encoding of the list `[[entry_id, hmac], ...]`, sorted
   bytewise by `entry_id` whatever order the members came in. A seal holds 1 to 50000 members.
 - The seal digest, kept in `seal_digest`, is the lower-case hex SHA-256 of the canonical encoding of the envelope, its
   keys sorted bytewise. `previous_digest` is the digest recomputed from the previous seal's fields, not its stored

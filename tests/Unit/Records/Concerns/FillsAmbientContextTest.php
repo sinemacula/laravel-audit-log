@@ -19,12 +19,7 @@ use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for how contributors fill a pending record's gaps: each filler
- * fills an open field and marks it, never replaces a given or filled one, and
- * leaves the field open when given `null`; an explicit setter replaces a filled
- * value; two-field fillers treat each field on their own; the values each
- * filler refuses, and the address none refuses; and the context's collision
- * diagnostics.
+ * Unit tests for how contributors fill a pending record's open fields.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -142,9 +137,8 @@ final class FillsAmbientContextTest extends TestCase
     }
 
     /**
-     * An explicit value given after a filler replaces the filled one, and an
-     * explicit `null` after it removes it, for the actor, the principal and the
-     * tenant: explicit beats contributor in either order.
+     * An explicit value or `null` given after a filler replaces the filled one,
+     * for the actor, the principal and the tenant.
      *
      * @return void
      */
@@ -167,9 +161,8 @@ final class FillsAmbientContextTest extends TestCase
     }
 
     /**
-     * A filler of two fields fills each on its own: a filled request id does
-     * not stop the trace id being filled, nor a filled user agent the IP
-     * address, and neither filled field is replaced.
+     * A filler of two fields fills each on its own, never replacing a filled
+     * one.
      *
      * @return void
      */
@@ -446,9 +439,8 @@ final class FillsAmbientContextTest extends TestCase
     }
 
     /**
-     * The context parameter is marked sensitive on the builder and on the view
-     * a contributor gets, and so is the helper a refused list is thrown from,
-     * so none of them appears in a stack trace.
+     * The context parameter is marked sensitive wherever a refusal can be
+     * thrown with it on the stack.
      *
      * @return void
      */
@@ -630,8 +622,7 @@ final class FillsAmbientContextTest extends TestCase
     }
 
     /**
-     * Values exactly as long as their columns, counted in characters, are kept
-     * (protects against an off-by-one mutation of each cap).
+     * Values exactly as long as their columns, counted in characters, are kept.
      *
      * @return void
      */
@@ -667,9 +658,8 @@ final class FillsAmbientContextTest extends TestCase
     }
 
     /**
-     * No address is refused, since a bad one must not lose the record: it is
-     * taken as it comes, and claims the field like any other, for minimising to
-     * store as `null` and diagnose.
+     * No address is refused, so a bad one cannot lose the record; minimising
+     * stores it as `null`.
      *
      * @param  string  $address
      * @return void

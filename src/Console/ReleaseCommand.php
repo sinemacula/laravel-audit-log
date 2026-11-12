@@ -10,19 +10,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\UnknownHoldException;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:release`: releases an active hold, journalled behind the lifecycle
- * lock and decided from the verified journal, never from the holds projection,
- * then records it.
- *
- * It trusts the shell, as every maintenance command does: `--by-type` and
- * `--by-id` assert the operator and prove nothing of who runs it, and the
- * boundary is the maintenance connection's credentials. It prints the hold
- * released, and a warning when its record could not be written, since
- * `audit-log:reconcile` writes it from the journal. A hold the journal does not
- * hold active, never placed or released already, is refused, recorded
- * `denied`, and exits 1, as does any other refusal, named by its class alone;
- * a hold id that is not a lower-case UUID v7, or an option it refuses, exits 2
- * before anything runs.
+ * `audit-log:release`: releases an active hold, decided from the verified
+ * journal and never the holds projection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,8 +36,7 @@ final class ReleaseCommand extends Command
     protected $description = 'Release a hold on audit entries';
 
     /**
-     * Release the hold the argument names, once the options are known to be
-     * well formed, and print it.
+     * Release the hold the argument names and print it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @return int

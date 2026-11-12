@@ -8,25 +8,8 @@ use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The immutable fields of one seal and their canonical digest, under seal
- * version 1.
- *
- * The digest is SHA-256 over the canonical encoding of all sixteen fields, so
- * the log, the place in the chain, the link to the seal before, the members,
- * the times, how the seal is signed and the lifecycle journal's head it commits
- * to are all covered, and none can change without changing it. The members
- * digest is SHA-256 over the canonical encoding of the members' entry ids and
- * HMACs, sorted bytewise by entry id, so it never depends on the order rows
- * were read in. The journal's head is its last row's sequence and HMAC, both
- * `null` when the journal had no row, so the journal is anchored exactly as the
- * entries are.
- *
- * Every field is checked as it is built, and a stored seal is read through
- * `fromRow()`, which refuses a missing or malformed column with an
- * `UnexpectedValueException` naming the column and never its value. Neither
- * enforces the genesis rule nor the pairing of the previous fields or of the
- * journal's: a stored seal that breaks them is evidence that verification must
- * report, not a row it may refuse to load.
+ * The immutable fields of one seal and their digest. A seal that breaks the
+ * genesis or pairing rules still loads, for verification to report.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,7 +54,7 @@ final readonly class SealEnvelope
         'journal_head'    => self::DIGEST_PATTERN,
     ];
 
-    /** @var list<string> The fields that may be `null`: the link to the seal before, which genesis has not, and the journal's head, which an empty journal has not. */
+    /** @var list<string> The fields that may be `null`: genesis has no link before, and an empty journal no head. */
     private const array NULLABLE = ['previous_id', 'previous_digest', 'journal_sequence', 'journal_head'];
 
     /** @var list<string> The fields that are instants. */
@@ -190,10 +173,8 @@ final readonly class SealEnvelope
     }
 
     /**
-     * The members digest: SHA-256, in hex, over the canonical encoding of the
-     * members' entry ids and HMACs, sorted bytewise by entry id. An empty list,
-     * an entry given twice, an id that is not a lower-case UUID and an HMAC
-     * that is not 64 lower-case hex are refused.
+     * The members digest: SHA-256 hex of the members' entry ids and HMACs,
+     * sorted by entry id so the order rows were read in never matters.
      *
      * @param  list<array{0: string, 1: string}>  $members
      * @return string
@@ -224,12 +205,8 @@ final readonly class SealEnvelope
     }
 
     /**
-     * The envelope of a decoded stored seal: each of the thirteen envelope
-     * columns is required, and the journal's two are read as `null` when they
-     * are not given; times are read in any form an engine returns and integers
-     * as an integer or its decimal string. A missing or malformed column is
-     * refused naming the column, never quoting its value; the digest and the
-     * signature are the caller's to read.
+     * The envelope of a decoded stored seal. Every column but the journal's two
+     * is required; a refusal names the column, never its value.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -284,8 +261,7 @@ final readonly class SealEnvelope
     }
 
     /**
-     * The sixteen fields the digest covers, each under its canonical key. The
-     * order is irrelevant: the canonical encoding sorts the keys.
+     * The sixteen fields the digest covers, each under its canonical key.
      *
      * @formatter:off
      *
@@ -320,8 +296,7 @@ final readonly class SealEnvelope
     }
 
     /**
-     * The seal digest: SHA-256, in hex, over the canonical encoding of the
-     * sixteen fields.
+     * The seal digest: SHA-256 hex of the sixteen fields.
      *
      * @return string
      *
@@ -333,9 +308,7 @@ final readonly class SealEnvelope
     }
 
     /**
-     * The row that stores the seal, in table order: the thirteen envelope
-     * columns and the journal's two, with times in the form the database
-     * stores, and the digest and signature given. The anchor columns are left
+     * The row that stores the seal, in table order; the anchor columns are left
      * out, so they start `null`.
      *
      * @formatter:off
@@ -382,10 +355,8 @@ final readonly class SealEnvelope
     }
 
     /**
-     * The first field, in the order given, that is malformed, or `null` when
-     * none is. The latest member's time is malformed, too, when it is before
-     * the earliest's; both are in one fixed form, so comparing them as strings
-     * orders them as instants.
+     * The first malformed field in the order given, or `null`. Both times are
+     * in one fixed form, so comparing them as strings orders them.
      *
      * @param  array<string, int|string|null>  $fields
      * @return ?string
@@ -419,9 +390,7 @@ final readonly class SealEnvelope
     }
 
     /**
-     * Whether the integer field's value is in its range: a supported algorithm
-     * version, a member count from 1 to the most members, or a sequence, the
-     * seal's or the journal's, of at least 1.
+     * Whether the integer field's value is in its range.
      *
      * @param  string  $field
      * @param  int  $value
@@ -437,8 +406,7 @@ final readonly class SealEnvelope
     }
 
     /**
-     * Refuse a member whose entry id is not a lower-case UUID, or whose HMAC is
-     * not 64 lower-case hex.
+     * Refuse a member whose entry id or HMAC is malformed.
      *
      * @param  string  $entryId
      * @param  string  $hmac

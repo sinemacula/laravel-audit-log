@@ -10,24 +10,11 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 
 /**
- * Classifies the lines of one chunk of an import as new, duplicates or
- * conflicts, by their source identity and the keyed digest of their source
- * assertion.
+ * Classifies a chunk's lines as new, duplicates or conflicts by source identity
+ * and the keyed digest of the source assertion; it never writes.
  *
- * The rows stored under each source's record ids are read from the storage
- * connection's writer, 500 ids to a statement, through the source's unique
- * index. A line whose source identity a stored row holds is a duplicate when
- * its digest, taken under the key the row names, is the row's `source_digest`,
- * and a conflict otherwise: a row whose key the ring no longer holds, or that
- * holds no digest, is a conflict, never a duplicate. Within the chunk, the
- * first line of a source identity no row holds is its candidate, new, and a
- * later one is a duplicate when its digest under the ring's signing key is the
- * candidate's and a conflict otherwise. The digest is taken before
- * minimisation, so a definition changed between two imports never turns a
- * repeated line into a conflict.
- *
- * It reads and never writes; a chunk classifies inside its own transaction, and
- * a dry run outside any.
+ * The digest is taken before minimisation, so a definition changed between two
+ * imports never turns a repeated line into a conflict.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,13 +33,12 @@ final readonly class ImportClassifier
      */
     public function __construct(
 
-        /** The digests the lines' assertions are compared by. */
+        /** Digests the lines' assertions for comparison. */
         private SourceDigest $digests,
     ) {}
 
     /**
-     * The digest of the line's source assertion under the ring's signing key,
-     * which a new row of it stores.
+     * The digest of the line's source assertion under the ring's signing key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine  $line
      * @return string
@@ -67,8 +53,7 @@ final readonly class ImportClassifier
     }
 
     /**
-     * The plan of the lines, in file order: new, duplicates of a stored row or
-     * of an earlier line, or conflicts with one.
+     * The plan of the lines in file order.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
@@ -114,10 +99,8 @@ final readonly class ImportClassifier
     }
 
     /**
-     * Whether the line repeats what is known under its source identity: the
-     * digest of its assertion under the key that digest was taken under is the
-     * known one. A known digest of a key the ring no longer holds, or none at
-     * all, never is.
+     * Whether the line's digest, under the known digest's key, matches it; an
+     * unknown key or a missing digest is a conflict.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportLine  $line
      * @param  string  $digest
@@ -145,9 +128,7 @@ final readonly class ImportClassifier
     }
 
     /**
-     * The digest and key of every stored row under the lines' source
-     * identities, by identity, read from the writer a source and 500 record ids
-     * to a statement.
+     * The digest and key of every stored row under the lines' identities.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\ImportLine>  $lines
@@ -159,8 +140,7 @@ final readonly class ImportClassifier
     {
         $sources = [];
 
-        // Keyed by prefixed text, so an id of digits never becomes an integer
-        // key and is never bound as a number
+        // Prefixed so a numeric id never becomes an integer key or binding
         foreach ($lines as $line) {
             $sources['s:' . $line->sourceId]['source']                            = $line->sourceId;
             $sources['s:' . $line->sourceId]['ids']['r:' . $line->sourceRecordId] = $line->sourceRecordId;
@@ -188,7 +168,7 @@ final readonly class ImportClassifier
     }
 
     /**
-     * The source identity of a source and a record id there, as one key.
+     * The source identity as one key.
      *
      * @param  string  $sourceId
      * @param  string  $sourceRecordId
@@ -202,7 +182,7 @@ final readonly class ImportClassifier
     }
 
     /**
-     * The stored value as text, or `null` for anything else.
+     * The stored value as text, or `null` when it is not a string.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

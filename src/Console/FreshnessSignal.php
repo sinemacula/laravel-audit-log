@@ -5,14 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Console;
 
 /**
- * One signal of `audit-log:check --freshness`: what it watches, its status, how
- * old what it last recorded is and how old it may grow, each in seconds, and
- * whether it is a problem.
- *
- * A status is `ok`, `stale`, `failed`, `never_run` or `not_applicable`. A stale
- * or failed signal is always a problem, and one that never ran is a problem
- * only when its run is scheduled and the log's oldest entry is older than its
- * limit. An age or a limit the signal has none of is `null`.
+ * One signal of `audit-log:check --freshness`: its status, its age and limit in
+ * seconds, and whether it fails the run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,8 +62,8 @@ final readonly class FreshnessSignal
     ) {}
 
     /**
-     * The signal as a line of text: its name, its status and, when it has them,
-     * its age, its limit and its cause.
+     * The signal as a line of text, with its age, limit and cause when it has
+     * them.
      *
      * @return string
      */
@@ -85,8 +79,7 @@ final readonly class FreshnessSignal
     }
 
     /**
-     * The signal's closed list of fields, for `--json`, which leaves out its
-     * cause.
+     * The signal's fields for `--json`, without its cause.
      *
      * @return array{signal: string, status: string, age_seconds: ?int, limit_seconds: ?int}
      */

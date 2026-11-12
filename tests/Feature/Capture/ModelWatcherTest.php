@@ -21,15 +21,8 @@ use Tests\Fixtures\Capture\Models\WatchedInvoiceRevision;
 use Tests\TestCase;
 
 /**
- * Feature tests for the model watcher: a watch registers its five definitions
- * and listens for its four Eloquent events by the exact class's names, every
- * check runs before anything is registered, an identical watch changes nothing,
- * a different one, a segment taken and a definition registered differently are
- * refused, nothing is watched once the watcher is frozen, and no model is
- * built.
- *
- * Each test makes a watcher of its own, on a catalogue and a dispatcher of its
- * own, so what it registers can be read back exactly.
+ * Feature tests for the model watcher, each on its own catalogue and
+ * dispatcher.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,8 +63,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * A watch registers the definition of each of the five changes, exactly as
-     * the watch defines it, and the watch is found by its class.
+     * A watch registers the five change definitions and is found by its class.
      *
      * @return void
      */
@@ -92,9 +84,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * A watch listens for the four Eloquent events by the names Eloquent
-     * dispatches them under for exactly the class, each to the listener's
-     * method of the same name, and for nothing of a subclass or a restore.
+     * A watch listens for the four Eloquent events of exactly the class.
      *
      * @return void
      */
@@ -115,8 +105,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * A class named in another case is watched, and listened for, as PHP
-     * declares it.
+     * A class named in another case is watched as PHP declares it.
      *
      * @return void
      */
@@ -129,8 +118,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * Watching a class again as it is watched, its fields in another order,
-     * changes nothing: one listener for each event, and the same definitions.
+     * Watching a class again the same way changes nothing.
      *
      * @return void
      */
@@ -167,8 +155,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * Watching another class under a segment a watched class's changes are
-     * stored under is refused, even a subclass, and registers nothing for it.
+     * Watching a class under a segment another watched class uses is refused.
      *
      * @return void
      */
@@ -190,9 +177,8 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * A watch whose definition the catalogue holds differently is refused
-     * before any definition is registered, so none of the five is, nothing is
-     * listened for, and the class is not watched.
+     * A watch whose definition the catalogue holds differently registers
+     * nothing.
      *
      * @return void
      */
@@ -215,8 +201,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * A definition the catalogue already holds exactly as the watch defines it
-     * is no conflict.
+     * A definition the catalogue already holds identically is no conflict.
      *
      * @return void
      */
@@ -250,8 +235,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * Once frozen the watcher refuses any watch and registers nothing; freezing
-     * again changes nothing.
+     * A frozen watcher refuses any watch; freezing again changes nothing.
      *
      * @return void
      */
@@ -276,8 +260,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * A catalogue frozen first refuses the first definition, so a watch then
-     * registers nothing either.
+     * A watch on a frozen catalogue registers nothing.
      *
      * @return void
      */
@@ -312,8 +295,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * Watching a model builds none: the class alone is read, so the class does
-     * not boot until a model of it is built.
+     * Watching a model builds none, so its class does not boot.
      *
      * @return void
      */
@@ -332,8 +314,7 @@ final class ModelWatcherTest extends TestCase
     }
 
     /**
-     * Assert the invoices are not watched: no watch, no listener and none of
-     * their definitions.
+     * Assert the invoices have no watch, listener or definition.
      *
      * @return void
      */

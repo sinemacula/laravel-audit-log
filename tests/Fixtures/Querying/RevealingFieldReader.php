@@ -10,11 +10,9 @@ use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
 use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 
 /**
- * A field reader that answers each path from the map it is given, a value to
- * reveal, a state to keep the field sealed in, or an exception to throw for the
- * whole page, and `encrypted` for any other path, as the package's own reader
- * does. It keeps every field it was asked for, in order, and how many pages it
- * was asked to read.
+ * A field reader that answers each path from its map, a value, a state or an
+ * exception for the whole page, and `encrypted` for any other path, keeping
+ * each field and page it was asked for.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

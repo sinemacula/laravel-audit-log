@@ -20,8 +20,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for a projected page: the entries it shows, in order, and what it
- * disclosed of their encrypted fragments, kept as given.
+ * Unit tests for a projected page.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +31,7 @@ use Tests\Fixtures\Records\RecordFactory;
 final class ProjectedPageTest extends TestCase
 {
     /**
-     * The entries and the disclosure are kept as given, the entries in their
-     * order.
+     * The entries, in order, and the disclosure are kept as given.
      *
      * @return void
      */

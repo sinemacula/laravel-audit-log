@@ -19,9 +19,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for an import's result: made from its tally, committed unless it
- * is a dry run, its record noted afterwards on a copy, the hold placed with its
- * start, and its map.
+ * Unit tests for an import's result.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,8 +39,7 @@ final class ImportResultTest extends TestCase
     private const string HOLD = '01932b4e-d000-7000-8000-000000000001';
 
     /**
-     * An import's result carries its tally's counts, its batch, status and
-     * hold, is committed, and is not yet recorded.
+     * A result carries its tally, batch, status and hold, and is committed.
      *
      * @return void
      */
@@ -84,8 +81,7 @@ final class ImportResultTest extends TestCase
     }
 
     /**
-     * A copy notes whether the record was written, and leaves everything else
-     * as it was.
+     * A copy notes whether the record was written and changes nothing else.
      *
      * @return void
      */
@@ -101,8 +97,7 @@ final class ImportResultTest extends TestCase
     }
 
     /**
-     * The map names every field under its snake-case key, the status by its
-     * value and the hold by its id.
+     * The map uses snake-case keys, the status and hold by value and id.
      *
      * @return void
      */

@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Records\DisclosureManifest;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 
 /**
- * Unit tests for a read's disclosure: its canonical form, keys sorted and
- * members in the order returned, the empty set, the members it refuses, and the
- * plaintexts it reads back, exactly the canonical form of a version it reads
- * and nothing else, without ever throwing.
+ * Unit tests for a read's disclosure manifest and the plaintexts it reads back.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,10 +40,8 @@ final class DisclosureManifestTest extends TestCase
     private const string AFTER = '2026-11-01T12:00:00.123456Z';
 
     /**
-     * The canonical form is the canonical encoding of the six keys, every map's
-     * keys sorted bytewise, the members in the order the read returned them,
-     * never sorted, the page the read was after, and a nonce; the manifest is a
-     * disclosure counted by its members and digested as its bytes.
+     * The canonical form is the canonical encoding of the six keys, with the
+     * members in the order the read returned them.
      *
      * @return void
      */
@@ -82,10 +77,8 @@ final class DisclosureManifestTest extends TestCase
     }
 
     /**
-     * Every disclosure carries a fresh nonce of 32 random bytes, so two
-     * identical disclosures, even of nothing, never share a digest, and a
-     * digest a reader is shown cannot be reversed by digesting candidate
-     * filters and scopes.
+     * Every disclosure carries a fresh 32-byte nonce, so its digest cannot be
+     * reversed by digesting candidate filters and scopes.
      *
      * @return void
      */
@@ -276,9 +269,8 @@ final class DisclosureManifestTest extends TestCase
     }
 
     /**
-     * Members that are not a list, or a member that is not exactly an entry's
-     * lower-case UUID and its HMAC of 64 lower-case hex, are refused, naming
-     * what the members must be.
+     * Members that are not a list of lower-case UUIDs and HMACs are refused,
+     * naming what the members must be.
      *
      * @param  list<array{0: string, 1: string}>  $members
      * @param  string  $message
@@ -294,9 +286,8 @@ final class DisclosureManifestTest extends TestCase
     }
 
     /**
-     * Rows of `[filters, scope]`: filters or a scope the reader would not read
-     * back: a list where a map belongs, or nesting deeper than a disclosure is
-     * read to.
+     * Rows of `[filters, scope]`: a list where a map belongs, or nesting deeper
+     * than a disclosure is read to.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -385,9 +376,7 @@ final class DisclosureManifestTest extends TestCase
     }
 
     /**
-     * `DisclosureManifest` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *

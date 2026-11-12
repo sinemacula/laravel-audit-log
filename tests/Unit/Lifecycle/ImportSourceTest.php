@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportSource;
 
 /**
- * Unit tests for an import's source: the format each named constructor reads,
- * the file it must name, and the source id and region it refuses, each refusal
- * naming the problem, never the file's content or the field's value.
+ * Unit tests for an import's source.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,8 +74,7 @@ final class ImportSourceTest extends TestCase
     }
 
     /**
-     * A file of this package's export is read in the export format, its region
-     * optional.
+     * An export file is read in the export format, its region optional.
      *
      * @return void
      */
@@ -132,8 +129,7 @@ final class ImportSourceTest extends TestCase
     }
 
     /**
-     * A file this process cannot read is refused, and the refusal never names
-     * what the file holds.
+     * An unreadable file is refused without naming its content.
      *
      * @return void
      */
@@ -155,8 +151,7 @@ final class ImportSourceTest extends TestCase
     }
 
     /**
-     * Rows of `[source id]`: ids that are empty, longer than 64 characters or
-     * not clean text.
+     * Rows of `[source id]`: empty, over 64 characters or not clean text.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -171,8 +166,7 @@ final class ImportSourceTest extends TestCase
     }
 
     /**
-     * Each refused source id fails closed, naming the field and its limit and
-     * never its value.
+     * A refused source id names the field and its limit, never its value.
      *
      * @param  string  $sourceId
      * @return void
@@ -199,8 +193,7 @@ final class ImportSourceTest extends TestCase
     }
 
     /**
-     * Rows of `[region]`: regions that are empty, longer than 32 characters or
-     * not clean text.
+     * Rows of `[region]`: empty, longer than 32 characters or not clean text.
      *
      * @return iterable<string, array{0: string}>
      */

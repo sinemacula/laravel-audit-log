@@ -42,13 +42,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for prunes racing holds, releases and each other, in
- * processes of their own, on whichever engine the suite runs against and on a
- * file database on SQLite. A hold committed before a chunk's lock keeps its
- * entries, and one that waits for the chunk's lock comes after the deletion it
- * could not stop; a release is ordered the same way; and two prunes over one
- * seal never cover a member twice. Whatever the order, no entry held before a
- * chunk's lock is ever deleted.
+ * Integration tests for prunes racing holds, releases and each other in
+ * processes of their own; no entry held before a chunk's lock is deleted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,9 +87,7 @@ final class PruneRacesTest extends TestCase
     private const int CHUNK_LOCK = 2;
 
     /**
-     * Stop the clock, keep every category thirty days, bind the configured
-     * policy and the journal's ledger, and store and seal the entries every
-     * race is over.
+     * Stop the clock, keep thirty days, and store and seal the entries.
      *
      * @return void
      */
@@ -119,8 +112,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * Put the clock back, and remove what the children shared once the
-     * migrations have rolled back.
+     * Put the clock back and remove the children's files after the rollback.
      *
      * @return void
      */
@@ -135,10 +127,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * A hold racing a prune never loses a held entry: committed before the
-     * chunk's lock, it keeps every entry; asking for the lock while the chunk
-     * holds it, it commits after the chunk deleted the entries it did not yet
-     * hold, so no entry held before the chunk's lock is deleted either way.
+     * A hold racing a prune never loses an entry held before the chunk's lock.
      *
      * @return void
      */
@@ -170,9 +159,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * Two prunes racing over one seal never cover a member twice: whichever
-     * chunk takes the lock second finds the entries gone and covers nothing,
-     * and the seal verifies `pruned`.
+     * Two prunes racing over one seal never cover a member twice.
      *
      * @return void
      */
@@ -198,10 +185,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * A release racing a prune is ordered by the lock: asking for it while the
-     * chunk holds it, it commits after the chunk kept the held entries, which
-     * the next prune deletes; committed before the chunk's lock, the chunk
-     * deletes them.
+     * A release racing a prune is ordered by the lock.
      *
      * @return void
      */
@@ -252,13 +236,8 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * Start a child that prunes, its clock the seconds given ahead of the
-     * test's, opening the arrival gate of the phase and waiting for its release
-     * gate either just before its first chunk's lock or, once it holds that
-     * lock, before it goes on, briefly keeping the lock after it is released;
-     * it writes its result to the results file. Its clock is moved on so the
-     * ids it draws in its own millisecond never repeat those this process
-     * draws, which a fork would otherwise share.
+     * Start a pruning child that meets the phase's gates at the chunk lock; its
+     * clock runs ahead so its ids never repeat this process's.
      *
      * @param  bool  $before
      * @param  string  $phase
@@ -282,8 +261,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * Run the pause just before the first chunk's lock statement, or just after
-     * it, inside the chunk's transaction.
+     * Run the pause just before or just after the first chunk's lock.
      *
      * @param  bool  $before
      * @param  \Closure(): void  $pause
@@ -311,9 +289,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * Open the phase's release gate just before this process's next lock
-     * statement runs, so the pruning child goes on to commit while this process
-     * waits for the lock.
+     * Open the phase's release gate as this process asks for the lock.
      *
      * @param  string  $phase
      * @return void
@@ -335,9 +311,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * Assert no entry held before a chunk's lock was deleted: every prune row
-     * of the journal follows every hold row whose hold matched one of the
-     * entries it deleted, or the hold was released before it.
+     * Assert no entry held before a chunk's lock was deleted.
      *
      * @return void
      */
@@ -405,8 +379,7 @@ final class PruneRacesTest extends TestCase
     }
 
     /**
-     * Verify the whole log through the journal's ledger, and return each
-     * segment's integrity, in order.
+     * Verify the whole log through the journal's ledger.
      *
      * @return list<string>
      */

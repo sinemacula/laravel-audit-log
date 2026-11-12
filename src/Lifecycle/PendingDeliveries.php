@@ -11,26 +11,11 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Which entries a prune must keep because their delivery is not finished: an
- * outbox row, pending, claimed or failed, or a destination's receipt not yet
- * delivered. Pruning never removes the memory of a record a destination may
- * still need, so a failed delivery keeps its entry until it is replayed and
- * delivered.
+ * Which entries a prune must keep because their delivery is not finished, read
+ * after the chunk's lifecycle lock.
  *
- * Both are read after the chunk's lifecycle lock, never before. The receipts
- * live beside the entries, so they are read inside the chunk's transaction on
- * the maintenance connection. The outbox is read there too when it lives on the
- * storage database; when it lives on another connection it is read through that
- * connection's writer, in a read of its own, which cannot join the transaction.
- * That read is sound: an outbox row for an id already stored and sealed is only
- * ever written again by a restore, and the drain checks every row it claims
- * against the pruned ids. Each statement names at most 500 ids.
- *
- * An erasure asks how many outbox rows were created before it started, failed
- * ones included, since a failed row is replayed: every row, not only its
- * owner's, because the outbox's payload is sealed under the application's key
- * and its owners cannot be told without opening every row. It is read the same
- * way, after the erasure's lock.
+ * An outbox on another connection is read through its writer outside the
+ * transaction; a stored, sealed id is only queued again by a restore.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,9 +40,7 @@ final readonly class PendingDeliveries
 
     /**
      * The ids among those given that have an outbox row, each once, in the
-     * order given: read through the maintenance connection, inside its
-     * transaction, when the outbox lives on the storage database, and through
-     * the outbox connection's writer otherwise.
+     * order given.
      *
      * @param  \Illuminate\Database\Connection  $maintenance
      * @param  list<string>  $ids
@@ -74,10 +57,8 @@ final readonly class PendingDeliveries
     }
 
     /**
-     * How many outbox rows were created before the instant, in the package's
-     * form, failed and claimed ones included: read through the maintenance
-     * connection, inside its transaction, when the outbox lives on the storage
-     * database, and through the outbox connection's writer otherwise.
+     * How many outbox rows of any owner were created before the instant; the
+     * payloads are sealed, so owners cannot be told apart.
      *
      * @param  \Illuminate\Database\Connection  $maintenance
      * @param  string  $instant
@@ -96,8 +77,7 @@ final readonly class PendingDeliveries
 
     /**
      * The ids among those given that have a receipt not yet delivered, each
-     * once, in the order given, read through the connection given, inside the
-     * chunk's transaction.
+     * once, in the order given.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<string>  $ids
@@ -119,9 +99,8 @@ final readonly class PendingDeliveries
     }
 
     /**
-     * The connection the outbox is read through: the maintenance connection
-     * when the outbox lives on the storage database, and the outbox connection
-     * otherwise.
+     * The maintenance connection when the outbox lives on the storage database,
+     * the outbox connection otherwise.
      *
      * @param  \Illuminate\Database\Connection  $maintenance
      * @return \Illuminate\Database\Connection
@@ -136,8 +115,7 @@ final readonly class PendingDeliveries
     }
 
     /**
-     * The ids among those given that the read of each chunk of them returns,
-     * each once, in the order given.
+     * The ids the read of each chunk returns, each once, in the order given.
      *
      * @param  list<string>  $ids
      * @param  \Closure(list<string>): array<array-key, scalar|null>  $read

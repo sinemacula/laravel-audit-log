@@ -8,10 +8,9 @@ use Cron\CronExpression;
 use Illuminate\Contracts\Config\Repository;
 
 /**
- * Reads a schedule setting the one way every settings class reads one: its
- * default when it is not set, `null` when it is `null` or empty, so nothing is
- * scheduled, and otherwise a cron expression. Anything else fails closed with
- * an `InvalidArgumentException` naming the key and never the value.
+ * Reads a schedule setting: its default when unset, `null` when `null` or
+ * empty, and otherwise a cron expression; anything else fails closed naming the
+ * key, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

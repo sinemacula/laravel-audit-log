@@ -7,24 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Records;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * A captured record once finalised: the record, when it was recorded, and the
- * integrity fields it is signed with, produced once so that every retry reuses
- * it byte for byte.
- *
- * Signing and storage read it, in the envelope of the entries table; it is
- * never rebuilt from a stored row, which is evidence to verify, not a record to
- * write again. A record kept in the outbox or a spill line is rebuilt only by
- * the codec, after its signature verifies: it keeps the JSON columns as they
- * were decoded, and returns them from `toArray()`, because an array cannot tell
- * `{}` from `[]`, nor a map with sequential numeric keys from a list, and the
- * captured record holds arrays. Those columns are copied whole on the way in
- * and on the way out, because a decoded object is shared by reference, and a
- * destination changing what it was handed must not change what was signed for
- * the next destination. It is never recorded before the activity occurred, and
- * its id, and its import batch id when it has one, are lower-case UUIDs, the
- * one form every engine stores and returns, so a record signed on one engine
- * verifies on every other; its source digest, when it has one, is 64 lower-case
- * hexadecimal characters, which its column holds exactly.
+ * A captured record once finalised with its recorded time and integrity fields,
+ * made once so every retry reuses it byte for byte.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,7 +68,7 @@ final readonly class FinalisedRecord
         /** HMAC-SHA256, lower-case hex, over every other column. */
         public string $hmac,
 
-        /** The JSON columns as a verified envelope decoded them, or `null` for a record finalised here. */
+        /** The JSON columns as decoded, since an array cannot tell `{}` from `[]`; `null` if finalised here. */
         private ?array $decodedColumns = null,
     ) {
         self::checkTime($record, $recordedAt);
@@ -94,10 +78,8 @@ final readonly class FinalisedRecord
     }
 
     /**
-     * The finalised record a verified envelope holds: the record rebuilt from
-     * it, its finalisation as signed, and its JSON columns as they were
-     * decoded, which `toArray()` returns in place of the record's arrays. It is
-     * checked like any other.
+     * The finalised record a verified envelope holds, keeping its JSON columns
+     * as they were decoded.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -130,10 +112,8 @@ final readonly class FinalisedRecord
     }
 
     /**
-     * The finalised record as its envelope: the captured record's fields, then
-     * when it was recorded and its integrity fields, each under its stored key,
-     * in the order of the entries table. A record rebuilt from an envelope
-     * gives a copy of its JSON columns as they were decoded, in their places.
+     * The finalised record as its envelope, in the order of the entries table,
+     * with a copy of any decoded JSON columns.
      *
      * @formatter:off
      *
@@ -160,8 +140,8 @@ final readonly class FinalisedRecord
     }
 
     /**
-     * A deep copy of a decoded JSON value, keeping every object an object and
-     * every array an array, so nothing of the copy is shared with the original.
+     * A deep copy of a decoded JSON value, since objects are shared by
+     * reference and a destination must not change what was signed.
      *
      * @template TValue
      *
@@ -192,9 +172,8 @@ final readonly class FinalisedRecord
     }
 
     /**
-     * Refuse a time that is not in the package's form, or that is before the
-     * activity occurred; both are in the same fixed form, so comparing them as
-     * strings orders them as instants.
+     * Refuse a time not in the package's form or before the activity occurred;
+     * the fixed form makes string order instant order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  string  $recordedAt
@@ -239,8 +218,7 @@ final readonly class FinalisedRecord
     }
 
     /**
-     * Refuse a record whose id, or whose import batch id when it has one, is
-     * not a lower-case UUID.
+     * Refuse a record whose id or import batch id is not a lower-case UUID.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return void
@@ -259,8 +237,7 @@ final readonly class FinalisedRecord
     }
 
     /**
-     * Refuse a source digest, when there is one, that is not 64 lower-case
-     * hexadecimal characters.
+     * Refuse a source digest that is not 64 lower-case hex.
      *
      * @param  ?string  $sourceDigest
      * @return void
@@ -277,10 +254,8 @@ final readonly class FinalisedRecord
     }
 
     /**
-     * Refuse a UUID column whose value is not a lower-case UUID: PostgreSQL's
-     * `uuid` columns refuse any other form and return lower case, so a record
-     * signed over another form would be stored on one engine and refused on
-     * another, or stored and never verify.
+     * Refuse a value that is not a lower-case UUID: PostgreSQL's `uuid` refuses
+     * other forms and returns lower case, so another would never verify.
      *
      * @param  'id'|'import_batch_id'  $column
      * @param  string  $value

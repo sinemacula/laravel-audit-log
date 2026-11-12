@@ -17,26 +17,13 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Projects a finalised record as one OCSF event of version 1.9.0 of the Open
- * Cybersecurity Schema Framework, in canonical JSON on one line.
+ * Projects a finalised record as one OCSF 1.9.0 event, in canonical JSON on one
+ * line.
  *
- * Every event carries `time` (when the activity occurred, in epoch
- * milliseconds), `severity_id` and `severity` (1 Informational for a success, 3
- * Medium for a failure, 4 High for a denial), `status_id` and `status` (1
- * Success, or 2 Failure with the outcome and any reason in `status_detail`),
- * the reason in `status_code`, the event code as `message`, `type_uid`, and
- * `metadata`: the record's id as `uid`, the code as `event_code`, the schema
- * version, the product, the time the activity occurred as stored, the time it
- * was recorded, and the correlation id and tenant when the record has them.
- *
- * A code is classified only by the mapper its definition names, and only for
- * records of the definition's version; the mapper's attributes are checked
- * before they are added. Any other record is a Base Event, unknown activity in
- * no category, whose `unmapped` attribute holds every column with a value that
- * is not carried elsewhere, so a classification is never invented and nothing
- * the record says is lost. The HMAC, its key id and the integrity version are
- * left out: the event is a projection, never the integrity artefact. The same
- * record always gives the same bytes.
+ * A record is classified only by its definition's mapper, for the definition's
+ * version; any other is a Base Event whose `unmapped` holds every column
+ * carried nowhere else. The integrity fields are left out: the event is a
+ * projection.
  *
  * @api
  *
@@ -189,7 +176,7 @@ final readonly class OcsfFormatter implements AuditFormatter
         [$severityId, $severity] = self::severityOf($captured->outcome);
 
         return [
-            'time'        => self::epochMilliseconds($captured->occurredAt),
+            'time'        => StoredTime::epochMilliseconds($captured->occurredAt),
             'severity_id' => $severityId,
             'severity'    => $severity,
             ...self::status($captured->outcome, $captured->reason),
@@ -250,7 +237,7 @@ final readonly class OcsfFormatter implements AuditFormatter
             'version'         => self::VERSION,
             'product'         => self::PRODUCT,
             'original_time'   => $captured->occurredAt,
-            'logged_time'     => self::epochMilliseconds($record->recordedAt),
+            'logged_time'     => StoredTime::epochMilliseconds($record->recordedAt),
             'correlation_uid' => $captured->correlationId,
             'tenant_uid'      => $captured->tenantType === null || $captured->tenantId === null ? null : $captured->tenantType . ':' . $captured->tenantId,
         ];
@@ -329,21 +316,5 @@ final readonly class OcsfFormatter implements AuditFormatter
         $value = $attributes[$key] ?? null;
 
         return is_int($value) ? $value : throw new \UnexpectedValueException(sprintf('The OCSF mapper `%s` must return `%s` as an integer.', $mapper, $key));
-    }
-
-    /**
-     * The instant, in the package's form, in milliseconds since the Unix epoch.
-     *
-     * @param  string  $instant
-     * @return int
-     *
-     * @throws \InvalidArgumentException
-     * @throws \UnexpectedValueException
-     */
-    private static function epochMilliseconds(string $instant): int
-    {
-        $parsed = StoredTime::instant(StoredTime::toStorage($instant));
-
-        return $parsed->getTimestamp() * 1000 + intdiv((int) $parsed->format('u'), 1000);
     }
 }

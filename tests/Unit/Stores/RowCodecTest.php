@@ -15,12 +15,7 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the row codec: the columns it writes in table order, the row
- * it encodes for an insert, with JSON in fixed flags and times in UTC to the
- * microsecond, and the envelope it decodes from a stored row, with integers
- * read from digit strings, JSON objects kept as objects, numbers never turned
- * into strings, and every missing or malformed column refused; and a record
- * rebuilt from an envelope, whose objects are written as objects.
+ * Unit tests for the row codec: encoding a record's row and decoding it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -114,8 +109,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * The codec's columns are the finalised record's envelope, in table order,
-     * each with what it holds (S1).
+     * The columns are the finalised record's envelope, in table order (S1).
      *
      * @return void
      */
@@ -127,8 +121,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Every column is encoded for the insert, in table order: strings and
-     * integers as they are, JSON columns as JSON, and times in the stored form.
+     * Every column is encoded for the insert, in table order.
      *
      * @return void
      */
@@ -178,8 +171,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Times are written in UTC with all six fractional digits, a whole second
-     * included, never through Carbon's microsecond-less format.
+     * Times are written in UTC with all six fractional digits.
      *
      * @return void
      */
@@ -197,8 +189,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * An occurrence time that is not in the package's form is refused as it is
-     * encoded, never written as it is.
+     * An occurrence time not in the package's form is refused on encode.
      *
      * @return void
      */
@@ -213,8 +204,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * JSON is written with fixed flags: unicode, emoji and slashes unescaped,
-     * quotes and backslashes escaped, and a numeric-key map kept a map.
+     * JSON is written with fixed flags, and a numeric-key map stays a map.
      *
      * @return void
      */
@@ -246,8 +236,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Absent context and properties are written as `null`, never as `null` JSON
-     * or an empty list, and read back as `null`.
+     * Absent context and properties are written and read back as `null`.
      *
      * @return void
      */
@@ -267,8 +256,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * An encoded row decodes back to the record's envelope: the same columns in
-     * table order, encoding canonically as the envelope does.
+     * An encoded row decodes back to the record's envelope.
      *
      * @return void
      */
@@ -287,8 +275,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * An imported record's row carries its source fields and source digest as
-     * text, and decodes back to its envelope, its digest read as text.
+     * An imported record's source fields and digest round-trip as text.
      *
      * @return void
      */
@@ -309,8 +296,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A row decodes in table order whatever order its columns come in, and keys
-     * beyond the table's columns are dropped.
+     * A row decodes in table order, and keys beyond the columns are dropped.
      *
      * @return void
      */
@@ -323,8 +309,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[stored time, time read back]`: times with every number of
-     * fractional digits an engine returns.
+     * Rows of `[stored time, time read back]`: each count of fractional digits.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -338,8 +323,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A stored time with fewer fractional digits, as PostgreSQL returns one
-     * whose trailing digits are zero, reads back with six.
+     * Fewer fractional digits, as PostgreSQL returns, read back as six.
      *
      * @param  string  $stored
      * @param  string  $expected
@@ -358,8 +342,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * An integer column an engine returns as a digit string reads as the
-     * integer; any other string, a float or a boolean is refused.
+     * A digit-string integer reads as the integer; any other value is refused.
      *
      * @return void
      */
@@ -384,8 +367,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Stored JSON decodes with objects as `stdClass`, so an empty object stays
-     * an object beside an empty list, and numeric keys stay keys of a map.
+     * Stored JSON decodes objects as `stdClass`, so empty objects survive.
      *
      * @return void
      */
@@ -407,9 +389,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A JSON number is never decoded as a string: an integer beyond PHP's range
-     * and a fraction decode as floats, and an integer within it as the integer;
-     * protects against a mutation that decodes big integers as strings.
+     * A JSON number never decodes as a string, even beyond PHP's integer range.
      *
      * @return void
      */
@@ -428,8 +408,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Stored JSON decodes to `json_decode()`'s own depth of 512, far beyond any
-     * payload capture stores, and JSON nested deeper is refused.
+     * Stored JSON decodes to a depth of 512, and deeper JSON is refused.
      *
      * @return void
      *
@@ -458,8 +437,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Values are read as the engine returned them: never trimmed, case-folded
-     * or normalised.
+     * Values are read as the engine returned them, never normalised.
      *
      * @return void
      */
@@ -487,8 +465,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A row without any one column is refused, naming the column, nullable
-     * columns included.
+     * A row missing any column, nullable ones included, is refused, naming it.
      *
      * @param  string  $column
      * @return void
@@ -508,8 +485,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[column, stored value, what the column holds, previous
-     * exception's class or null]`: values a column cannot hold.
+     * Rows of `[column, stored value, what it holds, previous class or null]`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -537,9 +513,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A value its column cannot hold is refused, naming the column and what it
-     * holds, with the codec's or the time parser's refusal kept as the previous
-     * exception.
+     * A value its column cannot hold is refused, keeping the cause as previous.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -566,8 +540,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A non-UTC default time zone shifts nothing: times are written and read in
-     * UTC whatever the default.
+     * A non-UTC default time zone shifts nothing.
      *
      * @return void
      */
@@ -586,9 +559,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A record rebuilt from an envelope writes its JSON columns as it decoded
-     * them: an object as an object, nested objects included, where the record's
-     * array views would have written lists.
+     * A rebuilt record writes its decoded objects as objects, never as lists.
      *
      * @return void
      */
@@ -604,8 +575,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * An empty map stays an empty map, at the top and nested, and an empty list
-     * an empty list, through the row and back.
+     * Empty maps and empty lists survive the round trip, at the top and nested.
      *
      * @return void
      */
@@ -624,8 +594,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A map with sequential numeric keys, which an array cannot tell from a
-     * list, stays a map, at the top and nested, through the row and back.
+     * A map with sequential numeric keys stays a map through the round trip.
      *
      * @return void
      */
@@ -644,8 +613,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A record rebuilt from an envelope with lists or `null` in its JSON
-     * columns writes them as given.
+     * A rebuilt record writes lists and `null` JSON columns as given.
      *
      * @return void
      */
@@ -658,9 +626,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A bulk record's artifact row holds every column of the artifacts table,
-     * in table order: the attachment as it was sealed, the record's id as its
-     * entry, and the record's recorded time as the entry stores it.
+     * A bulk record's artifact row holds every artifacts column, in order.
      *
      * @return void
      */
@@ -685,8 +651,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * The artifact's time is the entry's recorded time, written exactly as the
-     * entry's row writes it, never the time the activity occurred.
+     * The artifact's time is the entry's recorded time, not the occurrence.
      *
      * @return void
      */
@@ -700,8 +665,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * Only a bulk record has an artifact row: a record without an attachment is
-     * refused.
+     * A record without an attachment has no artifact row.
      *
      * @return void
      */
@@ -714,9 +678,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * The record, the row and every value a helper takes are marked sensitive,
-     * and so is a previous exception, which can hold a value in its message: a
-     * frame of a trace never carries the record.
+     * The record, the row, helper values and previous exceptions are sensitive.
      *
      * @return void
      */
@@ -747,8 +709,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * A record of the captured envelope rebuilt with the JSON columns given, as
-     * the codec rebuilds one.
+     * A captured record rebuilt with the JSON columns given, as the codec does.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -762,8 +723,7 @@ final class RowCodecTest extends TestCase
     }
 
     /**
-     * The record, or a captured one under the pinned id, finalised at the time
-     * given.
+     * A captured record, or the one given, finalised at the time given.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  string  $recordedAt

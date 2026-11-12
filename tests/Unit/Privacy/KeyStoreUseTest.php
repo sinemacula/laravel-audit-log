@@ -15,11 +15,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 
 /**
- * Unit tests for whether the package's key store is in use: it is under the
- * package's own encrypter and under the one that never encrypts, compared by
- * exact class, and under no other, a decorator of the package's own included;
- * an encrypter is described by its class, or by the type an anonymous one is
- * declared as.
+ * Unit tests for whether the package's key store is in use, judged by the
+ * encrypter's exact class, and how an encrypter is described.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,9 +43,8 @@ final class KeyStoreUseTest extends TestCase
     }
 
     /**
-     * An application's own encrypter keeps its keys where the package cannot
-     * see them, so the key store is not in use, and the encrypter is described
-     * by its class.
+     * An application's own encrypter keeps its keys outside the package, so the
+     * key store is not in use; it is described by its class.
      *
      * @return void
      */
@@ -61,10 +57,8 @@ final class KeyStoreUseTest extends TestCase
     }
 
     /**
-     * A decorator of the package's own encrypter is another class, so it does
-     * not count, though every value it seals goes through the package's;
-     * anonymous, it is described by the contract it is declared as, never by
-     * the generated name that holds a file path.
+     * A decorator of the package's encrypter does not count; anonymous, it is
+     * described by its contract, never a name holding a file path.
      *
      * @return void
      */
@@ -106,9 +100,8 @@ final class KeyStoreUseTest extends TestCase
     }
 
     /**
-     * `KeyStoreUse` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * `KeyStoreUse` cannot be instantiated: its constructor is private, and is
+     * invoked here by reflection so the line is covered.
      *
      * @return void
      *

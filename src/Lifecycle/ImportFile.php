@@ -7,22 +7,10 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection;
 
 /**
- * An import file read as an import reads it: its SHA-256 first, streamed, and
- * then its lines, hashing again as they are read, so a file that changed
- * between the two reads is told by its two digests.
+ * An import file read twice, hashed each time, so a file that changed between
+ * the reads is caught; made for one import.
  *
- * Both reads take the file a mebibyte at a time. A line is yielded by its line
- * number in the file, from 1, without its line feed or a carriage return before
- * it; a blank line, empty or of spaces and tabs only, is skipped and never
- * yielded. A line longer than the most bytes given is yielded as
- * `OVERSIZED_LINE` and never held whole: what is read of it past the limit is
- * dropped as it is read, so a line of any length costs no more memory than the
- * limit and one read. The read digest covers every byte read, the skipped and
- * the oversized lines included, and is known only once the lines have all been
- * read.
- *
- * It holds the read digest once the lines are read, so it is made for one
- * import.
+ * An oversized line is never held whole, so memory stays bounded by the limit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,7 +22,7 @@ final class ImportFile
     /** @var int Bytes taken by one read: a mebibyte. */
     public const int READ_BYTES = 1048576;
 
-    /** @var ?string The SHA-256 of what the lines' read read, once it has ended. */
+    /** @var ?string The SHA-256 of the lines' read, once it has ended. */
     private ?string $readDigest = null;
 
     /**
@@ -49,7 +37,7 @@ final class ImportFile
     ) {}
 
     /**
-     * The file's SHA-256, as lower-case hex, read a mebibyte at a time.
+     * The file's lower-case hex SHA-256.
      *
      * @return string
      *
@@ -67,9 +55,8 @@ final class ImportFile
     }
 
     /**
-     * The file's lines, each by its line number: its text, or `OVERSIZED_LINE`
-     * for one longer than the most bytes given; blank lines are skipped. Once
-     * the generator has ended, `readDigest()` is the SHA-256 of what it read.
+     * The non-blank lines by line number, `OVERSIZED_LINE` past the limit;
+     * `readDigest()` is known once the generator ends.
      *
      * @param  int  $maxBytes
      * @return \Generator<int, \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection|string>
@@ -98,8 +85,7 @@ final class ImportFile
     }
 
     /**
-     * The SHA-256 of what the lines' read read, as lower-case hex: known only
-     * once that read has ended.
+     * The lower-case hex SHA-256 of the lines' read, once it has ended.
      *
      * @return string
      *
@@ -111,8 +97,7 @@ final class ImportFile
     }
 
     /**
-     * The file's bytes, a mebibyte at a time, the last block shorter; the file
-     * is closed once they are read, or once the reader stops.
+     * The file's bytes a mebibyte at a time, closing it once the reader stops.
      *
      * @return \Generator<int, string>
      *
@@ -142,9 +127,8 @@ final class ImportFile
     }
 
     /**
-     * The lines the block ends, each by its line number, carrying the line it
-     * leaves unfinished, its number and whether it is oversized, in the state
-     * given, to the next block.
+     * The lines the block ends, carrying its unfinished line to the next block
+     * in `$state`.
      *
      * @param  string  $block
      * @param  array{number: int, buffer: string, oversized: bool}  $state
@@ -184,8 +168,7 @@ final class ImportFile
     }
 
     /**
-     * The block's pieces between its line feeds, each with whether a line feed
-     * ends it: every piece but the last does.
+     * The block's pieces between line feeds, each with whether one ends it.
      *
      * @param  string  $block
      * @return list<array{0: string, 1: bool}>
@@ -199,9 +182,8 @@ final class ImportFile
     }
 
     /**
-     * The line so far with the piece added, unless that makes it longer than
-     * the most bytes given and a carriage return: it is then oversized, and
-     * nothing more of it is held.
+     * The line so far with the piece added, or oversized and emptied once it
+     * passes the limit plus a carriage return.
      *
      * @param  string  $buffer
      * @param  bool  $oversized
@@ -219,9 +201,8 @@ final class ImportFile
     }
 
     /**
-     * The line, by its number: its text without a carriage return before its
-     * line feed, `OVERSIZED_LINE` for one longer than the most bytes given once
-     * that carriage return is set aside, or nothing for a blank one.
+     * The line without a trailing carriage return, `OVERSIZED_LINE` past the
+     * limit, or nothing when blank.
      *
      * @param  int  $number
      * @param  string  $buffer

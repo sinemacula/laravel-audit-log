@@ -38,10 +38,10 @@ registered.
   was given, which Laravel sets from `cache.schedule_store` or the `SCHEDULE_CACHE_DRIVER` environment variable, and the
   default store when there is none. On a `file` or `array` store every server runs each command; that is safe, since
   sealing is safe beside another sealer, but it is wasted work, so give the scheduler a shared store.
-- `audit-log:seal` also takes a cache lock for up to 900 seconds when the store can lock: `audit-log:seal` for the recent
-  pass and `audit-log:seal:sweep` for the sweep, which are safe beside each other, so a long sweep never stops the
-  recent pass from sealing and anchoring. A run that finds its own lock held prints "Another sealer holds the lock." and
-  exits 0. The lock only saves work: a store that cannot lock, or that fails, costs nothing else.
+- `audit-log:seal` also takes a cache lock for up to 900 seconds when the store can lock: `audit-log:seal` for the
+  recent pass and `audit-log:seal:sweep` for the sweep, which are safe beside each other, so a long sweep never stops
+  the recent pass from sealing and anchoring. A run that finds its own lock held prints "Another sealer holds the lock."
+  and exits 0. The lock only saves work: a store that cannot lock, or that fails, costs nothing else.
 - Set a run's schedule to `null` or empty (`AUDIT_LOG_INTEGRITY_SEAL_SCHEDULE=`) to register nothing for it, and
   schedule the command yourself, for example in `routes/console.php`:
 
@@ -120,8 +120,8 @@ check, so a deploy never fails because a scheduled run is late.
 ```
 
 With `--freshness`, `audit-log:check` runs only these signals, and exits 1 when any is a problem and 0 otherwise. It
-reads the progress below and, in outbox mode, the outbox's oldest row not failed, a fixed number of reads whatever the tables
-hold, and writes nothing.
+reads the progress below and, in outbox mode, the outbox's oldest row not failed, a fixed number of reads whatever the
+tables hold, and writes nothing.
 
 | Signal         | Reads                                | A problem when                                                                                   | Limit                          |
 |----------------|--------------------------------------|--------------------------------------------------------------------------------------------------|--------------------------------|
@@ -199,20 +199,19 @@ SELECT name, value, updated_at FROM audit_log_integrity_state ORDER BY name;
   one is normal while holds or undelivered records keep entries, and a run that stopped on its time budget is resumed
   by the next. A prune never reads this row: where it resumes is read from the lifecycle journal.
 
-- **Anchor lag** is the distance between `seal.last` and `anchor.last` by sequence. Each seal run anchors up to
+- Anchor lag is the distance between `seal.last` and `anchor.last` by sequence. Each seal run anchors up to
   `integrity.anchor.batch` seals after it seals, so a lag that grows run after run means the anchor is failing or slower
   than sealing; `audit-log:verify` also prints how many seals still await their first anchoring.
-- **An overdue sweep** leaves a late entry older than the lookback unsealed. Once one is older than
+- An overdue sweep leaves a late entry older than the lookback unsealed. Once one is older than
   `integrity.verify.max_unsealed_age_seconds` (25 hours by default) verification reports it `overdue_unsealed` and the
   log `incomplete`, so a sweep that stops is found by the next verification as well as by its progress.
-- **Replayed records**, such as those spilled during an outage and replayed later, keep the time they were recorded,
-  so one older than the lookback waits for the next sweep, and one older than the allowed age would be overdue the
-  moment it is inserted. The scheduled verification sweeps first, so a replay inserted after the daily sweep is sealed
-  before it is verified; a verification run by hand without `--sweep-first` reports such a replay overdue until a sweep
-  seals it.
-- **An entry recorded far ahead of the clock**, more than the lookback beyond the verification's own clock, is never
-  taken by a seal while it stays ahead, so verification reports it `future_unsealed` and the log `incomplete` rather
-  than counting it pending. A clock that runs that far ahead on a recording server shows up here first.
+- Replayed records, such as those spilled during an outage and replayed later, keep the time they were recorded, so one
+  older than the lookback waits for the next sweep, and one older than the allowed age would be overdue the moment it is
+  inserted. The scheduled verification sweeps first, so a replay inserted after the daily sweep is sealed before it is
+  verified; a verification run by hand without `--sweep-first` reports such a replay overdue until a sweep seals it.
+- An entry recorded far ahead of the clock, more than the lookback beyond the verification's own clock, is never taken
+  by a seal while it stays ahead, so verification reports it `future_unsealed` and the log `incomplete` rather than
+  counting it pending. A clock that runs that far ahead on a recording server shows up here first.
 - Run `php artisan audit-log:check` in the deploy pipeline: it reports a malformed integrity, retention, import or
   monitoring setting, a retention shorter than its preservation, a missing or misshapen integrity or lifecycle table, a
   missing lock row, a missing installation id, a maintenance connection that reaches another installation, a lifecycle
@@ -522,16 +521,16 @@ sweep of the sealed table took 1.80 s.
 
 ## Scale
 
-- A single entries table, with the indexes the migrations create, handles tens of millions of rows comfortably: every
-  read the package makes, from the trail to sealing, the sweep and verification, pages through an index in batches.
+- A single entries table, with the indexes the migrations create, handles tens of millions of rows: every read the
+  package makes, from the trail to sealing, the sweep and verification, pages through an index in batches.
 - Batched pruning keeps it that size: `audit-log:prune` deletes in chunks of `retention.batch`, each its own
   transaction, so retention holds the table to the entries it must keep without one long lock.
 - For hundreds of millions of rows, or for analytics, stream entries to a warehouse or SIEM through a delivery
   destination, such as a destination of a stack store or the outbox's drain, and keep a shorter retention in the
   database.
-- Partitioning is not supported. The entries table's primary key is `id` alone, and partitioning the table yourself is
-  not supported: an engine that partitions needs the partition key in every unique key, which would break the
-  uniqueness of `id`, and the seals assume one table in which every entry is found by its id.
+- Partitioning is not supported. The entries table's primary key is `id` alone, and an engine that partitions needs
+  the partition key in every unique key, which would break the uniqueness of `id`; the seals assume one table in which
+  every entry is found by its id.
 
 ## Compliance
 

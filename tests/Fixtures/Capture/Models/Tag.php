@@ -8,10 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * A tag a tagged invoice is attached to through a plain pivot table, with no
- * model of its own: an attachment writes only the pivot's row, and neither the
- * invoice nor the tag hears of it.
- *
- * Its table is created and dropped by the tests that use it.
+ * model of its own, so an attachment writes only the pivot's row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

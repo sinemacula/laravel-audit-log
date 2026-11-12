@@ -20,17 +20,12 @@ use SineMacula\Laravel\AuditLog\Keys\WrappingRing;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Holds every parameter of the key store's classes that carries a data key, a
- * secret, a wrapped key, a key row, a stored row or an owner to
- * `#[\SensitiveParameter]`, because with `zend.exception_ignore_args` off every
- * frame of a thrown exception keeps its arguments, private helpers included.
+ * Holds the key store's parameters that carry a key, a secret, a row or an
+ * owner to `#[\SensitiveParameter]`, since a frame keeps its arguments when
+ * `zend.exception_ignore_args` is off.
  *
- * The scan reads every class under `src/Keys` whenever it runs, so a class
- * added to the namespace is held to the rule without editing this test. It
- * reads a parameter by its name or by its type, must find what it expects so it
- * cannot pass by finding nothing, and is shown to flag what it should. Key ids,
- * unit digests, generations, counts and class names are not secrets, and a
- * parameter holding one is left alone.
+ * Key ids, unit digests, generations, counts and class names are not secrets
+ * and are left alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -101,9 +96,8 @@ final class KeysSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Every method of every class of the key store, private ones included,
-     * marks a parameter that goes by the name or the type of a key, a secret, a
-     * wrapped key, a row or an owner, with no exemption.
+     * Every method of every key store class marks a parameter that goes by a
+     * key, secret, row or owner, with no exemption.
      *
      * @return void
      */
@@ -125,9 +119,8 @@ final class KeysSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan finds a held parameter in each class that must hold one and each
-     * parameter it must find, and reads every class of the namespace, one that
-     * holds none included.
+     * The scan finds each parameter it must find and reads every class of the
+     * namespace.
      *
      * @return void
      */
@@ -187,9 +180,7 @@ final class KeysSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan reads a parameter as one the rule holds by its name or its type,
-     * so it flags what it should and nothing else: protects against a scan that
-     * passes by flagging nothing.
+     * The scan flags a parameter by its name or type, and nothing else.
      *
      * @param  string  $parameter
      * @param  bool  $held

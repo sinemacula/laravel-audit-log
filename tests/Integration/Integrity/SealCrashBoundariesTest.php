@@ -38,18 +38,8 @@ use Tests\TestCase;
 
 /**
  * Integration tests for a sealer killed by `SIGKILL` at every boundary of a
- * seal, on whichever engine the suite runs against: before the head is read,
- * after the selection, before and after the checkpoint's insert, between two
- * chunks of its members, before and after the commit, before its progress is
- * written, in a later batch of a run and in the middle of a sweep. A kill
- * before the commit leaves nothing of the seal, since the engine rolls the
- * attempt back whole; a kill after it keeps the seal, its progress stale until
- * the next run overwrites it. After every kill a run of `audit-log:seal` leaves
- * every entry a member of exactly one seal, the sequences contiguous from 1,
- * every segment `valid` and every seal anchored.
- *
- * Every test starts from one anchored seal, so each kill falls on a seal that
- * extends the chain.
+ * seal, after which the next run leaves the log whole; each starts from one
+ * anchored seal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -214,9 +204,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A sealer killed once the checkpoint is inserted, before any of its
-     * members, leaves no checkpoint, since the insert never committed, and the
-     * next run seals every entry under the sequence the lost one had.
+     * A kill after the checkpoint insert leaves no checkpoint, and the next run
+     * reuses its sequence.
      *
      * @return void
      */
@@ -233,9 +222,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A sealer of 601 entries in one seal, killed after the first of its three
-     * chunks of members, leaves neither the checkpoint nor that chunk, and the
-     * next run seals all 601 in one seal.
+     * A kill after the first of three member chunks leaves nothing, and the
+     * next run seals all 601 entries in one seal.
      *
      * @return void
      */
@@ -276,10 +264,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A sealer killed straight after its commit keeps the seal, chained onto
-     * the first, with every member, though its progress still names the first
-     * seal and nothing anchored it; the next run anchors it and seals nothing
-     * more.
+     * A kill straight after the commit keeps the seal unanchored with stale
+     * progress, and the next run anchors it.
      *
      * @return void
      */
@@ -303,9 +289,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A sealer killed after its commit, before it records the seal in progress,
-     * leaves that progress naming the seal before; progress is never evidence,
-     * so the log verifies, and the next run's seal overwrites it.
+     * A kill before the progress is written leaves it stale, which verification
+     * ignores, and the next seal overwrites it.
      *
      * @return void
      */
@@ -326,9 +311,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A sweep killed before its third window, two windows sealed and its cursor
-     * saved after the second, keeps both seals, and the next sweep resumes from
-     * that cursor, never from the beginning, and completes.
+     * A sweep killed before its third window keeps both seals and resumes from
+     * its saved cursor.
      *
      * @return void
      */
@@ -352,9 +336,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A sweep killed after its second window committed, before it saved its
-     * cursor past that window, resumes from the cursor before it: it reads the
-     * window again, finds it sealed, seals nothing of it twice, and completes.
+     * A sweep killed before saving its cursor reads the sealed window again and
+     * seals nothing twice.
      *
      * @return void
      */
@@ -377,9 +360,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A run killed in its third batch, before that batch's checkpoint, keeps
-     * the two seals its earlier batches committed and their progress, and the
-     * next run seals what is left onto them.
+     * A run killed in its third batch keeps the earlier batches' seals, and the
+     * next run seals the rest onto them.
      *
      * @return void
      */
@@ -429,10 +411,8 @@ final class SealCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Run `audit-log:seal` with the options and assert it succeeds and leaves
-     * the log whole: every entry a member of exactly one seal, the sequences
-     * contiguous from 1, and on verification, strict, every segment `valid` and
-     * anchored, the anchor's head the last seal.
+     * Run `audit-log:seal` with the options and assert the log is whole, every
+     * seal valid, anchored and verified strictly.
      *
      * @param  array<string, bool>  $options
      * @return void

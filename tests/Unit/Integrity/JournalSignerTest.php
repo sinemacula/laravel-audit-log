@@ -17,10 +17,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 
 /**
- * Unit tests for the journal signer: the HKDF journal key under its own info,
- * the golden HMACs reproduced, a row signed as one kind never verifying as
- * another, every signed field covered, verification that selects the key by the
- * stored id, and the refusals of an unknown key and a malformed HMAC.
+ * Unit tests for the journal signer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,9 +40,8 @@ final class JournalSignerTest extends TestCase
     private const string PREVIOUS = 'b7569d64198e4df1c121883d6a23213915ecb232d574c31a3e2b50daae590429';
 
     /**
-     * The derivation's info is pinned, and the journal key is HKDF-SHA256 of
-     * the secret under it with an empty salt: neither the secret, nor the seal
-     * key, nor any other key the ring's secret gives.
+     * The journal key is HKDF-SHA256 of the secret under its pinned info with
+     * an empty salt, unlike any other key.
      *
      * @return void
      *
@@ -92,9 +88,8 @@ final class JournalSignerTest extends TestCase
     }
 
     /**
-     * Signing names the ring's signing key, and verification selects the key
-     * the row names, so a row signed before a rotation verifies while its key
-     * stays in the ring, and never under another key.
+     * Verification selects the key the row names, so a row signed before a
+     * rotation still verifies.
      *
      * @return void
      */
@@ -173,9 +168,8 @@ final class JournalSignerTest extends TestCase
     }
 
     /**
-     * The payload is covered through its digest alone: a row read with another
-     * payload, its digest column unchanged, still verifies, for the chain to
-     * compare the payload with its digest.
+     * The payload is covered only through its digest; the chain compares the
+     * two.
      *
      * @return void
      */
@@ -208,9 +202,7 @@ final class JournalSignerTest extends TestCase
     }
 
     /**
-     * An HMAC no key could have made is refused before any key is looked up, so
-     * an unsigned draft, which names no key, is malformed rather than of an
-     * unknown key.
+     * An HMAC no key could have made is refused before any key is looked up.
      *
      * @return void
      */
@@ -223,9 +215,7 @@ final class JournalSignerTest extends TestCase
     }
 
     /**
-     * Neither the journal key nor the secret is ever passed unmarked: the
-     * secret and every row and key through the signer are sensitive, so a trace
-     * through them shows none.
+     * The secret and every row and key through the signer are marked sensitive.
      *
      * @return void
      */

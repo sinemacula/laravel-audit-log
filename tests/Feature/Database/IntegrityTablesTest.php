@@ -11,9 +11,8 @@ use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use Tests\TestCase;
 
 /**
- * Feature tests for what the integrity tables are called: the three table
- * names, their defaults, each read as configured on every call, and the names
- * each refuses, with a message that names the key and never the value.
+ * Feature tests for the integrity table names, and the refusal that names the
+ * key and never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,9 +35,7 @@ final class IntegrityTablesTest extends TestCase
     private const string TABLE_MESSAGE = ' must be a table name of 1 to 47 lower-case letters, digits and underscores that does not start with a digit.';
 
     /**
-     * `IntegrityTables` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it so the line is covered.
      *
      * @return void
      *
@@ -59,9 +56,7 @@ final class IntegrityTablesTest extends TestCase
     }
 
     /**
-     * With no integrity settings at all, the seals are in
-     * `audit_log_checkpoints`, their members in `audit_log_checkpoint_members`
-     * and the progress in `audit_log_integrity_state`.
+     * With no integrity settings at all, each table has its default name.
      *
      * @return void
      */
@@ -110,9 +105,8 @@ final class IntegrityTablesTest extends TestCase
     }
 
     /**
-     * Rows of `[setting, value]`: per setting, a capital, a leading digit, one
-     * character too many, a value that is no string, a `null` set explicitly,
-     * and the other shapes a table name must not take.
+     * Rows of `[setting, value]`: per setting, the shapes a table name must not
+     * take.
      *
      * @return iterable<string, array{0: string, 1: int|list<string>|string|null}>
      */

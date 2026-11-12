@@ -29,12 +29,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for the gate every read of the trail passes before anything is
- * queried: re-entry inside a read or a write window or an event mapper,
- * refused and reported once; a store that cannot keep the read's record in
- * sync mode; an open transaction on the storage connection or, in outbox mode,
- * the outbox connection, judged by the framework's own rule; the failure mode
- * never read; and no query made.
+ * Feature tests for the gate every read passes before anything is queried.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,8 +64,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * With nothing open, the bound store durable and keeping attachments, the
-     * gate lets a read in, in either delivery mode.
+     * With nothing open, the gate lets a read in, in either delivery mode.
      *
      * @return void
      */
@@ -86,9 +80,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A transaction open on the storage connection refuses the read, naming the
-     * connection, since a row it would show, and the read's own record, could
-     * still be rolled back.
+     * A storage transaction refuses the read: its rows could still roll back.
      *
      * @return void
      */
@@ -100,9 +92,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * In outbox mode a transaction open on the outbox connection, one of its
-     * own, refuses the read, naming that connection, since the committed row is
-     * the read's acknowledgement.
+     * In outbox mode, an outbox transaction refuses the read it acknowledges.
      *
      * @return void
      */
@@ -117,10 +107,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A transaction open on a connection that neither reads the trail nor
-     * acknowledges its record refuses nothing: in sync mode the outbox's own
-     * connection is such a one, and in outbox mode on the storage connection,
-     * any other.
+     * A transaction on an unrelated connection refuses nothing.
      *
      * @return void
      */
@@ -141,11 +128,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * In sync mode a transaction open on a connection the bound store says it
-     * joins refuses the read, naming that connection, both on entry and just
-     * before the record is written or acknowledged, since the store's write is
-     * durable only once that transaction commits; in outbox mode, where the
-     * outbox acknowledges the record, it does not.
+     * A transaction the store joins refuses a sync read, on entry and at write.
      *
      * @return void
      */
@@ -171,10 +154,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Under the manager Laravel's testing traits install, the test's base
-     * transaction, at level 1, counts as committed, as the framework counts it,
-     * so a test that wraps itself in a transaction can read the trail; the
-     * outbox connection is judged the same way.
+     * The testing base transaction counts as committed, as Laravel counts it.
      *
      * @return void
      */
@@ -192,9 +172,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Under that manager a transaction the test opens inside its base one, at
-     * level 2, is one the framework would not yet call committed, so the read
-     * is refused.
+     * A transaction nested in the testing base transaction refuses the read.
      *
      * @return void
      */
@@ -224,9 +202,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A transaction open on the storage connection refuses the read whatever
-     * the store, one durable on another connection that keeps attachments
-     * included, and in either mode, since the read itself is made there.
+     * A storage transaction refuses the read, whatever the store or mode.
      *
      * @param  string  $mode
      * @return void
@@ -245,9 +221,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * In sync mode a store that does not say a return is durable refuses the
-     * read, naming its class; in outbox mode, where the outbox acknowledges the
-     * record, it does not.
+     * In sync mode a non-durable store refuses the read, naming its class.
      *
      * @return void
      */
@@ -263,9 +237,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * In sync mode a durable store that keeps no attachment refuses the read,
-     * naming its class, since every read's record carries one and would
-     * otherwise fail only after the query; in outbox mode it does not.
+     * In sync mode a store keeping no attachment refuses the read up front.
      *
      * @return void
      */
@@ -281,9 +253,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Inside a read window every entry is refused, and only the first is
-     * reported; the next window's first refusal is reported again, and once the
-     * window has ended a read enters.
+     * Inside a read window entry is refused, reported once per window.
      *
      * @return void
      */
@@ -313,8 +283,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Inside a write window, which also covers a failed write being handled,
-     * every entry is refused, and only the first is reported.
+     * Inside a write window entry is refused, and only the first is reported.
      *
      * @return void
      */
@@ -334,8 +303,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Inside both a read and a write window the read window's first refusal is
-     * the one said, and the write window's is left for its own refusals.
+     * Inside both windows, the read window's first refusal is the one said.
      *
      * @return void
      */
@@ -356,8 +324,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * While an event mapper runs every entry is refused, before anything is
-     * read, and each refusal is reported.
+     * While an event mapper runs every entry is refused and reported.
      *
      * @return void
      */
@@ -377,9 +344,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A reporter that reads the trail while it reports a mapper's refusal is
-     * refused too, and that refusal is not reported again, through the report
-     * latch, rather than reporting in a loop.
+     * A reporter that reads during a mapper's refusal is latched, not looped.
      *
      * @return void
      */
@@ -408,8 +373,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A reporter that fails is ignored: the refusal is what is thrown, inside a
-     * read window, a write window or an event mapper alike.
+     * A failing reporter is ignored and the refusal is still thrown.
      *
      * @return void
      */
@@ -431,9 +395,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A re-entered read is refused as such before the delivery mode or the
-     * store is read, so neither a malformed mode nor a store that could not
-     * keep the record is what refuses it.
+     * A re-entered read is refused before the mode or the store is read.
      *
      * @return void
      */
@@ -450,9 +412,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * `confirmDurable()` applies the transaction rule and nothing else: inside
-     * a read window, with a store that is not durable, it lets the read on, and
-     * a transaction open on the storage connection refuses it.
+     * `confirmDurable()` applies the transaction rule alone.
      *
      * @return void
      */
@@ -472,8 +432,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * `confirmDurable()` judges the outbox connection in outbox mode, and only
-     * then.
+     * `confirmDurable()` judges the outbox connection in outbox mode only.
      *
      * @return void
      */
@@ -491,8 +450,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * The failure mode is never read, since a read's record is fail-closed
-     * whatever it says, so a malformed one does not refuse the read.
+     * The failure mode is never read: a read's record is always fail-closed.
      *
      * @return void
      */
@@ -507,8 +465,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A malformed delivery mode is refused as it is read, with its own message,
-     * by entering and by `confirmDurable()` alike.
+     * A malformed delivery mode is refused as it is read, with its own message.
      *
      * @return void
      */
@@ -521,8 +478,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Without a transactions manager the framework has no rule that would call
-     * an open transaction committed, so any open transaction refuses the read.
+     * Without a transactions manager any open transaction refuses the read.
      *
      * @return void
      */
@@ -542,8 +498,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A connection that is not a database connection holds no transaction the
-     * gate could judge, so it refuses nothing.
+     * A connection that is no database connection refuses nothing.
      *
      * @return void
      */
@@ -561,8 +516,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * The gate makes no query, whether it lets the read in or refuses it, in
-     * either mode.
+     * The gate makes no query, letting in or refusing, in either mode.
      *
      * @return void
      */
@@ -588,8 +542,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * The window runs the work inside the read guard and returns what it
-     * returns, and closes however the work ends.
+     * The window runs the work inside the read guard and always closes.
      *
      * @return void
      */
@@ -657,8 +610,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Bind the manager Laravel's testing traits install, over the storage
-     * connection.
+     * Bind the transactions manager Laravel's testing traits install.
      *
      * @return void
      */
@@ -696,8 +648,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * Assert that the work is refused with the message, and carries no previous
-     * exception.
+     * Assert the work is refused with the message and no previous exception.
      *
      * @param  string  $message
      * @param  \Closure(): void  $work
@@ -716,8 +667,7 @@ final class ReadGateTest extends TestCase
     }
 
     /**
-     * A durable store that keeps attachments and joins transactions only on the
-     * named connection.
+     * A durable store that keeps attachments and joins the named connection.
      *
      * @param  string  $connection
      * @return \SineMacula\Laravel\AuditLog\Contracts\AcceptsAttachments&\SineMacula\Laravel\AuditLog\Contracts\DurableAuditStore

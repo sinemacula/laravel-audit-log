@@ -233,7 +233,7 @@ Each is measured on the complete final JSON, with `CanonicalEncoder::JSON_FLAGS`
   branch holding a rule-governed field goes with them; and the note last of all. The tiers of the context are:
   application keys first, then the fixed package names `route`, `method`, `command`, `job` and `channel`.
 - The metadata protected is `identifier_hash` and `omitted`, which are bounded and never omitted. The properties keep
-  `ByteBudget::METADATA_RESERVE_BYTES` (4400) free for them at their largest, so the final encoding fits whatever the
+  `ByteBudget::METADATA_RESERVE_BYTES` (4600) free for them at their largest, so the final encoding fits whatever the
   omissions add. A note is not protected. The context has no metadata and no reserve, and `_audit` in it is an ordinary
   key.
 - `properties._audit.omitted` is `{count, paths}`, for the context's omissions as well, and absent when nothing was

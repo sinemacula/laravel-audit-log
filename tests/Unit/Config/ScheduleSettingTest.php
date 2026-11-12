@@ -11,9 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Config\ScheduleSetting;
 
 /**
- * Unit tests for the schedule setting reader every settings class shares: the
- * default, `null` or empty for none, a cron expression, and the message it
- * fails with.
+ * Unit tests for the schedule setting reader every settings class shares.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

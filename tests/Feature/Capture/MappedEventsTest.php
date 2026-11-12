@@ -55,14 +55,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for mapped events through the provider's wiring and the real
- * dispatcher, each mapping registered while the application boots: an exact
- * class mapping winning over a broad one, a single interface or parent mapping
- * used, an ambiguity and an excepted class unmapped, an event object written
- * once however often it is dispatched; every kind of return a mapper can make
- * contained, a record through the facade inside a mapper writing nothing at
- * all; a mapper that captures or dispatches its own event again never
- * recursing, while what its work sets off is captured on its own; and the
- * package's own events never mapped nor captured.
+ * dispatcher.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,8 +85,7 @@ final class MappedEventsTest extends TestCase
     private array $refusals = [];
 
     /**
-     * Bind the reporter, hear each capture failure, and listen for every event
-     * after the bridge.
+     * Bind the reporter, hear capture failures and listen after the bridge.
      *
      * @return void
      */
@@ -116,8 +108,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * An exact class mapping wins over a broad one: the class's mapper writes
-     * its row, and the broad mapper, which would throw, is never asked.
+     * An exact class mapping wins over a broad one.
      *
      * @return void
      */
@@ -157,9 +148,8 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * An event two broad mappings match is contained: no row, one report and
-     * one `AuditCaptureFailed` naming no mapper, and the listeners after the
-     * bridge still run.
+     * An event two broad mappings match is a contained failure naming no
+     * mapper.
      *
      * @return void
      */
@@ -176,8 +166,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * A class the mapping excepts is left unmapped, and the mapping's other
-     * classes are still captured.
+     * A class the mapping excepts is left unmapped.
      *
      * @return void
      */
@@ -196,8 +185,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * A class and its interface mapped together are no ambiguity: the class's
-     * own mapping applies, and one row is written.
+     * A class and its interface mapped together write one row.
      *
      * @return void
      */
@@ -211,8 +199,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * One event object dispatched twice, then captured explicitly, writes one
-     * row; another object of the same class writes its own.
+     * One event object dispatched twice, then captured, writes one row.
      *
      * @return void
      */
@@ -232,8 +219,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Mapping the package's marker, or an event implementing it, is refused
-     * while the application boots, and maps nothing.
+     * Mapping the package's marker, or an event implementing it, is refused.
      *
      * @return void
      */
@@ -245,9 +231,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * A broad mapping never captures an event of the package's own, even one
-     * that implements the mapped interface: dispatched or captured explicitly,
-     * it writes nothing and says nothing.
+     * A broad mapping never captures the package's own events.
      *
      * @return void
      */
@@ -263,9 +247,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Rows of `[mapper, the class of the failure it is contained with]`: every
-     * kind of return a mapper can make but its own builder, from `null`, which
-     * skips the event, to an exception.
+     * Rows of `[mapper, the class of the failure it is contained with]`.
      *
      * @return iterable<string, array{0: class-string<\SineMacula\Laravel\AuditLog\Contracts\EventMapper>, 1: ?class-string<\Throwable>}>
      */
@@ -287,10 +269,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Each kind of return is contained: `capture()` returns `null`, no row is
-     * written at all, and, but for `null`, one report and one
-     * `AuditCaptureFailed` holding the class names alone are made per capture;
-     * the listeners after the bridge still run.
+     * Every kind of mapper return is contained, `null` skipping the event.
      *
      * @param  class-string<\SineMacula\Laravel\AuditLog\Contracts\EventMapper>  $mapper
      * @param  ?class-string<\Throwable>  $failure
@@ -322,11 +301,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * The package's own events, dispatched by every write and every failure,
-     * are never recorded, even when they fit a broad mapping: an event that is
-     * the package's own and a portal event alike, dispatched and captured from
-     * inside the write path, writes nothing, and the mapped event writes its
-     * one row.
+     * The package's own events are never recorded, even from the write path.
      *
      * @return void
      */
@@ -351,8 +326,8 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Rows of `[mapper]`: a mapper that captures the event it is mapping again,
-     * and one that dispatches it again.
+     * Rows of `[mapper]`: one that captures its event again, one that
+     * dispatches it.
      *
      * @return iterable<string, array{0: class-string<\Tests\Fixtures\Capture\Mappers\RecapturingMapper|\Tests\Fixtures\Capture\Mappers\RedispatchingMapper>}>
      */
@@ -365,9 +340,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * A mapper that captures or dispatches the event it is mapping again never
-     * runs inside itself: the inner capture writes nothing, and the outer one
-     * writes its one row with nothing failed.
+     * A mapper that captures or dispatches its event again never recurses.
      *
      * @param  class-string<\Tests\Fixtures\Capture\Mappers\RecapturingMapper|\Tests\Fixtures\Capture\Mappers\RedispatchingMapper>  $mapper
      * @return void
@@ -392,10 +365,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * What a mapper's own work sets off is captured as it would be anywhere
-     * else: the watched line it saves and the Gate denial it meets are each
-     * written by their own capture, beside the mapped event's row, and nothing
-     * fails.
+     * What a mapper's own work sets off is captured on its own.
      *
      * @return void
      */
@@ -415,9 +385,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * A mapper covers the subjects of a bulk operation: the capture writes one
-     * entry, whose descriptor counts each subject once, and one artifact beside
-     * it.
+     * A mapper covers the subjects of a bulk operation.
      *
      * @return void
      */
@@ -450,8 +418,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Map the portal interface to the portal mapper, excepting one class of it,
-     * while the application boots.
+     * Map the portal interface to the portal mapper, excepting one class.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -464,8 +431,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Map the portal sign-in class, which a renewed session extends, to the
-     * portal mapper while the application boots.
+     * Map the portal sign-in class, which a renewed session extends.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -537,8 +503,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Map the portal interface to the mapper the data provider gives while the
-     * application boots.
+     * Map the portal interface to the data provider's mapper.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -555,9 +520,8 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Map the portal interface to a mapper with side effects, watch the lines,
-     * turn Gate capture on and define the package's codes while the application
-     * boots.
+     * Map the portal interface to a mapper with side effects, with lines
+     * watched and Gate capture on.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -573,8 +537,8 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Try to map the package's marker and an event implementing it while the
-     * application boots, noting what each refusal says.
+     * Try to map the package's marker and an implementing event, noting each
+     * refusal.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -606,8 +570,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Register the mappings while the application boots, as an application's
-     * provider would.
+     * Register the mappings while the application boots.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @param  \Closure(): void  $mappings
@@ -619,10 +582,8 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * What the package puts in a report: its message, its class names and the
-     * arguments of the package's own frames of its trace. The frames above them
-     * are the caller's (the dispatcher's and the facade's), which hold the
-     * event they were given while arguments are kept in traces.
+     * What the package puts in a report: its message, class names and own
+     * frames' arguments; the caller's frames hold the event anyway.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

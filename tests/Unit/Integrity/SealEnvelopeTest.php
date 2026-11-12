@@ -11,14 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 
 /**
- * Unit tests for the seal envelope: the golden members digest, canonical seal
- * and digest reproduced byte for byte, the second golden seal chained onto the
- * first and committing to the golden journal's first row, members sorted
- * bytewise whatever their order, a digest that every one of the sixteen fields
- * changes, each malformed field and member refused with its message, the
- * genesis rule and the journal's pairing left to verification, and a stored
- * seal read in every form an engine returns, its journal columns optional,
- * refused naming the column and never quoting its value.
+ * Unit tests for the seal envelope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,9 +77,8 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * The golden first seal has the golden sixteen fields, encodes to the
-     * golden canonical string, and has the golden digest; it was made before
-     * the journal had a row, so it commits to none.
+     * The golden first seal reproduces its fields, canonical string and digest,
+     * and commits to no journal row.
      *
      * @return void
      *
@@ -148,9 +140,8 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * Every order of the members gives one digest, the digest of the members
-     * sorted bytewise by entry id: a digit sorts before a letter, and the HMACs
-     * play no part in the order.
+     * Every member order gives one digest, the members sorted bytewise by entry
+     * id.
      *
      * @return void
      */
@@ -171,9 +162,7 @@ final class SealEnvelopeTest extends TestCase
 
     /**
      * Rows of `[field, changed value, whether an envelope can hold it]`: each
-     * of the sixteen fields. The version, the signer and the algorithm version
-     * have one value this release builds, so a change to them is shown on the
-     * encoded fields.
+     * of the sixteen fields.
      *
      * @return iterable<string, array{0: string, 1: int|string, 2: bool}>
      */
@@ -389,9 +378,8 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * The pairing of the journal's two fields is not enforced when a seal is
-     * built or loaded: a sequence with no head, or a head with no sequence, is
-     * evidence for the journal's verification to report.
+     * The journal fields' pairing is left to verification, never enforced when
+     * a seal is built or loaded.
      *
      * @return void
      *
@@ -435,10 +423,8 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * Neither the genesis rule nor the pairing of the previous fields is
-     * enforced when a seal is built or loaded: a later seal with no link, a
-     * genesis seal with one, or one previous field without the other is
-     * evidence for verification to report, not a row to refuse.
+     * Genesis and the previous fields' pairing are left to verification, never
+     * enforced on load.
      *
      * @return void
      *
@@ -591,8 +577,7 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * Rows of `[column, malformed stored value]`: a wrong type, a malformed
-     * form, and a value the envelope refuses, each holding the planted text
+     * Rows of `[column, malformed stored value]`, each holding the planted text
      * where it can.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
@@ -631,9 +616,8 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * Each malformed stored column is refused with an unexpected-value
-     * exception naming the column and never quoting the value, nor chaining the
-     * refusal that found it.
+     * A malformed stored column is refused naming the column, never quoting the
+     * value or chaining the cause.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -657,9 +641,8 @@ final class SealEnvelopeTest extends TestCase
     }
 
     /**
-     * The insert row holds the thirteen envelope columns, the journal's two,
-     * the digest and the signature in table order, every time in the form the
-     * database stores, and no anchor column.
+     * The insert row holds every column in table order, times in the stored
+     * form, and no anchor column.
      *
      * @return void
      *

@@ -39,13 +39,8 @@ use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
 /**
- * Integration tests for the seals' commitment to the lifecycle journal on
- * whichever engine the suite runs against, SQLite on a file shared with a child
- * process: a journal restored to an older state, below the row a seal committed
- * to, contradicts that seal; a committed tail removed is never sealed over and
- * refuses the prune and a hold; a row edited by a raw statement on the engine
- * is found; and the sequence and HMAC a seal commits to read back as written in
- * each engine's types, so the seal's digest is the one it signed.
+ * Integration tests for the seals' commitment to the lifecycle journal on every
+ * engine, SQLite on a file shared with a child process.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,10 +73,7 @@ final class JournalCommitmentEnginesTest extends TestCase
     }
 
     /**
-     * A seal, a journal of two rows, the second written and sealed by another
-     * process, then the journal restored to its first row alone: the second
-     * seal committed to a row the journal no longer holds, and verification
-     * says so, while what is left of the chain is whole.
+     * Restoring an older journal contradicts the seal of a later row.
      *
      * @return void
      */
@@ -115,10 +107,7 @@ final class JournalCommitmentEnginesTest extends TestCase
     }
 
     /**
-     * A committed hold removed from the journal's tail is never sealed over:
-     * the next seal is refused, and the prune and a new hold each fail closed
-     * on the contradicted commitment, so the entry the removed hold kept is
-     * never deleted.
+     * A removed tail is never sealed over, and refuses a prune or a hold.
      *
      * @return void
      *
@@ -165,8 +154,7 @@ final class JournalCommitmentEnginesTest extends TestCase
     }
 
     /**
-     * A row's reason changed by a raw statement on the engine, its HMAC kept,
-     * is a signature finding at that row.
+     * A journal row edited on the engine is a signature finding at that row.
      *
      * @return void
      */
@@ -191,9 +179,7 @@ final class JournalCommitmentEnginesTest extends TestCase
     }
 
     /**
-     * The sequence and HMAC a seal commits to read back as written in each
-     * engine's types, the seal's digest is the one it was stored with, the
-     * journal's rows read back as they were signed, and the log verifies.
+     * The sequence and HMAC a seal commits to survive each engine's types.
      *
      * @return void
      */
@@ -225,8 +211,7 @@ final class JournalCommitmentEnginesTest extends TestCase
     }
 
     /**
-     * Put the default connection on a file when it is SQLite, so a child
-     * process shares it.
+     * Put a SQLite default connection on a file, so a child process shares it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 
 /**
- * Unit tests for the journal kind enum: its cases and their stored values, the
- * label each signs under, the kinds that carry an authority, the privacy kinds
- * among them, and the kinds whose payloads the pruner replays.
+ * Unit tests for the journal kind enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,9 +69,8 @@ final class JournalKindTest extends TestCase
     }
 
     /**
-     * The privacy kinds, each signing under a label of its own that names it,
-     * so an erasure row never verifies as a reinstatement, a rewrap or a
-     * reconciled restore, nor as any earlier kind.
+     * Each privacy kind signs under its own label, so one never verifies as
+     * another.
      *
      * @return void
      */
@@ -97,9 +94,8 @@ final class JournalKindTest extends TestCase
     }
 
     /**
-     * A hold, a release, an import's start and finish, and each privacy kind
-     * carry the authority that asked for them; a policy, a prune run and a
-     * prune chunk carry none.
+     * Holds, releases, imports and privacy kinds carry an authority; policies
+     * and prune rows do not.
      *
      * @return void
      */
@@ -127,9 +123,7 @@ final class JournalKindTest extends TestCase
     }
 
     /**
-     * The pruner never replays a privacy kind's payload: an erasure, a
-     * reinstatement, a rewrap and a reconciled restore decide nothing a prune
-     * keeps.
+     * The pruner never replays a privacy kind's payload.
      *
      * @return void
      */

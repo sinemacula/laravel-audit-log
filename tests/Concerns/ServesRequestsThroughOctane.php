@@ -17,13 +17,9 @@ use Symfony\Component\HttpFoundation\Response;
 use Tests\Integration\Octane\Fixtures\BootedApplicationFactory;
 
 /**
- * Serves requests through one Laravel Octane worker, as Octane's own suite
- * does: the test's booted application, warmed with Octane's default services,
- * is the worker's root application, and every request runs through the real
- * `Worker`, which clones it into a sandbox and dispatches Octane's listeners
- * (the configuration sandbox, `FlushAuthenticationState`, the new request
- * instance, the flush of scoped instances) around the HTTP kernel. Only the
- * server is fake: no Swoole, RoadRunner or FrankenPHP.
+ * Serves requests through one Octane worker as Octane's own suite does: the
+ * real `Worker` clones the booted application into a sandbox and runs Octane's
+ * listeners around the HTTP kernel; only the server is fake.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -114,13 +110,9 @@ trait ServesRequestsThroughOctane
     }
 
     /**
-     * Hand the services Octane gave the request's sandbox (the database
-     * manager, the router, the HTTP kernel) back to the root application, so
-     * the test can read the database between requests: the sandbox they hold
-     * has been flushed once the worker is done with it. Only the application
-     * they hold is replaced, as the next request's own listeners replace it
-     * again; nothing is reset, so whatever the next request does not see is
-     * down to Octane's lifecycle alone.
+     * Hand the services Octane gave the flushed sandbox back to the root
+     * application, so the test can read the database between requests; nothing
+     * is reset, so isolation is down to Octane alone.
      *
      * @param  \Illuminate\Http\Request  $request
      * @param  \Symfony\Component\HttpFoundation\Response  $response

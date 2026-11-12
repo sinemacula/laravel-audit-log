@@ -21,13 +21,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for the OCSF formatter: a code with no mapping applying is a
- * Base Event that is never classified, a mapped code is classified by its
- * mapper only at its definition's version, both validate offline against the
- * pinned schema, the base attributes and metadata are pinned, the integrity
- * fields are left out, a mapper's attributes are checked, a package code
- * resolves its definition, and the line is one line, the same bytes on every
- * call, with every hostile value in its string.
+ * Feature tests for the OCSF formatter, its events validated offline against
+ * the pinned schema.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -101,9 +96,8 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * A code no definition is registered for, and a code with the package's
-     * reserved prefix that is none of the package's own, which no caller can
-     * register, are Base Events.
+     * An unregistered code, or a reserved package-prefix code that is none of
+     * the package's own, is a Base Event.
      *
      * @return void
      *
@@ -120,10 +114,8 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * A package code is looked up as any other code is, so its record is
-     * classified by the mapper its definition names, at its version, and a
-     * record of the package's own definition, which names none, is a Base Event
-     * carrying the code.
+     * A package code is classified by its definition's mapper, and one whose
+     * definition names none is a Base Event.
      *
      * @return void
      *
@@ -194,9 +186,8 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * A record its definition's mapper classifies as API Activity validates
-     * offline against the pinned schema's API Activity, with the mapper's
-     * attributes and the type it gives.
+     * A record mapped to API Activity validates offline against the pinned
+     * schema's API Activity.
      *
      * @return void
      *
@@ -259,9 +250,7 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * A mapping applies only to records of its definition's version: a record
-     * of version 1 under a definition at version 2 is a Base Event, and one of
-     * version 2 is classified.
+     * A mapping applies only to records of its definition's version.
      *
      * @return void
      *
@@ -280,9 +269,7 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * The metadata names the record and its code, the schema version, the
-     * product, the time the activity occurred as stored, the time it was
-     * recorded in epoch milliseconds, the correlation id and the tenant.
+     * The metadata is pinned, with the recorded time in epoch milliseconds.
      *
      * @return void
      *
@@ -427,9 +414,8 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * `unmapped` holds every column with a value that the event does not carry
-     * elsewhere, context and properties included, under its stored key; a
-     * column with no value is left out.
+     * `unmapped` holds every column with a value the event does not carry
+     * elsewhere, under its stored key.
      *
      * @return void
      *
@@ -510,9 +496,8 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * A mapper that does not return each of `class_uid`, `category_uid` and
-     * `activity_id` as an integer is refused, naming the mapper and the
-     * attribute.
+     * A mapper that does not return `class_uid`, `category_uid` and
+     * `activity_id` as integers is refused, naming the attribute.
      *
      * @param  array<string, int|string>  $classification
      * @param  string  $attribute
@@ -616,9 +601,8 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
-     * A value written to look like JSON, or like an attribute of the event,
-     * stays inside its string: the event's classification and metadata are the
-     * formatter's, and the value decodes back as it was.
+     * A value written to look like JSON or an event attribute stays inside its
+     * string and decodes back as it was.
      *
      * @return void
      *

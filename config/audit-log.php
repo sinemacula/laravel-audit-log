@@ -9,18 +9,15 @@ return [
     | Storage
     |---------------------------------------------------------------------------
     |
-    | The connection the package's tables live on (`null` or empty for the
-    | default): the model reads them there, the store writes them there, and the
-    | published migrations create them there. The maintenance connection is the
-    | one pruning, holds and the lifecycle journal run through (`null` or empty
-    | for the storage connection). It must reach the same database with a user
-    | of its own, so the application's user needs only `SELECT` and `INSERT` on
-    | the entries table and never deletes one. A value that is neither a
-    | connection name nor `null` or empty fails closed when it is read, and
-    | `audit-log:check` reports it, as it does a name `database.connections`
-    | does not configure. Keep both fixed while the application runs: moving the
-    | tables is a deploy, with a migration the application performs and a worker
-    | restart.
+    | The connection the package's tables live on, `null` or empty for the
+    | default. Pruning, holds and the lifecycle journal run through the
+    | maintenance connection (`null` or empty for the storage connection): give
+    | it a database user of its own, so the application's user needs only
+    | `SELECT` and `INSERT` on the entries table. Moving either connection is a
+    | deploy, with a migration and a worker restart.
+    |
+    | A malformed value anywhere in this file fails closed where it is read, and
+    | `audit-log:check` reports it.
     |
     */
 
@@ -34,16 +31,12 @@ return [
     | Entries
     |---------------------------------------------------------------------------
     |
-    | The table the entries live in (`audit_log_entries` by default): 1 to 47
-    | lower-case letters, digits and underscores that does not start with a
-    | digit, so every index the migration names after it fits PostgreSQL's 63
-    | characters, the connection's table prefix included. `artifacts_table`
-    | (`audit_log_artifacts` by default) holds each entry's artifact beside its
-    | entry, on the storage connection, with the same grammar: a bulk
-    | operation's subjects, a read's disclosure, which every audited read of the
-    | trail writes, and an export's manifest. Any other value fails closed when
-    | it is read, and `audit-log:check` reports it. Set both before migrating:
-    | changing one later moves no table.
+    | The entries table and the table of each entry's artifact (bulk subjects,
+    | read disclosures, export manifests), both on the storage connection. A
+    | table name is 1 to 47 lower-case letters, digits and underscores, not
+    | starting with a digit, so every index named after it fits PostgreSQL's 63
+    | characters with the table prefix. Set both before migrating: changing one
+    | later moves no table.
     |
     */
 
@@ -57,69 +50,34 @@ return [
     | Integrity
     |---------------------------------------------------------------------------
     |
-    | Every entry is signed with HMAC-SHA256 under the current key and keeps
-    | that key's id. With no keys the key is derived from `app.key`, and the
-    | keys derived from `app.previous_keys` still verify the rows signed before
-    | a rotation. To manage the keys instead, map each id (1 to 32 letters,
-    | digits, dots, underscores or hyphens, starting with a letter or a digit)
-    | to a secret of at least 32 bytes, or `base64:` followed by the encoding of
-    | one, and name the signing key in `current`. A malformed ring fails closed,
-    | never falling back to `app.key`, and `audit-log:check` reports it.
-    | Removing a key leaves its rows unverifiable, so keep every key as long as
-    | its rows are kept. Choose the managed ring before going live: rows signed
-    | under a derived key cannot yet be carried into it. Read each secret from
-    | its own env var:
+    | Entries are signed with HMAC-SHA256 under the `current` key, derived from
+    | `app.key` when `keys` is empty, with `app.previous_keys` still verifying
+    | rows signed before a rotation. A managed ring maps ids to secrets of at
+    | least 32 bytes, or `base64:` encoded, and never falls back to `app.key`.
+    | Keep every key as long as its rows, and choose the managed ring before
+    | going live: rows signed under a derived key cannot move into it. Read each
+    | secret from its own env var:
     |
     |     'keys' => ['k2026' => env('AUDIT_LOG_INTEGRITY_KEY_K2026')],
     |
-    | Entries are sealed in batches: a seal is a signed checkpoint of the ids
-    | and HMACs of the entries it holds, chained to the seal before it, so
-    | `audit-log:verify` finds an entry or a seal that was changed, removed or
-    | added. `log_id` names the chain: 1 to 64 letters, digits, dots,
-    | underscores or hyphens, starting with a letter or a digit, or `null` or
-    | empty, the default, for `source.id`, which must then fit the same grammar.
-    | `checkpoints_table`, `members_table` and `state_table` name the seals, the
-    | entries each holds and the progress of sealing, anchoring and
-    | verification, all on the storage connection, with the entries table's
-    | grammar. Set the log id and the tables before the first seal and never
-    | change them: sealing refuses to extend a chain of another log id, and
-    | changing a table moves none.
+    | A seal is a signed checkpoint of its entries' ids and HMACs, chained to
+    | the one before, so `audit-log:verify` finds an entry or seal changed,
+    | removed or added. `log_id` names the chain, `null` or empty for
+    | `source.id`. Set it and the tables before the first seal and never change
+    | them.
     |
-    | `seal.schedule` (every five minutes) and `seal.sweep_schedule` (daily) are
-    | when the package schedules `audit-log:seal` and `audit-log:seal --sweep`,
-    | and `verify.schedule` (daily) when it schedules a strict verification that
-    | sweeps first, `audit-log:verify --strict --sweep-first`: cron expressions,
-    | or `null` or empty to schedule nothing and run that command elsewhere. A
-    | malformed schedule schedules nothing for its run and is reported, never
-    | thrown. `seal.batch` is the most entries one seal holds, from 100 to 50000
-    | and 5000 by default. `seal.max_batches` is the most seals one run writes,
-    | from 1 to 100000 and 100 by default. `seal.lookback_seconds` is how far
-    | before the latest entry a recent pass sealed a run looks for entries
-    | recorded late, from 0 to 2592000 and 3600 by default, and must exceed the
-    | worst clock skew between servers. `seal.settle_seconds` is how long an
-    | entry waits after it is recorded before a seal may hold it, from 0 to 3600
-    | and 0 by default. `seal.max_attempts` is how many attempts a seal gets
-    | against a concurrent sealer, from 1 to 100 and 5 by default.
-    | `verify.max_unsealed_age_seconds` is how old an unsealed entry may grow
-    | before verification calls the log incomplete, from 600 to 31536000 and
-    | 90000 (25 hours) by default: more than a day, because an entry recorded
-    | later than the lookback waits for the daily sweep. These may change on any
-    | deploy.
+    | Each schedule is a cron expression, or `null` or empty to schedule nothing
+    | and run the command elsewhere; a malformed one schedules nothing and is
+    | reported, never thrown. `seal.lookback_seconds` must exceed the worst
+    | clock skew between servers, and `verify.max_unsealed_age_seconds` must
+    | exceed a day, since an entry recorded later than the lookback waits for
+    | the daily sweep.
     |
-    | `anchor.driver` is `null` by default, which keeps the seals in the
-    | database alone, or `disk`, which writes each seal's digest once under
-    | `anchor.path` (`audit-log-anchors` by default: 1 to 191 characters of
-    | segments of letters, digits, dots, underscores and hyphens, joined by
-    | single slashes) on `anchor.disk` (`null` or empty for
-    | `filesystems.default`), so verification finds a log rewritten or cut short
-    | against it. `anchor.batch` is how many seals one run anchors, from 1 to
-    | 10000 and 100 by default. The anchor holds only on a write-once (WORM)
-    | store that the application's credentials cannot overwrite or delete, such
-    | as a bucket under object lock; on any other disk it is a copy an attacker
-    | can rewrite. Moving the disk or the path anchors every seal again at the
-    | new place. A malformed value fails closed when it is read, and
-    | `audit-log:check` reports it, as it does a disk `filesystems.disks` does
-    | not configure.
+    | `anchor.driver` is `null` to keep the seals in the database alone, or
+    | `disk` to write each seal's digest under `anchor.path` on `anchor.disk`
+    | (`null` or empty for `filesystems.default`). The anchor holds only on a
+    | write-once (WORM) store the application's credentials cannot overwrite or
+    | delete. Moving the disk or the path anchors every seal again.
     |
     */
 
@@ -156,15 +114,10 @@ return [
     | Lifecycle
     |---------------------------------------------------------------------------
     |
-    | The tables the lifecycle works from, all on the storage connection, with
-    | the entries table's grammar. `journal_table` (`audit_log_lifecycle` by
-    | default) is the signed, chained journal of every hold, release, prune and
-    | import, which every seal commits to; `holds_table` (`audit_log_holds`)
-    | lists the active holds for `audit-log:holds` and `audit-log:check`, and is
-    | never trusted for a decision; and `lock_table`
-    | (`audit_log_lifecycle_lock`) holds the one row every lifecycle transaction
-    | locks first. Any other value fails closed when it is read, and
-    | `audit-log:check` reports it. Set them before migrating: changing one
+    | The signed, chained journal of every hold, release, prune and import; the
+    | active holds, listed for `audit-log:holds` and never trusted for a
+    | decision; and the one row every lifecycle transaction locks first. All are
+    | on the storage connection; set them before migrating, since changing one
     | later moves no table.
     |
     */
@@ -180,15 +133,12 @@ return [
     | Retention
     |---------------------------------------------------------------------------
     |
-    | How long entries are kept. Everything is kept forever by default.
-    | `after_days` is how many days an entry of a category not listed is kept,
-    | and `categories` maps a category to its own: each from 1 to 36500 days, or
-    | `0` for forever, the default. A prune deletes entry by entry, and only
-    | sealed ones: never one of `audit_log.trail_exported`, never one a hold
-    | keeps, and never one still waiting to be delivered. `preserve` maps a
-    | category to how many days its entries must stay readable, `0` meaning
-    | forever, and a category is never kept for less than it is preserved: such
-    | a setting is refused. For example:
+    | Days an entry is kept: `categories` per category and `after_days` for any
+    | other, each `0` for forever, the default. A prune deletes only sealed
+    | entries, and never an `audit_log.trail_exported` entry, a held one or one
+    | waiting to be delivered. `preserve` maps a category to the days its
+    | entries must stay readable, and a shorter retention is refused. For
+    | example:
     |
     |     'categories' => [
     |         'security'          => 730,
@@ -197,16 +147,10 @@ return [
     |     ],
     |     'preserve' => ['security' => 365],
     |
-    | `batch` is the most entries one transaction of a prune deletes, from 100
-    | to 10000 and 1000 by default, and `max_seconds` how long a run goes on
-    | before it stops between chunks, for the next run to resume, from 60 to
-    | 86400 and 3000 by default. `schedule` (daily) is when the package
-    | schedules `audit-log:prune`, which it does only when something is kept for
-    | less than forever, or a policy of the application's own is bound: a cron
-    | expression, or `null` or empty to schedule nothing. An invalid value
-    | prunes nothing, and `audit-log:check` reports it. They may change on any
-    | deploy; a change of `after_days`, `categories` or `preserve` is a new
-    | policy version, which the next run journals.
+    | `audit-log:prune` is scheduled only once something is kept for less than
+    | forever or the application binds a policy of its own. A change of
+    | `after_days`, `categories` or `preserve` is a new policy version, which
+    | the next run journals.
     |
     */
 
@@ -224,16 +168,10 @@ return [
     | Import
     |---------------------------------------------------------------------------
     |
-    | How `audit-log:import` takes in another system's records. `batches_table`
-    | (`audit_log_import_batches` by default) holds one row per import, on the
-    | storage connection, with the entries table's grammar; set it before
-    | migrating. `chunk` is how many lines one transaction writes, from 100 to
-    | 5000 and 500 by default. `max_skew_seconds` is how far after the clock an
-    | imported entry may claim to have happened, from 0 to 86400 and 300 by
-    | default. `max_line_bytes` is the longest line read, from 1024 to 16777216
-    | and 1048576 by default; a longer one is rejected without being held. A
-    | malformed value fails closed when an import runs, before it reads a line,
-    | and `audit-log:check` reports it. The numbers may change on any deploy.
+    | How `audit-log:import` takes in another system's records.
+    | `max_skew_seconds` is how far after the clock an imported entry may claim
+    | to have happened, and a line longer than `max_line_bytes` is rejected
+    | without being held. Set `batches_table` before migrating.
     |
     */
 
@@ -249,12 +187,9 @@ return [
     | Actor
     |---------------------------------------------------------------------------
     |
-    | The guards the ambient actor is read from, in order: `null` for the
-    | default guard (the default), or a non-empty list of guard names of 1 to 64
-    | characters. The first guard holding a user decides, and the actor comes
-    | from what it already holds, never from `user()`. Any other value fails
-    | closed when it is read, and `audit-log:check` reports it, as it does a
-    | name `auth.guards` does not configure. It may change on any deploy.
+    | The guards the ambient actor is read from, in order, or `null` for the
+    | default guard. The first guard holding a user decides, and the actor comes
+    | from what it already holds, never from `user()`.
     |
     */
 
@@ -267,17 +202,12 @@ return [
     | Context
     |---------------------------------------------------------------------------
     |
-    | Whether a request id or a `traceparent` sent by the edge is believed. Both
-    | flags are `false` by default and must be real booleans. Trusting a header
-    | needs both its flag and a configured `TrustProxies`, and
-    | `isFromTrustedProxy()` checks only the immediate peer, so the trusted edge
-    | must overwrite or validate these headers. A record or a dispatch in global
-    | middleware ahead of `TrustProxies` runs before the proxy is trusted, so it
-    | gets a generated id, kept for the rest of the request. An untrusted,
-    | repeated or malformed header is ignored and never kept. `request_id_header`
-    | names the request id's header (`X-Request-Id` by default), 1 to 64
-    | characters of an RFC 9110 token. A malformed setting fails closed when it
-    | is read, and `audit-log:check` reports it. They may change on any deploy.
+    | Whether a request id or a `traceparent` sent by the edge is believed; both
+    | flags must be real booleans. Trust needs the flag and a configured
+    | `TrustProxies`, which checks only the immediate peer, so the trusted edge
+    | must overwrite or validate these headers. A record made in global
+    | middleware ahead of `TrustProxies` gets a generated id, kept for the rest
+    | of the request.
     |
     */
 
@@ -292,12 +222,10 @@ return [
     | Definitions
     |---------------------------------------------------------------------------
     |
-    | Whether a code with no registered definition is refused: `false` by
-    | default, so it takes the permissive definition, or `true`, so it is a
-    | programming error. It must be a real boolean, read on every capture;
-    | anything else fails closed there, never at boot, and `audit-log:check`
-    | reports it. Turn it on once every code the application records is
-    | registered.
+    | Whether a code with no registered definition is refused as a programming
+    | error rather than taking the permissive definition. It is read on every
+    | capture, so a malformed value fails there, never at boot. Turn it on once
+    | every code the application records is registered.
     |
     */
 
@@ -310,34 +238,21 @@ return [
     | Capture
     |---------------------------------------------------------------------------
     |
-    | What the package records on its own. Laravel's authentication events are
-    | always listened to. `laravel.except_guards` is a list of guard names, none
-    | by default, matched against the guard an event names, or `['*']` to record
-    | none of them; an event that names no guard (`Lockout`, `Registered`,
-    | `Verified`, `PasswordReset`, `PasswordResetLinkSent`) is skipped only
-    | under `['*']`. `laravel.identifier_key` is the one credential a failed
-    | sign-in or a lockout is read for, `email` by default, of 1 to 64 letters,
-    | digits, underscores, dots or hyphens, and it is stored as
-    | `redaction.identifiers` says, as a keyed hash or not at all; no other
-    | credential is ever read.
+    | Laravel's authentication events are always listened to.
+    | `laravel.except_guards` skips the events of the listed guards, or every
+    | event under `['*']`, the only setting that skips an event naming no guard.
+    | `laravel.identifier_key` is the one credential a failed sign-in or a
+    | lockout is read for, stored as `redaction.identifiers` says.
     |
-    | Gate capture is off by default: `gate.enabled`, a real boolean, turns it
-    | on, and it records denials only. `gate.only_abilities` is `null` for every
-    | ability, the default, or a non-empty list, and `gate.except_abilities` a
-    | list, none by default, which wins over it; each holds ability names of 1
-    | to 191 bytes, compared exactly, so name abilities with literal strings
-    | rather than building them from data. `gate.reason_codes` lists the
-    | machine-readable codes a denial's response may give that are kept as its
-    | reason, none by default: the code is data the application controls, so one
-    | that is not listed is never kept.
+    | Gate capture is off by default and records denials only.
+    | `gate.except_abilities` wins over `gate.only_abilities` (`null` for every
+    | ability). Abilities are compared exactly, so name them with literal
+    | strings. `gate.reason_codes` lists the codes a denial's response may give
+    | that are kept as its reason: the application controls the code, so an
+    | unlisted one is never kept.
     |
-    | `bulk.max_members` is the most subjects a bulk operation's manifest holds,
-    | from 1 to 1000000 and 100000 by default, and `bulk.max_bytes` the most its
-    | encoded list may hold, from 65536 to 8388608 and 4194304 by default; a
-    | manifest over either is refused, never truncated. A malformed value fails
-    | closed when it is read, and `audit-log:check` reports it, as it does an
-    | excepted guard `auth.guards` does not configure. All of them may change on
-    | any deploy.
+    | A bulk manifest over `bulk.max_members` subjects or `bulk.max_bytes`
+    | encoded is refused, never truncated.
     |
     */
 
@@ -363,12 +278,9 @@ return [
     | Reading
     |---------------------------------------------------------------------------
     |
-    | The most entries a page of the trail may ask for. `max_per_page` is from 1
-    | to 500 and 100 by default; a page size above it is refused as a
-    | programming error, before any query, and a page that names no size holds
-    | 50 entries, or `max_per_page` when that is fewer. A malformed value fails
-    | closed when a page is read, and `audit-log:check` reports it. It may
-    | change on any deploy.
+    | The largest page of the trail a caller may ask for; a larger size is
+    | refused before any query. A page that names no size holds 50 entries, or
+    | `max_per_page` when that is fewer.
     |
     */
 
@@ -381,11 +293,8 @@ return [
     | Export
     |---------------------------------------------------------------------------
     |
-    | How many entries an export reads per statement inside its snapshot.
-    | `chunk` is from 100 to 10000 and 1000 by default; memory grows with it,
-    | never with the export's size. A malformed value fails closed when an
-    | export runs, before any query or record, and `audit-log:check` reports
-    | it. It may change on any deploy.
+    | How many entries an export reads per statement inside its snapshot; memory
+    | grows with it, never with the export's size.
     |
     */
 
@@ -398,14 +307,8 @@ return [
     | Source
     |---------------------------------------------------------------------------
     |
-    | Which deployment a record came from. `id` is 1 to 64 characters with no
-    | control characters, kept as given; `null` or empty, the default, takes a
-    | slug of `app.name`. `region` is `null` or empty for none, the default, or
-    | 1 to 32 characters with no control characters. A malformed value fails
-    | closed when it is read, as does an `app.name` that gives no slug, and
-    | `audit-log:check` reports each. Each record keeps the values it was
-    | written with, so changing them on a deploy leaves earlier rows as they
-    | are.
+    | The deployment a record came from: `id` defaults to a slug of `app.name`
+    | and `region` to none. Each record keeps the values it was written with.
     |
     */
 
@@ -419,22 +322,11 @@ return [
     | Redaction
     |---------------------------------------------------------------------------
     |
-    | What a record keeps of what it is given. `keys` are more key names to
-    | redact, none by default, merged with the built-ins, each tokenised the way
-    | a key is, and no built-in can be removed: matching keys is a heuristic,
-    | whose remedy is an event definition that allowlists a code's fields.
-    | `identifiers` says how a sign-in identifier is stored, `hash` by default
-    | or `drop`. `ip` says how an address is stored, `full` by default,
-    | `truncate`, `hash`, `drop` or `encrypt`. `key` is at least 32 bytes, or
-    | `base64:` followed by the encoding of one, or empty by default to derive
-    | it from `app.key`; changing it visibly breaks correlation with earlier
-    | rows. `max_bytes` is the most the encoded properties may hold, from 8192
-    | to 16777216 and 16384 by default, and `max_context_bytes` the most the
-    | encoded context may hold, from 1024 to 16777216 and 4096 by default.
-    | `keys`, `identifiers`, `ip` and both budgets may change on any deploy and
-    | affect only later rows, and changing `ip` or `identifiers` breaks
-    | correlation across the switch. A malformed value fails closed when it is
-    | read, and `audit-log:check` reports it.
+    | `keys` adds key names to the built-in redaction list, which cannot be
+    | shortened; key matching is a heuristic, and an event definition that
+    | allowlists a code's fields is the remedy. `key` is at least 32 bytes, or
+    | `base64:` encoded, or empty to derive it from `app.key`. Changing `key`,
+    | `ip` or `identifiers` breaks correlation with earlier rows.
     |
     */
 
@@ -453,33 +345,18 @@ return [
     |---------------------------------------------------------------------------
     |
     | Each value a definition marks for encryption is sealed under a key of its
-    | owner's, one key per owner, tenant and category, kept in
-    | `subject_keys_table` (`audit_log_subject_keys` by default), so erasing an
-    | owner destroys its keys and leaves its values unreadable.
-    | `owner_erasures_table` (`audit_log_owner_erasures`) marks each erasure and
-    | reinstatement of an owner, and `key_uses_table` (`audit_log_key_uses`)
-    | records which key sealed a field of which entry. All three are on the
-    | storage connection, with the entries table's grammar; set them before
-    | migrating, since changing one later moves no table.
+    | owner's, one per owner, tenant and category, so erasing an owner destroys
+    | its keys and leaves its values unreadable. Set the tables before
+    | migrating: changing one later moves no table.
     |
-    | Every owner's key is wrapped under a wrapping key. With no `keys` the
-    | wrapping key is derived from `app.key`, separated from every other key
-    | `app.key` gives but not independent of it, and the keys derived from
-    | `app.previous_keys` still unwrap what they wrapped before a rotation. To
-    | manage the wrapping keys instead, map each id (1 to 32 letters, digits,
-    | dots, underscores or hyphens, starting with a letter or a digit) to a
-    | secret of at least 32 bytes, or `base64:` followed by the encoding of one,
-    | and name the wrapping key in `current`: both or neither. A malformed ring
-    | fails closed, never falling back to `app.key`, and `audit-log:check`
-    | reports it. Keep every wrapping key until `audit-log:rewrap` has moved
-    | every owner's key off it. Read each secret from its own env var:
+    | Owners' keys are wrapped under the `current` wrapping key, derived from
+    | `app.key` when `keys` is empty: separated from every other key `app.key`
+    | gives, but not independent of it. Set `keys` and `current` together or
+    | neither; a malformed ring never falls back to `app.key`. Keep every
+    | wrapping key until `audit-log:rewrap` has moved every owner's key off it.
+    | Read each secret from its own env var:
     |
     |     'keys' => ['w2026' => env('AUDIT_LOG_PRIVACY_KEY_W2026')],
-    |
-    | `rewrap_batch` is the most keys one transaction of `audit-log:rewrap`
-    | changes, from 100 to 10000 and 500 by default, and may change on any
-    | deploy. A malformed value fails closed when it is read, and
-    | `audit-log:check` reports it.
     |
     */
 
@@ -497,20 +374,14 @@ return [
     | Failure
     |---------------------------------------------------------------------------
     |
-    | What a failed write does to the code that recorded it. `mode` is `report`
-    | by default, which spills the record, reports the failure, dispatches
-    | `AuditWriteFailed` and lets the code go on, or `throw`, which spills the
-    | record, dispatches the event and throws. A `failClosed()` record always
-    | throws, and a `transactional()` record always throws and is never spilled,
-    | whatever the mode. `log_channel` is the channel a spill line goes to, 1 to
-    | 64 characters, or `null` or empty for the default channel. A spill line
-    | holds the whole record, so this channel holds personal data: control who
-    | can read it and how long it is kept. A dedicated file channel using
-    | `LineFormatter` with `%message%\n` and no inline-break replacement is the
-    | only format `audit-log:replay` promises to read, and `audit-log:check`
-    | notes any other. A malformed value fails closed when it is read, and
-    | `audit-log:check` reports it, as it does a name `logging.channels` does
-    | not configure. Both may change on any deploy.
+    | What a failed write does to the code that recorded it: `report` spills the
+    | record, reports the failure, dispatches `AuditWriteFailed` and carries on,
+    | and `throw` spills, dispatches and throws. A `failClosed()` record always
+    | throws, and a `transactional()` one always throws without spilling. A
+    | spill line holds the whole record, so `log_channel` holds personal data:
+    | control who can read it and how long it is kept. `audit-log:replay`
+    | promises to read only a dedicated file channel using `LineFormatter` with
+    | `%message%\n` and no inline-break replacement.
     |
     */
 
@@ -524,26 +395,13 @@ return [
     | Delivery
     |---------------------------------------------------------------------------
     |
-    | How a record reaches its store. `mode` is `sync` by default, which stores
-    | it as it is written, or `outbox`, which inserts it in the outbox table for
-    | `audit-log:drain`, scheduled by the application, to deliver.
-    | `outbox.connection` is the connection that table lives on, `null` or empty
-    | for the storage connection: on the connection the application's
-    | transactions run on, a row commits exactly when they do. `outbox.table`
-    | and `deliveries_table` name the tables, with the same grammar as the
-    | entries table, and the deliveries table is always on the storage
-    | connection. `outbox.lease_seconds` is how long a drain's claim lasts
-    | before another drain may take the row, from 30 to 86400 and 300 by
-    | default, and must outlast a destination's timeout. `outbox.max_attempts`
-    | is how many attempts a row gets before it is failed and kept for a replay,
-    | from 1 to 1000 and 10 by default. `outbox.backoff_seconds` is how long the
-    | first retry waits, doubling up to an hour, from 1 to 3600 and 60 by
-    | default. A row holds the record encrypted with `app.key`, so an old
-    | `app.key` must stay in `app.previous_keys` while the outbox needs it. A
-    | malformed value fails closed when it is read, and `audit-log:check`
-    | reports it. The mode and the numbers may change on any deploy; set the
-    | connection and the tables before migrating, since changing them later
-    | moves no table.
+    | `sync` stores a record as it is written, and `outbox` inserts it in the
+    | outbox table for `audit-log:drain`, scheduled by the application, to
+    | deliver. On the connection the application's transactions run on, an
+    | outbox row commits exactly when they do. `outbox.lease_seconds` must
+    | outlast a destination's timeout. A row is encrypted with `app.key`, so an
+    | old `app.key` must stay in `app.previous_keys` while the outbox needs it.
+    | Set the connection and the tables before migrating.
     |
     */
 
@@ -564,14 +422,10 @@ return [
     | Monitor
     |---------------------------------------------------------------------------
     |
-    | How old the progress `audit-log:check --freshness` reads may grow before
-    | it calls a run stale, in minutes. `seal_minutes` is the last seal run's
-    | limit, from 5 to 1440 and 30 by default. `daily_minutes` is the limit of
-    | the last sweep, the last full verification and the last prune, from 60 to
-    | 10080 and 1560 (a day and two hours) by default. `outbox_minutes` is how
-    | long the oldest outbox row may wait for a drain in outbox mode, from 1 to
-    | 1440 and 15 by default. A malformed value fails the freshness check, and
-    | `audit-log:check` reports it. They may change on any deploy.
+    | How old, in minutes, the progress `audit-log:check --freshness` reads may
+    | grow before it calls a run stale: `seal_minutes` for sealing,
+    | `daily_minutes` for the sweep, full verification and prune, and
+    | `outbox_minutes` for the oldest outbox row in outbox mode.
     |
     */
 

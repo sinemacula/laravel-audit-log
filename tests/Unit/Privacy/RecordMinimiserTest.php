@@ -38,9 +38,7 @@ use Tests\Fixtures\Records\RecordFactory;
 
 /**
  * Unit tests for the record minimiser: the order of its steps, what each does
- * to the context, the collisions, the address, the note, the identifier and the
- * properties, that every diagnostic lands in one list, and which settings fail
- * the capture and when.
+ * to the record, its diagnostics, and failing settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -106,8 +104,7 @@ final class RecordMinimiserTest extends TestCase
 
     /**
      * Under the permissive definition a record with no secret-shaped key,
-     * within its budgets, is exactly what the builder held, and no diagnostic
-     * is added.
+     * within its budgets, is unchanged and gains no diagnostic.
      *
      * @return void
      */
@@ -140,10 +137,8 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
-     * Key redaction runs before the rules, so a rule retaining a secret-shaped
-     * key keeps only the marker, hashing or encrypting it changes nothing, and
-     * a rule can redact what the key matcher exempts. Caps run after the rule
-     * chose, so only a retained string is cut.
+     * Key redaction runs before the rules, so a rule cannot recover a
+     * secret-shaped key, and caps after them, cutting only retained strings.
      *
      * @return void
      */
@@ -295,11 +290,8 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
-     * A value the record is given that is exactly an encryption envelope, in
-     * the properties or the context, at any depth, is removed and diagnosed
-     * before anything is sealed, so a record stores no envelope its own sealer
-     * did not make; a map with a member beyond the three, and the rest of each
-     * container, are kept, and a list stays a list.
+     * A given value that is exactly an envelope is removed and diagnosed at any
+     * depth before sealing; the rest of its container is kept.
      *
      * @return void
      */
@@ -521,9 +513,8 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
-     * One capture meets one failure: the address, the note and a field that
-     * would each call a broken encrypter call it once, report once, and are
-     * each diagnosed.
+     * A broken encrypter is called and reported once per capture, and the
+     * address, the note and the field it would seal are each diagnosed.
      *
      * @return void
      */
@@ -562,10 +553,8 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
-     * Every value of a record is sealed with the same list of owners: the
-     * owners of the encrypted fields, the note's owner and, under the `encrypt`
-     * IP mode, the actor, each once and sorted, so the first value sealed
-     * already names every key the record needs.
+     * Every value of a record is sealed with the same sorted owners, the actor
+     * included under `encrypt`, so the first value sealed names every key.
      *
      * @return void
      */
@@ -833,9 +822,8 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
-     * A bulk record's manifest descriptor is added at capture, in the reserved
-     * area after the note and the identifier hash, and holds the artifact's id,
-     * its kind, the digest and the count.
+     * A bulk record's manifest descriptor is added at capture after the note
+     * and hash, holding the artifact's id, kind, digest and count.
      *
      * @return void
      *
@@ -870,9 +858,8 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
-     * A disclosure's descriptor, of an empty disclosure counting none, is added
-     * as a bulk operation's is, naming its kind, and survives a definition that
-     * drops every unlisted property.
+     * A disclosure's descriptor, even of an empty one, is added as a bulk
+     * operation's is and survives dropping every unlisted property.
      *
      * @return void
      *
@@ -1048,9 +1035,7 @@ final class RecordMinimiserTest extends TestCase
 
     /**
      * Several malformed settings fail on the key names first, whatever the
-     * budgets and the modes hold, so the first reader decides what a capture
-     * reports; protects against a mutation that leaves the keys to the
-     * redactor's read.
+     * budgets and modes hold, so the first reader decides the report.
      *
      * @return void
      */
@@ -1128,9 +1113,7 @@ final class RecordMinimiserTest extends TestCase
 
     /**
      * A key past the ceiling leaves with its branch before anything else reads
-     * a key, in the properties and the context alike, and each removal is
-     * counted under a path masked whole, whatever the rules are: the key, and
-     * what was under it, reach neither the record nor a diagnostic.
+     * a key, counted under a path masked whole, whatever the rules.
      *
      * @return void
      */
@@ -1148,9 +1131,8 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
-     * A failure reaches the caller without the record's payload, in its message
-     * or in the arguments of any frame, which production's setting would hide
-     * and so hide a leak from this test too.
+     * A failure carries no payload in its message or frame arguments, which are
+     * kept here since production's setting would hide a leak.
      *
      * @return void
      */

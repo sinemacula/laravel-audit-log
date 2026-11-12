@@ -14,44 +14,11 @@ use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * The frame of every write of the lifecycle journal and the holds projection:
- * one outermost transaction on the maintenance connection whose first statement
- * takes the lifecycle lock.
+ * Runs lifecycle writes in one outermost transaction on the maintenance
+ * connection whose first statement takes the lifecycle lock.
  *
- * An operation (a hold, a release, a prune run, an import, a rebuild) first
- * calls `confirm()`, once, never per transaction and never in a dry run: the
- * installation id, which the migrations seed, is ensured through the storage
- * connection, written there only if it was lost, and must read the same through
- * the maintenance one, so the operation's rows land in the database that holds
- * the entries and the seals. Each of its transactions then goes through
- * `run()`, which refuses to start while the maintenance or the storage
- * connection is already in a transaction, so a lifecycle transaction is never a
- * savepoint of the host's and commits on its own.
- *
- * Each attempt sets `read committed` for the next transaction on MySQL, then
- * begins the framework's transaction, whose first statement updates the lock's
- * one row with a token naming the operation and a fresh random suffix, so the
- * update always changes the row and its affected count is 1 on every engine; a
- * missing row is refused. On PostgreSQL the transaction's isolation is then
- * read and must be `read committed`, its default. On MySQL and PostgreSQL the
- * update takes the row lock; on SQLite it is a real write, so it takes the
- * database's write lock on PHP 8.3 and 8.4 alike, before the transaction has
- * read anything. Every decision read of the work follows the lock, inside the
- * same transaction, so it sees every operation committed before the lock was
- * granted. The lock gives exclusion, not fairness: an operation waiting for it
- * is not promised a turn ahead of one that asks later.
- *
- * An attempt lost to a concurrent operation (a deadlock, a serialisation
- * failure, a lock wait timeout or a locked database) is rolled back whole and
- * made again after a jittered wait, its work run afresh, up to three times; the
- * fourth loss is a `LifecycleContentionException`. A lost connection is never
- * retried, since its commit may have happened, and anything else propagates
- * unchanged. The work's result is returned only once its transaction has
- * committed, so a caller keeps nothing a rolled-back attempt produced.
- *
- * The lock serialises the package's own lifecycle operations and nothing else:
- * whoever holds the maintenance credentials can still change the tables, and
- * the journal and the seals make that detectable, not impossible.
+ * The lock update writes a fresh random token so it affects one row on every
+ * engine, and on SQLite takes the write lock before any read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,7 +45,7 @@ final readonly class MaintenanceTransaction
     /** @var int The random bytes of a token's suffix, drawn per attempt. */
     private const int TOKEN_BYTES = 8;
 
-    /** @var string How the lock's time is written: UTC to the microsecond, as every time the package stores. */
+    /** @var string UTC to the microsecond, as the package stores every time. */
     private const string TIME_FORMAT = 'Y-m-d H:i:s.u';
 
     /** @var string The isolation level every lifecycle transaction runs at, as PostgreSQL names it. */
@@ -109,8 +76,7 @@ final readonly class MaintenanceTransaction
 
     /**
      * Ensure the installation id through the storage connection and confirm the
-     * maintenance connection reads the same one; an operation calls this once,
-     * before its first transaction, and never in a dry run.
+     * maintenance connection reads the same; never in a dry run.
      *
      * @return void
      *
@@ -122,13 +88,8 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Run the work in one outermost transaction on the maintenance connection,
-     * behind the lifecycle lock, and return its result once the transaction has
-     * committed. An attempt lost to a concurrent operation is rolled back and
-     * made again after a jittered wait, the work run afresh, up to three times;
-     * a refusal (an operation id that is empty or longer than 47 bytes, a
-     * transaction already open, a missing lock row, another isolation level)
-     * and any other failure propagate.
+     * Run the work behind the lifecycle lock and return its result once
+     * committed, retrying contention up to three times.
      *
      * @template TResult
      *
@@ -165,9 +126,8 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Make one attempt: on MySQL set `read committed` for the next transaction,
-     * then, in the framework's transaction, take the lock, check the isolation
-     * on PostgreSQL, and run the work.
+     * Make one attempt: set `read committed` on MySQL, then take the lock,
+     * check the isolation and run the work.
      *
      * @template TResult
      *
@@ -197,12 +157,8 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Whether the failed attempt was lost to a concurrent operation, so a fresh
-     * one may not meet the failure: a deadlock, a serialisation failure, a lock
-     * wait timeout or a locked database. A lost connection never is, since its
-     * commit may have happened. Short of a lost connection, a transaction the
-     * driver still holds after a failed commit is rolled back first, so
-     * whatever follows begins afresh.
+     * Whether the attempt was lost to contention; a lost connection never is,
+     * since its commit may have happened.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \Throwable  $exception
@@ -220,9 +176,8 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Refuse to start while the maintenance or the storage connection is in a
-     * transaction: the operation would become a savepoint of the host's and
-     * commit only with it.
+     * Refuse to run inside a transaction on either connection, which would make
+     * the operation a savepoint of the host's.
      *
      * @param  \Illuminate\Database\Connection  $maintenance
      * @return void
@@ -239,8 +194,8 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Refuse an operation id that is empty, or too long for its token to fit
-     * the lock's column.
+     * Refuse an operation id that is empty or too long for the lock's token
+     * column.
      *
      * @param  string  $operationId
      * @return void
@@ -257,8 +212,7 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Take the lock: update its one row with the attempt's token and time, as
-     * the transaction's first statement, and refuse when no row was updated.
+     * Take the lock by updating its one row, refusing when no row was updated.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $token
@@ -279,8 +233,7 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * On PostgreSQL, refuse a transaction that does not run at `read
-     * committed`; other engines are not asked.
+     * On PostgreSQL, refuse a transaction not at `read committed`.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -302,9 +255,8 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Wait before the next attempt a random time no longer than the bound of
-     * the attempt that was lost: 20 milliseconds after the first, doubling
-     * after each, up to a second.
+     * Wait a random time bounded by 20 milliseconds after the first loss,
+     * doubling each time up to a second.
      *
      * @param  int  $attempt
      * @return void
@@ -319,9 +271,8 @@ final readonly class MaintenanceTransaction
     }
 
     /**
-     * Roll back a transaction the driver still holds once the framework holds
-     * none, as a commit that failed leaves it, without connecting when there is
-     * no connection yet.
+     * Roll back a transaction a failed commit left on the driver, without
+     * connecting when there is no connection yet.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void

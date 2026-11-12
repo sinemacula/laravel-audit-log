@@ -7,18 +7,11 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
- * What reinstating an erased owner did: the operation, the id of the
- * reinstatement's journal row, which its marker shares, the owner's keyed
- * fingerprint and the id of the ring key it was taken under, the generation
- * floor the owner's next key is created above, that it committed, and whether
- * its `audit_log.keys_reinstated` record was written.
+ * What reinstating an erased owner did; `recorded` is `false` when the record
+ * failed after the commit, which `audit-log:reconcile` repairs.
  *
- * `committed` is always `true` on a result that is returned, since a
- * reinstatement that did not commit throws instead. `recorded` is `false` when
- * the record could not be written after the commit, which never undoes the
- * reinstatement; `audit-log:reconcile` writes the record later from the
- * journal. The fingerprint is personal data while it can be linked to the
- * owner, and the result names the owner by nothing else.
+ * The fingerprint is personal data while it can be linked to the owner, and the
+ * result names the owner by nothing else.
  *
  * @api
  *

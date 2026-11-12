@@ -13,10 +13,8 @@ use Tests\Unit\Stubs\Enums\StubActivity;
 use Tests\Unit\Stubs\Enums\StubNumberedActivity;
 
 /**
- * Unit tests for the event code: the codes it keeps, the enums it takes, the
- * codes it refuses, the order its rules apply in, the prefix reserved for the
- * package's own codes, minting one of them, and reading a code under any
- * prefix.
+ * Unit tests for the event code and the prefix reserved for the package's own
+ * codes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -178,9 +176,8 @@ final class EventCodeTest extends TestCase
     }
 
     /**
-     * The length is checked before the grammar and the reserved prefix, and in
-     * bytes, so a long code is refused with the length message whatever else is
-     * wrong with it.
+     * The length is checked first, in bytes, so a long code is refused with the
+     * length message whatever else is wrong.
      *
      * @param  string  $code
      * @return void
@@ -243,9 +240,8 @@ final class EventCodeTest extends TestCase
     }
 
     /**
-     * The reserved prefix alone is outside the grammar, and is refused with the
-     * grammar message, not the reserved one, because the grammar is checked
-     * first.
+     * The reserved prefix alone is refused with the grammar message, as the
+     * grammar is checked first.
      *
      * @return void
      */
@@ -295,9 +291,8 @@ final class EventCodeTest extends TestCase
     }
 
     /**
-     * A code read for a lookup may be under the reserved prefix, given as a
-     * string or as an enum case, and keeps its value; an ordinary code is read
-     * as `of()` reads it.
+     * A code read for a lookup may be under the reserved prefix; an ordinary
+     * code is read as `of()` reads it.
      *
      * @return void
      */

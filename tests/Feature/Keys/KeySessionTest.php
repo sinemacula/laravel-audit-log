@@ -17,17 +17,8 @@ use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\TestCase;
 
 /**
- * Feature tests for the session a key is created on: in-memory SQLite created
- * on the storage connection itself, a file database given a session of its own
- * made from the storage connection's write configuration and purged once
- * closed, the testing manager's base transaction and SQLite inside any host
- * transaction kept on the storage connection, and an engine a key is not
- * created on refused before anything.
- *
- * The databases here are SQLite connections of their own, files or in-memory,
- * so they read the same on every engine the suite runs against; the testing
- * manager's transaction is opened on the storage connection itself, whichever
- * engine it is.
+ * Feature tests for the session a key is created on, using SQLite connections
+ * of their own so they read the same on every engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,9 +52,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * In-memory SQLite, which a second PDO cannot see, is the session itself:
-     * no connection is made, and closing leaves the storage connection as it
-     * was.
+     * In-memory SQLite, which a second PDO cannot see, is the session itself,
+     * and closing leaves the storage connection as it was.
      *
      * @return void
      */
@@ -87,10 +77,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * Over a read/write split the session is the storage connection's write
-     * configuration: the primary's database, no `read` or `write` of its own,
-     * one PDO for reads and writes, and a name of its own, so a key is never
-     * read from or written to the replica.
+     * Over a read/write split the session is the write configuration alone,
+     * under its own name, so a key never touches the replica.
      *
      * @return void
      */
@@ -117,9 +105,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * A file database is given a session of its own on its writer: another
-     * connection to the same file, under its own name, whose writes the storage
-     * connection reads.
+     * A file database is given a session of its own on its writer, whose writes
+     * the storage connection reads.
      *
      * @return void
      */
@@ -141,11 +128,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * A storage connection configured with persistent PDO connections still
-     * gives the session a handle of its own, so a creation never runs on the
-     * storage connection's own transaction nor disconnects it when purged; the
-     * session keeps the other PDO options and drops the isolation level, which
-     * the key creator sets.
+     * A persistent storage connection still gives the session its own handle,
+     * keeping the other PDO options and dropping the isolation level.
      *
      * @return void
      */
@@ -177,9 +161,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * Closing a dedicated session purges it from the manager, which disconnects
-     * it; closing again does nothing, and the next session has a name of its
-     * own.
+     * Closing a dedicated session purges it from the manager; closing again
+     * does nothing, and the next session has its own name.
      *
      * @return void
      */
@@ -207,10 +190,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * A storage connection holding the testing manager's base transaction,
-     * whose rows no other session could see, is the session itself, so a key
-     * created in a test rolls back with it; a transaction nested in that base
-     * is a host's, given a session of its own on every engine but SQLite.
+     * Inside the testing manager's base transaction the session is the storage
+     * connection, so a test's key rolls back; a nested one is a host's.
      *
      * @return void
      */
@@ -249,9 +230,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * On SQLite a storage connection inside any transaction is the session
-     * itself, since a second writer would wait for the host's own lock; once
-     * the transaction ends a session of its own is made again.
+     * On SQLite a storage connection inside any transaction is the session,
+     * since a second writer would wait on the host's lock.
      *
      * @return void
      */
@@ -307,9 +287,8 @@ final class KeySessionTest extends TestCase
     }
 
     /**
-     * An engine other than MySQL, PostgreSQL and SQLite is refused before any
-     * session is made or any statement runs, naming the connection and the
-     * driver.
+     * An engine other than MySQL, PostgreSQL and SQLite is refused before
+     * anything runs, naming the connection and the driver.
      *
      * @return void
      */

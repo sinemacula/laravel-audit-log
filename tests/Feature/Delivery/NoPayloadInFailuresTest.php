@@ -53,25 +53,8 @@ use Tests\Fixtures\Stores\ThrowingLogHandler;
 use Tests\TestCase;
 
 /**
- * A secret planted in a record, and in what its write fails with, is searched
- * for wherever a failed write can leave it: each report, each event, what
- * escapes, its chain, every argument of every frame, and the traces as strings
- * a log and `failed_jobs` keep, under each failure rule and in either delivery
- * mode. The store fails quoting the row, with its bindings, as a real
- * `QueryException` built from the secret, and in outbox mode the insert does.
- *
- * Then the same again for a failure of a failure: a spill and a listener that
- * throw the secret, a reporter that does; for a failure fatal to a transaction;
- * for a stack; and for a drain and a replay. What is left on disk is searched
- * too: a spill holds only minimised values, an outbox row no plaintext, and a
- * receipt no payload.
- *
- * The whole class turns `zend.exception_ignore_args` off, so every frame keeps
- * its arguments to search, and a helper on the stack takes neither the secret
- * nor a payload, or the search would find the test's own frame.
- *
- * It claims no coverage because it pins what a failed write leaves behind, end
- * to end, and each class's behaviour is pinned by its own test.
+ * Searches everywhere a failed write can leave a planted secret; frames keep
+ * their arguments, so no helper may take the secret or a payload.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -206,9 +189,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * The search has something to find: the record holds the secret, the
-     * failure quotes it in its message, its SQL and its bindings, and the spill
-     * keeps the record whole, so finding it nowhere else means something.
+     * The search has something to find: the record, the failure's message, SQL
+     * and bindings, and the spill all hold the secret.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void
@@ -255,9 +237,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * What is reported holds no secret, and nor does what a handler would write
-     * to the log for it: every failure is said once, and only as the sanitised
-     * exception.
+     * Nothing reported holds the secret, and every failure is reported once,
+     * only as the sanitised exception.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
@@ -350,9 +331,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * Every argument of every frame is walked, objects and what they hold
-     * included, which a trace written as a string would not show, and holds no
-     * secret; the frames that took the payload hold PHP's stand-in instead.
+     * No argument of any frame, objects included, holds the secret; the frames
+     * that took the payload hold PHP's stand-in.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
@@ -369,10 +349,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * `getTraceAsString()` and `(string) $exception`, which keep the first 15
-     * bytes of each string argument and are what `failed_jobs` stores, hold no
-     * secret, and do show the stand-in, so a frame's argument was written
-     * there.
+     * The string traces `failed_jobs` stores hold no secret and do show the
+     * stand-in, so a frame's argument was written there.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
@@ -391,9 +369,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * A real insert that fails holds the whole row in its bindings, and no
-     * value of them reaches a report: only the record's id and code, which are
-     * meant to, and nothing of its statement or its table.
+     * A real failed insert holds the whole row in its bindings, and nothing of
+     * it reaches a report beyond the record's id and code.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
@@ -472,9 +449,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * An anonymous class is named by what it extends, in each diagnostic, and
-     * never by the file that declares it, which `$e::class` would give with a
-     * NUL byte after it.
+     * An anonymous class is named by what it extends, never by its declaring
+     * file, which `$e::class` would give with a NUL byte.
      *
      * @param  string  $through
      * @return void
@@ -514,9 +490,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * A spill and a listener that each throw the secret leave it nowhere: each
-     * is reported as a sanitised exception of its own, naming only its class,
-     * and neither changes what the rule does to the code that recorded.
+     * A throwing spill and listener are each reported naming only their class,
+     * and change nothing of what the rule does.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
@@ -597,9 +572,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * A deadlock quoting the row, inside a host's transaction, is replaced by
-     * the fixed `DeadlockException`: not reported, not spilled, and with
-     * nothing of the failure in its message, chain or frames.
+     * A deadlock quoting the row inside a host's transaction becomes the fixed
+     * `DeadlockException`, holding nothing of the failure.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void
@@ -622,9 +596,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * A lost connection quoting the row, inside a host's transaction, escapes
-     * as the sanitised exception: not reported, not spilled, and with nothing
-     * of the failure in its message, chain or frames.
+     * A lost connection quoting the row inside a host's transaction escapes
+     * sanitised, holding nothing of the failure.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void
@@ -680,9 +653,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * Every destination of a stack quoting the row leaves only their ids and
-     * the classes they failed with, both on the failure the stack throws and on
-     * what is then reported or thrown.
+     * A stack whose destinations all quote the row leaves only their ids and
+     * failure classes, thrown or reported.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
      * @return void
@@ -730,10 +702,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * A spill keeps the record as it was minimised: a redacted value is the
-     * marker, a value past its cap is cut before the secret at its end, an
-     * identifier is its hash, and what minimising keeps is kept. The line holds
-     * no secret, and nothing else logged does.
+     * A spill keeps the record as minimised, so its line holds no secret, and
+     * nothing else logged does.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void
@@ -774,9 +744,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * Each raw column of an outbox row holds no plaintext: not the secret, and
-     * none of the record's values that are not secret, the payload as stored
-     * and once its base64 is undone both, though decrypting it gives them all.
+     * No raw column of an outbox row holds plaintext, before or after undoing
+     * its base64, though decrypting it gives every value.
      *
      * @return void
      */
@@ -817,9 +786,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * A receipt has only its six columns, holding the entry's id, the
-     * destination, the attempts and the failure's class, whether it failed or
-     * was delivered, and neither holds a payload.
+     * A receipt has only its six columns, and neither a failed nor a delivered
+     * one holds a payload.
      *
      * @return void
      */
@@ -1083,9 +1051,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * Put the application in the mode, and make the write fail with the failure
-     * given, quoting the row: the store, or the outbox's insert, before it
-     * reaches the database.
+     * Put the application in the mode and make the store, or the outbox's
+     * insert, fail with the given failure quoting the row.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @param  string  $message
@@ -1337,9 +1304,8 @@ final class NoPayloadInFailuresTest extends TestCase
     }
 
     /**
-     * Fail when any argument of any frame of the exception holds the secret,
-     * however deep, or when no frame holds the stand-in for what was hidden, so
-     * the walk reached the frames that took the payload.
+     * Fail when any frame argument holds the secret, however deep, or no frame
+     * holds the stand-in for what was hidden.
      *
      * @param  \Throwable  $exception
      * @return void

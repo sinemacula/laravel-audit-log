@@ -5,23 +5,17 @@ declare(strict_types = 1);
 namespace Tests\Integration\Models;
 
 use Illuminate\Config\Repository as ConfigRepository;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Casts\UtcInstant;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
- * Integration tests for reading entries through the read model on the engine
- * the suite runs against: every column of a stored row as the model reads it,
- * the times as UTC instants with their microseconds whatever the application's
- * time zone, and a table and connection of the application's choosing.
- *
- * Rows are seeded with literal `DB::table()->insert()` statements, never
- * through the row codec or the store, so the test reads what an engine returns
- * for what was written, not what the package wrote.
+ * Integration tests for reading entries through the read model on every engine;
+ * rows are seeded by literal inserts, so they read what the engine returns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,6 +26,8 @@ use Tests\TestCase;
 #[CoversClass(UtcInstant::class)]
 final class AuditEntryReadTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string The default entries table. */
     private const string TABLE = 'audit_log_entries';
 
@@ -123,10 +119,7 @@ final class AuditEntryReadTest extends TestCase
     }
 
     /**
-     * Every column of a row the engine stored reads back through the model as
-     * written: the strings unchanged, the versions as integers, the JSON
-     * columns as arrays, numeric keys and nested nulls kept, and the times in
-     * the package's form, PostgreSQL's dropped trailing zeros restored.
+     * Every column of a stored row reads back through the model as written.
      *
      * @return void
      */
@@ -146,8 +139,7 @@ final class AuditEntryReadTest extends TestCase
     }
 
     /**
-     * With the application's and PHP's time zones far from UTC, a stored time
-     * still reads as the UTC instant it names, to the microsecond.
+     * Stored times read as UTC instants to the microsecond, whatever the zone.
      *
      * @return void
      */
@@ -169,9 +161,7 @@ final class AuditEntryReadTest extends TestCase
     }
 
     /**
-     * With a table and a storage connection of the application's own, the model
-     * reads the entry from that table on that connection, and nothing from the
-     * default table on the default connection.
+     * The model reads from the application's own table and connection.
      *
      * @return void
      */
@@ -183,7 +173,7 @@ final class AuditEntryReadTest extends TestCase
         $config->set('audit-log.storage.connection', self::STORAGE);
         $config->set('audit-log.entries.table', self::CUSTOM_TABLE);
 
-        $migration = $this->loadMigration();
+        $migration = $this->loadMigration(self::MIGRATION_PATH);
 
         $migration->up(); // @phpstan-ignore method.notFound
 
@@ -203,25 +193,5 @@ final class AuditEntryReadTest extends TestCase
         }
 
         self::assertFalse(Schema::connection(self::STORAGE)->hasTable(self::CUSTOM_TABLE));
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Entries migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

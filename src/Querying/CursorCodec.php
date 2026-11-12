@@ -10,25 +10,11 @@ use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 
 /**
- * Issues and opens the cursor of a page of the trail, version 1: `v1`, then the
- * key id, the payload and the MAC, each as unpadded base64url, separated by
- * dots. The payload is the canonical encoding of `{pos: [time, id]}`, the
- * position of the last entry a page showed, and the MAC is HMAC-SHA256 over the
- * binding's canonical input, the key id and the payload part exactly as sent,
- * under a key derived by HKDF-SHA256 from the secret of the ring key the key id
- * names, with an empty salt and an info string of its own, so it is never the
- * key that signs rows or seals.
+ * Issues and opens a page cursor: `v1.<key id>.<payload>.<mac>` in unpadded
+ * base64url, the MAC under an HKDF-derived key never used to sign rows.
  *
- * A cursor is issued under the ring's signing key and opened under the key it
- * names, so a cursor issued before a rotation still opens while its key stays
- * in the ring. Opening is bounded to 512 bytes, checks the MAC in constant time
- * before anything of the payload is decoded, decodes the payload to exactly one
- * key holding two strings, two levels deep and no deeper, and refuses every
- * failure, a key the ring does not hold included, with the one uniform
- * `InvalidCursorException`. It makes no query, reads no row and never expires a
- * cursor: the scope is answered again on every read, so a cursor can never
- * widen what a viewer sees. The derived key is made on every call and never
- * kept.
+ * Opening checks the MAC in constant time before decoding the payload, and
+ * every failure is the one uniform `InvalidCursorException`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,16 +35,16 @@ final readonly class CursorCodec
     /** @var string What separates the parts of a cursor. */
     private const string SEPARATOR = '.';
 
-    /** @var int How many parts a cursor has: the version, the key id, the payload and the MAC. */
+    /** @var int The version, the key id, the payload and the MAC. */
     private const int PARTS = 4;
 
-    /** @var string A part after the version: one or more characters of the base64url alphabet, with no padding. */
+    /** @var string Unpadded base64url. */
     private const string PART_PATTERN = '/\A[A-Za-z0-9_-]+\z/';
 
     /** @var string The one key a payload holds. */
     private const string POSITION_KEY = 'pos';
 
-    /** @var int How deep a payload is decoded: the map, its list and the list's strings, as PHP counts them. */
+    /** @var int The map, its list and the list's strings, as PHP counts depth. */
     private const int DEPTH = 3;
 
     /** @var int Length of every cursor key and MAC, in bytes. */
@@ -71,13 +57,12 @@ final readonly class CursorCodec
      */
     public function __construct(
 
-        /** The ring whose signing key issues a cursor and whose keys open one. */
+        /** Issues under its signing key; opens under any key it still holds. */
         private KeyRing $keys,
     ) {}
 
     /**
-     * The cursor of the position, bound to the read, under the ring's signing
-     * key.
+     * The cursor of the position, bound to the read.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\CursorBinding  $binding
      * @param  \SineMacula\Laravel\AuditLog\Querying\Position  $position
@@ -96,11 +81,7 @@ final readonly class CursorCodec
     }
 
     /**
-     * The position the cursor holds, once it is shown to have been issued for
-     * the read, or the uniform refusal: longer than `MAX_BYTES`, not four
-     * parts, the first `v1` and the others base64url, a key id that is not one
-     * or that the ring does not hold, a MAC that is not 32 bytes or does not
-     * match, and only then a payload that is not exactly a position.
+     * The position the cursor holds, once shown to be issued for the read.
      *
      * @param  string  $cursor
      * @param  \SineMacula\Laravel\AuditLog\Querying\CursorBinding  $binding
@@ -114,8 +95,7 @@ final readonly class CursorCodec
     }
 
     /**
-     * The payload part of a cursor whose MAC matches the one computed for the
-     * read under the key it names, or the refusal.
+     * The payload part of a cursor whose MAC matches the read's.
      *
      * @param  array{0: string, 1: string, 2: string}  $parts
      * @param  \SineMacula\Laravel\AuditLog\Querying\CursorBinding  $binding
@@ -144,8 +124,7 @@ final readonly class CursorCodec
     }
 
     /**
-     * The ring's key with the id, or the refusal when the ring does not hold
-     * it, so an unknown key is refused as any other cursor is.
+     * The ring's key with the id; an unknown key gets the uniform refusal.
      *
      * @param  string  $keyId
      * @return \SineMacula\Laravel\AuditLog\Integrity\IntegrityKey
@@ -162,9 +141,7 @@ final readonly class CursorCodec
     }
 
     /**
-     * The key id, payload and MAC parts of a cursor of at most `MAX_BYTES` that
-     * is exactly four parts, the first `v1` and each other one or more
-     * base64url characters, or the refusal. Nothing is decoded here.
+     * The key id, payload and MAC parts of a well-formed cursor, undecoded.
      *
      * @param  string  $cursor
      * @return array{0: string, 1: string, 2: string}
@@ -195,8 +172,7 @@ final readonly class CursorCodec
     }
 
     /**
-     * The position an authenticated payload part holds, or the refusal when it
-     * is not exactly a position's payload, or its position is not one.
+     * The position an authenticated payload part holds.
      *
      * @param  string  $payload
      * @return \SineMacula\Laravel\AuditLog\Querying\Position
@@ -219,9 +195,8 @@ final readonly class CursorCodec
     }
 
     /**
-     * The two strings of a payload that decodes strictly to exactly `{pos:
-     * [string, string]}`, two levels deep and no deeper, and is the canonical
-     * encoding of them, or `null` for any other payload.
+     * The two strings of a payload that is exactly the canonical encoding of
+     * `{pos: [string, string]}`, or `null`.
      *
      * @param  ?string  $json
      * @return ?array{0: string, 1: string}
@@ -248,9 +223,7 @@ final readonly class CursorCodec
     }
 
     /**
-     * The JSON decoded with objects as arrays, at most two levels deep, or
-     * `null` when there is nothing to decode, it is not JSON or it nests
-     * deeper.
+     * The JSON decoded to at most `DEPTH`, or `null` when it cannot be.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -271,8 +244,7 @@ final readonly class CursorCodec
     }
 
     /**
-     * The MAC of a cursor under the key's cursor key, as raw bytes, over the
-     * binding's canonical input.
+     * The raw MAC of a cursor under the key's derived cursor key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\IntegrityKey  $key
      * @param  \SineMacula\Laravel\AuditLog\Querying\CursorBinding  $binding
@@ -300,8 +272,8 @@ final readonly class CursorCodec
     }
 
     /**
-     * The bytes of a part that is the very unpadded base64url encoding of them,
-     * so no two spellings decode alike, or `null` for any other part.
+     * The bytes of a canonically encoded part, so no two spellings decode
+     * alike, or `null`.
      *
      * @param  string  $part
      * @return ?string

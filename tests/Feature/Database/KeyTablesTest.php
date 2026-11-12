@@ -11,11 +11,8 @@ use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use Tests\TestCase;
 
 /**
- * Feature tests for what the owners' key tables are called: the three table
- * names, their defaults, which a setting that is unset, `null` or empty leaves
- * in place, each read as configured on every call, the names each refuses, with
- * a message that names the leaf and never the value, and the validation that
- * reads every one of them and names the first that is malformed.
+ * Feature tests for the names of the owners' key tables, and the refusal that
+ * names the leaf and never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,9 +38,7 @@ final class KeyTablesTest extends TestCase
     private const string TABLE_MESSAGE = ' must be a table name of 1 to 47 lower-case letters, digits and underscores that does not start with a digit.';
 
     /**
-     * `KeyTables` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it so the line is covered.
      *
      * @return void
      *
@@ -64,9 +59,7 @@ final class KeyTablesTest extends TestCase
     }
 
     /**
-     * With no privacy settings at all, the keys are in
-     * `audit_log_subject_keys`, the markers in `audit_log_owner_erasures` and
-     * the key uses in `audit_log_key_uses`.
+     * With no privacy settings at all, each table has its default name.
      *
      * @return void
      */
@@ -89,9 +82,8 @@ final class KeyTablesTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: the values a setting may be left at, which name its
-     * default table: `null`, as an unset environment variable leaves it, and an
-     * empty string, as an empty one does.
+     * Rows of `[value]`: `null` and an empty string, as an unset or empty
+     * environment variable leaves a setting.
      *
      * @return iterable<string, array{0: ?string}>
      */
@@ -129,9 +121,8 @@ final class KeyTablesTest extends TestCase
     }
 
     /**
-     * Each table is the configured name, read on every call, and no setting
-     * changes another's table; the longest name the grammar takes and the
-     * shortest are kept as they are.
+     * Each table is its configured name, read on every call, and no setting
+     * changes another's table.
      *
      * @return void
      */
@@ -157,9 +148,8 @@ final class KeyTablesTest extends TestCase
     }
 
     /**
-     * Rows of `[setting, value]`: per setting, a capital, a schema-qualified
-     * name, one character too many, a leading digit, a value that is no string,
-     * and the other shapes a table name must not take.
+     * Rows of `[setting, value]`: per setting, the shapes a table name must not
+     * take.
      *
      * @return iterable<string, array{0: string, 1: bool|int|list<string>|string}>
      */
@@ -226,9 +216,8 @@ final class KeyTablesTest extends TestCase
     }
 
     /**
-     * Validation reads every setting: with all three well-formed it passes,
-     * with any one malformed it fails closed naming that one, whichever it is,
-     * and with several malformed it names the first in the order it reads them.
+     * Validation fails closed naming the first malformed setting, in the order
+     * it reads them.
      *
      * @return void
      */

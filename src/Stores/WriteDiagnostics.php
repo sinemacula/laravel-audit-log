@@ -8,17 +8,8 @@ use Illuminate\Database\QueryException;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 
 /**
- * What may be said about a failed write without saying anything of the record:
- * the record's id and code, the operation that failed, the store and the
- * exception's class, and, for a database failure, its SQLSTATE, its numeric
- * driver code and the connection's alias. A failure that stopped a drain before
- * any one record was read has no id.
- *
- * It is the only reader of a caught write failure, and reads nothing else of
- * it: never its message, its SQL, its bindings or the driver's message, any of
- * which can hold the record's values, and never its previous exception. A class
- * is named by `get_debug_type()`, so an anonymous class is named by what it
- * extends and never by the file that declares it.
+ * What may be said of a failed write without saying anything of the record: it
+ * never reads the message, SQL, bindings or previous exception.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,14 +66,13 @@ final readonly class WriteDiagnostics
         /** The alias of the connection the write failed on, never its host or port. */
         public ?string $connection,
 
-        /** The id of the destination that failed, for a delivery to one of several; several ids separated by commas when a stack's destinations failed together. */
+        /** The failed destination's id, comma-separated when several in a stack failed. */
         public ?string $destination,
     ) {}
 
     /**
-     * The diagnostics of the failure, read from its class, its SQLSTATE, its
-     * driver code and its connection's alias alone. A query exception's own
-     * connection replaces the one given.
+     * The failure's diagnostics; a query exception's own connection wins, and
+     * `get_debug_type()` names an anonymous class without its file.
      *
      * @param  \Throwable  $failure
      * @param  ?string  $recordId
@@ -106,8 +96,7 @@ final readonly class WriteDiagnostics
         $alias     = $connection;
 
         if ($failure instanceof QueryException) {
-            // Laravel documents a string, but the alias is whatever the code
-            // that threw the query exception gave it.
+            // Laravel documents a string, but a thrower can give anything
             // @phpstan-ignore function.alreadyNarrowedType
             $alias = is_string($failure->connectionName) ? $failure->connectionName : $connection;
         }
@@ -126,8 +115,8 @@ final readonly class WriteDiagnostics
     }
 
     /**
-     * A database failure's SQLSTATE: the first element of its error
-     * information, or else its code, whichever is a SQLSTATE first.
+     * A database failure's SQLSTATE, from its error information or else its
+     * code.
      *
      * @param  \Throwable  $failure
      * @param  ?array<array-key, scalar|null>  $errorInfo
@@ -149,8 +138,7 @@ final readonly class WriteDiagnostics
     }
 
     /**
-     * A database failure's driver code, the second element of its error
-     * information, when it is an integer or a string of digits.
+     * A database failure's driver code, when an integer or a string of digits.
      *
      * @param  ?array<array-key, scalar|null>  $errorInfo
      * @return ?int

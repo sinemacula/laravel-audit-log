@@ -56,18 +56,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:verify`: it prints a pinned line for each seal
- * as it is verified, then each finding of the run and the summary, in text or
- * one JSON object a line; the coverage is always printed, and a ranged run says
- * it is not the whole log; the journal's line follows the anchoring, its counts
- * in the JSON summary; a run of the whole log prints the key store's line and
- * holds its member, or says it skipped it for a custom encrypter; it fails
- * non-zero on a tampered, incomplete or unverifiable log, a journal or key
- * finding among them, and, with `--strict` and an anchor, on anything the
- * anchor does not confirm, except a seal awaiting its first anchoring; it
- * refuses a malformed option or range before verifying anything and alarms
- * nothing; and a failure or a stopped run dispatches the event and reports the
- * exception, none of which holds a value of an entry.
+ * Feature tests for `audit-log:verify`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -82,7 +71,7 @@ final class VerifyCommandTest extends TestCase
     /** @var string When the log is sealed by the seal command. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
 
-    /** @var string When a run verifies, unless a test says otherwise: past the anchoring grace of every seal, and within the allowed age of every entry stored by default. */
+    /** @var string When a run verifies by default: past every seal's anchoring grace, within every default entry's allowed age. */
     private const string VERIFIED_AT = '2026-11-01 14:00:00';
 
     /** @var string When an entry is recorded that is overdue for sealing by the time a run verifies. */
@@ -125,9 +114,7 @@ final class VerifyCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Register both commands with the console kernel, which keeps the test
-     * independent of the provider, bind no anchor and nothing pruned, and
-     * record every report and every integrity event.
+     * Register both commands, bind no anchor or prune, and record alarms.
      *
      * @return void
      */
@@ -159,8 +146,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A valid log passes: each seal is printed in order, then the summary, and
-     * nothing is dispatched or reported.
+     * A valid log passes, printing each seal then the summary.
      *
      * @return void
      */
@@ -180,8 +166,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Every text line is pinned: a valid seal, a seal with its finding and the
-     * first id it was found at, a finding of the run, and the summary.
+     * Every text line is pinned.
      *
      * @return void
      */
@@ -210,8 +195,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Every JSON line decodes to one object: each seal's, then each finding's,
-     * and the summary last, each pinned whole.
+     * Every JSON line is one pinned object, the summary last.
      *
      * @return void
      */
@@ -260,8 +244,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * The journal's line follows the anchoring: the rows read, the sequence of
-     * the chain's head, and the sequence the latest seal commits to.
+     * The journal's line follows the anchoring.
      *
      * @return void
      */
@@ -282,8 +265,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * The JSON summary holds the journal's counts, and so does a ranged run's,
-     * since every run verifies the whole journal.
+     * The JSON summary holds the journal's counts, ranged runs included.
      *
      * @return void
      */
@@ -303,8 +285,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A journal finding is printed as a finding of the run, fails the run
-     * non-zero and alarms with it, a ranged run included.
+     * A journal finding fails the run and alarms, ranged runs included.
      *
      * @return void
      */
@@ -324,10 +305,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A run of the whole log prints the key store's line after the journal's:
-     * the keys verified, those erased and the key findings; a ranged run prints
-     * none, and a custom encrypter's run says it skipped the key store, naming
-     * the encrypter.
+     * A whole-log run prints the key store's line after the journal's.
      *
      * @return void
      */
@@ -360,8 +338,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A key finding is printed as a finding of the run, counted on the key
-     * store's line, fails the run non-zero and alarms with it.
+     * A key finding fails the run and alarms.
      *
      * @return void
      */
@@ -385,9 +362,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * The JSON summary holds the key store's member: its counts on a run of the
-     * whole log, `null` on a ranged run, and the encrypter it was skipped for
-     * with a custom one.
+     * The JSON summary holds the key store's member.
      *
      * @return void
      */
@@ -410,8 +385,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A strict JSON run says so in its summary, with the anchor's head and how
-     * it compared.
+     * A strict JSON summary carries the anchor's head and how it compared.
      *
      * @return void
      */
@@ -430,8 +404,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A tampered log fails non-zero, naming the first altered entry in member
-     * order, bytewise.
+     * A tampered log fails, naming the first altered entry in member order.
      *
      * @return void
      */
@@ -450,9 +423,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A log holding a bundle whose artifact was deleted after sealing exits
-     * non-zero, its seal tampered with `manifest_missing` at the bundle's
-     * entry, and alarms once.
+     * A deleted artifact fails as `manifest_missing` and alarms once.
      *
      * @return void
      */
@@ -476,9 +447,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A log holding two bundles whose artifacts were swapped between their
-     * entries after sealing exits non-zero, its seal tampered with
-     * `manifest_swapped` at the earlier of the two entries, and alarms once.
+     * Swapped artifacts fail as `manifest_swapped` and alarm once.
      *
      * @return void
      */
@@ -521,8 +490,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A log with a seal of a signer the package does not know fails as
-     * unverifiable, naming the seal.
+     * A seal of an unknown signer fails as unverifiable, naming the seal.
      *
      * @return void
      */
@@ -539,8 +507,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A segment whose entries a valid prune record of both its members accounts
-     * for is pruned, and the run passes.
+     * A segment a valid prune record accounts for passes as pruned.
      *
      * @return void
      */
@@ -576,8 +543,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * With the null anchor, unanchored is informational: a strict run passes
-     * and says no anchor is configured.
+     * With the null anchor, unanchored is informational.
      *
      * @return void
      */
@@ -591,9 +557,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * With an anchor configured, a seal past the grace that the anchor does not
-     * hold is unanchored: a run passes, and a strict run fails, alarming with
-     * the anchoring counts and no finding.
+     * With an anchor, a seal past the grace it lacks fails a strict run.
      *
      * @return void
      */
@@ -621,9 +585,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An anchor setting that is malformed stops the run, never the command
-     * before it: the run prints what stopped it by its class alone, alarms with
-     * no finding, reports the stopped run and exits 1, strict or not.
+     * A malformed anchor setting stops the run by class and alarms.
      *
      * @return void
      */
@@ -645,8 +607,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A listener that fails is reported as it threw, and hides nothing: the
-     * alarm is still reported after it and the run still exits 1.
+     * A failing listener is reported and hides nothing.
      *
      * @return void
      */
@@ -670,10 +631,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * With `--sweep-first`, an entry inserted late since the last sweep, older
-     * than the allowed age, such as a replayed record, is sealed before the run
-     * verifies, so it is never found overdue; without it, the same entry is
-     * overdue.
+     * `--sweep-first` seals a late entry before verifying, so it is on time.
      *
      * @return void
      */
@@ -694,9 +652,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * With `--sweep-first` and `--json`, the sweep prints nothing, so every
-     * line is still one JSON object, and a sweep that fails makes the run exit
-     * 1 even when the log verifies.
+     * `--sweep-first` keeps `--json` clean and fails with a failed sweep.
      *
      * @return void
      */
@@ -717,8 +673,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An anchor that is unavailable makes a run say so and still pass, and a
-     * strict run fail.
+     * An unavailable anchor fails only a strict run.
      *
      * @return void
      */
@@ -739,9 +694,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An anchor that cannot report its head cannot show a truncated tail, so a
-     * strict run fails on it even when it confirms every seal, while a run that
-     * is not strict passes.
+     * A strict run fails on an anchor that cannot show a truncated tail.
      *
      * @return void
      */
@@ -759,8 +712,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A strict run passes when the anchor confirms every seal and its head is
-     * the local head.
+     * A strict run passes when the anchor confirms every seal and the head.
      *
      * @return void
      */
@@ -787,9 +739,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A seal committed a moment before the run, and not anchored yet, awaits
-     * its first anchoring: it is printed and counted as such, and a strict run
-     * beside it passes.
+     * A seal awaiting its first anchoring does not fail a strict run.
      *
      * @return void
      */
@@ -809,8 +759,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A seal still unanchored once the grace has passed no longer awaits its
-     * anchoring, and a strict run fails on it.
+     * A seal unanchored past the grace fails a strict run.
      *
      * @return void
      */
@@ -828,8 +777,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * The coverage line is printed on every run that verifies: of an empty log,
-     * of the whole log, of a range, and of a run that fails.
+     * The coverage line is printed on every run that verifies.
      *
      * @return void
      */
@@ -865,9 +813,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A ranged run prints only its seals, says it does not establish the
-     * integrity of the whole log, and has no unsealed entries to count; a run
-     * of the whole log never says so.
+     * A ranged run says it does not establish the whole log's integrity.
      *
      * @return void
      */
@@ -910,8 +856,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[option, value]`: values of each option that are not a sequence
-     * from 1.
+     * Rows of `[option, value]`: values that are not a sequence from 1.
      *
      * @return iterable<string, array{0: 'from'|'to', 1: string}>
      */
@@ -934,8 +879,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An option that is not a sequence is refused with `INVALID`, naming the
-     * option and its range, before any statement runs, alarming nothing.
+     * A malformed option is `INVALID` before any statement and alarms nothing.
      *
      * @param  'from'|'to'  $option
      * @param  string  $value
@@ -969,8 +913,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[options, message]`: ranges with an end beyond a head of two
-     * seals.
+     * Rows of `[options, message]`: ranges ending beyond a two-seal head.
      *
      * @return iterable<string, array{0: array<string, string>, 1: string}>
      */
@@ -984,8 +927,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An end beyond the head the run observed is refused with `INVALID`, naming
-     * the option and the head, and nothing is verified.
+     * A range ending beyond the head is `INVALID` and verifies nothing.
      *
      * @param  array<string, string>  $options
      * @param  string  $message
@@ -1001,8 +943,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Any range of a log with no seal is refused with `INVALID`, while the
-     * whole of it passes.
+     * Any range of an empty log is `INVALID`; the whole of it passes.
      *
      * @return void
      */
@@ -1015,8 +956,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A refused range of a log that would fail verifies nothing, prints only
-     * why, and dispatches and reports nothing.
+     * A refused range verifies nothing and alarms nothing.
      *
      * @return void
      */
@@ -1035,9 +975,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A run that stops prints what stopped it by its class alone after the
-     * seals already verified, alarms with those counts, no finding and no head,
-     * reports the stopped run and exits 1.
+     * A stopped run prints its class, alarms with its counts, and exits 1.
      *
      * @return void
      */
@@ -1062,9 +1000,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A run that stops before any seal is verified alarms with every count at
-     * zero, and a failure the configuration raises is a stopped run, never a
-     * refused range.
+     * A failure before any seal is a stopped run with every count at zero.
      *
      * @return void
      */
@@ -1084,9 +1020,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * A failure dispatches one event holding the counts, the first finding and
-     * its id, the head and the coverage, and reports the exception built from
-     * it, with no previous.
+     * A failure dispatches one event and reports the exception built from it.
      *
      * @return void
      */
@@ -1125,8 +1059,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An anchor that holds another digest for a seal, found as it reports its
-     * head, is a finding of the run: the log is tampered and the run fails.
+     * An anchor conflict found reading its head fails the run as tampered.
      *
      * @return void
      */
@@ -1145,8 +1078,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An anchor whose head is beyond the local tail names that head, and the
-     * missing tail fails the run.
+     * An anchor head beyond the local tail is named and fails the run.
      *
      * @return void
      */
@@ -1165,8 +1097,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An anchor that holds nothing yet, beside a log sealed past the grace,
-     * says so.
+     * An empty anchor beside a log sealed past the grace says so.
      *
      * @return void
      */
@@ -1181,8 +1112,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Nothing printed, dispatched or reported holds a value of an entry, in
-     * text or JSON, across a tampered entry and a stopped run.
+     * Nothing printed, dispatched or reported holds an entry's value.
      *
      * @return void
      */
@@ -1215,8 +1145,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Each seal's line is written as its seal is verified, before the next
-     * seal's members are read.
+     * Each seal's line is written before the next seal's members are read.
      *
      * @return void
      */
@@ -1246,8 +1175,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An id read from a table that was altered is printed with its control
-     * characters stripped and nothing in it read as a style.
+     * An altered id is printed stripped of control characters and styles.
      *
      * @return void
      */
@@ -1271,8 +1199,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * An id that is not UTF-8, as only SQLite stores, is repaired in a text
-     * line and in a JSON line alike, so the run still says what it found.
+     * A non-UTF-8 id, which only SQLite stores, is repaired in text and JSON.
      *
      * @return void
      */
@@ -1294,8 +1221,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * The command is named `audit-log:verify` and takes `--from`, `--to`,
-     * `--json`, `--strict` and `--sweep-first` alone.
+     * The command's name and options are pinned.
      *
      * @return void
      */
@@ -1315,10 +1241,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Store and seal the number of seals, each of the number of entries,
-     * recorded a minute apart, through the seal command at the time the log is
-     * sealed, which anchors each seal when an anchor is bound, and return the
-     * stored seals.
+     * Store and seal the seals given, a minute apart, and return them.
      *
      * @param  int  $seals
      * @param  int  $entries
@@ -1337,9 +1260,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Store two entries and seal them at the time given without anchoring the
-     * seal, as a seal run that has committed and not anchored yet leaves it,
-     * and return the new seal.
+     * Store two entries and seal them unanchored, returning the new seal.
      *
      * @param  string  $at
      * @return array<string, scalar|null>
@@ -1356,8 +1277,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Run the seal command at the time the log is sealed, and assert it
-     * succeeded.
+     * Run the seal command at the seal time and assert it succeeded.
      *
      * @return void
      */
@@ -1369,8 +1289,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Run the verify command with the options given at the time given, into the
-     * output given or the kernel's, and return its exit code.
+     * Run the verify command at the time given and return its exit code.
      *
      * @param  array<string, bool|string>  $options
      * @param  string  $at
@@ -1442,10 +1361,8 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Bind the recording anchor every run anchors and verifies with, behind a
-     * wrapper that gives it each stored receipt in the order it wrote it, since
-     * MySQL's JSON column keeps an object's keys in an order of its own, and
-     * return it.
+     * Bind the anchor behind a wrapper that orders each receipt's keys as it
+     * wrote them, since MySQL's JSON column reorders them.
      *
      * @param  \Tests\Fixtures\Integrity\RecordingAnchor  $anchor
      * @return \Tests\Fixtures\Integrity\RecordingAnchor
@@ -1490,8 +1407,7 @@ final class VerifyCommandTest extends TestCase
             }
 
             /**
-             * Whether the anchor confirms the receipt, its sequence and digest
-             * given in the order the anchor wrote them.
+             * Whether the anchor confirms the receipt, keys in its order.
              *
              * @param  \SineMacula\Laravel\AuditLog\Integrity\SealSummary  $seal
              * @param  array<string, scalar|null>  $receipt
@@ -1536,8 +1452,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Change the stored event of the entry, as someone who can write to the
-     * database could, so it no longer matches its HMAC.
+     * Change the entry's stored event so it no longer matches its HMAC.
      *
      * @param  string  $id
      * @return void
@@ -1548,8 +1463,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Raise the failure from the selection of the members of the seal at the
-     * position given, counted from one, and of every seal after it.
+     * Raise the failure reading members of the seal at `$from` and after.
      *
      * @param  \Throwable  $failure
      * @param  int  $from
@@ -1587,8 +1501,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Store a record whose properties hold the planted secret, recorded at the
-     * time given, and return its id.
+     * Store a record holding the planted secret and return its id.
      *
      * @param  string  $recordedAt
      * @return string
@@ -1623,8 +1536,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Assert that exactly one exception was reported, an
-     * `IntegrityCheckFailedException` with the message given and no previous.
+     * Assert one `IntegrityCheckFailedException` was reported, no previous.
      *
      * @param  string  $message
      * @return void
@@ -1660,9 +1572,7 @@ final class VerifyCommandTest extends TestCase
     }
 
     /**
-     * Whether the statement reads the members of one seal with their entries,
-     * as verifying a segment does, and not the unsealed entries or the orphaned
-     * members of the whole log.
+     * Whether the statement reads one seal's members, as a segment check does.
      *
      * @param  string  $query
      * @return bool

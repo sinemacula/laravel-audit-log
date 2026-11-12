@@ -7,13 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Querying\Enums;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * What the verification of an export found failing, each its own step of the
- * chain, in the order the chain checks them: the bundle, the export entry, its
- * signed descriptor, the artifact that holds the manifest, the manifest the
- * bundle carries, then the file, its membership and each of its lines.
- *
- * A finding names the step and never a value of an entry, so it can be shown,
- * logged and alerted on as it is. An export verifies only with none.
+ * A failed step of an export's verification, in the order the chain checks
+ * them; it names the step, never a value, so it is safe to log.
  *
  * @api
  *
@@ -22,23 +17,19 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
  */
 enum ExportFinding: string
 {
-    // The bundle beside the file is missing, or not exactly a bundle this
-    // release writes
+    // The bundle beside the file is missing or not one this release writes
     case BUNDLE_MALFORMED = 'bundle_malformed';
 
-    // The export entry the bundle names is not stored, or the viewer may not
-    // see it
+    // The export entry is not stored, or the viewer may not see it
     case ENTRY_MISSING = 'entry_missing';
 
-    // The export entry is signed under a key the ring does not hold, under an
-    // integrity version this release does not read, or is not a well-formed row
+    // The export entry's key, integrity version or row cannot be verified
     case ENTRY_UNVERIFIABLE = 'entry_unverifiable';
 
     // The export entry's signature does not match its content
     case ENTRY_TAMPERED = 'entry_tampered';
 
-    // The entry found is not an export's journal, or not the one the bundle
-    // holds
+    // The entry found is not the export journal the bundle names
     case ENTRY_SWAPPED = 'entry_swapped';
 
     // The descriptor the entry signed is not the bundle's, or not an export's
@@ -47,15 +38,13 @@ enum ExportFinding: string
     // The artifact the descriptor names is not stored
     case ARTIFACT_MISSING = 'artifact_missing';
 
-    // The artifact is stored under another id than its descriptor signed, or
-    // names another entry
+    // The artifact's id or entry is not the one its descriptor signed
     case ARTIFACT_SWAPPED = 'artifact_swapped';
 
     // The artifact is stored as another kind than its descriptor signed
     case ARTIFACT_WRONG_KIND = 'artifact_wrong_kind';
 
-    // The artifact counts other members, or holds another digest, than its
-    // descriptor signed
+    // The artifact's count or digest is not the one its descriptor signed
     case ARTIFACT_MISMATCH = 'artifact_mismatch';
 
     // The artifact's members cannot be decrypted with the application's keys
@@ -64,8 +53,7 @@ enum ExportFinding: string
     // The artifact's members are no canonical export manifest
     case ARTIFACT_MALFORMED = 'artifact_malformed';
 
-    // The artifact's members are a canonical export manifest, but not the one
-    // its descriptor signed
+    // The artifact's manifest is canonical but not the one signed
     case ARTIFACT_TAMPERED = 'artifact_tampered';
 
     // The manifest the bundle carries is not the one the journal holds
@@ -74,26 +62,20 @@ enum ExportFinding: string
     // The file's digest is not the one its manifest holds
     case FILE_MISMATCH = 'file_mismatch';
 
-    // The file's lines, their ids, or its first and last positions are not the
-    // ones its manifest holds
+    // The file's lines, ids or end positions are not its manifest's
     case MEMBERSHIP_MISMATCH = 'membership_mismatch';
 
     // A line of the file is not a line of its format, or names no id
     case LINE_MALFORMED = 'line_malformed';
 
-    // A line of an NDJSON export is signed under a key the ring does not hold,
-    // under an integrity version this release does not read, or lacks a column
-    // its signature covers
+    // An NDJSON line's key, integrity version or columns cannot be verified
     case LINE_UNVERIFIABLE = 'line_unverifiable';
 
     // A line's signature does not match its content
     case LINE_TAMPERED = 'line_tampered';
 
     /**
-     * The finding of an export's artifact for the finding the artifact
-     * inspector or a failed decryption gives it, each its own: a missing,
-     * swapped, wrong-kind, mismatched, malformed or tampered manifest, and one
-     * that could not be read as undecryptable. Any other finding is refused.
+     * The export finding for an artifact finding; any other is refused.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding
      * @return self

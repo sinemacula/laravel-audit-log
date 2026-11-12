@@ -14,9 +14,8 @@ use Tests\Fixtures\Commands\RecordingCommand;
 
 /**
  * A provider that audits the end of jobs and commands from its `boot()`, as an
- * application does, booted after the package's. It records only while its
- * switch is on, and for commands only the recording one, so a test class can
- * list it without every job and migration recording more.
+ * application does, only while its switch is on and for the recording command
+ * alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

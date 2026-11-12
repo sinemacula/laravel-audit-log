@@ -8,21 +8,8 @@ use Illuminate\Contracts\Support\Arrayable;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 
 /**
- * What a prune run did: its run id, whether it committed its start and whether
- * its record was written, how it ended and why it failed, the policy version it
- * ran under, its counts, where the next run resumes and how many seals it left,
- * and, for a dry run, its plan.
- *
- * `committed` is `false` for a dry run and for a run that failed before its
- * start row; once it is `true` the chunks the run committed stand whatever
- * happened after. `recorded` is set once the run's `audit_log.pruned` record is
- * written, and stays `false` when it could not be. The counts per category keep
- * the 50 largest, by count and then bytewise by category, with the rest summed
- * under `_other`, so the result, the record and the journal's finish row stay
- * bounded whatever the categories; nothing is kept per tenant but the number of
- * tenants the run deleted from, and at most 100 skipped seals are named. A dry
- * run's plan is not a promise: it is what the run would delete were nothing to
- * change before it ran, its held entries counted as the run would count them.
+ * What a prune run did, or for a dry run would do; once `committed`, the chunks
+ * it committed stand whatever followed.
  *
  * @api
  *
@@ -112,23 +99,22 @@ final readonly class PruneResult implements Arrayable
         /** How many eligible entries an outbox row or an undelivered receipt kept. */
         public int $pendingDelivery,
 
-        /** How many seals the run skipped, because a seal or one of its candidates failed authentication, or a chunk's deletes kept mismatching. */
+        /** How many seals the run skipped as unauthenticated or with deletes that kept mismatching. */
         public int $skippedSeals,
 
-        /** The sequence of the last seal the run walked to its end, which the next run resumes after when this one stopped on its time budget. */
+        /** The sequence of the last seal walked to its end, which the next run resumes after. */
         public int $cursor,
 
         /** How many seals from the cursor to the run's boundary it did not walk. */
         public int $remaining,
 
-        // The entries deleted per category, bounded as the result keeps them.
+        // Not promoted: bounded before it is kept
         array $categories,
 
         /** How many tenants the run deleted entries of. */
         public int $tenantsAffected,
 
-        // The ids of the seals the run skipped, bounded as the result keeps
-        // them.
+        // Not promoted: bounded before it is kept
         array $skippedSealIds,
 
         /** The plan of a dry run, per pair and per seal, or `null` for a run that is not one. */
@@ -142,9 +128,8 @@ final readonly class PruneResult implements Arrayable
     }
 
     /**
-     * The counts per category, bounded: the 50 largest by name, the largest
-     * first and a tie bytewise by category, and the rest, with any already
-     * summed under `_other`, summed under `_other`.
+     * The 50 largest counts by name, ties bytewise, and the rest summed under
+     * `_other`.
      *
      * @param  array<string, int>  $categories
      * @return array<string, int>

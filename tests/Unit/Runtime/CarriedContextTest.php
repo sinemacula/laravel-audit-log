@@ -15,9 +15,8 @@ use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\CarriedContext;
 
 /**
- * Unit tests for what the package keeps in hidden Context: the keys, the actor
- * going out as three strings and coming back, every malformed envelope being no
- * actor rather than an error, and the rest of Context being left alone.
+ * Unit tests for the actor the package carries in hidden Context; a malformed
+ * envelope is no actor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,9 +34,7 @@ final class CarriedContextTest extends TestCase
     ];
 
     /**
-     * `CarriedContext` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * `CarriedContext` cannot be instantiated: its constructor is private.
      *
      * @return void
      *

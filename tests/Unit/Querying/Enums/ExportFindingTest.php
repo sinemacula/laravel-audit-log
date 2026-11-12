@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
 
 /**
- * Unit tests for the findings of an export's verification: the cases in the
- * order the chain checks them, each value the lower snake case of its name,
- * each finding of an artifact mapped to its own, and every other finding
- * refused.
+ * Unit tests for the findings of an export's verification.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,8 +22,7 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
 final class ExportFindingTest extends TestCase
 {
     /**
-     * The cases, in chain order, with their values, so a renamed, reordered or
-     * added case fails.
+     * The cases and their values are pinned, in chain order.
      *
      * @return void
      */
@@ -68,8 +64,7 @@ final class ExportFindingTest extends TestCase
     }
 
     /**
-     * Rows of `[finding of an artifact, the export's finding]`: each finding
-     * the artifact inspector or a failed decryption gives.
+     * Rows of `[artifact finding, export finding]`, one per artifact finding.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding, 1: \SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding}>
      */
@@ -100,8 +95,7 @@ final class ExportFindingTest extends TestCase
     }
 
     /**
-     * Every artifact finding maps to a distinct finding of the export, so no
-     * two of them read alike.
+     * No two artifact findings map to the same export finding.
      *
      * @return void
      */

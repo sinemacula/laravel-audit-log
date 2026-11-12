@@ -9,11 +9,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * A key unit: what one owner's key is made for, the owner, the tenant of the
- * records it encrypts, or none, and the category of their definitions, so
- * materially different obligations never share a key and a tenant-local id
- * reused across tenants never names the same unit. Its digest is what the key
- * rows of the unit store and are unique on with their generation.
+ * What one owner's key is made for: owner, tenant and category, so different
+ * obligations never share a key and a tenant-local id never spans tenants.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

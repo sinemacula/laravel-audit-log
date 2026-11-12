@@ -20,45 +20,12 @@ use SineMacula\Laravel\AuditLog\Stores\StackDeliveryException;
 use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 
 /**
- * What happens once a record could not be written: the record is spilled, the
- * failure is reported, `AuditWriteFailed` is dispatched, and the failure is
- * thrown or not, each as the record's failure rule says.
+ * Spills, reports, dispatches `AuditWriteFailed` and throws for a failed write
+ * as its failure rule says; each step runs on its own, so one that fails stops
+ * no other.
  *
- * The spill goes first, because it is the only lasting trace of the record and
- * a reporter may block or end the process. Each step runs on its own, so one
- * that fails stops no other: its failure is reported as an
- * `AuditWriteFailedException` of its own, and goes no further. Under the
- * `REPORT` rule the code that recorded goes on; under the others the failure is
- * thrown and not also reported, since a handler would then report it twice.
- * Nothing thrown is the original failure: it is replaced by an
- * `AuditWriteFailedException` that holds no value of the record and has no
- * previous exception.
- *
- * A concurrency error or a lost connection on a connection with a transaction
- * open has ended that transaction, whatever the rule says, so it is never
- * spilled or reported and always thrown: a concurrency error as a sanitised
- * `DeadlockException`, which Laravel still retries, and a lost connection as
- * the sanitised exception. The same failure raised by a step on any connection
- * with a transaction open, or by the reporter of a step's own failure, is
- * thrown once the remaining steps have run. A statement refused because a
- * PostgreSQL transaction was already aborted is not fatal in this sense and
- * follows the rule.
- *
- * A spill bound to a commit is written when that transaction commits and never
- * when it rolls back, so a replay never brings back a record of work that was
- * undone. It waits in the commit queue and never throws, so it stops no later
- * commit callback. Every step, and a bound spill, runs inside the write guard,
- * so a record made from inside one is refused rather than written.
- *
- * A record captured from an event carries its capture's signal, and always
- * follows the `REPORT` rule. Once the steps have run, the signal is told the
- * failure once, as fatal when it is thrown to the capture. A synchronous
- * capture's failure fatal to an open transaction is thrown as for any record;
- * a deferred one's runs inside a commit callback, long after the capture
- * returned, so it is reported instead, inside the write guard, and never
- * thrown. The work it records has already committed, so the record is spilled
- * first, at once and bound to no transaction, as the only trace left of it. A
- * signal whose callback fails stops no step.
+ * The spill goes first because it is the only lasting trace and a reporter may
+ * end the process.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,13 +46,9 @@ final readonly class FailureHandler
     ) {}
 
     /**
-     * Spill, report and dispatch `AuditWriteFailed` as the rule says, then
-     * throw what the rule, or a failure fatal to an open transaction, requires.
-     * With a transaction to bind to, the spill waits for that transaction's
-     * commit, and is dropped when the failure shows the transaction was already
-     * aborted. With a capture's signal, the signal is then told the failure
-     * once, and a deferred capture's fatal failure is spilled at once and
-     * reported, not thrown.
+     * Run the rule's steps, then throw what the rule or a failure fatal to an
+     * open transaction requires; a deferred capture's failure is reported
+     * instead, since it runs inside a commit callback.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
@@ -132,11 +95,9 @@ final readonly class FailureHandler
     }
 
     /**
-     * Report a deferred write dropped because the transaction it waited for was
-     * already aborted, so its commit is really a rollback: nothing is written,
-     * spilled or dispatched, as for any other rollback, and the report names
-     * the record, since the application saw its commit succeed. A reporter that
-     * fails is ignored: no commit callback may throw for work that was undone.
+     * Report a deferred write dropped because its transaction was already
+     * aborted, so its commit was really a rollback; a failing reporter is
+     * ignored.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \Throwable  $aborted
@@ -151,9 +112,7 @@ final readonly class FailureHandler
 
     /**
      * Report what a deferred capture's write let out beyond the failure path,
-     * named by its class alone, and tell the capture's signal, so nothing
-     * leaves the commit callback the write runs in. A reporter that fails is
-     * ignored, and a signal already told keeps its first failure.
+     * by its class alone, and signal the capture.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \Throwable  $failure
@@ -175,9 +134,8 @@ final readonly class FailureHandler
     }
 
     /**
-     * Report a sanitised failure that cannot be thrown, because it would leave
-     * a commit callback, inside the write guard. A reporter that fails is
-     * ignored: no commit callback may throw.
+     * Report a sanitised failure that cannot be thrown out of a commit
+     * callback, ignoring a failing reporter.
      *
      * @param  \RuntimeException  $thrown
      * @return void
@@ -189,15 +147,14 @@ final readonly class FailureHandler
                 $this->container->make(ExceptionHandler::class)->report($thrown);
             });
         } catch (\Throwable) {
-            // The write ran inside a commit callback, which nothing may leave,
-            // and there is nowhere left to say so
+            // Nothing may leave a commit callback, and there is nowhere left to
+            // say so
         }
     }
 
     /**
-     * Run each step the rule asks for, in order, and return the first failure
-     * of a step that is fatal to the open transaction, sanitised, or `null`. A
-     * failure fatal to the transaction is neither spilled nor reported.
+     * Run each step the rule asks for and return the first failure fatal to an
+     * open transaction, sanitised, or `null`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Runtime\WriteGuard  $guard
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
@@ -227,14 +184,12 @@ final readonly class FailureHandler
     }
 
     /**
-     * Spill the record now, or bind the spill to the transaction's commit, and
-     * return the failure of a spill written now that is fatal to the open
-     * transaction, sanitised, or `null`.
+     * Spill the record now, or bind the spill to the transaction's commit;
+     * returns a now-written spill's failure fatal to an open transaction, or
+     * `null`.
      *
-     * A failure that shows the transaction was already aborted drops the bound
-     * spill: PostgreSQL ends such a transaction with a rollback while reporting
-     * the commit a success, so its commit callbacks would run for work that was
-     * undone.
+     * PostgreSQL commits an already aborted transaction as a rollback yet
+     * reports success, so such a failure drops the bound spill.
      *
      * @param  \SineMacula\Laravel\AuditLog\Runtime\WriteGuard  $guard
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
@@ -263,13 +218,10 @@ final readonly class FailureHandler
     }
 
     /**
-     * Write a spill bound to a commit, inside the write guard, as that commit
-     * runs it. Its failure is reported and goes no further, since nothing may
-     * be thrown from a commit callback.
-     *
-     * The failed write reaches the callback sealed: the commit's own frames
-     * hold the transaction and the callbacks bound to it, so a failure's trace
-     * would otherwise reach the record through them.
+     * Write a commit-bound spill inside the write guard, reporting its failure
+     * since nothing may leave a commit callback. The failed write arrives
+     * sealed so a failure's trace cannot reach the record through the commit's
+     * frames.
      *
      * @param  \SineMacula\Laravel\AuditLog\Runtime\WriteGuard  $guard
      * @param  \SensitiveParameterValue  $sealed
@@ -284,8 +236,8 @@ final readonly class FailureHandler
     }
 
     /**
-     * Write the spill line: the finalised record with its integrity fields, or
-     * the captured record marked unsigned when finalising it failed.
+     * Write the spill line: the finalised record, or the captured record marked
+     * unsigned when finalising failed.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
      * @return void
@@ -310,10 +262,9 @@ final readonly class FailureHandler
     }
 
     /**
-     * Run the step, and report its failure as a sanitised exception of its own
-     * that goes no further. A failure fatal to a transaction that was open on
-     * any connection is returned sanitised instead, unreported, when it may
-     * propagate; a bound spill runs after the commit and never propagates.
+     * Run the step and report its failure as a sanitised exception of its own;
+     * a failure fatal to an open transaction is returned instead when it may
+     * propagate.
      *
      * @param  \Closure(): void  $step
      * @param  \SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation  $operation
@@ -339,8 +290,7 @@ final readonly class FailureHandler
     }
 
     /**
-     * Dispatch `AuditWriteFailed` with the record's id and code, the store's
-     * class and the failure's class.
+     * Dispatch `AuditWriteFailed` for the failed write.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
      * @param  \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException  $exception
@@ -356,9 +306,8 @@ final readonly class FailureHandler
     }
 
     /**
-     * Report a step's sanitised failure. A reporter that fails here is ignored,
-     * unless its failure ended a transaction that was open and may propagate,
-     * which is returned sanitised.
+     * Report a step's sanitised failure; a reporter's failure is ignored unless
+     * it ended an open transaction and may propagate.
      *
      * @param  \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException  $exception
      * @param  \SineMacula\Laravel\AuditLog\Delivery\FailedWrite  $failed
@@ -370,9 +319,8 @@ final readonly class FailureHandler
         try {
             $this->container->make(ExceptionHandler::class)->report($exception);
         } catch (\Throwable $failure) {
-            // A failure of the failure path that cannot be reported has nowhere
-            // left to be said, and must not stop the remaining steps, unless it
-            // has ended a transaction the caller is still inside
+            // A reporter's failure must not stop the remaining steps, unless it
+            // ended a transaction the caller is inside
             return $mayPropagate ? $this->secondaryFatalOf($failure, $this->exceptionOf($failure, FailedOperation::NOTIFY, $failed, null), $failed) : null;
         }
 
@@ -380,9 +328,8 @@ final readonly class FailureHandler
     }
 
     /**
-     * What a failure of a step would be thrown as if it ended a transaction
-     * that was open on any connection the application holds. A step can touch
-     * any of them, so a failure that names no connection counts when any was
+     * What a step's failure is thrown as if it ended an open transaction; a
+     * step can touch any connection, so an unnamed one counts when any was
      * open.
      *
      * @param  \Throwable  $failure
@@ -401,11 +348,9 @@ final readonly class FailureHandler
     }
 
     /**
-     * What the failure would be thrown as if it ended a transaction that was
-     * open: the sanitised deadlock for a concurrency error, the sanitised
-     * exception for a lost connection, and `null` for anything else, or for a
-     * failure on a connection with no transaction open. A failure that names no
-     * connection counts as the caller says.
+     * What the failure is thrown as if it ended an open transaction: the
+     * sanitised deadlock, which Laravel still retries, for a concurrency error,
+     * the sanitised exception for a lost connection, and `null` otherwise.
      *
      * @param  \Throwable  $failure
      * @param  \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException  $exception
@@ -430,9 +375,8 @@ final readonly class FailureHandler
     }
 
     /**
-     * Whether the failure is a concurrency error, whether it is a lost
-     * connection, and the connections it happened on. A stack's failure is read
-     * from what it kept of its destinations' failures.
+     * Whether the failure is a concurrency error or a lost connection, and the
+     * connections it happened on.
      *
      * @param  \Throwable  $failure
      * @return array{0: bool, 1: bool, 2: array<int, ?string>}
@@ -449,10 +393,9 @@ final readonly class FailureHandler
     }
 
     /**
-     * The sanitised exception of a failure of the operation on the record,
-     * holding nothing of the failure but its diagnostics. A stack's failure
-     * names each destination that failed, since nothing else records it in sync
-     * mode; an id holds no comma, so the list reads back.
+     * The sanitised exception of the failure, holding only its diagnostics; a
+     * stack's failure names each failed destination, since nothing else records
+     * them in sync mode.
      *
      * @param  \Throwable  $failure
      * @param  \SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation  $operation

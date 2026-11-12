@@ -25,16 +25,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Feature tests for describing an entry: a title from the package's flat codes
- * file or an application's vendor override, in the locale asked for, then the
- * fallback locale, then the code itself; only a non-empty string is a title,
- * never an array, an empty line, the namespaced key or what a missing-key
- * handler answers; no stored value is replaced into a title; a locale that
- * could name another directory is never looked up; and the reason and
- * properties are the shown entry's, a concealed reason `null`.
- *
- * The fixture directory is the application's language path, so its vendor files
- * are the application's overrides.
+ * Feature tests for describing an entry: its title, reason and properties.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -114,8 +105,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * An application's override of a package code wins over the package's
-     * title, and the package's other titles stay.
+     * An application's override of a package code wins; other titles stay.
      *
      * @return void
      */
@@ -137,8 +127,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A locale with a title gives it, and a code it does not translate falls
-     * back to the fallback locale's title.
+     * A locale's title is used, and an untranslated code falls back.
      *
      * @return void
      */
@@ -161,8 +150,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * The fallback is the configured fallback locale, whatever it is: with
-     * French as the fallback, a German description is French.
+     * The fallback is the configured fallback locale, whatever it is.
      *
      * @return void
      */
@@ -186,8 +174,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A code whose line is an array of lines is never described by it, nor by
-     * anything in it: the code is its title.
+     * An array translation is never a title: the code is.
      *
      * @return void
      */
@@ -198,8 +185,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * An empty line is no title: the fallback locale's is used, or the code
-     * when the empty line is the fallback's own.
+     * An empty line is no title: the fallback, or else the code, is used.
      *
      * @return void
      */
@@ -210,8 +196,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A code and a longer code under it each have their own title, since the
-     * file is keyed by the full code.
+     * A code and a longer code under it each keep their own title.
      *
      * @return void
      */
@@ -224,8 +209,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A title's placeholder stays as written even when the entry has a property
-     * of its name, so no stored value reaches a title.
+     * A placeholder stays as written, so no stored value reaches a title.
      *
      * @return void
      */
@@ -238,8 +222,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A reason the stored properties conceal is `null` in the description,
-     * though the stored entry holds it.
+     * A concealed reason is `null` in the description.
      *
      * @return void
      */
@@ -268,8 +251,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * The description holds the entry's code, outcome, reason and display
-     * properties as they are, with its title.
+     * The description holds the entry's code, outcome, reason and properties.
      *
      * @return void
      */
@@ -288,8 +270,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * Rows of `[locale]`: locales no file exists for, the empty locale, which
-     * the translator reads as the application's, among them.
+     * Rows of `[locale]`: locales with no file, the empty locale among them.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -303,8 +284,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A locale no file exists for never throws: the fallback locale's title is
-     * used, and an unknown code is its own.
+     * A locale with no file never throws and falls back.
      *
      * @param  string  $locale
      * @return void
@@ -317,8 +297,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * Rows of `[locale]`: locales that could name a directory other than their
-     * own, each holding a path separator, a parent directory or a NUL byte.
+     * Rows of `[locale]`: locales holding a separator, parent directory or NUL.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -334,9 +313,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A locale that could name another directory is never looked up, even
-     * through a loader that would answer for it: the fallback locale's title is
-     * used, and describing in it never throws.
+     * A locale that could name another directory is never looked up.
      *
      * @param  string  $locale
      * @return void
@@ -361,8 +338,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * What a handler of missing keys answers is never a title: the fallback
-     * locale's is used, then the code, and the handler is not asked.
+     * A missing-key handler's answer is never a title.
      *
      * @return void
      */
@@ -382,8 +358,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A JSON line under the namespaced key is a title, but one that is the key
-     * itself is never shown: the code is the title.
+     * A JSON line equal to the namespaced key is never shown as a title.
      *
      * @return void
      *
@@ -505,8 +480,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * The shown entry of the stored entry, read through the package's field
-     * reader.
+     * The shown entry of the stored entry, through the package's field reader.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\StoredEntry  $stored
      * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
@@ -517,8 +491,7 @@ final class DescriberTest extends TestCase
     }
 
     /**
-     * A stored entry of a captured record of an approved invoice that failed
-     * for the reason given, with its properties as the JSON given.
+     * A stored entry of a failed invoice approval, with the properties given.
      *
      * @param  string  $properties
      * @param  string  $reason

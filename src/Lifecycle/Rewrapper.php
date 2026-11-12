@@ -25,49 +25,11 @@ use SineMacula\Laravel\AuditLog\Keys\KeySettings;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Rewraps the owners' keys onto the key wrapper's current wrapping key, and
- * with rotation supersedes every live key, so the next write of each unit opens
- * the unit's next generation: rotation is not rewrap, and both are journalled.
+ * Rewraps the owners' keys onto the current wrapping key and, with rotation,
+ * supersedes every live key, journalling each batch.
  *
- * A run confirms the installation first, once, and never in a dry run. Its
- * boundary is frozen at its start: only keys created at or before that instant
- * are considered, so a key a concurrent write creates under the current key is
- * never superseded by the same run. Its current wrapping key is read once, at
- * its start. The keys it considers are those live or superseded and wrapped
- * under another key than the current, and with rotation every live key too;
- * erased keys hold no wrapped key and are never touched.
- *
- * The keys are walked in batches of `audit-log.privacy.rewrap_batch`, by id,
- * each batch after the last id of the one before, each in a lifecycle
- * transaction of its own: the lock, the journal verified for the first batch
- * and advanced from the last committed head for each later one, then the
- * batch's keys read after the lock. A key whose row fails its signature, names
- * a signing key the ring does not hold or cannot be read is skipped and never
- * rewrapped; so is one whose wrapped key does not unwrap under its own wrap
- * context. Every other key's data key is wrapped again under the current key,
- * bound to its row, unit, generation and the current key's id, and written with
- * a compare-and-set update on its id, its state and the wrapped key it was read
- * with, rotation setting `superseded` in the same statement; a key already
- * under the current key is unwrapped too, then only superseded. A new wrapped
- * key must unwrap to the same data key before it replaces the stored one, which
- * is the only copy, or the key is skipped and left as it was. A skipped key is
- * named by its id only when that id is a lower-case UUID, and counted either
- * way. An update that changes anything but the one row it read rolls the batch
- * back and fails the run, so a key changed behind the lock is never
- * overwritten. A batch that changed or skipped a key appends one `rewrap` row
- * listing each key's state, wrapped key digest and wrapping key before and
- * after, the keys it skipped and, when there were any, how many it skipped
- * without naming (`skipped_unnamed`), and it commits with its updates or not at
- * all.
- *
- * A run that fails throws, and the batches it committed stand. A dry run takes
- * no lock and writes nothing: it reads the same keys the same way on the
- * maintenance connection, authenticates and unwraps them, and counts what a run
- * would do, wrapping nothing.
- *
- * Rewrapping changes how a data key is stored, never what it opens: whoever
- * holds the maintenance credentials can still change a key's wrapping, and the
- * wrap context and the journal make that detectable, not impossible.
+ * The boundary is frozen at the start, so a key a concurrent write creates is
+ * never superseded by the same run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -125,9 +87,8 @@ final readonly class Rewrapper
     ) {}
 
     /**
-     * Rewrap every key created before the run that is not wrapped under the
-     * current wrapping key, and with `$rotate` supersede every live key, in
-     * batches each journalled; or with `$dryRun` count what a run would do.
+     * Rewrap every key created before the run onto the current wrapping key,
+     * superseding live keys with `$rotate`.
      *
      * @param  string  $operationId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -181,11 +142,8 @@ final readonly class Rewrapper
     }
 
     /**
-     * Commit one batch inside the lifecycle transaction the connection holds:
-     * the journal verified or advanced, the batch's keys read and decided after
-     * the lock, each change written, and the batch's row appended when it
-     * changed or skipped a key. The replay the batch leaves and the batch are
-     * returned.
+     * Commit one batch: decide its keys after the lock, write each change, and
+     * journal it when it changed or skipped a key.
      *
      * @formatter:off
      *
@@ -237,13 +195,8 @@ final readonly class Rewrapper
     }
 
     /**
-     * Read the batch's keys after the id on the connection and decide each: the
-     * change it takes, or skipped. How many keys were read, the last id read,
-     * the changes in id order, the skipped ids, sorted, and how many skipped
-     * keys were not named are returned. A skipped key is named only by an id
-     * that is a lower-case UUID, since its row is the one that could not be
-     * trusted, so no byte it holds reaches a console or the journal; one
-     * without such an id is counted alone.
+     * Read and decide the batch's keys; a skipped key is named only by a UUID
+     * id, so no byte of an untrusted row reaches the journal.
      *
      * @formatter:off
      *
@@ -289,13 +242,8 @@ final readonly class Rewrapper
     }
 
     /**
-     * The change the stored key takes: its data key wrapped under the current
-     * key unless it already is, and `superseded` when the run rotates a live
-     * key; `null` when the key is skipped, as one whose row does not
-     * authenticate or whose wrapped key does not unwrap. Every candidate is
-     * unwrapped, one already under the current key included, so no key is
-     * superseded or counted that could not be opened. A dry run wraps nothing
-     * and keeps the stored wrapped key in its place.
+     * The change the key takes, or `null` when it is skipped; every candidate
+     * is unwrapped, so none is superseded that cannot be opened.
      *
      * @formatter:off
      *
@@ -330,9 +278,8 @@ final readonly class Rewrapper
     }
 
     /**
-     * The key of the stored row when the row verifies under the signing key it
-     * names, and `null` when it does not, when the ring does not hold that key,
-     * or when the row cannot be read.
+     * The stored row's key when it verifies under the signing key it names,
+     * else `null`.
      *
      * @param  array<string, scalar|null>  $row
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow
@@ -344,20 +291,14 @@ final readonly class Rewrapper
 
             return $this->keySigner->verifies($key) ? $key : null;
         } catch (\UnexpectedValueException|UnknownKeyException) {
-            // A key that cannot be authenticated is never rewrapped: it is
-            // skipped and named, for verification to report
+            // Skipped and named, for verification to report
             return null;
         }
     }
 
     /**
-     * The key's data key wrapped under the current key, bound to the key's row,
-     * unit and generation and the current key's id, or `null` when its wrapped
-     * key does not unwrap under its own wrap context, or when the new wrapped
-     * key does not unwrap to the same data key under its own: the stored
-     * wrapped key is the only copy, so it is never replaced by one that could
-     * not be opened. A key already under the current key, and every key of a
-     * dry run, is unwrapped only, and its stored wrapped key given back.
+     * The data key wrapped under the current key, or `null` unless it reopens;
+     * the stored wrapped key is the only copy.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $key
      * @param  string  $current
@@ -368,8 +309,6 @@ final readonly class Rewrapper
      */
     private function rewrapped(#[\SensitiveParameter] SubjectKeyRow $key, string $current, bool $dry): ?string
     {
-        // A key that does not unwrap is left as it is, skipped and named:
-        // whatever wrapped it, the run cannot wrap it again
         $dataKey = $this->opened((string) $key->wrappedKey, (string) $key->wrapKeyId, $key->wrapContext());
 
         if ($dataKey === null) {
@@ -384,15 +323,12 @@ final readonly class Rewrapper
         $wrapped  = $this->wrapper->wrap($dataKey, $current, $context);
         $reopened = $this->opened($wrapped, $current, $context);
 
-        // A wrapper that cannot open what it wrapped leaves the key as it is,
-        // skipped and named
         return $reopened !== null && hash_equals($dataKey, $reopened) ? $wrapped : null;
     }
 
     /**
-     * The data key the wrapped key holds under the wrapping key and context, or
-     * `null` when it does not unwrap, whatever the wrapper threw, which could
-     * name the key.
+     * The data key, or `null` when it does not unwrap; the wrapper's exception
+     * is dropped, as it could name the key.
      *
      * @param  string  $wrapped
      * @param  string  $wrapKeyId
@@ -409,10 +345,8 @@ final readonly class Rewrapper
     }
 
     /**
-     * Up to a batch of the keys the run considers after the id, or from the
-     * first, in id order, on the connection's writer, each as its stored row:
-     * created at or before the run's boundary, live or superseded, and wrapped
-     * under another key than the current, or with rotation live.
+     * Up to a batch of the keys the run considers after the id, in id order, on
+     * the writer.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  ?string  $after
@@ -448,10 +382,8 @@ final readonly class Rewrapper
     }
 
     /**
-     * Write the change with a compare-and-set update on the key's id, state and
-     * the wrapped key it was read with, refusing anything but one row changed.
-     * A failed statement is thrown masked, so no wrapped key reaches a
-     * reporter.
+     * Write the change with a compare-and-set update, refusing anything but one
+     * row; failures are masked so no wrapped key is reported.
      *
      * @formatter:off
      *
@@ -492,8 +424,7 @@ final readonly class Rewrapper
     }
 
     /**
-     * What a batch's row lists of a key it changed: its id, and its state, the
-     * digest of its wrapped key and its wrapping key's id before and after.
+     * What a batch's row lists of a changed key, before and after.
      *
      * @formatter:off
      *
@@ -518,9 +449,7 @@ final readonly class Rewrapper
     }
 
     /**
-     * The run's totals with the batch's added: the keys it rewrapped onto
-     * another wrapping key, the live keys it superseded, the keys it skipped,
-     * and the batch itself when it changed or skipped one.
+     * The run's totals with the batch's added.
      *
      * @formatter:off
      *

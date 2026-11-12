@@ -27,12 +27,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the journal's verification, on whichever engine the suite
- * runs against: an empty journal with no seal passes, each seal commits to the
- * head when it was sealed, an edited row or payload is a signature finding, a
- * deleted row a gap, a truncated journal, a commitment running backwards,
- * dropped or unpaired each a commitment finding, each finding one run finding
- * with its first id and count, memory that never grows with the journal, and
- * every statement on the writer.
+ * runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -175,9 +170,8 @@ final class JournalVerifierTest extends TestCase
     }
 
     /**
-     * A journal truncated below the row a seal committed to contradicts the
-     * seal: the commitment names no row, found at the seal, while what is left
-     * of the chain is whole.
+     * A journal truncated below a seal's committed row contradicts the seal,
+     * found at the seal, while the rest of the chain is whole.
      *
      * @return void
      */
@@ -324,9 +318,8 @@ final class JournalVerifierTest extends TestCase
     }
 
     /**
-     * Each kind of finding is one run finding, with the id it was first found
-     * at and how many times it was found, in the order first found: the
-     * commitments, read first, before the rows.
+     * Each kind of finding is one run finding with its first id and count, in
+     * the order found, the commitments read before the rows.
      *
      * @return void
      */
@@ -359,8 +352,7 @@ final class JournalVerifierTest extends TestCase
 
     /**
      * The journal is read a page at a time after the commitments: one statement
-     * for the seals, then one per page of rows, each bounded below by the last
-     * sequence read.
+     * for the seals, then one per page of rows.
      *
      * @return void
      */

@@ -40,13 +40,6 @@ use Tests\TestCase;
 
 /**
  * Feature tests for placing and releasing holds and rebuilding their
- * projection, on whichever engine the suite runs against: a hold's journal row
- * and projection row commit in one lifecycle transaction behind the lock;
- * overlapping holds each count and a release removes only its own; a release of
- * a hold never placed or already released is refused writing nothing; a
- * hold id is never placed twice; a broken chain refuses a hold and a release;
- * `placeIn()` joins the caller's transaction; and every decision, a release's
- * and the active holds', is read from the verified chain, never from the
  * projection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -104,9 +97,8 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A hold is placed in one lifecycle transaction: the lock first, then the
-     * journal row and the projection row, then the commit; the hold returned is
-     * the one the journal row and the projection row record.
+     * A hold's journal row and projection row commit in one transaction behind
+     * the lock.
      *
      * @return void
      */
@@ -139,8 +131,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * Placing a hold confirms the installation first, writing its id once on an
-     * installation that lost the one the migrations seed.
+     * Placing a hold confirms the installation first.
      *
      * @return void
      */
@@ -156,8 +147,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * Overlapping holds each count: two holds of entries both keep are both
-     * active, and the entries stay kept by one when the other is released.
+     * Overlapping holds each count, and releasing one leaves the other active.
      *
      * @return void
      */
@@ -186,9 +176,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A release removes its own hold alone, from the chain and the projection,
-     * journalling the release under its authority, and returns the hold as it
-     * was.
+     * A release removes only its own hold and returns it as it was.
      *
      * @return void
      */
@@ -214,9 +202,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A release of a hold never placed is refused, naming the hold, and writes
-     * nothing: no journal row, no projection change, and the lock's row as it
-     * was.
+     * Releasing an unknown hold is refused and writes nothing.
      *
      * @return void
      */
@@ -249,8 +235,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A hold id placed before, released or active, is never placed again, and
-     * the refusal writes nothing; one never placed is placed under that id.
+     * A hold id placed before is never placed again.
      *
      * @return void
      *
@@ -282,8 +267,8 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A hold id that is not a lower-case UUID v7 is refused for a hold and for
-     * a release, before anything is read or written.
+     * A hold id that is not a lower-case UUID v7 is refused before anything is
+     * read.
      *
      * @return void
      *
@@ -314,8 +299,8 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A hold, a release and a rebuild on a journal that fails verification are
-     * refused fail closed, and write nothing.
+     * A hold, release or rebuild on a broken journal is refused and writes
+     * nothing.
      *
      * @return void
      *
@@ -349,10 +334,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * `placeIn()` joins the transaction its caller opened: the hold commits
-     * with the caller's own journal row, onto the replay it returned, and a
-     * rollback of the caller's transaction leaves no hold row and no projection
-     * row.
+     * `placeIn()` joins the caller's transaction and rolls back with it.
      *
      * @return void
      *
@@ -399,8 +381,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A hold id placed before is refused by `placeIn()` too, before anything is
-     * appended in the caller's transaction.
+     * `placeIn()` refuses a hold id placed before, appending nothing.
      *
      * @return void
      */
@@ -424,8 +405,8 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * The rebuild replays the verified chain: rows deleted, inserted and
-     * changed by hand are replaced by exactly the active holds.
+     * The rebuild replaces hand-edited rows with exactly the verified chain's
+     * active holds.
      *
      * @return void
      */
@@ -455,8 +436,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * The active holds are read only from the verified chain: a projection row
-     * deleted by hand leaves its hold active, and its release still succeeds.
+     * The active holds are read only from the verified chain.
      *
      * @return void
      */
@@ -472,9 +452,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * A release is decided from the chain, not the projection: a projection row
-     * inserted by hand for a hold the chain never placed does not make it
-     * releasable, and the row is left as it was.
+     * A release is decided from the chain, never from the projection.
      *
      * @return void
      */
@@ -492,8 +470,8 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * Listing the active holds runs behind the lock under an operation of its
-     * own, a UUID v7, and journals nothing.
+     * Listing the active holds takes the lock under its own operation and
+     * journals nothing.
      *
      * @return void
      */
@@ -514,8 +492,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * Expect the release of the hold id to be refused as unknown, naming it,
-     * and nothing else to be thrown.
+     * Expect the release of the hold id to be refused as unknown, naming it.
      *
      * @param  string  $holdId
      * @return void
@@ -534,10 +511,7 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * Record each statement and each transaction event from now on, in order:
-     * `lock` for the lock's update, `journal` for an insert of a journal row,
-     * `holds` for a change of the projection, and the SQL's first word for
-     * anything else.
+     * Record each statement and transaction event from now on, in order.
      *
      * @return \ArrayObject<int, string>
      */

@@ -12,22 +12,8 @@ use SineMacula\Laravel\AuditLog\Records\ExportManifest;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 
 /**
- * Classifies a stored artifact against the descriptor its entry signed, so each
- * way an artifact can differ is reported as its own finding: a descriptor that
- * is not exactly an artifact id, a known kind, a digest and a count that kind
- * allows is `manifest_malformed`; no stored artifact is `manifest_missing`; an
- * artifact under another id, or naming another entry, is `manifest_swapped`;
- * one stored as another kind is `manifest_wrong_kind`; one counting other
- * members or holding another digest is `manifest_mismatch`; and members that
- * open to no canonical form of the signed kind are `manifest_malformed`, while
- * a canonical form of that kind other than the one signed is
- * `manifest_tampered`.
- *
- * Each kind's plaintext is read by its own reader: a bulk operation's by the
- * manifest, a disclosure's and an export's by their versioned readers, none of
- * which reads the catalogue, a setting or the container. Nothing here reads the
- * database or decrypts; the manifest verifier does both and asks this what it
- * found.
+ * Classifies a stored artifact against the descriptor its entry signed, one
+ * finding per way it can differ; it reads no database and decrypts nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,7 +22,7 @@ use SineMacula\Laravel\AuditLog\Records\Manifest;
  */
 final class ArtifactInspector
 {
-    /** @var list<string> The keys of a descriptor, sorted: exactly these and nothing else. */
+    /** @var list<string> The keys of a descriptor, sorted. */
     private const array DESCRIPTOR_KEYS = ['artifact_id', 'count', 'digest', 'kind'];
 
     /**
@@ -45,10 +31,8 @@ final class ArtifactInspector
     private function __construct() {}
 
     /**
-     * Whether the value is exactly a descriptor: an artifact id that is a
-     * lower-case UUID, a kind the package knows, a digest of 64 lower-case hex
-     * and an integer count, at least one for a bulk operation and at least none
-     * for any other kind, and no other key.
+     * Whether the value is exactly a descriptor: a lower-case UUID artifact id,
+     * a known kind, a 64-hex digest and a count that kind allows.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -80,10 +64,7 @@ final class ArtifactInspector
 
     /**
      * The finding of the entry's stored artifact columns, or `null` when they
-     * are the ones its descriptor signed, checked in this order: no artifact is
-     * missing; another artifact id, or an artifact naming another entry, is
-     * swapped; another kind is the wrong kind; and another count or digest is a
-     * mismatch.
+     * are the ones its descriptor signed.
      *
      * @param  ?array<string, scalar|null>  $stored
      * @param  string  $entryId
@@ -103,9 +84,8 @@ final class ArtifactInspector
 
     /**
      * The finding of an artifact's decrypted members, or `null` when they are
-     * exactly the canonical form the descriptor signed: a plaintext the signed
-     * kind's reader does not read as a canonical form of that kind is
-     * malformed, and a canonical form of another count or digest is tampered.
+     * the signed canonical form: malformed when unreadable as that kind,
+     * tampered when another.
      *
      * @param  string  $plaintext
      * @param  array{artifact_id: string, count: int, digest: string, kind: string}  $descriptor

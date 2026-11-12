@@ -7,9 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Delivery;
 use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 
 /**
- * One spill line as the reader found it: its number in the file, and either the
- * one JSON object it holds, not yet parsed or verified, or why the reader could
- * not take one from it.
+ * One spill line as the reader found it: its number, and either its unparsed
+ * JSON object or why none could be taken.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,14 +26,14 @@ final readonly class SpillLine
      */
     public function __construct(
 
-        /** The line's number in the file, from 1, with every line of the file counted. */
+        /** The line's number in the file, from 1, every line counted. */
         public int $number,
 
-        /** The one JSON object the line holds, or `null` when the reader could not take one. */
+        /** The line's JSON object, or `null` when none could be taken. */
         #[\SensitiveParameter]
         public ?string $json,
 
-        /** Why the reader could not take a JSON object from the line, or `null` when it did. */
+        /** Why no JSON object could be taken, or `null` when one was. */
         public ?EnvelopeFailure $failure,
     ) {}
 }

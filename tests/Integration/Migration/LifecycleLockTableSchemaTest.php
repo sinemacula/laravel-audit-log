@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Integration\Migration;
 
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -14,22 +13,12 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
 use SineMacula\Laravel\AuditLog\Console\TableShape;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the lifecycle lock the shipped migration
- * creates, on whichever engine the suite runs against: its columns, their
- * types, lengths and nullability, its key, the one row it seeds, the update
- * that takes it, and the collision guard, the setting that renames it and its
- * rollback.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the lifecycle lock the shipped migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,6 +28,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class LifecycleLockTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped lifecycle lock migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000900_create_audit_log_lifecycle_lock_table.php';
 
@@ -60,8 +51,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     private const array TIMES = ['locked_at'];
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -79,7 +69,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
         Builder::defaultTimePrecision(0);
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
         } finally {
             Builder::defaultTimePrecision($precision);
         }
@@ -100,9 +90,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the three columns of the lock, in order, each with the
-     * type family, length and nullability the shape gives it: the id, and the
-     * token and time of the last lock, which the seeded row lacks.
+     * The lock's three columns in order; the token and time are nullable.
      *
      * @return void
      */
@@ -162,9 +150,8 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name fits
-     * PostgreSQL's 63 characters. SQLite names its primary key index itself and
-     * limits no name, so there the primary key is left out.
+     * Every index name fits PostgreSQL's 63 characters at the longest table
+     * name; SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -191,8 +178,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is binary without padding and on InnoDB, as every
-     * table the package keeps.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -209,8 +195,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The migration seeds exactly one row, `id` 1, with no token and no time,
-     * so the first lifecycle transaction finds a row to lock.
+     * The migration seeds one row, `id` 1, for the first transaction to lock.
      *
      * @return void
      */
@@ -225,8 +210,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The lock row is taken by an update that writes a new token and time and
-     * affects the one row, and a second row under its id is refused.
+     * The lock row is taken by an update; a second row under its id is refused.
      *
      * @return void
      */
@@ -245,10 +229,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `lifecycle.lock_table` setting that renames it, and leaves the table as
-     * it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -257,7 +238,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
         $before = DB::table(self::TABLE)->count();
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -272,8 +253,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
     }
 
     /**
-     * The table is created under whatever name its setting gives, and its
-     * indexes are named after it.
+     * A renamed table and its indexes are created under its setting's name.
      *
      * @return void
      */
@@ -283,7 +263,7 @@ final class LifecycleLockTableSchemaTest extends TestCase
 
         self::assertFalse(Schema::hasTable(self::RENAMED));
 
-        $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
 
         self::assertTrue(Schema::hasTable(self::RENAMED));
 
@@ -299,28 +279,8 @@ final class LifecycleLockTableSchemaTest extends TestCase
      */
     public function testDownDropsTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('The lifecycle lock migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

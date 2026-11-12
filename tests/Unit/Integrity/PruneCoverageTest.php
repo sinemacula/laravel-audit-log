@@ -19,13 +19,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 
 /**
- * Unit tests for what a seal's prune records account for, over the golden seal
- * of three members: a missing member covered by a valid record, one covered by
- * none, records that overlap, records of another seal, forged or under a key
- * the ring does not hold, which cover nothing, membership that was not
- * authenticated, which assigns no position, a present member covered, which is
- * read again, and several disjoint records covering together, all with nothing
- * read.
+ * Unit tests for what a seal's prune records account for.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,9 +54,8 @@ final class PruneCoverageTest extends TestCase
     private const string PRUNED_AT = '2027-11-01T00:00:00.000000Z';
 
     /**
-     * Every missing member set in a valid record is covered, in the order the
-     * members were missing, with no finding, and a present member the record
-     * does not set is not read again.
+     * Every missing member a valid record sets is covered, in order, with no
+     * finding.
      *
      * @return void
      *
@@ -78,9 +71,8 @@ final class PruneCoverageTest extends TestCase
     }
 
     /**
-     * A missing member set in no valid record is `missing_entry`, at the first
-     * such member in member order, and the ones a record sets are still
-     * covered; with no record, none is.
+     * A missing member no valid record sets is `missing_entry` at the first
+     * such member.
      *
      * @return void
      *
@@ -100,9 +92,8 @@ final class PruneCoverageTest extends TestCase
     }
 
     /**
-     * Two valid records that set one member are `prune_record` at the seal, a
-     * record given twice among them, and what they set is still covered, since
-     * the verdict is tampered either way.
+     * Two valid records that set one member are `prune_record`, and what they
+     * set is still covered.
      *
      * @return void
      *
@@ -139,9 +130,8 @@ final class PruneCoverageTest extends TestCase
     }
 
     /**
-     * A validly signed record that binds anything but this seal's log, id,
-     * recomputed digest and member count is `prune_record` at the seal, and
-     * covers nothing, so the missing member is still `missing_entry`.
+     * A record that binds anything but this seal is `prune_record` and covers
+     * nothing.
      *
      * @param  string  $field
      * @param  int|string  $value
@@ -181,9 +171,8 @@ final class PruneCoverageTest extends TestCase
     }
 
     /**
-     * A record of exactly this seal under a key the ring does not hold cannot
-     * be checked: `prune_key`, covering nothing. One that binds another seal is
-     * `prune_record` even so, since what it binds is checked first.
+     * A record of this seal under an unknown key is `prune_key`; one binding
+     * another seal is still `prune_record`.
      *
      * @return void
      *
@@ -203,9 +192,7 @@ final class PruneCoverageTest extends TestCase
     }
 
     /**
-     * Without authenticated membership no position is assigned: a valid record
-     * of every member covers no missing one and puts no present one to be read
-     * again.
+     * Without authenticated membership no record covers or rechecks any member.
      *
      * @return void
      *
@@ -221,9 +208,7 @@ final class PruneCoverageTest extends TestCase
     }
 
     /**
-     * A present member a valid record sets is put to be read again, in the
-     * order given, and nothing is found of it here: whether it is gone or back
-     * is the reread's to tell.
+     * A present member a valid record sets is read again, in the order given.
      *
      * @return void
      *

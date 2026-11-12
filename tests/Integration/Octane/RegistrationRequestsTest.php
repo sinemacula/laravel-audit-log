@@ -71,12 +71,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * End-to-end tests for what an application registers while it boots, served by
- * one Laravel Octane worker: the definitions, contributors, event mappers and
- * watched models serve every request, a request cannot add to them, what a
- * request captured dies with it, and the listeners and the middleware that
- * track and capture each request are registered once for the worker's whole
- * life.
+ * End-to-end tests for boot-time registration served by one Octane worker: it
+ * serves every request, and no request adds to it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -195,8 +191,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A definition registered at boot gives its version and its category to
-     * every request's record.
+     * A definition registered at boot serves every request's record.
      *
      * @return void
      */
@@ -214,8 +209,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A contributor registered at boot fills every request's record, and it
-     * follows the defaults, each once, however many requests have been served.
+     * A contributor registered at boot fills every request's record once.
      *
      * @return void
      */
@@ -237,8 +231,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A definition offered in a request is refused in every request, however
-     * many came before, and the catalogue does not take it.
+     * A definition offered in a request is refused.
      *
      * @return void
      */
@@ -254,8 +247,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A contributor offered in a request is refused in every request, however
-     * many came before, and no later record is filled by it.
+     * A contributor offered in a request is refused.
      *
      * @return void
      */
@@ -272,8 +264,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * Every request sees the one catalogue, the one list of contributors and
-     * the one dispatcher the booted application holds.
+     * Every request resolves the registration the booted application holds.
      *
      * @return void
      */
@@ -294,8 +285,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A mapper registered at boot captures the mapped event in every request,
-     * one row each, however many requests have been served.
+     * A mapper registered at boot captures in every request.
      *
      * @return void
      */
@@ -311,8 +301,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A model watched at boot has its creation recorded in every request, one
-     * row each, however many requests have been served.
+     * A model watched at boot is recorded in every request.
      *
      * @return void
      */
@@ -328,8 +317,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A mapping offered in a request is refused in every request, however many
-     * came before, and the mappers do not take it.
+     * A mapping offered in a request is refused.
      *
      * @return void
      */
@@ -345,8 +333,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A watch offered in a request is refused in every request, however many
-     * came before, and the watcher does not take it.
+     * A watch offered in a request is refused.
      *
      * @return void
      */
@@ -362,9 +349,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * What a request has captured dies with it: each request has capture state
-     * of its own, so one event object dispatched in every request is claimed in
-     * each and recorded once per request.
+     * One event object dispatched in every request is recorded once in each.
      *
      * @return void
      */
@@ -381,9 +366,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A capture setting a request changes reaches that request's capture and no
-     * later one: the capture listeners are built for each event from the
-     * request's own container, never from the worker's.
+     * A capture setting changed in a request does not reach the next.
      *
      * @return void
      */
@@ -401,8 +384,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * Rows of `[event, the listener the package gives it]`: every event the
-     * package listens for.
+     * Rows of `[event, the listener the package gives it]`.
      *
      * @return iterable<string, array{0: class-string, 1: class-string}>
      */
@@ -431,8 +413,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * Each listener is on the worker's one dispatcher once, however many
-     * requests have been served: a request registers nothing.
+     * Each listener is on the worker's dispatcher once, however many requests.
      *
      * @param  class-string  $event
      * @param  class-string  $listener
@@ -453,9 +434,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * The listener that routes mapped events, which the mapping at boot added,
-     * is on the worker's one dispatcher once, however many requests have been
-     * served, and so is each watched model's.
+     * The capture listeners are on the worker's dispatcher once.
      *
      * @return void
      */
@@ -474,8 +453,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * The middleware that enters a request's frame is on the HTTP kernel once,
-     * first, however many requests have been served.
+     * The frame middleware is on the HTTP kernel once, first.
      *
      * @return void
      */
@@ -498,9 +476,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * A setting a request changes reaches its own capture and no later one: the
-     * requirement to register is read per capture from the request's
-     * configuration, never kept on the recorder or the catalogue.
+     * Requiring registration in one request does not reach the next.
      *
      * @return void
      */
@@ -514,8 +490,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * Register a definition, a contributor, an event mapper and a watched model
-     * while the application boots, as an application's own provider would.
+     * Register a definition, contributor, mapper and watched model at boot.
      *
      * @param  mixed  $app
      * @return void
@@ -596,8 +571,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * How many times the listener is on the application's dispatcher for the
-     * event.
+     * How many times the listener is on the dispatcher for the event.
      *
      * @param  string  $event
      * @param  array{0: class-string, 1: string}|class-string  $listener
@@ -613,8 +587,7 @@ final class RegistrationRequestsTest extends TestCase
     }
 
     /**
-     * How many times the listener that routes mapped events is on the
-     * application's dispatcher for every event.
+     * How many times the mapped-event router is on the dispatcher.
      *
      * @SuppressWarnings("php:S3011")
      *

@@ -26,9 +26,8 @@ use Tests\Unit\Stubs\StubHeldActorReader;
 use Tests\Unit\Stubs\StubHelperGuard;
 
 /**
- * Feature tests for who the guards already hold: which guards are walked, that
- * the first holding a user decides, what its user gives, and that nothing is
- * ever loaded, queried or dispatched to find out.
+ * Feature tests for the actor the guards already hold, read without loading,
+ * querying or dispatching anything.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -281,8 +280,8 @@ final class AmbientActorTest extends TestCase
     }
 
     /**
-     * A reader that reads nothing leaves a `GuardHelpers` guard to be read as
-     * before.
+     * A reader that reads nothing falls back to the `GuardHelpers` reading of
+     * the guard.
      *
      * @return void
      */
@@ -398,9 +397,8 @@ final class AmbientActorTest extends TestCase
     }
 
     /**
-     * A real session guard whose session holds a user's id has loaded no user,
-     * so it holds none: it gives no actor, runs no query (no table exists to
-     * answer one) and dispatches no `Authenticated`.
+     * A session guard holding only a user's id gives no actor, runs no query
+     * and dispatches no `Authenticated`.
      *
      * @return void
      */

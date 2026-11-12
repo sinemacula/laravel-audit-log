@@ -17,28 +17,11 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
- * `audit-log:export`: exports the entries a viewer may see to a file, in
- * NDJSON, OCSF or CEF, with its bundle beside it, or with `--verify` verifies
- * an export for the viewer, exactly as the trail's `export()` and
- * `verifyExport()` do, each authorised by the bound access policy and recorded
- * before anything is published or shown.
+ * `audit-log:export`: exports the entries a viewer may see to a file in NDJSON,
+ * OCSF or CEF with its bundle, or with `--verify` verifies an export.
  *
- * The viewer is the reference `--viewer-type` and `--viewer-id` name together.
- * It is an assertion made by whoever runs the command, and proves nothing of
- * who that is: the access policy decides what the viewer may see, and a viewer
- * it denies is given an empty export. Without both options, with a viewer that
- * cannot be referenced, or with a format other than `ndjson`, `ocsf` or `cef`,
- * the command says why and exits with `INVALID` before anything is read.
- *
- * An export prints how many entries it holds and where, the id of the entry
- * that journals it and how that entry was acknowledged, the SHA-256 of its file
- * and where its bundle is. A verification prints each finding, then whether the
- * export verified, and exits with `FAILURE` on any finding. A target that
- * exists without `--force`, or that cannot be written to, exits with `INVALID`,
- * and a read that is refused or cannot be recorded with `FAILURE`; each prints
- * its message, which never holds the path or a value of an entry. Nothing else
- * is caught, so what an access policy throws reaches the console as it was
- * thrown.
+ * The viewer options are the operator's assertion; the access policy decides
+ * what the viewer may see.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,7 +45,7 @@ final class ExportCommand extends Command
 
     /**
      * Export the trail the viewer may see to the file, or verify the export
-     * there, once the options are known to be well formed.
+     * there.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $trail
      * @return int
@@ -90,9 +73,8 @@ final class ExportCommand extends Command
     }
 
     /**
-     * Export the trail to the path in the format, or verify the export there,
-     * and return the exit code the run earns: a refused read fails, and a
-     * refused target is invalid.
+     * Export the trail to the path, or verify the export there; a refused read
+     * fails, and a refused target is invalid.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $trail
      * @param  string  $path
@@ -138,8 +120,8 @@ final class ExportCommand extends Command
     }
 
     /**
-     * Print each finding of the verification, then whether the export verified,
-     * and return the exit code it earns.
+     * Print each finding, then whether the export verified, and return the exit
+     * code.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\ExportVerification  $verification
      * @return int
@@ -162,8 +144,8 @@ final class ExportCommand extends Command
     }
 
     /**
-     * Print the refusal of the target and return `INVALID`, or rethrow any
-     * other refusal, which is not the command's to catch.
+     * Print the target's refusal and return `INVALID`, or rethrow any other
+     * refusal.
      *
      * @param  \InvalidArgumentException  $refusal
      * @return int
@@ -231,10 +213,8 @@ final class ExportCommand extends Command
     }
 
     /**
-     * Whether the refusal is the target's own: a directory that does not exist
-     * or cannot be written to, a target that is a directory, or a target that
-     * exists without `--force`. Only the export's file raises one, so it is
-     * told apart by where it was raised, and never by its text.
+     * Whether the refusal is the target's own, told apart by where it was
+     * raised, never by its text.
      *
      * @param  \InvalidArgumentException  $refusal
      * @return bool

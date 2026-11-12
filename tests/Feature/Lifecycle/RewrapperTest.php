@@ -36,14 +36,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for rewrapping the owners' keys onto the current wrapping key,
- * and rotating them, on whichever engine the suite runs against: every live or
- * superseded key under another wrapping key rewrapped, its data key unchanged;
- * erased keys never touched; one journal row per batch listing each key before
- * and after; rotation superseding every live key, so the next write opens a
- * generation; a key that fails its signature or does not unwrap skipped and
- * named, never rewrapped; a key changed behind the lock never overwritten; a
- * reader seeing one whole wrapping or the other; bounded batches; the run's
- * boundary frozen at its start; and a dry run writing nothing.
+ * and rotating them.
  *
  * Keys are made under a ring of one wrapping key, `k1`, before the ring gains
  * `k2` as its current key, through the key creator or signed and stored by
@@ -110,9 +103,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * Every live key under another wrapping key is rewrapped onto the current
-     * one, bound to its own row, its data key unchanged and its state kept; a
-     * key already under the current key is left as it was.
+     * Every live key under another wrapping key is rewrapped, its data key
+     * unchanged.
      *
      * @return void
      */
@@ -144,8 +136,7 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A superseded key under another wrapping key is rewrapped too, and stays
-     * superseded.
+     * A superseded key is rewrapped too, and stays superseded.
      *
      * @return void
      */
@@ -166,8 +157,7 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * An erased key holds no wrapped key and is never touched, by a rewrap or a
-     * rotation, and is never counted.
+     * An erased key is never touched or counted.
      *
      * @return void
      */
@@ -187,10 +177,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * Each batch appends one `rewrap` row naming the operation and the
-     * authority, listing the run's id, whether it rotates, each key it changed,
-     * by id, with its state, wrapped key digest and wrapping key before and
-     * after, and the keys it skipped.
+     * Each batch's `rewrap` row lists each changed key before and after, and
+     * the keys skipped.
      *
      * @return void
      */
@@ -223,9 +211,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * Rotation supersedes every live key in the statement that rewraps it, and
-     * a key already under the current key keeps its wrapped key; the next write
-     * of each unit then opens its next generation.
+     * Rotation supersedes every live key, so each unit's next write opens a
+     * generation.
      *
      * @return void
      */
@@ -258,10 +245,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A key whose wrapped key does not unwrap under its own context, or whose
-     * wrapping key the wrapper does not hold, is skipped, named in the result
-     * and the batch's row, and left as it was; the run is partial and the rest
-     * are rewrapped.
+     * A key that fails to unwrap is skipped, named and left as it was; the run
+     * is partial.
      *
      * @return void
      */
@@ -292,9 +277,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * With rotation, a key already under the current wrapping key is unwrapped
-     * too: one whose wrapped key does not open is skipped and named, left live
-     * and as it was, never superseded or counted as rotated.
+     * Under rotation, a key already current that does not unwrap is skipped and
+     * left live.
      *
      * @return void
      */
@@ -318,9 +302,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A new wrapped key that does not unwrap to the same data key, as a faulty
-     * wrapper gives, never replaces the stored one, which is the only copy: the
-     * key is skipped and named, and left as it was.
+     * A new wrapped key that does not open to the same data key is never
+     * stored.
      *
      * @return void
      */
@@ -393,9 +376,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A key skipped by a row whose id is not a UUID, as a tampered row may hold
-     * escape sequences or invalid UTF-8, is counted and never named: not in the
-     * result, nor the batch's row, which counts it apart.
+     * A skipped key whose id is not a UUID is counted but never named, as it
+     * may hold unsafe bytes.
      *
      * @return void
      */
@@ -427,8 +409,7 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A key whose row fails its signature, or names a signing key the ring does
-     * not hold, is skipped and never unwrapped or rewrapped.
+     * A key that fails its signature is skipped, never unwrapped or rewrapped.
      *
      * @return void
      */
@@ -451,9 +432,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A key changed behind the lock, between the batch's read and its update,
-     * is never overwritten: the compare-and-set update changes nothing, the
-     * batch is rolled back whole, its row is not appended, and the run fails.
+     * A key changed behind the lock is never overwritten, and the batch rolls
+     * back.
      *
      * @return void
      *
@@ -484,10 +464,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * The batches are bounded by `audit-log.privacy.rewrap_batch`: each is one
-     * transaction behind the lock with one row listing at most a batch of keys,
-     * walked in id order with none twice, and an empty batch after a full one
-     * appends nothing.
+     * The batches are bounded by `audit-log.privacy.rewrap_batch`, each one
+     * transaction.
      *
      * @return void
      *
@@ -523,8 +501,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A dry run confirms nothing, takes no lock and writes nothing, yet counts
-     * what a run would do, its skipped keys included, uncommitted.
+     * A dry run takes no lock and writes nothing, but counts what a run would
+     * do.
      *
      * @return void
      */
@@ -553,10 +531,7 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A reader of a key being rewrapped sees one whole wrapping or the other:
-     * read through the key store before and after each update of the batch, the
-     * key always unwraps under the wrapping key and context its row names to
-     * the same data key.
+     * A reader of a key being rewrapped sees one whole wrapping or the other.
      *
      * @return void
      */
@@ -589,9 +564,7 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * The run's boundary is frozen at its start: a key a concurrent write
-     * creates once the run has begun, under the current key, is not superseded
-     * by the run's rotation and stays live.
+     * A key created during the run is not superseded by its rotation.
      *
      * @return void
      */
@@ -648,8 +621,7 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A run confirms the installation first, writing its id once on an
-     * installation that lost the one the migrations seed.
+     * A run confirms the installation first.
      *
      * @return void
      */
@@ -663,8 +635,7 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * A journal that fails verification fails the run before any key is
-     * changed.
+     * A broken journal fails the run before any key is changed.
      *
      * @return void
      *
@@ -796,9 +767,8 @@ final class RewrapperTest extends TestCase
     }
 
     /**
-     * The package's key wrapper, which on its first wrap changes the stored
-     * wrapped key of the key given to the text given, as a write behind the
-     * lock would.
+     * The package's key wrapper, which changes the key's stored wrapped key on
+     * its first wrap.
      *
      * @param  string  $keyId
      * @param  string  $wrapped

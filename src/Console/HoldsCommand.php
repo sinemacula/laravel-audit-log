@@ -12,20 +12,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * `audit-log:holds`: lists the active holds, replayed from the verified journal
- * under the lifecycle lock and never read from the holds projection, or with
- * `--rebuild` rebuilds the projection from the journal and says how many holds
- * it now holds.
- *
- * Each hold is shown by its id, its basis, when it was placed, its review date,
- * its scope's digest and the scope's dimensions: how many tenants and
- * references it names, whether it keeps the entries of no tenant, its
- * categories, its window and its import batch. The tenants and references
- * themselves are never printed. `--json` writes the listing, or the count, as
- * one JSON object instead.
- *
- * It exits 0 once it has listed or rebuilt, and 1 when the journal fails
- * verification or the lock cannot be taken, named by the class of the failure
- * alone.
+ * and never the projection, or with `--rebuild` rebuilds the projection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -146,9 +133,8 @@ final class HoldsCommand extends Command
     }
 
     /**
-     * The hold as the listing shows it: its id, basis, placement, review date,
-     * scope digest and the scope's dimensions, counting the tenants and the
-     * references rather than naming them.
+     * The hold as the listing shows it, counting the tenants and references
+     * rather than naming them.
      *
      * @formatter:off
      *

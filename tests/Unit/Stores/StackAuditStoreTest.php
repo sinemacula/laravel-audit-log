@@ -40,16 +40,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\Fixtures\Stores\PlainStore;
 
 /**
- * Unit tests for the store that delivers each record to several destinations:
- * the order and the bytes each receives, that a failing destination neither
- * stops nor undoes the others, the one exception naming each failure and what
- * it holds, the destinations it refuses, and what it says of durability,
- * transactions and attachments, which it keeps only when every destination
- * does.
- *
- * The storage connection the database store compares against is read through
- * the configuration facade, so each test gives the facade a bare application
- * whose configuration names `testing` as the default connection.
+ * Unit tests for the store that delivers each record to several destinations.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,8 +63,7 @@ final class StackAuditStoreTest extends TestCase
     private ?Container $previousContainer = null;
 
     /**
-     * Give the configuration facade an application whose default connection is
-     * `testing` and whose storage connection is not set.
+     * Bind an app whose default connection is `testing` to the config facade.
      *
      * @return void
      */
@@ -92,7 +82,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Take the application from the facade and put the global container back.
+     * Take the application from the facade and restore the global container.
      *
      * @return void
      */
@@ -133,8 +123,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Every destination receives the very record the stack was given, so each
-     * holds the same bytes.
+     * Every destination receives the very record the stack was given.
      *
      * @return void
      */
@@ -183,8 +172,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * A second destination that fails leaves the record with the first, which
-     * the stack never undoes.
+     * A failing second destination leaves the record with the first.
      *
      * @return void
      */
@@ -206,8 +194,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Every destination is tried before the stack throws, and it throws one
-     * exception for all the failures.
+     * Every destination is tried, then one exception reports all the failures.
      *
      * @return void
      */
@@ -231,9 +218,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The exception names the record and each destination that failed, in
-     * order, with its failure's class, and leaves out those that succeeded;
-     * an anonymous failure is named without its file path.
+     * The exception names each failed destination and its failure's class.
      *
      * @return void
      */
@@ -261,8 +246,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * An error, not only an exception, is kept as a failure and does not stop
-     * the destinations after it.
+     * An error is a failure like any other and stops no later destination.
      *
      * @return void
      */
@@ -282,8 +266,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Neither a failure's message nor its bindings, nor the record the stack
-     * was given, reach the exception: no previous, no message, no frame.
+     * No failure message, binding or record reaches the exception.
      *
      * @return void
      */
@@ -305,9 +288,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[failures, concurrency, lost connection]`: what each combination
-     * of failures sets, so either flag is set by any destination, not only the
-     * first or the last.
+     * Rows of `[failures, concurrency, lost connection]`: any destination sets.
      *
      * @return iterable<string, array{0: list<\Throwable>, 1: bool, 2: bool}>
      */
@@ -327,8 +308,8 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Whether any destination failed with a concurrency error, or with a lost
-     * connection, is set from the raw failures as Laravel classifies them.
+     * The concurrency and lost-connection flags follow Laravel's
+     * classification.
      *
      * @param  list<\Throwable>  $failures
      * @param  bool  $concurrency
@@ -351,9 +332,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * An aborted PostgreSQL host a destination met is kept as a flag of its
-     * own, so a spill bound to that transaction is discarded though the failure
-     * itself is gone.
+     * An aborted PostgreSQL host is flagged, so a spill bound to it is dropped.
      *
      * @return void
      */
@@ -374,9 +353,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The connection each fatal failure happened on is kept, so it is compared
-     * with the transactions open; one that does not say is kept as `null`, and
-     * a failure that is not fatal keeps nothing.
+     * Each fatal failure's connection is kept, or `null` when unknown.
      *
      * @return void
      */
@@ -394,8 +371,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * A deadlock in a first destination is flagged as a concurrency error, so
-     * it is still fatal to a host transaction.
+     * A deadlock in the first destination is flagged as a concurrency error.
      *
      * @return void
      */
@@ -453,8 +429,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[id]`: destination ids the pattern refuses, and a decimal
-     * integer, which PHP turns into a numeric key.
+     * Rows of `[id]`: ids the pattern refuses, and a decimal integer key.
      *
      * @return iterable<string, array{0: int|string}>
      */
@@ -477,9 +452,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Each refused destination id fails closed, with the pattern described;
-     * a destination keyed by a decimal integer is refused even after a valid
-     * one, so the stack is not a list.
+     * Each refused destination id fails closed, describing the pattern.
      *
      * @param  int|string  $id
      * @return void
@@ -525,8 +498,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * A member that is not an audit store is refused, naming its id and its
-     * type, never its value.
+     * A member that is no audit store is refused by id and type, never value.
      *
      * @return void
      */
@@ -539,8 +511,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * A stack among the destinations is refused, so a destination id names one
-     * place.
+     * A nested stack is refused, so a destination id names one place.
      *
      * @return void
      */
@@ -553,8 +524,8 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[destinations, durable]`: a stack is durable exactly when its
-     * first destination says it is.
+     * Rows of `[destinations, durable]`: durable exactly when the first
+     * destination is.
      *
      * @return iterable<string, array{0: array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>, 1: bool}>
      */
@@ -572,8 +543,8 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The stack asks its first destination, and only that one, whether a return
-     * is durable; one without the contract is not.
+     * Only the first destination is asked about durability; one without the
+     * contract is not durable.
      *
      * @param  array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>  $destinations
      * @param  bool  $durable
@@ -586,8 +557,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[destinations, connection, participates]`: a stack joins a
-     * transaction on a connection exactly when every destination does.
+     * Rows of `[destinations, connection, participates]`: all must join.
      *
      * @return iterable<string, array{0: array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>, 1: string, 2: bool}>
      */
@@ -606,9 +576,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The stack asks every destination whether it joins a transaction on the
-     * connection, and joins only when all of them do, so a line or a remote
-     * write is never mistaken for one that rolls back.
+     * The stack joins a transaction only when every destination does.
      *
      * @param  array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>  $destinations
      * @param  string  $connection
@@ -622,8 +590,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[destinations, accepts]`: a stack keeps attachments exactly when
-     * every destination implements the contract and says it does.
+     * Rows of `[destinations, accepts]`: all must accept attachments.
      *
      * @return iterable<string, array{0: array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>, 1: bool}>
      */
@@ -647,10 +614,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The stack asks every destination whether it keeps attachments, and keeps
-     * them only when all of them do, so a bulk record is never handed to a
-     * stack one destination of which would lose its manifest; one without the
-     * contract keeps none.
+     * The stack keeps attachments only when every destination does.
      *
      * @param  array<string, \SineMacula\Laravel\AuditLog\Contracts\AuditStore>  $destinations
      * @param  bool  $accepts
@@ -666,8 +630,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * Every destination is handed the very bundle the stack was given, its
-     * attachment included, so a database destination keeps the bundle.
+     * Every destination is handed the very bundle, its attachment included.
      *
      * @return void
      */
@@ -691,8 +654,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The destinations come back under their ids, as the very stores given, in
-     * the order given.
+     * The destinations come back under their ids, in the order given.
      *
      * @return void
      */
@@ -709,8 +671,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The record is marked sensitive, so a frame of the stack shows no value of
-     * it in a trace.
+     * The record is marked sensitive, so no frame of the stack shows it.
      *
      * @return void
      */
@@ -750,8 +711,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The database store, with no connection to write to: only what it says of
-     * itself is asked.
+     * The database store with no connection, asked only about itself.
      *
      * @return \SineMacula\Laravel\AuditLog\Contracts\AuditStore
      */
@@ -766,8 +726,7 @@ final class StackAuditStoreTest extends TestCase
     }
 
     /**
-     * The log store, with a log manager of a stub application, which it never
-     * asks for a channel.
+     * The log store over a stub application, which never resolves a channel.
      *
      * @return \SineMacula\Laravel\AuditLog\Contracts\AuditStore
      */

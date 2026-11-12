@@ -26,13 +26,8 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the tombstones on the re-delivery paths, on whichever
- * engine the suite runs against: an entry retention pruned, a record's or a
- * bundle's, is never stored again by the drain of an outbox row or the replay
- * of a spill line holding it, while a record beside it, never pruned, is.
- *
- * A test prunes a record as retention does: it is stored and sealed, then its
- * artifact and its entry are deleted, and its seal and member are kept.
+ * Integration tests for the tombstones on the re-delivery paths: a pruned
+ * record or bundle is never stored again by a drain or a spill replay.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,15 +44,14 @@ final class PrunedRedeliveryEnginesTest extends TestCase
     /** @var string When each test starts, and its records are finalised. */
     private const string NOW = '2026-11-01T12:00:00.000000Z';
 
-    /** @var string When the records are sealed: after each was recorded. */
+    /** @var string When the records are sealed, after each was recorded. */
     private const string SEALED_AT = '2026-11-01 12:30:00';
 
     /** @var ?string The spill file the test wrote. */
     private ?string $file = null;
 
     /**
-     * Stop the clock, freeze the sealer's, and keep what a report would say out
-     * of the output.
+     * Stop the clock, freeze the sealer's, and keep report output quiet.
      *
      * @return void
      */
@@ -90,9 +84,8 @@ final class PrunedRedeliveryEnginesTest extends TestCase
     }
 
     /**
-     * The drain completes the rows of a pruned record and a pruned bundle as
-     * pruned and stores neither, nor the bundle's artifact, and delivers the
-     * row of a record beside them.
+     * The drain completes pruned record and bundle rows without storing them,
+     * and delivers the record beside them.
      *
      * @return void
      */
@@ -115,9 +108,8 @@ final class PrunedRedeliveryEnginesTest extends TestCase
     }
 
     /**
-     * The spill replay counts the lines of a pruned record and a pruned bundle
-     * as pruned and stores neither, nor the bundle's artifact, and replays the
-     * line of a record beside them.
+     * The spill replay counts pruned record and bundle lines without storing
+     * them, and replays the record beside them.
      *
      * @return void
      */
@@ -141,9 +133,8 @@ final class PrunedRedeliveryEnginesTest extends TestCase
     }
 
     /**
-     * Store the record, seal it and prune it as retention would: its artifact
-     * and its entry deleted, its seal and member kept, and a signed record of
-     * the prune bound.
+     * Store, seal and prune the record as retention would, keeping its seal and
+     * member and binding a signed record of the prune.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
@@ -189,15 +180,5 @@ final class PrunedRedeliveryEnginesTest extends TestCase
     private function entriesUnder(string $id): int
     {
         return $this->storageConnection()->table(EntrySettings::table())->where('id', $id)->count();
-    }
-
-    /**
-     * The number of rows in the artifacts table.
-     *
-     * @return int
-     */
-    private function artifactCount(): int
-    {
-        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
     }
 }

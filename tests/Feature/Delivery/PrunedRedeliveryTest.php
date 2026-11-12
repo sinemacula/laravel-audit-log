@@ -48,16 +48,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the tombstones on every path that hands the store a record
- * it did not mint now: the drain completes an outbox row whose record retention
- * pruned as pruned, deleting it, calling no destination and dispatching no
- * `AuditRecorded`; a spill replay counts a pruned line and stores nothing, on a
- * dry run too; an outbox replay inherits the drain's check; a fresh capture is
- * never checked; and a direct store of a pruned record, which no index refuses,
- * is what verification reports `resurrected`.
- *
- * A test prunes a record as retention does: it is stored and sealed, then its
- * entry is deleted, and its seal and member are kept.
+ * Feature tests for the tombstones checked wherever the store is handed a
+ * record it did not just mint.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -152,10 +144,8 @@ final class PrunedRedeliveryTest extends TestCase
     }
 
     /**
-     * A row whose sealed entry was deleted outside retention, so no prune
-     * record covers it, is no tombstone: the drain never deletes the copy that
-     * can restore it and calls it pruned, but stores the authentic row again,
-     * and verification finds the seal whole.
+     * A row whose sealed entry was deleted outside retention is no tombstone:
+     * the drain stores it again and the seal verifies whole.
      *
      * @return void
      */
@@ -284,9 +274,8 @@ final class PrunedRedeliveryTest extends TestCase
     }
 
     /**
-     * A verified spill line whose record retention pruned is counted pruned by
-     * its id, never handed to the store, and stays in the file; a line beside
-     * it is replayed.
+     * A verified spill line of a pruned record is counted pruned, never stored
+     * and left in the file; the line beside it is replayed.
      *
      * @return void
      */
@@ -307,11 +296,8 @@ final class PrunedRedeliveryTest extends TestCase
     }
 
     /**
-     * A spill replay checks a record against the tombstones and stores it in
-     * one lifecycle transaction, after the lock every prune takes first: the
-     * lock row is updated before the check, the check and the insert run inside
-     * the transaction, and a prune that tries to run between them cannot, so it
-     * never deletes the record the replay is about to insert.
+     * A spill replay checks tombstones and stores in one lifecycle transaction
+     * after the prune lock, so a prune cannot run between them.
      *
      * @return void
      */
@@ -399,9 +385,8 @@ final class PrunedRedeliveryTest extends TestCase
     }
 
     /**
-     * An outbox replay requeues the failed row of a pruned record, and the
-     * drain completes it as pruned: it is counted pruned and deleted, never
-     * stored.
+     * An outbox replay requeues a pruned record's failed row, and the drain
+     * counts it pruned and deletes it, never storing it.
      *
      * @return void
      */
@@ -440,10 +425,8 @@ final class PrunedRedeliveryTest extends TestCase
     }
 
     /**
-     * A record an application kept and stores again directly violates no index,
-     * so the store inserts it; verification then finds the member its valid
-     * prune record covers present again, and reports the seal `resurrected`,
-     * where it was `pruned` before.
+     * A pruned record stored again directly violates no index, so verification
+     * reports its seal `resurrected`.
      *
      * @return void
      */
@@ -479,9 +462,8 @@ final class PrunedRedeliveryTest extends TestCase
     }
 
     /**
-     * Finalise a record now, store it, seal it and prune it as retention would:
-     * its entry deleted, its seal and member kept, and a signed record of the
-     * prune bound.
+     * Finalise, store, seal and prune a record as retention would, binding a
+     * signed record of the prune.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
      */

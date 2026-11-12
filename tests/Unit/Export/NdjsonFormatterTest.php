@@ -13,9 +13,8 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the NDJSON formatter: the line is the record's envelope in the
- * canonical encoding, on one physical line whatever a value holds, the same
- * bytes on every call, with Unicode kept and a map of numbered keys kept a map.
+ * Unit tests for the NDJSON formatter: the record's canonical envelope on one
+ * physical line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,9 +54,8 @@ final class NdjsonFormatterTest extends TestCase
     }
 
     /**
-     * A carriage return, a line feed and the Unicode line and paragraph
-     * separators in any value are escaped inside their string, so the line is
-     * one physical line, and each decodes back to what the record holds.
+     * Line breaks and Unicode line separators in a value are escaped, so the
+     * line is one physical line.
      *
      * @return void
      *

@@ -22,10 +22,7 @@ use Tests\Unit\Stubs\Enums\StubNumberedActivity;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for how a pending record describes its activity: the event code,
- * the subject, actor, principal and tenant, `by(null)` against an actor never
- * given, the credential and correlation ids, normalised properties with the
- * reserved metadata refused at any depth, and the capped note with its owner.
+ * Unit tests for how a pending record describes its activity.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -283,8 +280,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * A guard and a session reference given explicitly beat a filler in either
-     * order, `null` included.
+     * An explicit guard and session beat a filler in either order, `null`
+     * included.
      *
      * @param  ?string  $value
      * @return void
@@ -321,8 +318,7 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * Rows of `[call, the refusal]`: a guard or session reference that is
-     * empty, too long or not clean text.
+     * Rows of `[call, the refusal]`: an invalid guard or session reference.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void, 1: string}>
      */
@@ -390,8 +386,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * The client is given whole: a part given as `null` is not filled, in
-     * either order, and the last client given replaces both parts.
+     * The client is given whole: a `null` part is not filled, in either order,
+     * and the last client replaces both parts.
      *
      * @return void
      */
@@ -416,8 +412,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * The address is kept as given, and the user agent cleaned and capped, one
-     * empty once cleaned counting as none.
+     * The address is kept as given; the user agent is cleaned and capped, and
+     * empty counts as none.
      *
      * @return void
      */
@@ -430,9 +426,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * A credential id is kept exactly; the last one given wins, and an id as
-     * long as its column is kept (protects against an off-by-one mutation of
-     * the cap).
+     * A credential id is kept exactly up to its column length, and the last one
+     * given wins.
      *
      * @return void
      */
@@ -517,9 +512,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * Rows of `[correlation id]`: ids with no namespace, an empty side, an
-     * upper-case namespace, a leading space, too many characters or a control
-     * character.
+     * Rows of `[correlation id]`: ids not in the namespaced shape, too long or
+     * holding a control character.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -691,9 +685,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * Keys that collide once cleaned keep the first value and are diagnosed by
-     * their segments, accumulated across calls and bounded at 32 paths while
-     * every collision is counted.
+     * Keys that collide once cleaned keep the first value, and at most 32
+     * collision paths are kept while every collision is counted.
      *
      * @return void
      */
@@ -722,9 +715,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * An identifier is kept exactly as it was given: it is untrusted input, not
-     * a programming error, so nothing validates or cleans it, an empty one and
-     * one holding controls included.
+     * An identifier is untrusted input, so it is kept exactly as given, empty
+     * or holding controls.
      *
      * @return void
      */
@@ -805,8 +797,7 @@ final class DescribesTheActivityTest extends TestCase
 
     /**
      * Every parameter the properties and the note pass through is marked
-     * sensitive, the private helpers included, since a refusal is thrown with
-     * them on the stack.
+     * sensitive, since a refusal is thrown with them on the stack.
      *
      * @return void
      */
@@ -829,9 +820,7 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * The snapshot marks every payload it holds as sensitive, the raw keys of
-     * its collisions included, and the fields that hold no payload stay
-     * readable.
+     * The snapshot marks every payload it holds as sensitive, and only those.
      *
      * @return void
      */
@@ -845,10 +834,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * A refusal of the properties leaves no value and no key in the exception's
-     * stack trace, even with every frame keeping its arguments: not the
-     * reserved key's refusal, nor a list's, which is thrown with the normalised
-     * value on the stack.
+     * A refusal of the properties leaves no value or key in the exception's
+     * stack trace, even with every frame keeping its arguments.
      *
      * @return void
      */
@@ -975,9 +962,8 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
-     * A model with no key cannot own a note, and a refused note, for its owner
-     * or for its text, leaves the earlier note and its owner in place together,
-     * so an owned note never loses its owner and becomes plaintext.
+     * A refused note leaves the earlier note and its owner in place, so an
+     * owned note never becomes plaintext.
      *
      * @return void
      */

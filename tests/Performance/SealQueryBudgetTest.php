@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Performance;
 
 use Carbon\CarbonImmutable;
-use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -36,23 +35,12 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Statement-budget contract for sealing and anchoring: every run reads the
- * installation's id once, written by the first run of a fresh install and read
- * alone by every run after it; an empty recent pass reads the head twice and
- * its candidates once and writes its last run; a batch reads the head, its
- * candidates and, when it seals, the journal's head once, and writes its
- * checkpoint, a member insert per chunk and the last seal, in one transaction
- * with no savepoint; a full batch asks once more; a run of batches costs each
- * batch's share plus the run's constant; an attempt lost to a concurrent writer
- * costs one rollback and the whole attempt again; a sweep window reads at most
- * its batch and writes only its cursor; a skipped candidate costs nothing; the
- * candidates are read without their payload; and anchoring costs a fixed number
- * of indexed reads for the pass, whatever the size of the log, and an update
- * for each seal, and nothing at all with no anchor configured.
+ * Statement budget for sealing and anchoring: each batch, sweep window and
+ * anchored seal has a fixed cost, nothing is read per entry, and candidates are
+ * read without their payload.
  *
- * The least batch the settings accept is 100, so every batch here is at least
- * that. Each test starts with the installation's id written, as every run but a
- * fresh install's first finds it.
+ * Every batch is at least 100, the least the settings accept, and each test
+ * starts with the installation's id written.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,10 +63,10 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     /** @var int The reads each batch that seals nothing makes: the head and its candidates. */
     private const int EMPTY_BATCH_READS = 2;
 
-    /** @var int The writes each batch of the recent pass of fewer members than a chunk makes: its checkpoint, its members, the last seal and the high-water mark it moves forward. */
+    /** @var int The writes each recent-pass batch smaller than a chunk makes: checkpoint, members, last seal and high-water mark. */
     private const int BATCH_WRITES = 4;
 
-    /** @var int The reads a recent pass makes once, whatever it seals, with no high-water mark kept yet: the installation's id, the mark, and where the head says it starts. */
+    /** @var int The reads a recent pass makes once with no high-water mark yet: the installation id, the mark and the head's start. */
     private const int RUN_READS = 3;
 
     /** @var int The writes a run makes once, whatever it seals: its last run. */
@@ -116,10 +104,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A recent pass that finds nothing, with no high-water mark kept yet, reads
-     * the installation's id, the mark and where the head says it starts, then
-     * the head and its candidates, never the journal's head, and writes only
-     * its last run, in one transaction.
+     * An empty recent pass with no high-water mark makes five reads and writes
+     * only its last run, in one transaction.
      *
      * @return void
      */
@@ -133,9 +119,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A sweep that finds nothing reads the installation's id, its cursor, the
-     * head and its window, and writes its completion, forgets its cursor and
-     * writes its last run.
+     * An empty sweep makes four reads, then writes its completion, forgets its
+     * cursor and writes its last run.
      *
      * @return void
      */
@@ -148,11 +133,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Five rows in a batch of a hundred are one seal: six reads (the
-     * installation's id, the high-water mark, where the head says the pass
-     * starts, the head, the candidates and the journal's head) and five writes
-     * (the checkpoint, its members, the last seal, the high-water mark and the
-     * last run), in one transaction with no savepoint.
+     * Five rows in a batch of a hundred are one seal: six reads and five
+     * writes, in one transaction with no savepoint.
      *
      * @return void
      */
@@ -170,8 +152,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * A batch that fills the limit cannot know it reached the end, so it asks
-     * once more: two more reads, the head and the candidates, in one more
-     * transaction that writes nothing and reads no journal head.
+     * once more: two reads in one more transaction.
      *
      * @return void
      */
@@ -187,9 +168,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The members are inserted a chunk at a time, one statement per chunk: 301
-     * members are two inserts, and the batch otherwise costs what one of five
-     * does.
+     * Members are inserted one statement per chunk: 301 members are two
+     * inserts.
      *
      * @return void
      */
@@ -206,10 +186,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Ten batches cost ten times what one does, and the run's constant once:
-     * each batch reads the head, its candidates and the journal's head and
-     * writes its checkpoint, its members, the last seal and the high-water
-     * mark, each in its own transaction.
+     * Ten batches cost ten times one, each in its own transaction, plus the
+     * run's constant once.
      *
      * @return void
      */
@@ -228,10 +206,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An attempt lost to a concurrent writer at its checkpoint costs one
-     * rollback of the whole transaction, never a savepoint, and the attempt
-     * again from the head: the failed insert counts, and the run otherwise
-     * costs what one batch does.
+     * An attempt lost to a concurrent writer costs one transaction rollback,
+     * never a savepoint, and the whole attempt again.
      *
      * @return void
      */
@@ -253,8 +229,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * With no anchor configured, a pass over seals that were never anchored
-     * costs no statement at all.
+     * With no anchor configured, a pass over never-anchored seals costs no
+     * statement.
      *
      * @return void
      */
@@ -269,9 +245,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Anchoring a seal of an empty anchor reads the seals after its head once
-     * and the seals outside the chain once, updates the seal's anchor columns,
-     * and writes the last anchoring.
+     * Anchoring a seal reads the seals after its head and outside the chain
+     * once each, updates the seal and writes the last anchoring.
      *
      * @return void
      */
@@ -301,10 +276,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A pass over a log already anchored reads the seals after the anchor's
-     * head, the lost receipts below it and the seals outside the chain, each
-     * once and each by an index, whatever the size of the log, and writes
-     * nothing.
+     * A pass over an anchored log makes three indexed reads whatever its size,
+     * and writes nothing.
      *
      * @return void
      */
@@ -322,10 +295,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An anchor that fails, in discovery too, costs the read of the last
-     * anchoring it falls back to, the seals after it and the seals outside the
-     * chain, the failure's class on the seal and the last failure, and stops
-     * the pass there with no progress of an anchoring.
+     * An anchor that fails, discovery included, costs its fallback reads and
+     * its failure writes, and records no anchoring progress.
      *
      * @return void
      */
@@ -341,8 +312,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Rows of `[run, the select lists of the candidate statement, outer
-     * first]`: the recent pass, which reads its candidates directly, and the
-     * sweep, whose window is a derived table.
+     * first]`: the recent pass, and the sweep, whose window is a derived table.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Integrity\Sealer): \SineMacula\Laravel\AuditLog\Integrity\SealResult, 1: list<string>}>
      */
@@ -355,8 +325,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * The candidates are read by their id, HMAC and time alone, never a payload
-     * column or every column, in one statement per batch.
+     * The candidates are read by id, HMAC and time alone, in one statement per
+     * batch.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Integrity\Sealer): \SineMacula\Laravel\AuditLog\Integrity\SealResult  $run
      * @param  list<string>  $columns
@@ -386,9 +356,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A sweep over a sealed table of five windows reads each window once, each
-     * at most its batch of rows, and writes nothing but its cursor after every
-     * window, its completion and its last run.
+     * A sweep reads each of five windows once, at most its batch, and writes
+     * only its cursor, completion and last run.
      *
      * @return void
      */
@@ -411,9 +380,7 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A candidate that cannot be sealed is left out at no cost: the batch costs
-     * what a batch of the rest does, and its members insert holds the rest
-     * alone.
+     * A candidate that cannot be sealed is left out at no cost.
      *
      * @return void
      */
@@ -431,8 +398,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A batch whose every candidate is skipped writes no seal: it costs the
-     * reads of an empty batch and the last run alone.
+     * A batch of only skipped candidates writes no seal: it costs an empty
+     * batch's reads and the last run.
      *
      * @return void
      */
@@ -449,9 +416,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Each seal reads the journal's head once, inside its own transaction, and
-     * a seal that writes nothing never does; the installation's id is read once
-     * a run, however many seals it writes.
+     * Each seal reads the journal's head once in its own transaction, an empty
+     * one never, and each run reads the installation id once.
      *
      * @return void
      */
@@ -467,8 +433,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
         $journal    = array_filter($statements, static fn (string $statement): bool => str_contains($statement, LifecycleTables::journalTable()));
         $state      = array_filter($statements, static fn (string $statement): bool => self::readsTheState($statement));
 
-        // The run reads the state table twice, once for the installation's id,
-        // its first statement, and once for the high-water mark
+        // The run reads the state table twice: the installation id first, then
+        // the high-water mark
         self::assertSame(3, $result->seals());
         self::assertCount(3, $journal);
         self::assertCount(2, $state);
@@ -487,21 +453,8 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Seal in batches of the size given.
-     *
-     * @param  int  $batch
-     * @return void
-     */
-    private function useBatch(int $batch): void
-    {
-        app(ConfigRepository::class)->set('audit-log.integrity.seal.batch', $batch);
-    }
-
-    /**
-     * Insert the number of finalised records as entries, a chunk at a time, the
-     * first recorded when the entries stored together are, and each next one a
-     * microsecond later: what storing them one by one would leave, far more
-     * quickly.
+     * Insert finalised records as entries a chunk at a time, each a microsecond
+     * after the last: what storing them one by one would leave, far faster.
      *
      * @param  int  $count
      * @return void

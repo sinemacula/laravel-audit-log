@@ -8,10 +8,8 @@ use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The lists an access scope holds, as it keeps and shows them: references each
- * exact pair once, sorted by type then id bytewise, categories each held to the
- * definitions' grammar, once, sorted bytewise, both refused beyond their
- * limits, and references shown as their type and id.
+ * The lists an access scope holds: references and categories each held once,
+ * sorted bytewise and refused beyond their limits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -14,10 +14,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
 
 /**
- * Unit tests for the counts of one run: every status counted from zero in enum
- * order, the segments awaiting their first anchoring, the run's own findings
- * kept in order, the unsealed counts, and the first failure, the most severe
- * and then the earliest, of segments and run findings alike.
+ * Unit tests for the counts of one run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,9 +75,8 @@ final class VerificationTallyTest extends TestCase
     }
 
     /**
-     * The first failure is the most severe given, and of equally severe ones
-     * the earliest, with the id it was found at; a later failure of the same
-     * status never replaces it, and a run finding competes with segments.
+     * The first failure is the most severe, then the earliest; a run finding
+     * competes with segments.
      *
      * @return void
      */

@@ -11,8 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealCursor;
 use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 
 /**
- * Unit tests for what one sealing attempt did: the seal, the rows read and
- * skipped, the position after them, and whether the selection was exhausted.
+ * Unit tests for what one sealing attempt did.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,8 +40,7 @@ final class SealBatchTest extends TestCase
     }
 
     /**
-     * An attempt keeps the seal and digest it wrote, the rows it read and
-     * skipped, and the position of its last row; it is exhausted only when it
+     * An attempt keeps what it wrote and read, and is exhausted only when it
      * read fewer rows than its limit.
      *
      * @return void

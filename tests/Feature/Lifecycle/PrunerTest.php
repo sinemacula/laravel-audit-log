@@ -59,14 +59,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Feature tests for the pruner, on whichever engine the suite runs against:
- * what it deletes and keeps (the cut-off, categories apart, holds, unsealed,
- * protected and undelivered entries, artifacts and receipts with their
- * entries), what it journals (a policy row per version, the run's start and
- * bounded finish rows, one signed prune row per chunk), where a run resumes,
- * how it stops (its time budget, a seal or candidate that fails authentication,
- * a mismatch, a policy, a broken journal), what a dry run counts and writes,
- * and its progress.
+ * Feature tests for the pruner: what it deletes, keeps and journals, and how a
+ * run stops and resumes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -108,9 +102,8 @@ final class PrunerTest extends TestCase
     private ?RecordingExceptionHandler $reporter = null;
 
     /**
-     * Stop the clock, keep every category thirty days, bind the configured
-     * policy, the journal's ledger and a recording reporter, and seal at the
-     * test's time.
+     * Stop the clock, keep every category thirty days, bind the policy, ledger
+     * and reporter, and seal.
      *
      * @return void
      */
@@ -133,8 +126,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, and put the clock and the
-     * sleeper back.
+     * Roll back any open transaction, and restore the clock and the sleeper.
      *
      * @return void
      */
@@ -156,8 +148,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * By default every entry is kept forever: a run deletes nothing, writes no
-     * prune row, and ends complete.
+     * By default every entry is kept forever.
      *
      * @return void
      */
@@ -177,9 +168,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * The cut-off is the run's midnight less thirty days, to the microsecond:
-     * an entry one microsecond before it is pruned, one at it and one after it
-     * are kept.
+     * The cut-off is the run's midnight less thirty days, to the microsecond.
      *
      * @return void
      */
@@ -199,9 +188,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Two categories of one seal are pruned each by its own retention: a day
-     * for `security` prunes it, thirty for `finance` keeps it; the seal is then
-     * `pruned` and verifies.
+     * Two categories of one seal are pruned each by its own retention.
      *
      * @return void
      */
@@ -223,8 +210,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * An entry an active hold keeps survives and is counted held, and the run
-     * ends partial; its neighbours go.
+     * An entry an active hold keeps survives and is counted held.
      *
      * @return void
      */
@@ -243,9 +229,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Overlapping holds each count: an entry either keeps is kept, an entry
-     * both keep is counted once, and releasing one leaves the other keeping its
-     * entries.
+     * Overlapping holds each count, and releasing one leaves the other keeping
+     * its entries.
      *
      * @return void
      */
@@ -295,8 +280,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * An export's journal entry is protected: it survives a prune that takes
-     * everything around it, its artifact with it, and its export still
+     * A protected export entry survives with its artifact, and its export still
      * verifies.
      *
      * @return void
@@ -338,8 +322,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * An entry with an outbox row survives, counted as pending, and the run
-     * ends partial.
+     * An entry with an outbox row survives, counted as pending.
      *
      * @return void
      */
@@ -385,8 +368,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Each chunk of a seal writes one prune row of its own, its record signed
-     * and disjoint from the other's, between the run's start and finish.
+     * Each chunk of a seal writes one signed prune row of its own.
      *
      * @return void
      */
@@ -412,8 +394,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * The policy's row is written by the first run under its version alone,
-     * with the bound class and its settings.
+     * The policy's row is written once per version.
      *
      * @return void
      */
@@ -455,9 +436,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * The start row carries the run, its policy version, its boundary, its
-     * midnight and where it resumes; the finish row its status, counts, cursor,
-     * what it left, its deletions per category and its decisions.
+     * The start and finish rows carry the run's status, counts, cursor and
+     * cut-offs.
      *
      * @return void
      */
@@ -509,9 +489,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * The finish row is bounded whatever the tenants: a thousand tenants of one
-     * category give one decision, the thousand pairs it was made for, and the
-     * digest of every pair's decision.
+     * The finish row is bounded whatever the number of tenants.
      *
      * @return void
      */
@@ -535,9 +513,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * The time budget is read from the clock between chunks: a run past it
-     * after its first chunk stops before the second, partial, with the seal it
-     * was in left to the next run.
+     * The time budget is read between chunks and stops the run partial.
      *
      * @return void
      */
@@ -556,8 +532,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A run stopped on its budget is resumed after its cursor: the next run
-     * starts after the last seal it walked, and never reads the seals before.
+     * A run stopped on its budget is resumed after its cursor.
      *
      * @return void
      */
@@ -606,8 +581,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A run that failed before its boundary is never resumed from its cursor:
-     * the next run starts again from the first seal.
+     * A failed run is never resumed from its cursor.
      *
      * @return void
      */
@@ -635,9 +609,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A partial run that walked every seal to its boundary, leaving a held
-     * entry, has nothing remaining, so the next run starts again from the first
-     * seal.
+     * A partial run that reached its boundary has nothing remaining, so the
+     * next starts afresh.
      *
      * @return void
      */
@@ -660,8 +633,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * An entry a hold kept through a partial run is pruned by the next run once
-     * the hold is released, never stranded behind a cursor.
+     * An entry a released hold kept is pruned by the next run, never stranded
+     * behind a cursor.
      *
      * @return void
      */
@@ -684,9 +657,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * The cursor is the verified chain's, read after the start's lock: the
-     * progress a monitor reads is never consulted, and a finish row whose
-     * payload was changed refuses the run.
+     * The cursor is read from the verified chain after the lock, never from the
+     * progress.
      *
      * @return void
      */
@@ -735,8 +707,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A seal that fails authentication is skipped, named and counted, and the
-     * run prunes the seals after it and ends partial.
+     * A seal that fails authentication is skipped, named and counted.
      *
      * @return void
      */
@@ -758,8 +729,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A candidate changed after it was sealed skips its seal: nothing of that
-     * seal is deleted or recorded, and the next seal is still pruned.
+     * A candidate changed after sealing skips its seal and deletes nothing.
      *
      * @return void
      */
@@ -782,10 +752,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * An entry stored again after it was pruned skips its seal on the next run:
-     * it is never deleted again, no second record sets its member, and
-     * verification still finds it `resurrected` rather than an overlap of the
-     * package's own records.
+     * An entry stored again after it was pruned is never pruned again.
      *
      * @return void
      */
@@ -818,9 +785,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A policy that throws stops the run: the chunks it committed before stand,
-     * its finish row is written failed, and the failure is reported by its
-     * class alone.
+     * A policy that throws stops the run, and the chunks it committed stand.
      *
      * @return void
      */
@@ -842,8 +807,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A custom policy that keeps a pair for less than it must be preserved
-     * stops the run when the pair is first evaluated, as refused configuration.
+     * A custom policy that keeps a pair less than it preserves it stops the
+     * run.
      *
      * @return void
      */
@@ -861,8 +826,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A malformed retention setting refuses the run before it starts, as
-     * refused configuration, and nothing is journalled.
+     * A malformed retention setting refuses the run before it starts.
      *
      * @return void
      */
@@ -877,8 +841,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A journal that fails verification refuses the run: nothing is deleted or
-     * journalled, and the run is not committed.
+     * A broken journal refuses the run.
      *
      * @return void
      */
@@ -898,8 +861,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A hold whose projection row was deleted still keeps its entries: the
-     * pruner reads holds from the verified chain alone.
+     * A hold whose projection row was deleted still keeps its entries.
      *
      * @return void
      */
@@ -919,9 +881,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A dry run counts per pair and per seal what a run would delete, takes no
-     * lock, runs no statement but `select`, and journals nothing, not even the
-     * policy's row.
+     * A dry run counts per pair and per seal, takes no lock and journals
+     * nothing.
      *
      * @return void
      */
@@ -983,8 +944,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A dry run on a journal that fails verification refuses, and writes
-     * nothing.
+     * A dry run on a broken journal refuses.
      *
      * @return void
      */
@@ -1000,8 +960,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Every run that is not a dry run writes `retention.last_run`: when it
-     * ended, the run, its status, what it deleted and its cursor.
+     * Every run but a dry run writes `retention.last_run`.
      *
      * @return void
      */
@@ -1019,9 +978,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A run refuses inside a transaction on the storage connection, a dry run
-     * too, before it reads or writes anything; a budget under a second is
-     * refused as well.
+     * A run refuses inside a storage transaction, and a budget under a second
+     * is refused.
      *
      * @return void
      */
@@ -1052,8 +1010,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Ten thousand unsealed entries past the threshold are never deleted: a run
-     * walks seals alone.
+     * Unsealed entries are never deleted, since a run walks seals alone.
      *
      * @return void
      */
@@ -1068,8 +1025,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A chunk whose deletes mismatch is made once more from a fresh read; one
-     * that mismatches again skips its seal, deleting and journalling nothing.
+     * A chunk whose deletes mismatch is retried once, then its seal is skipped.
      *
      * @return void
      */
@@ -1107,9 +1063,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A chunk lost to a deadlock after it wrote its prune row is made again
-     * from the replay the last commit returned, so its retry appends its row at
-     * the same sequence.
+     * A retried chunk starts from the last committed replay.
      *
      * @return void
      */
@@ -1144,8 +1098,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A seal made during the run is past the boundary the run read at its
-     * start, and is left to the next run.
+     * A seal made during the run is left to the next run.
      *
      * @return void
      */
@@ -1180,9 +1133,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * The cut-off is fixed for the run: a clock that passes midnight during the
-     * run moves no pair's cut-off, so an entry the next day's cut-off would
-     * admit is kept.
+     * The cut-off is fixed for the run, even across midnight.
      *
      * @return void
      */
@@ -1203,8 +1154,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A run that fails after its start row still writes its finish row, failed,
-     * and reports the failure by its class alone.
+     * A run that fails after its start still writes its finish row and reports
+     * the failure by class.
      *
      * @return void
      */
@@ -1233,9 +1184,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * A failed delivery keeps its entry until it is replayed: the run ends
-     * partial with the entry pending, and once its receipt is delivered the
-     * next run prunes the entry and the receipt.
+     * A failed delivery keeps its entry until it is replayed.
      *
      * @return void
      */
@@ -1272,7 +1221,7 @@ final class PrunerTest extends TestCase
 
     /**
      * Thirty days for every category but `security`, for which the policy
-     * throws, naming a tenant a report must never show.
+     * throws naming a tenant.
      *
      * @param  string  $category
      * @return int
@@ -1310,8 +1259,7 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Bind a policy of version `custom:1` whose retention the closure gives, by
-     * category, preserving each pair for the days given or nothing.
+     * Bind a policy of version `custom:1` whose retention the closure gives.
      *
      * @param  \Closure(string): ?int  $retain
      * @param  ?int  $preserve
@@ -1417,9 +1365,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Store a captured record with the fields given over its own, happening at
-     * the instant given unless the fields say otherwise, recorded at the test's
-     * time, and return its id.
+     * Store a captured record with the fields given over its own and return its
+     * id.
      *
      * @param  string  $occurredAt
      * @param  array<string, ?string>  $fields
@@ -1436,9 +1383,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Insert the number of captured records happening at the instant given,
-     * each with the fields the closure gives it by its index, as the store
-     * writes them, twenty rows to a statement, and return their ids.
+     * Insert captured records twenty to a statement, as the store writes them,
+     * and return their ids.
      *
      * @param  int  $count
      * @param  string  $occurredAt
@@ -1468,7 +1414,7 @@ final class PrunerTest extends TestCase
 
     /**
      * Seed a receipt of the entry for the destination, delivered at the time
-     * given, as the engine stores it, or not yet.
+     * given or not yet.
      *
      * @param  string  $entryId
      * @param  string  $destination
@@ -1510,10 +1456,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Delete the entry, through the chunk's own connection, as each of the
-     * chunk's deletes of receipts runs, for the number of times given, so its
-     * delete of entries affects one row fewer than it names; and count each
-     * lock taken from now.
+     * Delete the entry as each receipts delete runs, so the entries delete
+     * mismatches; count each lock.
      *
      * @param  string  $id
      * @param  int  $times
@@ -1605,8 +1549,8 @@ final class PrunerTest extends TestCase
     }
 
     /**
-     * Verify the whole log through the journal's ledger, and return each
-     * segment's integrity, in order.
+     * Verify the whole log through the journal's ledger and return each
+     * segment's integrity.
      *
      * @return list<string>
      */

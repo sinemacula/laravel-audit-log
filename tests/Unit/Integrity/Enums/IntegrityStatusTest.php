@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 
 /**
- * Unit tests for the integrity status enum: its cases and their values, the
- * severity that orders them, and the statuses that fail a verification.
+ * Unit tests for the integrity status enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,9 +37,7 @@ final class IntegrityStatusTest extends TestCase
     }
 
     /**
-     * Each status has its own severity, from 0 for `valid` to 4 for `tampered`,
-     * in the order of the cases, so a status that passes is never more severe
-     * than one that fails.
+     * Severity runs from 0 for `valid` to 4 for `tampered`, in case order.
      *
      * @return void
      */
@@ -69,9 +66,7 @@ final class IntegrityStatusTest extends TestCase
     }
 
     /**
-     * Only `incomplete`, `unverifiable` and `tampered` fail a verification:
-     * `valid` passes, and so does `pruned`, whose missing entries a valid prune
-     * record accounts for.
+     * Only `incomplete`, `unverifiable` and `tampered` fail a verification.
      *
      * @return void
      */

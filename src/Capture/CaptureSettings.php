@@ -10,24 +10,8 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The capture settings, read from configuration on every call and validated as
- * they are read: the guards whose authentication events are not recorded
- * (`audit-log.capture.laravel.except_guards`), the one credential a failed
- * sign-in is read for (`audit-log.capture.laravel.identifier_key`), whether
- * Gate denials are recorded (`audit-log.capture.gate.enabled`), which abilities
- * (`audit-log.capture.gate.only_abilities` and
- * `audit-log.capture.gate.except_abilities`), the denial codes kept as a reason
- * (`audit-log.capture.gate.reason_codes`), and the bounds of a bulk operation's
- * manifest (`audit-log.capture.bulk.max_members` and
- * `audit-log.capture.bulk.max_bytes`).
- *
- * A missing setting takes its default; a `null` set explicitly is malformed,
- * except for `only_abilities`, whose default it is. A flag is a real boolean,
- * so a truthy string never turns capture on. A number is an integer, or the
- * canonical digit string an environment line gives, within its range. A name or
- * an ability is compared exactly, never cleaned or trimmed, and one that is not
- * already clean text is refused. Every malformed value fails closed with an
- * `InvalidArgumentException` naming the key and never the value.
+ * The settings under `audit-log.capture.`, validated on every read; a malformed
+ * value fails naming the key, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,7 +26,7 @@ final readonly class CaptureSettings
     /** @var int Longest guard name, in characters: the `guard` column. */
     public const int GUARD_MAX_CHARACTERS = 64;
 
-    /** @var string Pattern of a credential key: 1 to 64 letters, digits, underscores, dots or hyphens, starting with a letter, a digit or an underscore. */
+    /** @var string Pattern of a credential key. */
     public const string IDENTIFIER_KEY_PATTERN = '/\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}\z/';
 
     /** @var int Longest ability name a list may hold, in bytes. */
@@ -51,7 +35,7 @@ final readonly class CaptureSettings
     /** @var string Prefix of every capture setting's key. */
     private const string PREFIX = 'audit-log.capture.';
 
-    /** @var array<string, array{0: int, 1: int, 2: int}> Default, least and greatest value of each numeric setting, by its key under the prefix. */
+    /** @var array<string, array{0: int, 1: int, 2: int}> Default, least and greatest value of each numeric setting. */
     private const array NUMBERS = [
         'bulk.max_members' => [100000, 1, 1000000],
         'bulk.max_bytes'   => [4194304, 65536, 8388608],
@@ -83,8 +67,8 @@ final readonly class CaptureSettings
     ) {}
 
     /**
-     * The guards whose authentication events are not recorded: none unless
-     * configured, a list of names, or `['*']` for every guard.
+     * The guards whose authentication events are not recorded, or `['*']` for
+     * every guard.
      *
      * @return list<string>
      *
@@ -112,9 +96,8 @@ final readonly class CaptureSettings
     }
 
     /**
-     * Whether an authentication event under the guard is not recorded: every
-     * one is under `['*']`; otherwise one under a listed guard is, and one with
-     * no guard is not.
+     * Whether an authentication event under the guard is not recorded; a `null`
+     * guard is excluded only by `['*']`.
      *
      * @param  ?string  $guard
      * @return bool
@@ -133,8 +116,8 @@ final readonly class CaptureSettings
     }
 
     /**
-     * The key of the one credential a failed sign-in is read for: `email`
-     * unless configured otherwise.
+     * The key of the credential a failed sign-in is read for, `email` by
+     * default.
      *
      * @return string
      *
@@ -152,8 +135,7 @@ final readonly class CaptureSettings
     }
 
     /**
-     * Whether Gate denials are recorded: off unless turned on with a real
-     * boolean.
+     * Whether Gate denials are recorded; off by default.
      *
      * @return bool
      *
@@ -172,7 +154,7 @@ final readonly class CaptureSettings
 
     /**
      * The only abilities whose denials are recorded, or `null` for every
-     * ability; a list is never empty.
+     * ability.
      *
      * @return ?non-empty-list<string>
      *
@@ -211,10 +193,8 @@ final readonly class CaptureSettings
     }
 
     /**
-     * Whether a denial of the ability is recorded: it is not one of the
-     * excepted abilities, and it is one of the only abilities when they are a
-     * list. The ability is compared exactly as the Gate gave it, so one that
-     * differs in case or whitespace is another ability.
+     * Whether a denial of the ability is recorded, comparing ability names
+     * exactly.
      *
      * @param  string  $ability
      * @return bool
@@ -233,8 +213,7 @@ final readonly class CaptureSettings
     }
 
     /**
-     * The codes of a denial that are kept as its reason: none unless
-     * configured, each a machine-readable code.
+     * The denial codes kept as a reason; none by default.
      *
      * @return list<string>
      *
@@ -319,8 +298,7 @@ final readonly class CaptureSettings
     }
 
     /**
-     * The guard name, refused unless it is a string of 1 to 64 characters and
-     * already clean text.
+     * The guard name, refused unless it is clean text of 1 to 64 characters.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -339,8 +317,8 @@ final readonly class CaptureSettings
     }
 
     /**
-     * The list of abilities, refused with the message unless it is a list whose
-     * every member is a string of 1 to 191 bytes and already clean text.
+     * The abilities, refused with the message unless each is clean text of 1 to
+     * 191 bytes.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -371,8 +349,7 @@ final readonly class CaptureSettings
     }
 
     /**
-     * The reason code, refused unless it is a machine-readable code; the
-     * refusal names the setting, never the code.
+     * The reason code, refused without naming it unless it is machine-readable.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

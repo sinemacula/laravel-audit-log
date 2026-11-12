@@ -12,9 +12,7 @@ use Tests\Unit\Stubs\Enums\StubActivity;
 use Tests\Unit\Stubs\Enums\StubNumberedActivity;
 
 /**
- * Unit tests for the machine-readable code a reason, a purpose and a channel
- * share: the strings and enum cases it keeps, each it refuses, and the messages
- * it refuses them with, which name what the code is and never its value.
+ * Unit tests for the machine code a reason, a purpose and a channel share.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,9 +27,7 @@ final class MachineCodeTest extends TestCase
         . ' lower-case letters, digits, `_`, `.`, `:` or `-`, starting with a letter or a digit.';
 
     /**
-     * `MachineCode` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *
@@ -52,8 +48,7 @@ final class MachineCodeTest extends TestCase
     }
 
     /**
-     * Rows of `[code]`: the bounds of the length and the first character, and
-     * every other character a code may hold.
+     * Rows of `[code]`: the length and first-character bounds, every character.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -107,9 +102,8 @@ final class MachineCodeTest extends TestCase
     }
 
     /**
-     * Rows of `[code]`: the bounds of the length, a first character the pattern
-     * reserves, characters outside it, and line breaks at either end, which an
-     * unanchored pattern would let through.
+     * Rows of `[code]`: lengths out of bounds, reserved first characters, other
+     * characters and line breaks at either end.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -134,7 +128,7 @@ final class MachineCodeTest extends TestCase
     }
 
     /**
-     * Each malformed code is refused rather than cleaned, cut or kept.
+     * Each malformed code is refused, never cleaned, cut or kept.
      *
      * @param  string  $code
      * @return void
@@ -163,7 +157,7 @@ final class MachineCodeTest extends TestCase
     }
 
     /**
-     * Both refusals open with what was given, and neither holds the value.
+     * Both refusals open with what was given and never hold the value.
      *
      * @param  'A channel'|'A purpose'|'A reason'  $name
      * @return void

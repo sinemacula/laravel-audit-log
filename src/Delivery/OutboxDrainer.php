@@ -23,47 +23,11 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 
 /**
- * Drains the outbox: claims each row that is due, decrypts and verifies the
- * envelope it holds, delivers the record to every destination of the store, and
- * deletes the row once each has it.
+ * Drains the outbox: claims each due row, decrypts and verifies its envelope,
+ * delivers the record to every destination and deletes the row.
  *
- * A run takes the rows due when it starts, a batch at a time, so a row added
- * while it runs waits for the next run and a run until the outbox is empty
- * always ends. A row another drain claimed first is missed, and one another
- * drain took over while this one worked it is stale: this drain changes nothing
- * of it further. A row is never re-signed or finalised again.
- *
- * A row whose record retention has already pruned is deleted and counted
- * pruned, and nothing else: no destination is called and `AuditRecorded` is not
- * dispatched, so a pruned record is never stored again. Every row whose record
- * is read is checked against the tombstones, one statement each, since a row
- * requeued by `audit-log:replay --outbox` starts its attempts again and may
- * hold a record that was stored, sealed and pruned since.
- *
- * A row holding a bundle, a record with its attachment, is delivered whole:
- * each destination that keeps attachments stores the entry and its artifact
- * together, and its receipt follows them. A destination that keeps none is
- * refused before it is called, as that destination's failure, so the row is
- * retried, then failed and kept for a replay, never deleted.
- *
- * A row whose destination failed is retried after a wait that doubles with each
- * attempt, from `delivery.outbox.backoff_seconds` up to an hour, without a
- * report: the class of the failure is kept on the row and the receipt. At
- * `delivery.outbox.max_attempts` the row is failed and kept for a replay, the
- * failure is reported and `AuditWriteFailed` is dispatched. A row that cannot
- * be decrypted (its key removed, or the payload corrupt), an envelope that does
- * not verify, or a row that has already had more attempts than it may, its
- * worker killed each time, is failed and kept at once and reported by its id.
- * Every report holds the record's id and code and the failure's class, never a
- * value of the record or the failure's message, and runs, as does every
- * dispatch of `AuditWriteFailed`, inside the write guard. A row whose work
- * stops for a reason a delivery does not expect, or whose claim fails, is
- * reported the same way and stops no other: the former retries after its
- * backoff, and keeps its lease only when that retry cannot be written either.
- *
- * A drain never runs inside a transaction on the outbox or the storage
- * connection: a receipt and its entry would wait for that commit while the
- * outbox row was deleted, and a rollback would lose the record.
+ * It never runs inside a transaction on the outbox or storage connection, where
+ * a rollback would lose a record whose row was deleted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,7 +39,7 @@ final readonly class OutboxDrainer
     /** @var int Longest wait before a retry, in seconds: an hour. */
     public const int MAX_BACKOFF_SECONDS = 3600;
 
-    /** @var int The most doublings of the first wait, so the wait is computed without overflow. */
+    /** @var int Most doublings of the first wait, so the wait cannot overflow. */
     private const int MAX_DOUBLINGS = 16;
 
     /** @var string Why a row that has had more attempts than it may is failed. */
@@ -97,33 +61,32 @@ final readonly class OutboxDrainer
      */
     public function __construct(
 
-        /** The container the encrypter, the codec, the guard, the reporter and the dispatcher are resolved from. */
+        /** Resolves the encrypter, codec, guard, reporter and dispatcher. */
         private Container $container,
 
         /** The outbox the rows are claimed from. */
         private Outbox $outbox,
 
-        /** The coordinator that delivers each record to the store's destinations. */
+        /** Delivers each record to the store's destinations. */
         private DeliveryCoordinator $coordinator,
 
-        /** The settings the attempts and the wait before a retry are read from. */
+        /** Where the attempts and the backoff are read from. */
         private DeliverySettings $settings,
 
-        /** The clock that fixes which rows are due and when a retry comes. */
+        /** Fixes which rows are due and when a retry comes. */
         private Clock $clock,
 
-        /** The notifier that dispatches `AuditRecorded` for a delivered record. */
+        /** Dispatches `AuditRecorded` for a delivered record. */
         private RecordedNotifier $notifier,
 
-        /** The tombstones that say whether retention has already pruned a row's record. */
+        /** Say whether retention has already pruned a row's record. */
         private PruneTombstones $tombstones,
     ) {}
 
     /**
-     * Drain at most the limit of rows due now, or, until empty, batch after
-     * batch of them until none is left that this drain can claim, and tally how
-     * each ended. A failure reading the rows stops the run; a tally passed in
-     * still holds the rows already worked.
+     * Drain at most the limit of rows due now, or batches until none is left to
+     * claim, and tally how each ended; a passed-in tally keeps the rows worked
+     * before a failure stops the run.
      *
      * @param  int  $limit
      * @param  bool  $untilEmpty
@@ -164,8 +127,7 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Refuse to drain while a transaction is open on the outbox or the storage
-     * connection.
+     * Refuse to drain inside a transaction on the outbox or storage connection.
      *
      * @return void
      *
@@ -182,7 +144,7 @@ final readonly class OutboxDrainer
 
     /**
      * Claim the row, or count it missed when another drain claimed it first or
-     * the claim failed; a failed claim is reported, and stops no other row.
+     * the claim failed, which is reported.
      *
      * @param  string  $id
      * @param  \Carbon\CarbonImmutable  $due
@@ -207,9 +169,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Work the claimed row, so one row that cannot be worked stops no other;
-     * whatever stops it is reported payload-free and handled as a failed
-     * delivery, so the row retries after its backoff.
+     * Work the claimed row, reporting whatever stops it and retrying it after
+     * its backoff, so one row stops no other.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \Illuminate\Contracts\Encryption\StringEncrypter  $encrypter
@@ -227,9 +188,9 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Report what stopped the row, then retry it after its backoff, or fail it
-     * at its last attempt, which reports it itself. Only a row that cannot take
-     * either keeps its claim until the lease passes, counted failed.
+     * Report what stopped the row, then retry it or fail it at its last
+     * attempt; a row that can take neither keeps its claim until the lease
+     * passes.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics  $diagnostics
@@ -249,8 +210,8 @@ final readonly class OutboxDrainer
 
             $this->incomplete($claim, $diagnostics, $result);
         } catch (\Throwable) {
-            // Nothing can be written to the outbox, so the lease is what brings
-            // the row back, and the report is all that is left
+            // Nothing can be written to the outbox, so the lease brings the row
+            // back and the report is all that is left
             if (!$reported) {
                 $this->report($diagnostics);
             }
@@ -260,9 +221,9 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Work the claimed row: abandon it past its attempts, and otherwise read
-     * its record, then complete it as pruned when retention has pruned that
-     * record, and deliver it when not.
+     * Work the claimed row: abandon it past its attempts, else complete it as
+     * pruned or deliver it. Every row is checked against the tombstones, since
+     * a requeued row may hold a record pruned since.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \Illuminate\Contracts\Encryption\StringEncrypter  $encrypter
@@ -299,9 +260,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * The record the claimed row holds, once its payload is decrypted and its
-     * envelope verifies, or `null` once the row is failed because it does not:
-     * as undecryptable, or for the reason the envelope was refused.
+     * The row's record once decrypted and verified, or `null` once the row is
+     * failed because it was not.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \Illuminate\Contracts\Encryption\StringEncrypter  $encrypter
@@ -326,9 +286,7 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Deliver the record to the store's destinations, then delete the row when
-     * every destination has it, and otherwise retry or fail it; nothing more
-     * when the claim was lost on the way.
+     * Deliver the record, then delete, retry or fail the row by the outcome.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -352,8 +310,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Delete the row every destination has, then dispatch `AuditRecorded`; stale
-     * when the claim no longer owns the row, and then nothing is dispatched.
+     * Delete the delivered row, then dispatch `AuditRecorded`; stale,
+     * dispatching nothing, when the claim is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -377,8 +335,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Delete the row whose record retention has pruned, delivering it nowhere
-     * and dispatching nothing; stale when the claim no longer owns the row.
+     * Delete a row whose record retention pruned, delivering and dispatching
+     * nothing; stale when the claim is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \SineMacula\Laravel\AuditLog\Delivery\DrainResult  $result
@@ -399,9 +357,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Fail the row whose destination failed on its last attempt, and otherwise
-     * release it for a retry after the backoff, keeping the class of the last
-     * failure either way.
+     * Fail the row on its last attempt, or release it for a retry after the
+     * backoff, keeping the failure's class.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics  $failure
@@ -431,9 +388,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Fail and keep the row for the reason given, then report it, and dispatch
-     * `AuditWriteFailed` when its code is known; stale when the claim no longer
-     * owns the row, and then nothing is reported or dispatched.
+     * Fail and keep the row, report it, and dispatch `AuditWriteFailed` when
+     * its code is known; stale, with nothing reported, when the claim is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  string  $reason
@@ -484,8 +440,7 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Run the step inside the write guard, so a record made from it is refused,
-     * ignoring whatever it throws.
+     * Run the step inside the write guard, ignoring whatever it throws.
      *
      * @param  \Closure(\Illuminate\Contracts\Container\Container): void  $step
      * @return void
@@ -499,14 +454,13 @@ final readonly class OutboxDrainer
                 $step($container);
             });
         } catch (\Throwable) {
-            // A broken reporter or listener must not stop the drain, and there
-            // is nowhere left to say so
+            // A broken reporter or listener must not stop the drain
         }
     }
 
     /**
-     * The diagnostics of a row abandoned past its attempts, which no exception
-     * describes, so the reason stands in for the class.
+     * Diagnostics for a row abandoned past its attempts, with the reason
+     * standing in for the exception class.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @return \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics
@@ -517,8 +471,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * The payload-free diagnostics of a failure working the claimed row, whose
-     * record was not read, so its code is unknown.
+     * Payload-free diagnostics of a failure working the row, whose record, and
+     * so its code, is unknown.
      *
      * @param  \Throwable  $exception
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
@@ -530,9 +484,8 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * How long a row waits before its next attempt, in seconds: the first wait
-     * after the first attempt, which a claim always counts, doubled after each
-     * attempt since, and never more than an hour.
+     * Seconds before a row's next attempt: the first wait, doubled after each
+     * attempt since the first, capped at an hour.
      *
      * @param  int  $attempts
      * @return int

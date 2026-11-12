@@ -18,21 +18,9 @@ use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use Tests\TestCase;
 
 /**
- * Integration tests for the installation's identity, on whichever engine the
- * suite runs against: the migrations seed the id, and one that was lost is
- * written once, through the storage connection, as a JSON object of a
- * lower-case UUID version 7 at the caller's instant; a first write that loses a
- * race reads the winner's id and replaces nothing; confirming it reads nothing
- * more when both connections are one, writes a missing one, and refuses a
- * maintenance connection that reaches no id, or another one, with a message
- * naming no value; checking it does the same but writes nothing, refusing a
- * missing id; and a malformed value reads as absent and is never replaced.
- *
- * A maintenance connection that reaches the same database is a second
- * connection to the worker's database, sharing the in-memory database's own
- * connection on SQLite, where each connection would otherwise open a database
- * of its own. One that reaches another database has a table prefix of its own,
- * so it reads another state table, as a second database would.
+ * Integration tests for the installation id: its seeding, a first write that
+ * may race, and confirming or checking it across the storage and maintenance
+ * connections.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,10 +71,8 @@ final class InstallationIdentityTest extends TestCase
     }
 
     /**
-     * The first `ensure()` on an installation that lost its seeded id writes
-     * the id, a lower-case UUID version 7 in a JSON object `{id}`, at the
-     * instant given in UTC to the microsecond; a second returns the same id and
-     * writes nothing.
+     * The first `ensure()` writes a lower-case UUID v7 `{id}` at the given
+     * instant in UTC to the microsecond; a second writes nothing.
      *
      * @return void
      */
@@ -128,9 +114,8 @@ final class InstallationIdentityTest extends TestCase
     }
 
     /**
-     * Two connections to one database read one id, and a first write that loses
-     * a race, to a write another process makes between its read and its insert,
-     * reads the winner's id instead, which is never replaced.
+     * A first write that loses a race reads the winner's id and never replaces
+     * it.
      *
      * @return void
      */
@@ -164,9 +149,8 @@ final class InstallationIdentityTest extends TestCase
     }
 
     /**
-     * With no maintenance connection of its own, or one that names the storage
-     * connection, confirming reads the id once, through the storage connection,
-     * and makes no second read.
+     * With no maintenance connection of its own, confirming reads the id once,
+     * through the storage connection.
      *
      * @return void
      */
@@ -187,9 +171,8 @@ final class InstallationIdentityTest extends TestCase
     }
 
     /**
-     * On an installation that lost its seeded id, confirming writes the id
-     * through the storage connection, then reads the same one through a
-     * maintenance connection to the same database.
+     * Confirming a lost id writes it through the storage connection and reads
+     * it back through the maintenance connection.
      *
      * @return void
      */
@@ -296,9 +279,7 @@ final class InstallationIdentityTest extends TestCase
     }
 
     /**
-     * Checking reads the seeded id once, through the storage connection, and
-     * then the same through a maintenance connection to the same database,
-     * writing nothing.
+     * Checking reads the seeded id through both connections and writes nothing.
      *
      * @return void
      */
@@ -379,9 +360,8 @@ final class InstallationIdentityTest extends TestCase
     }
 
     /**
-     * The row a new id is written as names the id's row, holds a JSON object
-     * `{id}` of a lower-case UUID version 7 drawn at the instant given, and is
-     * stamped with that instant in UTC to the microsecond.
+     * A new id's row holds a lower-case UUID v7 `{id}` drawn at the given
+     * instant and is stamped with it in UTC to the microsecond.
      *
      * @return void
      */
@@ -421,9 +401,8 @@ final class InstallationIdentityTest extends TestCase
     }
 
     /**
-     * A stored value that holds no installation id reads as absent through any
-     * connection; `ensure()` and `check()` refuse it rather than replacing it,
-     * and the value is left as it was.
+     * A stored value holding no id reads as absent; `ensure()` and `check()`
+     * refuse it and leave it as it was.
      *
      * @param  string  $value
      * @return void

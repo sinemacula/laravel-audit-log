@@ -17,38 +17,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * The privileged operations on the log's lifecycle: placing and releasing
- * holds, pruning what retention no longer keeps, importing another system's
- * records and closing an import that stopped, listing the active holds and
- * rebuilding their projection, erasing an owner, reinstating one, rewrapping
- * and rotating the owners' keys, erasing again after a restore, rebuilding the
- * key uses, and writing again the activity records the journal says are
- * missing.
- *
- * Each operation commits with the journal row that describes it, and its
- * activity record, `audit_log.held`, `audit_log.released`, `audit_log.pruned`,
- * `audit_log.imported`, `audit_log.subject_erased`, `audit_log.keys_reinstated`
- * or `audit_log.keys_rewrapped`, is written only after that commit, through
- * `LifecycleRecords`: a record that cannot be written never undoes the
- * operation, is reported, and shows as `recorded: false` on the result, and
- * `reconcile()` writes it later from the journal. "Fail closed" names the
- * recording attempt alone. A release of a hold that is not active, a refused
- * erasure and a reinstatement of an owner who is not erased are recorded
- * `denied` and rethrown; an import that fails once its start has committed is
- * recorded as a failure, after its hold, and an erasure or a rewrap that fails
- * is recorded as a failure, each then rethrown. A dry run commits nothing and
- * records nothing.
- *
- * The class authorises nothing: the authority is whoever the caller says it is,
- * and the boundary is the maintenance connection's credentials and the
- * application's own authorisation before it calls. Holds, prunes, erasures and
- * the journal make the destruction of entries and keys accountable, never
- * impossible: whoever holds the database credentials can still delete rows and
- * keys, or restore them, and the seals, the key rows' signatures and the
- * journal make that detectable.
- *
- * Every operation resolves its services from the container on each call, so the
- * class outlives requests safely.
+ * The privileged operations on the log's lifecycle, each recording its activity
+ * only after it commits; it authorises nothing and resolves services per call.
  *
  * @api
  *
@@ -64,13 +34,12 @@ final readonly class AuditLifecycle
      */
     public function __construct(
 
-        /** The container every service an operation uses is resolved from on each call. */
+        /** Resolves every service an operation uses on each call. */
         private Container $container,
     ) {}
 
     /**
-     * Place a hold of the scope, on the basis and with the review date given,
-     * on the authority given, then record it.
+     * Place a hold of the scope, then record it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -95,9 +64,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Release the active hold of the id on the authority given, then record it.
-     * A hold the verified journal does not hold active is recorded `denied` and
-     * refused.
+     * Release the active hold, then record it; a hold that is not active is
+     * recorded `denied` and refused.
      *
      * @param  string  $holdId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -120,9 +88,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Run a prune, or with `$dryRun` plan one, within the time budget given or
-     * the configured one, then record it unless it was a dry run: a success for
-     * a complete or partial run and a failure, with its reason, otherwise.
+     * Run a prune within the time budget, or the configured one, then record it
+     * unless it was a dry run.
      *
      * @param  bool  $dryRun
      * @param  ?int  $maxSeconds
@@ -144,11 +111,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Import the source on the authority given, or plan it as a dry run, with a
-     * hold on its batch, of the basis given, placed with its start when one is
-     * asked for; then, unless it was a dry run, record the hold once its start
-     * has committed and the import once it ends. An import that fails after its
-     * start committed is recorded as a failure and rethrown.
+     * Import the source, or plan it as a dry run, optionally holding its batch;
+     * a failure after the start committed is recorded and rethrown.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportSource  $source
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -183,11 +147,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Close the batch whose import stopped, on the authority given: journal its
-     * finish when the journal lacks it and make it final, then record it. A
-     * batch whose finish its import had journalled already is made final with
-     * that status and not recorded again, since the import's own record, or
-     * `audit-log:reconcile`, records that finish.
+     * Close the batch whose import stopped, then record it unless its import
+     * had already journalled the finish.
      *
      * @param  string  $batchId
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -219,9 +180,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * The active holds, in the order they were placed, replayed from the
-     * verified journal under the lifecycle lock, never read from the
-     * projection.
+     * The active holds in placement order, replayed from the verified journal,
+     * never read from the projection.
      *
      * @return list<\SineMacula\Laravel\AuditLog\Lifecycle\Hold>
      *
@@ -237,7 +197,7 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Rebuild the holds projection from the verified journal, and return how
+     * Rebuild the holds projection from the verified journal, returning how
      * many holds it now holds.
      *
      * @return int
@@ -254,9 +214,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Write again every activity record the journal says is missing, for the
-     * operations journalled within the days looked back, from 1 to 3650, and
-     * return the tally.
+     * Write again every activity record the journal says is missing within the
+     * days looked back, 1 to 3650.
      *
      * @param  int  $sinceDays
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\ReconcileResult
@@ -270,16 +229,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Erase the owner on the authority given, all or nothing unless `$partial`
-     * lets the keys nothing blocks go, refusing outbox rows older than the
-     * erasure unless `$pending` accepts them, then record it. An owner already
-     * erased that holds no key is recorded `already_erased`. A refusal, an
-     * `ErasureRefusedException`, is recorded `denied` and rethrown; a failure,
-     * a `JournalBrokenException` for a journal that does not verify, a
-     * `LifecycleContentionException`, an `OwnerLockTimeoutException`, an
-     * `InstallationMismatchException` or anything else, is recorded as one and
-     * rethrown. The owner's fingerprint is taken first, so a ring that cannot
-     * take it throws before anything is recorded.
+     * Erase the owner, all or nothing unless `$partial`, refusing older outbox
+     * rows unless `$pending`; a refusal is recorded `denied` and rethrown.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -304,12 +255,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Reinstate the erased owner on the authority given, so a key may be
-     * created for the owner again above the floor of its erasure, then record
-     * it. An owner who is not erased is recorded `denied` and its
-     * `ReinstatementRefusedException` rethrown; any other failure, a
-     * `JournalBrokenException` for a journal or a marker the verified chain
-     * does not hold among them, is rethrown unrecorded.
+     * Reinstate the erased owner so a key may be created for it again, then
+     * record it; an owner who is not erased is recorded `denied` and refused.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -337,12 +284,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Rewrap every owner's key onto the key wrapper's current wrapping key on
-     * the authority given, and with `$rotate` supersede every live key, so the
-     * next write of each unit opens its next generation; or with `$dryRun`
-     * count what a run would do. Then, unless it was a dry run, record it: a
-     * run that fails, with a `JournalBrokenException` or anything else, is
-     * recorded as a failure and rethrown, and the batches it committed stand.
+     * Rewrap every owner's key onto the current wrapping key, superseding every
+     * live key with `$rotate`; a failed run keeps the batches it committed.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
      * @param  bool  $rotate
@@ -369,12 +312,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Erase again every owner the erasures file at the path names, after a
-     * restore, on the authority given: each owner erased in part and accepting
-     * pending deliveries, as `erase()` erases and records one, the run
-     * confirming the installation once and carrying the verified journal from
-     * owner to owner, and the restore journalled reconciled, with the anchor's
-     * head, only once every owner is erased whole or was already.
+     * Erase again, after a restore, every owner the erasures file names,
+     * journalling the restore reconciled once every owner is erased whole.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Authority  $authority
@@ -405,9 +344,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * Add the key uses missing from the entries whose signature verifies, on
-     * the storage connection's writer, never removing one; or with `$dryRun`
-     * count what a rebuild would add.
+     * Add the key uses missing from the entries whose signature verifies, never
+     * removing one.
      *
      * @param  bool  $dryRun
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\KeyUseRebuildResult
@@ -421,9 +359,7 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * The hold of the id released on the authority given, under the operation;
-     * a hold the verified journal does not hold active is recorded `denied`,
-     * and its refusal rethrown, as is any other failure.
+     * Release the hold, recording a refusal `denied` before rethrowing it.
      *
      * @param  string  $operationId
      * @param  string  $holdId
@@ -446,10 +382,7 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * The source imported on the authority given, with the hold asked for, and
-     * whether the hold's record, when it placed one, was written once its start
-     * committed; an import that fails after its start committed is recorded as
-     * a failure and rethrown, as is any other failure.
+     * The import's result and whether its hold's record was written.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditImporter  $importer
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportSource  $source
@@ -482,9 +415,8 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * The result of the import whose start committed and which then failed: its
-     * batch `failed`, with the counts its batch row holds, or those of its
-     * start when the row cannot be read.
+     * The result of an import that failed after its start committed, with the
+     * counts its batch row holds, or its start's when the row cannot be read.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportResult  $started
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\ImportResult
@@ -494,8 +426,7 @@ final readonly class AuditLifecycle
         try {
             $batch = $started->batchId === null ? [] : $this->batch($started->batchId);
         } catch (\Throwable) {
-            // The failure is recorded all the same, with the counts the start
-            // had, since the journal holds the batch's own
+            // Recorded with the start's counts; the journal holds the batch's
             $batch = [];
         }
 
@@ -523,7 +454,7 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * The stored row of the batch, or none when it cannot be found.
+     * The stored row of the batch, or an empty array when it is not found.
      *
      * @param  string  $batchId
      * @return array<string, scalar|null>
@@ -536,7 +467,7 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * A fresh operation id: a UUID v7 of the clock's time.
+     * A fresh UUID v7 operation id at the clock's time.
      *
      * @return string
      *
@@ -548,8 +479,7 @@ final readonly class AuditLifecycle
     }
 
     /**
-     * The records of the operations' activity, each written after its operation
-     * has committed.
+     * The writer of the operations' activity records.
      *
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecords
      *

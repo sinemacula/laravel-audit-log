@@ -10,18 +10,11 @@ use SineMacula\Laravel\AuditLog\Support\MachineCode;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * Who acted on the log, and why: the operator who asked for a hold, a release
- * or an import, a machine-readable reason code, and, when there is one, the
- * ticket or case the operation answers to.
+ * Who acted on the log and why, as the caller asserts it; the package records
+ * the authority and authorises nothing.
  *
- * The package records what the caller asserts and authorises nothing: the
- * operator is whoever the application or the shell says it is, and the boundary
- * is the maintenance connection's credentials and the application's own
- * authorisation before it calls. The reason is 1 to 64 lower-case letters,
- * digits, `_`, `.`, `:` or `-`, starting with a letter or a digit, the grammar
- * of every reason the package keeps; the external reference is 1 to 191
- * characters of clean text. Each is validated, never cleaned or cut, and a
- * refusal names the field, never its value.
+ * Each field is validated, never cleaned or cut, and a refusal names the field,
+ * never its value.
  *
  * @api
  *
@@ -32,7 +25,7 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  */
 final readonly class Authority implements Arrayable
 {
-    /** @var int Longest external reference, in characters: the reference columns. */
+    /** @var int Longest external reference, in characters. */
     public const int MAX_EXTERNAL_REFERENCE_CHARACTERS = 191;
 
     /**
@@ -65,8 +58,7 @@ final readonly class Authority implements Arrayable
     }
 
     /**
-     * The authority as the journal and a record keep it: the operator's type
-     * and id, the reason, and the external reference or `null`.
+     * The authority as the journal and a record keep it.
      *
      * @return array{type: string, id: string, reason: string, external_reference: ?string}
      */
@@ -82,8 +74,7 @@ final readonly class Authority implements Arrayable
     }
 
     /**
-     * Whether the text is an external reference: from 1 to 191 characters and
-     * already clean.
+     * Whether the text is a clean external reference of 1 to 191 characters.
      *
      * @param  string  $text
      * @return bool

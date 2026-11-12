@@ -5,9 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Delivery\Enums;
 
 /**
- * How a record reaches its store, under `audit-log.delivery.mode`: written to
- * the store by the code that records it, or put in the outbox for the drain to
- * deliver.
+ * How a record reaches its store, under `audit-log.delivery.mode`.
  *
  * @api
  *

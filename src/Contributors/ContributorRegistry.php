@@ -8,13 +8,8 @@ use SineMacula\Laravel\AuditLog\Contracts\ContextContributor;
 
 /**
  * The contributors every capture runs, by class name: the package's defaults,
- * then each one the application registers while it boots, once, in the order it
- * was registered.
- *
- * It holds names only and instantiates nothing, so a long-lived worker retains
- * no contributor: the recorder resolves each from the current container for
- * every capture. Once the application has booted the list is frozen and refuses
- * any further registration.
+ * then each one the application registers while it boots, in order. It holds
+ * names only, so a long-lived worker retains no contributor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

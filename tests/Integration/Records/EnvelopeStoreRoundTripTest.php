@@ -18,12 +18,7 @@ use Tests\TestCase;
 use Tests\Unit\Records\EnvelopeCodecTest;
 
 /**
- * Integration tests for a record rebuilt from its envelope and stored through
- * the database store on the engine the suite runs against: the row it stores
- * reads back with the envelope's canonical bytes, objects as objects and empty
- * maps as maps whatever the engine does to its JSON, it verifies, and storing
- * it again, or after the record it came from, resolves as a duplicate of
- * itself.
+ * Integration tests for storing a record rebuilt from its envelope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,9 +48,7 @@ final class EnvelopeStoreRoundTripTest extends TestCase
     private const string PLACEHOLDER_HMAC = '0000000000000000000000000000000000000000000000000000000000000000';
 
     /**
-     * A decoded record is stored as a row that reads back with exactly the
-     * envelope's canonical bytes, each JSON column of the type it was decoded
-     * as.
+     * A decoded record's row reads back with the envelope's canonical bytes.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -81,8 +74,7 @@ final class EnvelopeStoreRoundTripTest extends TestCase
     }
 
     /**
-     * The row a decoded record stores verifies under the signer, as the engine
-     * returns it.
+     * The row a decoded record stores verifies as the engine returns it.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -98,9 +90,7 @@ final class EnvelopeStoreRoundTripTest extends TestCase
     }
 
     /**
-     * A decoded record stored twice, or stored after the record it was encoded
-     * from, resolves as a duplicate of itself: it verifies and has the same
-     * captured content, so one row is kept and nothing is refused.
+     * A decoded record is a duplicate of itself and of its source record.
      *
      * @return void
      */
@@ -126,9 +116,7 @@ final class EnvelopeStoreRoundTripTest extends TestCase
     }
 
     /**
-     * A map with sequential numeric keys, at the top and nested, stays a map
-     * through the engine's JSON, which would otherwise read it back as a list
-     * and fail its signature.
+     * A map with sequential numeric keys stays a map through the engine's JSON.
      *
      * @return void
      */
@@ -148,8 +136,7 @@ final class EnvelopeStoreRoundTripTest extends TestCase
     }
 
     /**
-     * Sign with an explicit ring, so the tests can sign an envelope directly
-     * with its key's secret.
+     * Sign with an explicit ring, so tests can sign with the key's secret.
      *
      * @param  mixed  $app
      * @return void
@@ -173,9 +160,8 @@ final class EnvelopeStoreRoundTripTest extends TestCase
     }
 
     /**
-     * The envelope of a captured record finalised under `k2026`, with the
-     * fields given in place of its own, signed over the result with the key's
-     * secret, as the signer signs.
+     * The envelope of a record finalised under `k2026` with the fields given,
+     * signed as the signer signs.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -17,15 +17,10 @@ use SineMacula\Laravel\AuditLog\Keys\UnknownWrappingKeyException;
 use SineMacula\Laravel\AuditLog\Keys\WrappingRing;
 
 /**
- * Unit tests for the local key wrapper: a round trip, the golden wrapped key
- * unwrapped and its AES key, context and ciphertext recomputed, a substituted
- * context or another wrapping key refused, a fresh nonce on every wrap that no
- * method takes, an unknown wrapping key refused, malformed texts refused, and
- * failures that show nothing of the key.
+ * Unit tests for the local key wrapper, pinned against a golden wrapped key.
  *
- * The golden wrapped key is never wrapped again with its fixed nonce through
- * the wrapper, which takes none: it is unwrapped, and its ciphertext is
- * recomputed here with `openssl_encrypt()` directly.
+ * The wrapper takes no nonce, so the golden ciphertext is recomputed with
+ * `openssl_encrypt()` directly.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -81,9 +76,8 @@ final class LocalKeyWrapperTest extends TestCase
     }
 
     /**
-     * The golden wrapped key unwraps to its data key under its context, and its
-     * AES key, its context and its ciphertext are what the pinned derivation,
-     * encoding and cipher give.
+     * The golden wrapped key unwraps, and its AES key, context and ciphertext
+     * match the pinned derivation.
      *
      * @return void
      *
@@ -125,9 +119,8 @@ final class LocalKeyWrapperTest extends TestCase
     }
 
     /**
-     * The golden wrapped key does not unwrap under any other context: a wrapped
-     * key moved to another row, unit or generation, or named beside another
-     * wrapping key, fails.
+     * The golden wrapped key does not unwrap under any other row, unit,
+     * generation or wrapping key.
      *
      * @param  string  $context
      * @return void
@@ -275,9 +268,7 @@ final class LocalKeyWrapperTest extends TestCase
     }
 
     /**
-     * Rows of `[how the text is made from the golden wrapped key]`: padding,
-     * the standard alphabet, a byte short or long, a spare bit set, and nothing
-     * at all.
+     * Rows of `[how the text is made from the golden wrapped key]`.
      *
      * @return iterable<string, array{0: \Closure(string): string}>
      */
@@ -316,9 +307,8 @@ final class LocalKeyWrapperTest extends TestCase
     }
 
     /**
-     * A failure names nothing of the key: neither the message nor the arguments
-     * of any frame shows the wrapped text, the data key or the wrapping secret,
-     * which each frame holds as a sensitive parameter.
+     * A failure shows neither the wrapped text, the data key nor the wrapping
+     * secret in its message or frames.
      *
      * @return void
      *

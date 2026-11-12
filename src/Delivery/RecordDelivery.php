@@ -24,56 +24,12 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
 
 /**
- * Delivers one captured record according to its timing and the delivery mode:
- * in sync mode it finalises the record once, stores it, then dispatches
- * `AuditRecorded`, and in outbox mode it hands the record to the outbox writer,
- * whose row a drain delivers later.
+ * Delivers one captured record by its timing and the delivery mode: in sync
+ * mode it finalises, stores and dispatches `AuditRecorded`, and in outbox mode
+ * it hands the record to the outbox writer.
  *
- * It is made from the current container for each capture, and a deferred write
- * holds it only until its transaction ends, so it keeps no request's objects
- * beyond that. The finaliser and the store are resolved when the write happens,
- * so a record is stamped when it is written, and a store bound after the record
- * was captured is the one used. The failure and delivery modes are read once
- * before anything is deferred, so a malformed one is a refusal at the capture
- * and never an exception out of a commit callback.
- *
- * A failed write follows the failure policy: the failure handler spills,
- * reports and dispatches `AuditWriteFailed`, and throws what the record's
- * failure rule requires, to whoever runs the write, which is the code that
- * commits when it was deferred. It never notifies. A deferred write waits in
- * the commit queue, so its failure stops no other record waiting on that
- * commit, and it writes nothing when that commit proves to be a rollback. An
- * after-commit record's spill never precedes a commit it depends on, so a write
- * running while a transaction is open on the storage connection binds its spill
- * to that transaction. The notification sits outside the write: a listener's
- * failure is reported and goes no further, so it neither causes another write
- * nor stops a later after-commit callback, unless it ended a transaction open
- * on the connection it happened on.
- *
- * A record made while another is being written, or its failure handled, is not
- * written, since it would fail or be refused the same way: a fail-closed or a
- * transactional record is refused, because returning would break its guarantee,
- * and any other is reported once and returned unwritten.
- *
- * A record captured from an event comes with its capture's signal. It is
- * written now or after commit, never fail-closed or transactional, and always
- * follows the `REPORT` rule, without reading the failure mode, so neither the
- * configuration nor a malformed mode changes what a capture does. Its failure
- * is signalled once, and a deferred capture's failure reaches its signal when
- * the commit runs the write. Nothing leaves a deferred capture's commit
- * callback: whatever its write lets out beyond the failure path is reported,
- * with its class alone, and signalled.
- *
- * A record that carries an attachment is refused, inside the attempt, by a
- * store that keeps none, so the refusal follows the record's rule with the
- * whole bundle spilled, and nothing is silently lost.
- *
- * A record of the package's own read path comes with its package write, and is
- * delivered immediately and fail-closed, never any other way. Once the store
- * has it, after the write guard's window and before the notification, or once
- * the outbox's insert has returned, the package write is handed the finalised
- * record, so the read discloses nothing until then and holds the envelope that
- * was written. A write that fails is never acknowledged.
+ * The failure and delivery modes are read before anything is deferred, so a
+ * malformed one is refused at the capture, never thrown from a commit callback.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -82,13 +38,7 @@ use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
  */
 final readonly class RecordDelivery
 {
-    /** @var string Why a captured record is refused a guarantee a capture cannot give. */
-    private const string STRICT_CAPTURE = 'A captured record is written immediately or after commit, never fail-closed or transactional.';
-
-    /** @var string Why a package write is refused any other timing. */
-    private const string LOOSE_PACKAGE_WRITE = 'A package write is delivered immediately and fail-closed.';
-
-    /** @var string Why a fail-closed or a transactional record made inside the write guard is refused. */
+    /** @var string Why a strict record made inside the write guard is refused. */
     private const string STRICT_RECORD_IN_A_WRITE = 'A fail-closed or transactional record was made while an audit record was being written or its failure handled,'
         . ' so its guarantee cannot be met.';
 
@@ -103,19 +53,15 @@ final readonly class RecordDelivery
         /** The container of the capture the delivery belongs to. */
         private ContainerContract $container,
 
-        /** Resolves connection names, without opening a connection. */
+        /** Resolves connection names without opening a connection. */
         private ConnectionResolverInterface $connections,
     ) {}
 
     /**
-     * Refuse what cannot be honoured, before anything is consumed: a capture
-     * that is fail-closed or transactional, a malformed failure or delivery
-     * mode, a fail-closed or transactional record made inside the write guard,
-     * a transactional record with no transaction to join, a store that cannot
-     * give a strict record its guarantee when the outbox is not acknowledging
-     * for it, and an after-commit record naming a connection that does not
-     * exist. A capture never reads the failure mode, and, never strict, asks
-     * nothing of the store.
+     * Refuse what cannot be honoured before anything is consumed: a strict
+     * capture, a malformed mode, a strict record inside the write guard, a
+     * transactional record without its transaction, a store that cannot keep a
+     * strict record's guarantee, or an unknown after-commit connection.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  ?string  $connection
@@ -157,12 +103,8 @@ final readonly class RecordDelivery
     /**
      * Deliver the record by the delivery mode: an after-commit record once the
      * selected transaction commits, or now when there is none, and any other
-     * now, with a failure following the record's rule, which is `REPORT` for a
-     * capture. A connection named with a read or write selector is the
-     * connection it selects. Inside the write guard a strict record is refused,
-     * and any other is left unwritten. A package write is delivered immediately
-     * and fail-closed, or refused, and is handed the finalised record once it
-     * is acknowledged.
+     * now. Inside the write guard a strict record is refused and any other left
+     * unwritten.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
@@ -217,8 +159,8 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Refuse a capture that asks to be fail-closed or transactional: a capture
-     * follows the `REPORT` rule, which could not keep either guarantee.
+     * Refuse a fail-closed or transactional capture, which the `REPORT` rule a
+     * capture follows cannot honour.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  bool  $failClosed
@@ -230,14 +172,14 @@ final readonly class RecordDelivery
     private static function refuseAStrictCapture(Timing $timing, bool $failClosed, #[\SensitiveParameter] ?CaptureSignal $capture): void
     {
         if ($capture !== null && ($failClosed || $timing === Timing::TRANSACTIONAL)) {
-            throw new \LogicException(self::STRICT_CAPTURE);
+            throw new \LogicException('A captured record is written immediately or after commit, never fail-closed or transactional.');
         }
     }
 
     /**
      * Refuse a package write that is not immediate and fail-closed, or comes
-     * with a capture's signal: the read it records discloses nothing until the
-     * record is acknowledged, which nothing else could promise.
+     * with a capture's signal, since nothing else can hold the read until
+     * acknowledged.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  bool  $failClosed
@@ -257,13 +199,12 @@ final readonly class RecordDelivery
             return;
         }
 
-        throw new \LogicException(self::LOOSE_PACKAGE_WRITE);
+        throw new \LogicException('A package write is delivered immediately and fail-closed.');
     }
 
     /**
-     * Write the record when the selected transaction commits, unless that
-     * commit proves to be a rollback, and now when there is none. A capture's
-     * signal is marked deferred before the write is queued.
+     * Write the record when the selected transaction commits, unless the commit
+     * proves a rollback, or now when there is none.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
@@ -304,10 +245,8 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Write the record once the outermost transaction on the storage connection
-     * ends, under its rule when it commits and contained when it rolls back,
-     * and now when none is open. A capture's signal is marked deferred before
-     * the write is queued.
+     * Write the record once the outermost storage transaction ends, under its
+     * rule on commit and contained on rollback, or now when none is open.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
@@ -350,10 +289,9 @@ final readonly class RecordDelivery
     }
 
     /**
-     * The name a transaction on the named connection is known by. A selector
-     * such as `reporting::write` is a valid connection name, but a transaction
-     * records the connection's own name, so comparing the selector would match
-     * no transaction and write at once.
+     * The name a transaction on the named connection is known by: a transaction
+     * records the connection's own name, never a selector such as
+     * `reporting::write`.
      *
      * @param  ?string  $connection
      * @return ?string
@@ -370,10 +308,9 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Refuse a transactional record, in sync mode, that does not name the
-     * storage connection, since another connection needs the outbox, or that
-     * has no transaction open on it. The transaction may be a test's wrapping
-     * one.
+     * In sync mode, refuse a transactional record not on the storage
+     * connection, or with no transaction open there; a test's wrapping
+     * transaction counts.
      *
      * @param  ?string  $connection
      * @return void
@@ -397,8 +334,8 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Refuse a transactional record, in outbox mode, that does not name the
-     * outbox connection, or that has no transaction open on it.
+     * In outbox mode, refuse a transactional record not on the outbox
+     * connection, or with no transaction open there.
      *
      * @param  ?string  $connection
      * @return void
@@ -433,10 +370,8 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Refuse, in sync mode, a fail-closed record whose store does not say a
-     * return is durable, and a transactional record whose store does not join
-     * the transaction on the storage connection. An ordinary record asks the
-     * store nothing.
+     * In sync mode, refuse a fail-closed record whose store is not durable, and
+     * a transactional record whose store does not join the storage transaction.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  bool  $failClosed
@@ -466,10 +401,8 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Leave a record made inside the write guard unwritten: a strict one is
-     * refused, so it never returns unwritten even when no check came first, and
-     * any other is reported, once for each window, by a report that goes no
-     * further.
+     * Leave a record made inside the write guard unwritten: refuse a strict
+     * one, and report any other once per window.
      *
      * @param  \SineMacula\Laravel\AuditLog\Runtime\WriteGuard  $guard
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
@@ -493,19 +426,15 @@ final readonly class RecordDelivery
         try {
             $this->container->make(ExceptionHandler::class)->report(new \LogicException($message));
         } catch (\Throwable) {
-            // A broken reporter has nowhere left to say so, and must not fail
-            // the code that recorded or add to the failure being handled
+            // A broken reporter must not fail the code that recorded or add to
+            // the failure being handled
         }
     }
 
     /**
-     * Write the record a commit callback holds sealed. The commit's own frames
-     * hold the transaction and the callbacks bound to it, so a failure's trace
-     * would otherwise reach the record through them.
-     *
-     * A capture's write lets nothing out into the commit: the failure handler
-     * reports and signals the write's own failure, so what is caught here lies
-     * outside its attempt, and is reported and signalled in the same way.
+     * Write the record a commit callback holds sealed, so a failure's trace
+     * cannot reach it through the commit's frames. A capture's failure is
+     * contained, letting nothing out into the commit.
      *
      * @param  \SensitiveParameterValue  $sealed
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
@@ -536,9 +465,8 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Write the record held sealed past a rollback under the `REPORT` rule,
-     * letting nothing out: it runs inside the host's rollback, whose own
-     * exception must not be masked.
+     * Write a sealed record past a rollback under `REPORT`, letting nothing
+     * out, so the host's own exception is not masked.
      *
      * @param  \SensitiveParameterValue  $sealed
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture
@@ -561,8 +489,8 @@ final readonly class RecordDelivery
     }
 
     /**
-     * Report the record a commit callback holds sealed, whose commit proved to
-     * be a rollback, so it is not written.
+     * Report a sealed record whose commit proved a rollback, so it is not
+     * written.
      *
      * @param  \SensitiveParameterValue  $sealed
      * @param  \Throwable  $aborted
@@ -578,19 +506,11 @@ final readonly class RecordDelivery
 
     /**
      * Finalise the record once, store it inside the write guard and notify, or
-     * hand any failure to the failure handler under the rule, which notifies
-     * nothing, with the capture's signal. A record carrying an attachment is
-     * refused by a store that keeps none, inside the attempt. A package write
-     * is handed the finalised record once the store has it, before the
-     * notification, and never when the write failed.
+     * hand the failure to the failure handler, which notifies nothing. A
+     * package write is acknowledged once stored, before the notification.
      *
-     * Whether a transaction is open on the storage connection, which decides
-     * what the write's own failure ended, every connection with one open, which
-     * decides what a listener's or a failure step's failure ended, and which
-     * one an after-commit record's spill is bound to, are read before the
-     * attempt: Laravel forgets an open transaction when its connection is lost,
-     * and a transaction open when the write runs holds its row, so it must hold
-     * its spill too.
+     * Open transactions are read before the attempt, because Laravel forgets an
+     * open transaction when its connection is lost.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule  $rule
@@ -646,8 +566,7 @@ final readonly class RecordDelivery
 
     /**
      * The storage connection, or `null` when it is not a database connection or
-     * cannot be resolved, which has no transaction to read and which a store
-     * writing to it then fails on inside its attempt.
+     * cannot be resolved; the store then fails inside its attempt.
      *
      * @return ?\Illuminate\Database\Connection
      */

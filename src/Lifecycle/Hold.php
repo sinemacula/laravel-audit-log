@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Contracts\Support\Arrayable;
+use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\MachineCode;
@@ -12,21 +13,10 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * An active hold, as the verified journal records it: its id, the entries its
- * scope keeps, the basis it was placed on and the date it is due for review,
- * when and by whom it was placed and why, the operation that placed it, and the
- * sequence of the journal row that records it.
+ * An active hold, as the verified journal records it.
  *
- * A hold keeps every entry its scope matches from being pruned, whatever its
- * basis, until it is released; overlapping holds each count. The package
- * records the basis and the review date and decides nothing from either: a
- * review date that has passed is reported, never acted on.
- *
- * Every field is checked as it is built: the ids lower-case UUIDs, the times
- * instants in the package's form, the reason a machine-readable code, the
- * external reference `null` or 1 to 191 characters of clean text, and the
- * sequence from 1, each refused with an `InvalidArgumentException` naming the
- * field.
+ * A hold keeps every entry its scope matches from being pruned until released;
+ * its basis and review date are recorded and never acted on.
  *
  * @api
  *
@@ -37,9 +27,6 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  */
 final readonly class Hold implements Arrayable
 {
-    /** @var string Pattern of a hold's and an operation's id: a lower-case UUID. */
-    private const string UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
-
     /**
      * Constructor.
      *
@@ -58,7 +45,7 @@ final readonly class Hold implements Arrayable
      */
     public function __construct(
 
-        /** The hold's id, a lower-case UUID the package minted. */
+        /** The hold's lower-case UUID. */
         public string $id,
 
         /** The entries the hold keeps. */
@@ -71,7 +58,7 @@ final readonly class Hold implements Arrayable
         /** The instant the hold is due for review, or `null` for none. */
         public ?string $reviewBy,
 
-        /** The instant the hold was placed: its journal row's. */
+        /** The instant the hold's journal row was written. */
         public string $placedAt,
 
         /** Who placed the hold, as the caller asserted it. */
@@ -90,7 +77,7 @@ final readonly class Hold implements Arrayable
         public int $journalSequence,
     ) {
         foreach (['id' => $id, 'operation id' => $operationId] as $field => $value) {
-            if (preg_match(self::UUID_PATTERN, $value) !== 1) {
+            if (preg_match(SealEnvelope::UUID_PATTERN, $value) !== 1) {
                 throw new \InvalidArgumentException(sprintf('A hold\'s %s must be a lower-case UUID.', $field));
             }
         }
@@ -115,9 +102,8 @@ final readonly class Hold implements Arrayable
     }
 
     /**
-     * Whether the hold's review date has passed at the instant given: it has
-     * one, and it is before the instant. A hold with no review date is never
-     * past it.
+     * Whether the hold's review date is before the instant; a hold with none is
+     * never past review.
      *
      * @param  string  $now
      * @return bool
@@ -134,9 +120,7 @@ final readonly class Hold implements Arrayable
     }
 
     /**
-     * The hold as a listing shows it: its id, its scope's canonical form, its
-     * basis, its review date, when and by whom it was placed and why, the
-     * operation that placed it and its journal row's sequence.
+     * The hold as a listing shows it.
      *
      * @formatter:off
      *
@@ -166,8 +150,7 @@ final readonly class Hold implements Arrayable
     }
 
     /**
-     * Whether the text is an external reference: from 1 to 191 characters and
-     * already clean.
+     * Whether the text is a clean external reference of 1 to 191 characters.
      *
      * @param  string  $text
      * @return bool

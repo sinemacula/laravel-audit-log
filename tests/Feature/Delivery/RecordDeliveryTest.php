@@ -61,18 +61,8 @@ use Tests\Fixtures\Stores\PlainStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for how one captured record is delivered: when each timing
- * writes it, what is refused before anything is consumed, that the finaliser
- * and the store are resolved when the write happens, that the notification sits
- * outside the write, what a failed write does under each rule and when its
- * spill goes, which stores a strict record may use, how the delivery mode
- * routes it, what happens to a record made inside a write, that a bundle is
- * refused by a store keeping no attachments, how a captured record is
- * delivered: under the `REPORT` rule whatever the mode, never strict, with its
- * failure signalled once and nothing let out of a deferred one's commit; and
- * how a package write is delivered: immediately and fail-closed only, handed
- * its finalised record once the store or the outbox has it and before the
- * notification, and never when the write failed.
+ * Feature tests for how one captured record is delivered, by timing, delivery
+ * mode and failure rule.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -294,9 +284,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A container with no transactions manager has nothing to wait for, so an
-     * after-commit record is written at once; and everything the write needs
-     * comes from the delivery's own container, never another.
+     * With no transactions manager an after-commit record is written at once,
+     * from the delivery's own container.
      *
      * @return void
      */
@@ -675,9 +664,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A storage connection that is not a database connection has no transaction
-     * levels the package trusts, so a transactional record is refused even if
-     * it reports one.
+     * A storage connection that is not a database connection has no trusted
+     * transaction levels, so a transactional record is refused.
      *
      * @return void
      */
@@ -1024,9 +1012,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A store that cannot even be resolved is a failed write like any other,
-     * named by its contract, so the policy decides: reported in the default
-     * mode, and thrown under `throw`.
+     * An unresolvable store is a failed write named by its contract: reported
+     * by default and thrown under `throw`.
      *
      * @return void
      */
@@ -1112,9 +1099,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * With a transaction open on the storage connection when an after-commit
-     * write runs, in the commit of another connection, the row would join that
-     * transaction, so its spill waits for that transaction's commit.
+     * A transaction open on the storage connection at another connection's
+     * commit holds the row, so its spill waits for that commit.
      *
      * @return void
      *
@@ -1262,9 +1248,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A transaction open on another instance of the storage connection, as a
-     * read or write selector gives, cannot hold the row, so it does not hold
-     * the spill either.
+     * A transaction on another instance of the storage connection, as a
+     * selector gives, cannot hold the row or its spill.
      *
      * @return void
      *
@@ -1444,10 +1429,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * With the store on a dedicated connection and the host's transaction on
-     * another, a listener's deadlock on the host's connection ended the host's
-     * transaction, though the write's own connection had none open: it reaches
-     * the code that recorded, so the host cannot go on and commit the rest.
+     * A listener's deadlock on the host's connection reaches the caller, though
+     * the store's own dedicated connection had nothing open.
      *
      * @return void
      */
@@ -1491,8 +1474,7 @@ final class RecordDeliveryTest extends TestCase
 
     /**
      * An `AuditWriteFailed` listener's deadlock on the host's connection
-     * reaches the host in the same way when the store's write is the one that
-     * failed.
+     * reaches the host the same way.
      *
      * @return void
      */
@@ -1731,9 +1713,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * Participation is not durability: a store that joins the transaction but
-     * does not say a return is durable is refused for a fail-closed record and
-     * accepted for a transactional one.
+     * Participation is not durability: a joining store that is not durable is
+     * refused for fail-closed and accepted for transactional.
      *
      * @return void
      */
@@ -1834,9 +1815,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A transactional record in outbox mode needs a transaction on the outbox
-     * connection, and one on the storage connection does not count when the
-     * outbox has a connection of its own.
+     * A transactional outbox record needs a transaction on the outbox
+     * connection, not the storage one, when the outbox has its own.
      *
      * @return void
      */
@@ -2407,9 +2387,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A capture asked to be transactional is refused before the existing
-     * checks, so the refusal names the capture and not the transaction it
-     * lacks, and by a delivery made without a check.
+     * A transactional capture is refused before the existing checks, naming the
+     * capture, even by a delivery made without a check.
      *
      * @return void
      */
@@ -2635,10 +2614,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A bundle delivered to a store that keeps no attachments is refused inside
-     * the attempt, so it follows the rule: one spill line, one report naming
-     * the store and the refusal, and one `AuditWriteFailed`, with nothing
-     * handed to the store.
+     * A bundle to a store keeping no attachments is refused inside the attempt,
+     * so it follows the rule and the store is handed nothing.
      *
      * @return void
      */
@@ -2715,9 +2692,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A capture never reads the failure mode, so a malformed one stops neither
-     * its check nor its delivery, and its failure still follows the `REPORT`
-     * rule; a record without a signal is still refused.
+     * A capture never reads the failure mode, so a malformed one stops nothing
+     * and its failure follows `REPORT`; without a signal it is refused.
      *
      * @return void
      */
@@ -2764,11 +2740,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * Nothing leaves a deferred capture's commit callback: a listener's
-     * deadlock while another connection has a transaction open, which the
-     * notification throws and which lies outside the failure path's attempt, is
-     * reported once, by its class alone, and signalled, and the commit succeeds
-     * with the record stored.
+     * A listener's deadlock in a deferred capture's commit callback is reported
+     * once by class and signalled, and the commit succeeds.
      *
      * @return void
      *
@@ -2833,9 +2806,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A synchronous capture's listener deadlock inside a host transaction is
-     * not the delivery's to contain: it propagates, sanitised, for the capture
-     * to judge.
+     * A synchronous capture's listener deadlock inside a host transaction
+     * propagates sanitised for the capture to judge.
      *
      * @return void
      */
@@ -2901,9 +2873,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * A record delivered without a signal keeps every rule it had: under the
-     * `throw` mode its failure is thrown, a fail-closed check is accepted, and
-     * a transactional one still needs its transaction.
+     * A record delivered without a signal keeps every rule: `throw` throws,
+     * fail-closed is accepted, transactional needs its transaction.
      *
      * @return void
      */
@@ -3014,9 +2985,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * Rows of `[timing, fail-closed, with a capture's signal]`: every way a
-     * package write could ask to be delivered other than immediately and
-     * fail-closed.
+     * Rows of `[timing, fail-closed, with a capture's signal]`: every package
+     * write delivery other than immediate and fail-closed.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Records\Enums\Timing, 1: bool, 2: bool}>
      */
@@ -3061,9 +3031,8 @@ final class RecordDeliveryTest extends TestCase
     }
 
     /**
-     * In outbox mode a package write is handed the finalised record once the
-     * outbox's insert has returned, and it is the envelope the row holds; no
-     * store is called and nothing is notified.
+     * In outbox mode a package write is handed the row's envelope once the
+     * insert returns; no store is called and nothing is notified.
      *
      * @return void
      */

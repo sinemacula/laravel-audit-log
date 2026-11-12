@@ -17,31 +17,8 @@ use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * `audit-log:import`: imports another system's records from a file, as this
- * installation's acceptance of what that source asserted, never as activity it
- * witnessed, then records the import; or with `--close` marks a running batch
- * whose import stopped `interrupted`.
- *
- * The file is read in the import format, `audit-log-import/v1`, or with
- * `--from-export` as this package's own export lines, `audit-log-export/v1`;
- * `--source` names the source that asserted them, which is never this
- * installation, and `--region` its region. `--hold` places a hold on the batch
- * with its start, before any entry is written, on the basis `--hold-basis`
- * names (`other` when it names none). `--dry-run` reads, validates and
- * classifies, and writes nothing.
- *
- * It trusts the shell, as every maintenance command does: `--by-type` and
- * `--by-id` assert the operator and prove nothing of who runs it, and the
- * boundary is the maintenance connection's credentials. It prints the batch,
- * its status and counts, the lines rejected per reason, the first conflicting
- * source record ids, a warning when lines were already past their retention on
- * arrival, the hold, and a warning when the import's record could not be
- * written; `--json` writes the result as one JSON object instead. Nothing of a
- * line's content is printed.
- *
- * It exits 0 for a dry run, a complete or partial import and a close, 1 when
- * the import fails or is refused at run time, named by the class of the failure
- * alone, and 2 for an argument or option it refuses, before anything runs.
+ * `audit-log:import`: imports another system's records as accepted, never
+ * witnessed, activity, or with `--close` marks a stopped batch `interrupted`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,8 +54,7 @@ final class ImportCommand extends Command
     protected $description = 'Import another system\'s audit records, or close an import that stopped';
 
     /**
-     * Import the file, or close the batch, once the arguments and options are
-     * known to be well formed, and print the result.
+     * Import the file, or close the batch, and print the result.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle  $lifecycle
      * @param  \SineMacula\Laravel\AuditLog\Records\SourceSettings  $sources
@@ -94,8 +70,7 @@ final class ImportCommand extends Command
             $close     = $this->option('close');
             $work      = is_string($close) ? $this->closing($close) : $this->importing($sources);
         } catch (\InvalidArgumentException $refusal) {
-            // Each refusal names the option, the field or the path's problem,
-            // never a line of the file
+            // A refusal never quotes a line of the file
             $this->error(self::shown($refusal->getMessage()));
 
             return self::INVALID;
@@ -115,8 +90,8 @@ final class ImportCommand extends Command
     }
 
     /**
-     * The work of closing the batch the option names: a lower-case UUID, with
-     * no file and no option of an import.
+     * The work of closing the batch the option names, given with no file and no
+     * import option.
      *
      * @formatter:off
      *
@@ -148,8 +123,7 @@ final class ImportCommand extends Command
 
     /**
      * The work of importing the file from the source the options name, which is
-     * never this installation, in the format they name, with the hold they ask
-     * for.
+     * never this installation.
      *
      * @formatter:off
      *
@@ -212,10 +186,8 @@ final class ImportCommand extends Command
     }
 
     /**
-     * Print the batch, its status and counts, the rejections per reason, the
-     * conflicting source record ids, the warning about lines past retention,
-     * the hold, and a warning when the record could not be written; or with
-     * `--json` the result as one JSON object.
+     * Print the batch, its counts and its notes, or with `--json` the result as
+     * one JSON object.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportResult  $result
      * @return void
@@ -251,9 +223,7 @@ final class ImportCommand extends Command
     }
 
     /**
-     * Print what the counts leave out: the values dropped, the conflicting
-     * source record ids, the lines past retention on arrival, the hold, and
-     * whether the record was written.
+     * Print what the counts leave out.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportResult  $result
      * @return void

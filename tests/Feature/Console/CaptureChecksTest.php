@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Console\CaptureChecks;
 use Tests\TestCase;
 
 /**
- * Feature tests for the capture checks of `audit-log:check`: a reader for each
- * capture setting and for the artifacts table's name, in order, each refusing
- * its own malformed setting, and the problem of each excepted guard
- * `auth.guards` does not configure, none for the wildcard or a malformed list.
+ * Feature tests for the capture checks of `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,7 +21,7 @@ use Tests\TestCase;
 #[CoversClass(CaptureChecks::class)]
 final class CaptureChecksTest extends TestCase
 {
-    /** @var array<string, int|string> A value each reader refuses, by the setting it reads, in the order the readers are listed. */
+    /** @var array<string, int|string> A value each reader refuses, by setting, in reader order. */
     private const array BAD_SETTINGS = [
         'audit-log.capture.laravel.except_guards'  => 'web',
         'audit-log.capture.laravel.identifier_key' => 'e mail',
@@ -41,9 +38,7 @@ final class CaptureChecksTest extends TestCase
     private const string UNCONFIGURED = 'The guard [%s] that `audit-log.capture.laravel.except_guards` names is not configured in `auth.guards`.';
 
     /**
-     * `CaptureChecks` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; invoking it by reflection covers the line.
      *
      * @return void
      *
@@ -64,10 +59,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * There is one reader for each capture setting and the artifacts table's
-     * name, in order: with every setting well formed each reads, and with every
-     * one malformed the reader at each place refuses the setting at that place,
-     * naming it, so a reader dropped, repeated or moved fails here.
+     * One reader per capture setting, in order, each refusing its own setting.
      *
      * @return void
      */
@@ -100,8 +92,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * The readers read the configuration they are given on every call, so a
-     * setting changed after they are built is the one they read.
+     * The readers read the configuration afresh on every call.
      *
      * @return void
      */
@@ -120,9 +111,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * Each excepted guard `auth.guards` does not configure is a problem, named
-     * because a guard's name is no secret, in the list's order, and a guard it
-     * configures is none.
+     * Each excepted guard `auth.guards` does not configure is named, in order.
      *
      * @return void
      */
@@ -141,10 +130,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the settings changed, the guard named]`: a guard looked up the
-     * way `AuthManager` looks it up, so one configured as a string, one under a
-     * dotted name it cannot see, and one with no guards configured at all are
-     * each not configured.
+     * Rows of `[the settings changed, the guard named]`: unresolvable guards.
      *
      * @return iterable<string, array{0: array<string, array<string, array<string, string>|string>|list<string>|null>, 1: string}>
      */
@@ -158,8 +144,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * A guard `AuthManager` could not resolve is a problem: protects against a
-     * mutation that reads the guard's key as a literal or accepts anything set.
+     * A guard `AuthManager` cannot resolve is a problem.
      *
      * @param  array<string, array<string, array<string, string>|string>|list<string>|null>  $settings
      * @param  string  $guard
@@ -176,8 +161,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * The wildcard excludes every guard and names none, so it is no problem
-     * even when no guard is configured; nor is the default, an empty list.
+     * The wildcard and an empty list name no guard, so neither is a problem.
      *
      * @return void
      */
@@ -196,8 +180,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[except guards]`: lists the reader refuses, among them one
-     * holding a name `auth.guards` does not configure beside a bad member.
+     * Rows of `[except guards]`: lists the reader refuses.
      *
      * @return iterable<string, array{0: list<int|string>|string|null}>
      */
@@ -212,9 +195,7 @@ final class CaptureChecksTest extends TestCase
     }
 
     /**
-     * A malformed list names no guard to look up: it is the problem its reader
-     * reports, so the guard check finds none rather than reporting it twice or
-     * naming a guard of a list that is not used.
+     * A malformed list is left to its reader; the guard check reports nothing.
      *
      * @param  list<int|string>|string|null  $guards
      * @return void

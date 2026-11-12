@@ -13,16 +13,7 @@ use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use Tests\TestCase;
 
 /**
- * Integration tests for where the shipped delivery migrations, run by Laravel's
- * own `migrate` and `migrate:rollback` commands, create the outbox and the
- * deliveries tables: the outbox on the storage connection unless
- * `audit-log.delivery.outbox.connection` names its own, and the deliveries
- * always beside the entries on the storage connection.
- *
- * The storage and the outbox connections are further connections to the test
- * database, each with a table prefix of its own: a database of its own on
- * SQLite, where each in-memory connection has one, and prefixed tables beside
- * the default connection's on PostgreSQL and MySQL.
+ * Integration tests for the connections `migrate` puts the delivery tables on.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +42,7 @@ final class DeliveryMigrationsConnectionTest extends TestCase
     private const string ENTRIES_TABLE = 'audit_log_entries';
 
     /**
-     * With no outbox connection named, the outbox is created on the storage
-     * connection, beside the entries and the deliveries, and on no other.
+     * With no outbox connection named, the outbox is on the storage connection.
      *
      * @return void
      */
@@ -68,8 +58,7 @@ final class DeliveryMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * A named outbox connection holds the outbox, and the storage connection
-     * then does not.
+     * A named outbox connection holds the outbox.
      *
      * @return void
      */
@@ -88,8 +77,7 @@ final class DeliveryMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Moving the outbox leaves the deliveries and the entries on the storage
-     * connection, and puts neither on the outbox connection.
+     * Moving the outbox leaves the deliveries on the storage connection.
      *
      * @return void
      */
@@ -108,8 +96,7 @@ final class DeliveryMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Rolling the migrations back drops each table from the connection it was
-     * created on, and running them again creates each there once more.
+     * A rollback drops each table from its own connection.
      *
      * @return void
      */
@@ -138,9 +125,8 @@ final class DeliveryMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Put the package's tables on a second connection to the test database,
-     * with a prefix of its own, and register the outbox connection the same
-     * way.
+     * Prefix the other connections to the test database, each a database of its
+     * own on in-memory SQLite, and put the package's tables on one.
      *
      * @param  mixed  $app
      * @return void
@@ -163,8 +149,7 @@ final class DeliveryMigrationsConnectionTest extends TestCase
     }
 
     /**
-     * Roll the migrations back from where the test case ran them, then run them
-     * again with the outbox on its own connection.
+     * Migrate again with the outbox on its own connection.
      *
      * @return void
      */

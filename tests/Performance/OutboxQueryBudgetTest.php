@@ -27,15 +27,8 @@ use Tests\Concerns\SeedsTheOutbox;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 
 /**
- * Statement-budget contract for the write path in outbox mode, and for what a
- * failed write adds in either mode: a record outside a transaction is one
- * insert; inside its own, one insert and a savepoint; inside another
- * connection's, nothing until that commit and then one insert; a failed insert
- * adds only the rollback of its savepoint; and nothing a failure then does runs
- * a statement of its own. The storage connection is not touched while the
- * outbox is on another one, and a record refused inside a write costs nothing.
- *
- * The counts are of the default connection, as the base class takes them.
+ * Statement budget for the outbox write path, and for what a failed write adds
+ * in either mode. Counts are of the default connection.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,7 +49,7 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     /** @var string A second connection a host transacts on. */
     private const string OTHER = 'audit_other';
 
-    /** @var string The spill channel, which writes nowhere; the lines are captured as they are logged. */
+    /** @var string The spill channel, which writes nowhere; its lines are captured as logged. */
     private const string SPILL_CHANNEL = 'audit-spill';
 
     /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter is asked to report. */
@@ -119,8 +112,7 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An outbox write outside a transaction opens none: one insert is one
-     * statement, with no commit to wait for.
+     * An outbox write outside a transaction opens none.
      *
      * @return void
      */
@@ -131,7 +123,7 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
 
     /**
      * Inside a transaction on the outbox connection an after-commit record is
-     * one insert, now, in a savepoint that isolates a failure.
+     * one insert now, in a savepoint.
      *
      * @return void
      */
@@ -149,9 +141,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Inside a transaction on another connection an after-commit record costs
-     * the outbox's connection nothing until that commit, and one insert with no
-     * savepoint then.
+     * Inside another connection's transaction an after-commit record costs
+     * nothing until that commit, then one insert.
      *
      * @return void
      */
@@ -170,9 +161,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A rollback of the other connection's transaction costs nothing but that
-     * rollback, which is the host's own: the record it dropped was never
-     * inserted.
+     * Another connection's rollback costs only itself: the dropped record was
+     * never inserted.
      *
      * @return void
      */
@@ -187,9 +177,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A failed insert inside a transaction adds the rollback of its savepoint
-     * and nothing else: the report and the event run no statement, and the
-     * spill waits for the commit, which runs none either.
+     * A failed insert inside a transaction adds only its savepoint's rollback;
+     * the report, event and spill run no statement.
      *
      * @return void
      */
@@ -214,8 +203,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A failed insert with no transaction open is the one insert it tried, with
-     * no savepoint to roll back.
+     * A failed insert outside a transaction is the one insert it tried, with no
+     * savepoint.
      *
      * @return void
      */
@@ -230,8 +219,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A failed insert that throws costs what one that reports costs, and rolls
-     * back only its savepoint, so the transaction is the host's to end.
+     * A failed insert that throws costs what one that reports costs, rolling
+     * back only its savepoint.
      *
      * @return void
      */
@@ -257,8 +246,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An immediate record is one insert, with no savepoint outside a
-     * transaction.
+     * An immediate record outside a transaction is one insert, with no
+     * savepoint.
      *
      * @return void
      */
@@ -284,8 +273,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record asked to fail closed asks the store nothing, since the outbox
-     * acknowledges for it, so it is the one insert too.
+     * A fail-closed record is one insert too, since the outbox acknowledges for
+     * it.
      *
      * @return void
      */
@@ -316,9 +305,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * With the outbox on a connection of its own a record runs nothing on the
-     * storage connection, whatever is open there, and its one insert on the
-     * outbox's.
+     * With the outbox on its own connection a record runs nothing on the
+     * storage connection, whatever is open there.
      *
      * @return void
      */
@@ -338,9 +326,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * With the outbox on a connection of its own a record made inside a storage
-     * transaction still writes nothing on the storage connection, before or at
-     * its commit, whose one question is all it adds.
+     * With the outbox elsewhere a record inside a storage transaction writes
+     * nothing on the storage connection; the commit's question is all it adds.
      *
      * @return void
      */
@@ -357,8 +344,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * In sync mode a failed write is the insert it tried, and the spill, the
-     * report and the event add no statement.
+     * In sync mode a failed write is the insert it tried; the spill, report and
+     * event add no statement.
      *
      * @return void
      */
@@ -389,8 +376,8 @@ final class OutboxQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * A record made while another is being written is refused, and its refusal
-     * runs no statement, in either mode.
+     * A record made during another's write is refused without a statement, in
+     * either mode.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode  $mode
      * @return void

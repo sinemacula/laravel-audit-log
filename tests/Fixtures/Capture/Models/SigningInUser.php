@@ -8,14 +8,9 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\User;
 
 /**
- * A user who signs in through a guard for real: kept in a table of its own with
- * an email address, a password hashed when it is set and a remember token, so a
- * session guard's `attempt()` finds and checks the user, a remember-me cookie
- * restores them, a token guard finds them by their token, and a `Verified`
- * event can carry them.
- *
- * The table is created and dropped by the tests that use it, and is never one
- * of the package's.
+ * A user who signs in through a guard for real, with an email, a password
+ * hashed when set and a remember token; its table belongs to the tests that use
+ * it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

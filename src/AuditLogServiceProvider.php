@@ -89,53 +89,12 @@ use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 
 /**
- * Package service provider: registers the package's configuration, its clock,
- * integrity settings, key ring, store, field encrypter and key wrapper, the
- * anchor seals are kept in, the retention policy and the prune ledger, the
- * recorder with its catalogue, contributors, event mappers and model watcher,
- * the access policy that denies every viewer until the application binds its
- * own, the field reader that opens what the encrypter sealed for a scope that
- * reveals it, the scoped runtime and capture state with the read guard among
- * it, the listeners that track execution frames and carry context into jobs,
- * the listeners that capture Laravel's authentication events and Gate denials,
- * the package's own event codes, the global middleware that enters an HTTP
- * frame, the package's translations under the `audit-log` namespace, its
- * publishing tags (the configuration, the migrations, the artifacts, lifecycle
- * and owners' key tables' among them, which it never loads itself, and the
- * translations) and the `audit-log:check`, `audit-log:drain`,
- * `audit-log:erase`, `audit-log:export`, `audit-log:hold`, `audit-log:holds`,
- * `audit-log:import`, `audit-log:keys`, `audit-log:prune`,
- * `audit-log:reconcile`, `audit-log:reinstate`, `audit-log:release`,
- * `audit-log:replay`, `audit-log:rewrap`, `audit-log:seal` and
- * `audit-log:verify` console commands. It adds no route.
+ * Registers the package's bindings, listeners, middleware, commands, schedule,
+ * translations and publishing tags; it adds no route.
  *
- * In the console it schedules sealing, the sweep, a strict verification and,
- * when retention can delete anything, the prune, each of which its schedule
- * setting can turn off, once the application resolves its schedule; a malformed
- * schedule is reported and schedules nothing for that run.
- *
- * Binding `AuditStore` is the only seam for where records go: there is no
- * manager and no driver registry. The delivery classes are autowired for each
- * capture, so none outlives a request. The anchor is made from the settings on
- * each resolution, so a changed setting takes effect without a restart. The
- * trail, the describer and the classes that read the trail are autowired and
- * never shared, so each read resolves what it reads with afresh. The field
- * encrypter and the field reader are made afresh on every resolution too, so
- * the data keys one holds live for one record's minimisation or one page, and
- * the key wrapper, which is shared, reads its wrapping keys on every call and
- * holds none.
- *
- * The package's own codes are defined while it boots, so an application or an
- * integration that defines one of them differently is refused at boot; the
- * codes of its own reads are in the catalogue from the moment it is made. The
- * listener that routes mapped events is added by the first mapping, never by
- * the provider, so an application that maps nothing pays nothing for it. The
- * translations are read only once the translator is resolved.
- *
- * Registration of definitions, contributors, event mappers and watched models
- * is frozen once the application has booted, so a long-lived worker registers
- * once. Booting still issues no query and reads no setting that could stop it,
- * so a malformed one, a capture setting included, reaches `audit-log:check`.
+ * Registration is frozen once the application has booted, and booting issues no
+ * query and reads no setting that could stop it, so a malformed one reaches
+ * `audit-log:check`.
  *
  * @api
  *
@@ -176,9 +135,8 @@ final class AuditLogServiceProvider extends ServiceProvider
     ];
 
     /**
-     * Whether the contract still resolves to the package's own default: the
-     * binding is the package's, and any instance held under it is exactly the
-     * default's class, as resolving a shared default leaves.
+     * Whether the contract is still bound by this provider and any instance
+     * held under it is exactly the default's class.
      *
      * @param  \Illuminate\Container\Container  $container
      * @param  string  $contract
@@ -199,19 +157,8 @@ final class AuditLogServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register container bindings.
-     *
-     * Every binding is a default: one that the application or another package
-     * made before this provider registers is kept, so a store, a clock or an
-     * encrypter bound earlier is never replaced by the package's (an
-     * `AuditStore` by `DatabaseAuditStore`, a `Clock` by `SystemClock`, a
-     * `FieldEncrypter` by `SubjectKeyEncrypter`, a `KeyWrapper` by
-     * `LocalKeyWrapper`, a `RetentionPolicy` by `ConfiguredRetentionPolicy`, a
-     * `PruneLedger` by `JournalPruneLedger`, an `AuditAccessPolicy` by
-     * `DenyAllPolicy`, a `FieldReader` by `SubjectKeyFieldReader`, a
-     * `CheckpointAnchor` by the configured anchor), and one made after replaces
-     * the default, as any later binding does. Binding `NoFieldEncrypter` is the
-     * choice never to encrypt a field.
+     * Register the package's defaults: a binding made before this provider
+     * registers is kept, and one made after replaces the default.
      *
      * @return void
      */
@@ -264,13 +211,9 @@ final class AuditLogServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the configuration file for publishing under the
-     * `audit-log-config` tag, the migrations under the `audit-log-migrations`
-     * tag and the translations under the `audit-log-lang` tag, when running in
-     * the console. The migrations are published only, never loaded from the
-     * package, so the application owns them and runs them on the storage
-     * connection; the translations are published to the vendor directory the
-     * translator reads an application's overrides from.
+     * Publish the configuration, the migrations and the translations under
+     * their `audit-log-*` tags, in the console. The migrations are never loaded
+     * from the package, so the application owns them.
      *
      * @return void
      */
@@ -340,8 +283,8 @@ final class AuditLogServiceProvider extends ServiceProvider
     }
 
     /**
-     * Schedule sealing, the sweep and the strict verification once the
-     * application resolves its schedule, when running in the console.
+     * Register the integrity schedule once the application resolves its
+     * schedule, in the console.
      *
      * @return void
      */
@@ -357,15 +300,10 @@ final class AuditLogServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the listeners that track execution frames and carry context into
-     * queued jobs, wherever the application runs: recording never branches on
-     * the console.
-     *
-     * The events that end a frame are listened to once the application has
-     * booted, after every listener any provider's `boot()` adds. An application
-     * auditing a job's or a command's end is therefore still inside its frame,
-     * and a record it makes there has the job's or the command's origin, name
-     * and carried actor.
+     * Register the listeners that track execution frames, carry context into
+     * jobs and watch transactions. The frame-ending ones are added once booted,
+     * after every other listener, so a record made on a job's or a command's
+     * end is still inside its frame.
      *
      * @return void
      */
@@ -384,12 +322,9 @@ final class AuditLogServiceProvider extends ServiceProvider
     }
 
     /**
-     * Listen for Laravel's authentication events and for Gate evaluations, and
-     * define the package's own codes, unless the catalogue is already frozen
-     * because the provider is booted again after the application has, when they
-     * were defined on its first boot. Nothing is read from configuration: each
-     * listener reads its settings when an event reaches it, so a malformed one
-     * never stops boot.
+     * Listen for Laravel's authentication events and Gate evaluations, and
+     * define the package's own codes unless an earlier boot froze the
+     * catalogue.
      *
      * @return void
      *
@@ -443,8 +378,7 @@ final class AuditLogServiceProvider extends ServiceProvider
 
     /**
      * Freeze the catalogue, the contributors, the event mappers and the model
-     * watcher once the application has booted, after which each refuses any
-     * further registration.
+     * watcher once the application has booted.
      *
      * @return void
      */

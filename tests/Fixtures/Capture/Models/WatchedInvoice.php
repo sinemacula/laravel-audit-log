@@ -13,11 +13,9 @@ use Illuminate\Support\Fluent;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 
 /**
- * An invoice an application watches: it soft deletes, hides a note, casts a
- * token, a map and a list of lines encrypted (the lines through a cast with
- * arguments), its status to an enum and its issue time to a date, and has an
- * accessor and an appended attribute that refuse to be read, so a capture that
- * read either would fail and record nothing.
+ * An invoice an application watches: soft deletes, a hidden note, encrypted and
+ * enum casts, and an accessor and appended attribute that refuse to be read, so
+ * a capture that read either would fail.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

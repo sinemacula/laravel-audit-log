@@ -5,24 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Integrity;
 
 /**
- * Signs a seal, under seal version 1, and a prune record, under prune record
- * version 2, and verifies either.
- *
- * The seal key is HKDF-SHA256 over the secret of a ring key, with an empty salt
- * and an info string of its own, so it is never the key that signs rows, and a
- * row's HMAC is never a seal's signature. A seal's signature is HMAC-SHA256, as
- * lower-case hex, under the seal key of the key the envelope names, over a seal
- * label and the seal digest; a prune record's is the same over a prune label of
- * version 2 and the record's digest, which covers the bitmap of the members it
- * deleted, so neither is ever taken for the other, and a record signed for one
- * set of members never verifies for another.
- *
- * Verification selects the key by the id the seal or record stores, never the
- * current key, so a seal signed before a rotation verifies while its key stays
- * in the ring. It answers `false` only when the signature does not match: a key
- * the ring no longer holds is an `UnknownKeyException`, and a signature that is
- * not 64 lower-case hex an `UnexpectedValueException`. The seal key is derived
- * on every call and never kept.
+ * Signs and verifies seals and prune records under a key derived from a ring
+ * key by HKDF, so a row's HMAC is never a seal's signature.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -97,9 +81,8 @@ final readonly class SealSigner
     }
 
     /**
-     * Whether the signature is the seal's, under the key the envelope names.
-     * `false` means only that it does not match; a malformed signature and a
-     * key the ring does not hold are refused instead.
+     * Whether the signature is the seal's, under the key the envelope names; a
+     * malformed signature or an unknown key is refused instead.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SealEnvelope  $seal
      * @param  string  $signature
@@ -110,7 +93,9 @@ final readonly class SealSigner
      */
     public function verifies(SealEnvelope $seal, string $signature): bool
     {
-        self::checkSignature($signature);
+        if (preg_match(SealEnvelope::DIGEST_PATTERN, $signature) !== 1) {
+            throw new \UnexpectedValueException('A seal\'s `signature` must be 64 lower-case hexadecimal characters.');
+        }
 
         return hash_equals(self::signature(self::SEAL_LABEL, $seal->digest(), $this->keys->key($seal->keyId)), $signature);
     }
@@ -147,8 +132,7 @@ final readonly class SealSigner
     ): PruneRecord {
         $key = $this->keys->signingKey();
 
-        // The record is built unsigned first, so its fields are checked and its
-        // digest, which leaves the signature out, can be taken
+        // Built unsigned first, so its fields are checked and its digest taken
         $unsigned  = new PruneRecord($logId, $sealId, $sealDigest, $memberCount, $pruned, $prunedCount, $operationId, $prunedAt, $key->id, self::UNSIGNED);
         $signature = self::signature(self::PRUNE_LABEL, $unsigned->digest(), $key);
 
@@ -156,9 +140,8 @@ final readonly class SealSigner
     }
 
     /**
-     * Whether the prune record's signature matches its fields, under the key
-     * the record names. `false` means only that it does not match; a key the
-     * ring does not hold is refused instead.
+     * Whether the prune record's signature matches, under the key the record
+     * names; an unknown key is refused instead.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\PruneRecord  $record
      * @return bool
@@ -183,21 +166,5 @@ final readonly class SealSigner
     private static function signature(string $label, string $digest, #[\SensitiveParameter] IntegrityKey $key): string
     {
         return hash_hmac('sha256', $label . $digest, self::sealKey($key->secret()));
-    }
-
-    /**
-     * Refuse a stored signature that is not 64 lower-case hex: no key could
-     * have made it, so it is malformed, never merely wrong.
-     *
-     * @param  string  $signature
-     * @return void
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function checkSignature(string $signature): void
-    {
-        if (preg_match(SealEnvelope::DIGEST_PATTERN, $signature) !== 1) {
-            throw new \UnexpectedValueException('A seal\'s `signature` must be 64 lower-case hexadecimal characters.');
-        }
     }
 }

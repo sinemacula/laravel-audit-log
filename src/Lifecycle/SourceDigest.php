@@ -9,18 +9,10 @@ use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 
 /**
  * The keyed digest of an imported line's source assertion, which tells a
- * repeated import of the line from one that conflicts with it.
+ * repeated import from a conflicting one.
  *
- * The digest is HMAC-SHA256, as lower-case hex, over the canonical encoding of
- * the assertion, under a key of its own: HKDF-SHA256 over a ring key's secret,
- * with an empty salt and an info string no other key uses, so it is never the
- * key that signs entries, seals or the journal. A new row's digest is taken
- * under the ring's signing key, which then signs the row and names itself in
- * the row's `key_id`; a stored row's is compared under that key. A key the ring
- * no longer holds is an `UnknownKeyException`, and the line is then a conflict,
- * never a duplicate. The assertion is taken before minimisation and encryption,
- * so a definition changed between two imports never changes it. The derived key
- * is never kept.
+ * Its HKDF key is never one that signs and is never kept; the assertion is
+ * taken before minimisation, so a changed definition never changes it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,8 +58,7 @@ final readonly class SourceDigest
     }
 
     /**
-     * The id of the ring's signing key, which a new row's digest is taken
-     * under.
+     * The ring's signing key id, which a new row's digest is taken under.
      *
      * @return string
      *

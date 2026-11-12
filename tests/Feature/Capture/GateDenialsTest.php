@@ -20,6 +20,8 @@ use SineMacula\Laravel\AuditLog\Capture\GateArguments;
 use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 use SineMacula\Laravel\AuditLog\Listeners\RecordGateDenial;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
+use Tests\Concerns\CreatesSigningInUsers;
+use Tests\Concerns\SortsJsonObjectKeys;
 use Tests\Fixtures\Capture\Models\SigningInUser;
 use Tests\Fixtures\Capture\Models\TaggedInvoice;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -27,12 +29,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the capture of Gate denials through the provider's wiring
- * and the real Gate: no row for an allowed check, however many; one row per
- * denial evaluated, whichever way the Gate is asked (`allows()`, `authorize()`,
- * `inspect()`, `forUser()`), a `null` result included, naming the user the Gate
- * was asked for and no guard; none while capture is off; a policy's model
- * argument kept as its reference; and the paths that fire no event
- * (`allowIf()`, `denyIf()`, a callback that throws) recording nothing.
+ * and the real Gate.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,6 +39,8 @@ use Tests\TestCase;
 #[CoversClass(RecordGateDenial::class)]
 final class GateDenialsTest extends TestCase
 {
+    use CreatesSigningInUsers, SortsJsonObjectKeys;
+
     /** @var string The ability every test denies, unless it says otherwise. */
     private const string ABILITY = 'approve-invoice';
 
@@ -58,9 +57,8 @@ final class GateDenialsTest extends TestCase
     private SigningInUser $user;
 
     /**
-     * Hash passwords cheaply, create the users' and the invoices' tables and a
-     * user, turn Gate capture on, deny the ability, bind the reporter, and hear
-     * each capture failure.
+     * Create the users' and invoices' tables and a user, turn Gate capture on
+     * and deny the ability.
      *
      * @return void
      */
@@ -105,8 +103,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * One denial writes one denied row: the Gate's code, the user as actor, no
-     * subject and no guard, and the ability with no argument.
+     * One denial writes one denied row naming the user and no subject or guard.
      *
      * @return void
      */
@@ -142,8 +139,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * While Gate capture is off, its default, a denial writes nothing, and the
-     * Gate's answer is the same.
+     * With Gate capture off, its default, a denial writes nothing.
      *
      * @return void
      */
@@ -161,8 +157,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * A callback that returns `null` denies, as the Gate reads it, and so
-     * writes a denied row.
+     * A callback returning `null` denies and writes a denied row.
      *
      * @return void
      */
@@ -179,8 +174,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * `authorize()` records its denial before it throws, and the exception
-     * still reaches the caller.
+     * `authorize()` records its denial before it throws.
      *
      * @return void
      */
@@ -198,8 +192,8 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * `inspect()` records its denial, keeping the response's code as the reason
-     * when the reason codes list it, and never its message.
+     * `inspect()` records a listed response code as the reason, never the
+     * message.
      *
      * @return void
      */
@@ -225,8 +219,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * `forUser()` records the user the Gate was asked about, never the one
-     * signed in, and no guard.
+     * `forUser()` records that user, never the one signed in, and no guard.
      *
      * @return void
      */
@@ -261,9 +254,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * Every evaluation is recorded, with no deduplication: the same denial
-     * twice is two rows, and each ability a check of any of several evaluates
-     * is one.
+     * Every evaluation is recorded, with no deduplication.
      *
      * @return void
      */
@@ -282,9 +273,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * `allowIf()` and `denyIf()` decide without evaluating an ability, so no
-     * event is fired and nothing is written, though both refuse: a gap of Gate
-     * capture.
+     * `allowIf()` and `denyIf()` fire no event, so nothing is written.
      *
      * @return void
      */
@@ -304,9 +293,8 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * A callback that throws ends the evaluation before the Gate fires its
-     * event, so nothing is written and the exception reaches the caller: a gap
-     * of Gate capture.
+     * A callback that throws ends the check before the Gate's event, so nothing
+     * is written.
      *
      * @return void
      *
@@ -328,9 +316,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * A policy's model argument is kept as its reference, a class string as
-     * itself and anything else as the marker, with the full count of the
-     * arguments.
+     * A policy's model argument is kept as its reference.
      *
      * @return void
      */
@@ -369,8 +355,8 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * Only the abilities selected are recorded: `only_abilities` limits the
-     * denials recorded, and `except_abilities` removes one of them.
+     * Only the abilities `only_abilities` selects and `except_abilities` keeps
+     * are recorded.
      *
      * @return void
      */
@@ -390,8 +376,7 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * A malformed Gate setting is a contained failure of the capture: the Gate
-     * still answers, nothing is written, and the failure is said once.
+     * A malformed Gate setting is a contained capture failure.
      *
      * @return void
      */
@@ -487,44 +472,8 @@ final class GateDenialsTest extends TestCase
     }
 
     /**
-     * Create the users' table on the test's connection, and drop it before the
-     * application is destroyed.
-     *
-     * @return void
-     */
-    private function createUsersTable(): void
-    {
-        $schema = Schema::connection(self::CONNECTION);
-
-        $schema->dropIfExists(SigningInUser::TABLE);
-        $schema->create(SigningInUser::TABLE, static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('email', 191)->unique();
-            $table->string('password', 191);
-            $table->rememberToken();
-        });
-
-        $this->beforeApplicationDestroyed(static function (): void {
-            Schema::connection(self::CONNECTION)->dropIfExists(SigningInUser::TABLE);
-        });
-    }
-
-    /**
-     * A saved user of the email address, with the password every user is made
-     * with and the remember token given.
-     *
-     * @param  string  $email
-     * @param  ?string  $rememberToken
-     * @return \Tests\Fixtures\Capture\Models\SigningInUser
-     */
-    private static function newUser(string $email, #[\SensitiveParameter] ?string $rememberToken = null): SigningInUser
-    {
-        return SigningInUser::query()->create(['email' => $email, 'password' => SigningInUser::PASSWORD, 'remember_token' => $rememberToken]);
-    }
-
-    /**
-     * Create the tagged invoices' table on the test's connection, and drop it
-     * before the application is destroyed.
+     * Create the tagged invoices' table, dropped before the application is
+     * destroyed.
      *
      * @return void
      */
@@ -541,28 +490,5 @@ final class GateDenialsTest extends TestCase
         $this->beforeApplicationDestroyed(static function (): void {
             Schema::connection(self::CONNECTION)->dropIfExists(TaggedInvoice::TABLE);
         });
-    }
-
-    /**
-     * The value with every map's keys sorted, at any depth, so a map read back
-     * from a JSON column compares the same on every engine: MySQL keeps a JSON
-     * object's keys in an order of its own.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  mixed  $value
-     * @return mixed
-     */
-    private static function keysSorted(mixed $value): mixed
-    {
-        if (!is_array($value)) {
-            return $value;
-        }
-
-        if (!array_is_list($value)) {
-            ksort($value, SORT_STRING);
-        }
-
-        return array_map(self::keysSorted(...), $value);
     }
 }

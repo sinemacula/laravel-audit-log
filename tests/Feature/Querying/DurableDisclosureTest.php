@@ -33,13 +33,7 @@ use Tests\Fixtures\Querying\ClosurePolicy;
 use Tests\TestCase;
 
 /**
- * Feature tests for the rule that nothing a read finds leaves the package until
- * its record is durable, through the read API alone: no row, count or
- * verification result returned when the record fails; a read refused before
- * anything is queried while a transaction is open on the storage connection, or
- * in outbox mode on the outbox's own connection or the storage connection; a
- * read refused on a store that is not durable; and a failed record spilled,
- * with its disclosure, and reported once.
+ * Feature tests that nothing a read finds leaves before its record is durable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,8 +54,7 @@ final class DurableDisclosureTest extends TestCase
     private array $files = [];
 
     /**
-     * Bind the read path, report to a recording handler, and capture every line
-     * logged.
+     * Bind the read path, report to a recording handler and capture logs.
      *
      * @return void
      */
@@ -79,8 +72,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a test left open, put the outbox back, and
-     * remove the files an export wrote.
+     * Roll back any open transaction, restore the outbox and remove exports.
      *
      * @return void
      */
@@ -107,8 +99,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * No row is returned when the read's record cannot be written: the rows
-     * were found, but the read is refused as unrecorded, carrying nothing.
+     * No row is returned when the read's record cannot be written.
      *
      * @return void
      */
@@ -121,7 +112,7 @@ final class DurableDisclosureTest extends TestCase
 
         $this->captureQueries();
 
-        $refusal = $this->refusalOf(fn () => $this->trail()->cursorPaginate());
+        $refusal = $this->readRefusalOf(fn () => $this->financeTrail()->cursorPaginate());
 
         self::assertInstanceOf(AuditReadRefusedException::class, $refusal);
         self::assertSame(AuditReadRefusedException::unrecorded()->getMessage(), $refusal->getMessage());
@@ -143,7 +134,7 @@ final class DurableDisclosureTest extends TestCase
 
         $this->expectExceptionObject(AuditReadRefusedException::unrecorded());
 
-        $this->trail()->count();
+        $this->financeTrail()->count();
     }
 
     /**
@@ -160,9 +151,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * A read inside a transaction on the storage connection is refused, naming
-     * the connection, before the policy is asked or any statement runs, and
-     * leaves no record.
+     * A read inside a storage transaction is refused before any query.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): (int|\SineMacula\Laravel\AuditLog\Querying\TrailPage)  $terminal
      * @return void
@@ -180,9 +169,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * In outbox mode a read inside a transaction on the outbox's own connection
-     * is refused, naming that connection, before the policy is asked or any
-     * statement runs, and leaves no outbox row.
+     * In outbox mode a read inside an outbox transaction is refused.
      *
      * @return void
      */
@@ -204,9 +191,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * In outbox mode a read inside a transaction on the storage connection,
-     * which the read reads, is refused too, though the outbox is on another
-     * connection.
+     * In outbox mode a read inside a storage transaction is refused too.
      *
      * @return void
      */
@@ -226,9 +211,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * A read with the log store bound, which is not durable, is refused naming
-     * the store, before the policy is asked or any statement runs, and no line
-     * is logged.
+     * A read on the non-durable log store is refused before any query.
      *
      * @return void
      */
@@ -248,9 +231,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * A read whose record fails is spilled once, the whole bundle with the
-     * disclosure of what it found, and the failure is reported once as the
-     * store's sanitised failure.
+     * A failed read record is spilled with its disclosure and reported once.
      *
      * @return void
      */
@@ -261,7 +242,7 @@ final class DurableDisclosureTest extends TestCase
 
         FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
-        $refusal = $this->refusalOf(fn () => $this->trail()->cursorPaginate());
+        $refusal = $this->readRefusalOf(fn () => $this->financeTrail()->cursorPaginate());
         $lines   = $this->spillLines();
         $reports = $this->reporter?->reports() ?? [];
 
@@ -278,9 +259,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * No verification result is returned when the verification's record cannot
-     * be written: the export verifies while its record can be, and is refused
-     * as unrecorded once it cannot.
+     * No verification result is returned when its record cannot be written.
      *
      * @return void
      */
@@ -291,26 +270,15 @@ final class DurableDisclosureTest extends TestCase
 
         $path = $this->exportPath();
 
-        $this->trail()->export($path);
+        $this->financeTrail()->export($path);
 
-        self::assertTrue($this->trail()->verifyExport($path)->isVerified());
+        self::assertTrue($this->financeTrail()->verifyExport($path)->isVerified());
 
         FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
         $this->expectExceptionObject(AuditReadRefusedException::unrecorded());
 
-        $this->trail()->verifyExport($path);
-    }
-
-    /**
-     * The trail, in the `finance` category the seeded entries are in, read for
-     * the viewer.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
+        $this->financeTrail()->verifyExport($path);
     }
 
     /**
@@ -326,8 +294,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * A path of the test's own for an export, removed with its bundle when the
-     * test ends.
+     * A path for an export, removed with its bundle when the test ends.
      *
      * @return string
      */
@@ -341,26 +308,7 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * The refusal the read is refused with, or `null` when it is not.
-     *
-     * @param  \Closure(): (int|\SineMacula\Laravel\AuditLog\Querying\TrailPage)  $read
-     * @return ?\SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException
-     */
-    private function refusalOf(\Closure $read): ?AuditReadRefusedException
-    {
-        try {
-            $read();
-        } catch (AuditReadRefusedException $refusal) {
-            return $refusal;
-        }
-
-        return null;
-    }
-
-    /**
-     * Assert the terminal call on the trail is refused as expected, before the
-     * policy is asked or any statement runs on any connection, and that nothing
-     * is reported and no read is recorded.
+     * Assert the terminal call is refused before any query, report or record.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException  $expected
      * @param  \Tests\Fixtures\Querying\ClosurePolicy  $policy
@@ -371,7 +319,7 @@ final class DurableDisclosureTest extends TestCase
     {
         $this->captureQueries();
 
-        $refusal = $this->refusalOf(fn (): int|TrailPage => $terminal($this->trail()));
+        $refusal = $this->readRefusalOf(fn (): int|TrailPage => $terminal($this->financeTrail()));
 
         self::assertInstanceOf(AuditReadRefusedException::class, $refusal);
         self::assertSame($expected->getMessage(), $refusal->getMessage());

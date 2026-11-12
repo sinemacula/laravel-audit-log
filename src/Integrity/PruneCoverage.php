@@ -7,24 +7,9 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 
 /**
- * Which of a seal's members its prune records account for, judged from what
- * verification read of the members and what the ledger gave for the seal.
- *
- * A record counts only when it binds exactly this seal, its log, its id, its
- * recomputed digest and its member count, and its signature verifies under the
- * key it names; one that does not is `prune_record` at the seal, one signed
- * under a key the ring does not hold `prune_key`, and either covers nothing.
- * Valid records whose bitmaps share a member are `prune_record` too, though
- * what they cover is still taken, since the verdict is `tampered` either way.
- *
- * A position is a member's place in the members sorted bytewise, and none is
- * assigned unless the membership was authenticated against the seal's members
- * digest, so a member row added, removed or moved never borrows a record's bit.
- * A missing member set in no valid record is `missing_entry`, at the first such
- * member in member order; a missing member set in one is covered; and a present
- * member set in one is to be read again, since a prune that committed after the
- * members were read is gone by then, and a member still there was restored or
- * inserted again. It reads nothing itself.
+ * Which of a seal's members its prune records account for; a record counts only
+ * when it binds exactly this seal and verifies, and a present member it covers
+ * is read again.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

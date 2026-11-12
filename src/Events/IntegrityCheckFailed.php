@@ -8,20 +8,11 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditLogEvent;
 
 /**
  * Dispatched when sealing or verification finds the log altered, incomplete or
- * unverifiable, or when a verification stops before it can say: which command
- * ran, how many segments it found in each integrity and each anchoring status,
- * the first finding and the id it was found at, the heads it observed, and
- * whether it covered the whole log. A seal run stopped by anything else than a
- * refused head is reported as a `SealFailedException` only, and dispatches
- * nothing.
+ * unverifiable, or a verification stops before it can say.
  *
- * The event carries ids, counts and codes, and nothing else: no value of an
- * entry and no text of an exception reaches a listener. Both maps always list
- * every status by its value, zero-filled and always in the same order, so a
- * listener reads one shape from sealing and verification alike; a seal run
- * counts its one failing condition once, never once per entry. A verification
- * that stopped has no finding and is not complete. The package dispatches it
- * with a first bad id only when that id is a lower-case UUID.
+ * It carries ids, counts and codes only. Both maps list every status by its
+ * value, zero-filled and in the same order, so sealing and verification give
+ * one shape.
  *
  * @api
  *

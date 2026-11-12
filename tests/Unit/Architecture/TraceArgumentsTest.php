@@ -8,10 +8,8 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The test run keeps arguments in stack traces. The tests that prove no payload
- * reaches a trace read each frame's arguments, so with arguments dropped, as
- * production's setting drops them, they would find none and pass without
- * proving anything.
+ * The test run keeps stack trace arguments, without which the tests that no
+ * payload reaches a trace would pass vacuously.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

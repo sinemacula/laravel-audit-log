@@ -28,14 +28,8 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for tampering on whichever engine the suite runs against,
- * each alteration made by a raw SQL statement that binds its values in the
- * engine's own column types (a `uuid`, a `json` document, a timestamp to the
- * microsecond): a modified entry, a deleted entry, a deleted seal, members
- * swapped between seals and a truncated tail are each found as they are on
- * every engine, and an entry's JSON that the engine stores in an order and a
- * spacing of its own, or that is rewritten so, still verifies, since integrity
- * is checked on the decoded values.
+ * Integration tests for tampering by raw SQL in each engine's column types:
+ * each alteration is found, and reordered JSON still verifies.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -81,9 +75,8 @@ final class TamperingEnginesTest extends TestCase
     }
 
     /**
-     * On each engine, an entry's properties replaced by a JSON document of the
-     * engine's type, and another entry's time moved by one microsecond in the
-     * engine's timestamp type, each no longer match the entry's HMAC.
+     * An entry's properties replaced or its time moved by a microsecond, in the
+     * engine's types, no longer match its HMAC.
      *
      * @return void
      */
@@ -174,9 +167,8 @@ final class TamperingEnginesTest extends TestCase
     }
 
     /**
-     * On each engine, the last seal deleted with its members and entries by raw
-     * statements, and every local receipt cleared, is still found against the
-     * anchor's head.
+     * The last seal deleted with its members, entries and local receipts is
+     * still found against the anchor's head.
      *
      * @return void
      */
@@ -208,11 +200,8 @@ final class TamperingEnginesTest extends TestCase
     }
 
     /**
-     * On each engine, an entry whose properties the engine may store with its
-     * keys reordered, nested and in a list, verifies, and still verifies once
-     * its JSON is rewritten by a raw statement with its keys in another order
-     * and other spacing, since integrity is checked on the decoded values; a
-     * list's order, which is part of the value, is not excused.
+     * Properties stored or rewritten with reordered keys and other spacing
+     * still verify, while a list's order is not excused.
      *
      * @return void
      */
@@ -268,9 +257,8 @@ final class TamperingEnginesTest extends TestCase
     }
 
     /**
-     * The placeholder that binds a value as the column type on this engine:
-     * cast on PostgreSQL and, for JSON and times, on MySQL, and bound as given
-     * on SQLite, which keeps every value as written.
+     * The placeholder binding a value as the column type: cast on PostgreSQL,
+     * on MySQL for JSON and times, and as given on SQLite.
      *
      * @param  'json'|'time'|'uuid'  $type
      * @return string

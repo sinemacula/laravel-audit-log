@@ -27,15 +27,8 @@ use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for the captured record: its shape and its three named
- * constructors, the pinned envelope and the golden v1 record, the UUID version
- * 7 id and its order, the UTC instant, the versions, provenance and source it
- * carries, the reference pairs, that it stores only what minimising left, where
- * a note is stored and that an owned note never is, and the refusals of
- * building one; an imported record, its source fields, its id drawn at import,
- * its kept occurrence time, its optional origin and its refusals; and a record
- * rebuilt from an envelope, every field kept as given, and the envelopes it
- * refuses.
+ * Unit tests for the record: capturing one, importing one and rebuilding one
+ * from an envelope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,9 +69,8 @@ final class AuditRecordTest extends TestCase
     private const string SOURCE_OCCURRED_AT = '2019-03-04T05:06:07.080910Z';
 
     /**
-     * Raise every PHP warning as an exception, so each record is also built
-     * quietly: inside a Laravel application a warning becomes an exception,
-     * which would turn recording an activity into an error.
+     * Raise every PHP warning as an exception, as a Laravel application does,
+     * so each record is also built quietly.
      *
      * @return void
      */
@@ -108,11 +100,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The record is final and readonly, its constructor is private, and its
-     * only public methods are `fromPending()`, the one named constructor that
-     * captures a record, `fromImport()`, the one that imports one,
-     * `fromEnvelope()`, which only the codec calls to rebuild one, and
-     * `toArray()`.
+     * The record is final and readonly, with a private constructor and only its
+     * three named constructors and `toArray()` public.
      *
      * @return void
      */
@@ -138,10 +127,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A record rebuilt from an envelope keeps every field as given, in the
-     * envelope's order, whatever capture would have made of it: an id that is
-     * not a version 7 UUID, upper-case and unclean text, a list as the
-     * properties, and a version the release does not read.
+     * A record rebuilt from an envelope keeps every field as given, in order,
+     * whatever capture would have made of it.
      *
      * @return void
      */
@@ -164,8 +151,7 @@ final class AuditRecordTest extends TestCase
 
     /**
      * A record rebuilt from an envelope keeps its provenance and import fields
-     * as given: an imported record stays imported, with its source record, its
-     * batch and its source digest.
+     * as given.
      *
      * @return void
      */
@@ -270,9 +256,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * Every leaf of the envelope is a string, an integer, a boolean or `null`,
-     * even when the properties were given a model, an enum and a date: the
-     * record holds no object, enums included.
+     * Every leaf of the envelope is a scalar or `null`, even when the
+     * properties were given objects.
      *
      * @return void
      */
@@ -312,9 +297,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The golden v1 record, decoded, is exactly the full builder's envelope,
-     * and its record version is one this release reads; encoded the same way,
-     * the envelope is the fixture byte for byte.
+     * The golden v1 record decodes to the full builder's envelope and encodes
+     * back to the fixture byte for byte.
      *
      * @return void
      *
@@ -334,9 +318,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A captured record keeps the id it is given, the one the pipeline minted
-     * before minimising, whatever the instant, so the entry it is stored as is
-     * the entry its values were sealed for.
+     * A captured record keeps the id minted before minimising, so its values
+     * stay sealed for its own entry.
      *
      * @return void
      */
@@ -486,11 +469,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * An imported record is `imported`, with the current record version, the
-     * event version and category given, the references, outcome, reason,
-     * correlation id, IP, context and properties of its builder, and every
-     * source field of its source: the source that asserted it, its region, the
-     * record's id there, the batch and the digest.
+     * An imported record is `imported`, with the fields of its builder and
+     * every source field of its source.
      *
      * @return void
      */
@@ -519,9 +499,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * An imported record carries none of the ambient fields only capture fills:
-     * no credential, guard, session, request, trace or user agent, even when
-     * its builder was given them.
+     * An imported record carries none of the ambient fields only capture fills,
+     * even when its builder was given them.
      *
      * @return void
      */
@@ -558,8 +537,7 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * An imported record keeps the time its activity happened exactly as its
-     * source gave it, however long before the import, and never takes the
+     * An imported record keeps the occurrence time its source gave, never the
      * import's time.
      *
      * @return void
@@ -706,9 +684,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The import's pending parameter is marked sensitive, as the capture's is:
-     * it holds the record's values, and a refusal is thrown with it on the
-     * stack.
+     * The import's pending parameter is marked sensitive: a refusal is thrown
+     * with the record's values on the stack.
      *
      * @return void
      */
@@ -800,8 +777,7 @@ final class AuditRecordTest extends TestCase
 
     /**
      * A note with an owner is never stored in plaintext: with no encrypter it
-     * is dropped, the properties hold only the diagnostic of its fixed path,
-     * and the note's text appears nowhere in the encoded envelope.
+     * is dropped and only its diagnostic is kept.
      *
      * @param  \Closure(): (\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner|\SineMacula\Laravel\AuditLog\Records\Reference)  $owner
      * @return void
@@ -1082,10 +1058,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The source id is kept, with the region when one is given and `null` when
-     * not; an id and a region exactly as long as their columns, counted in
-     * characters, are kept (protects against an off-by-one mutation of either
-     * cap).
+     * The source id and region are kept, the region `null` when not given, up
+     * to their column lengths in characters.
      *
      * @return void
      */
@@ -1121,9 +1095,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A builder with a manifest gives a record carrying the attachment of that
-     * manifest, and its properties sign the descriptor that names it, its kind
-     * included, after the caller's keys.
+     * A builder with a manifest gives a record carrying its attachment, whose
+     * descriptor is signed after the caller's keys.
      *
      * @return void
      *
@@ -1165,9 +1138,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A stored entry rebuilt to be read keeps its binding through an attachment
-     * described from its own descriptor; one described from any other
-     * descriptor, or none, is refused as an unbound attachment is.
+     * A record rebuilt to be read takes only an attachment described from its
+     * own descriptor.
      *
      * @return void
      *
@@ -1266,9 +1238,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The attachment must be the one the minimised properties describe: a
-     * minimisation that lost the descriptor, or that describes another
-     * manifest, is refused even with the builder's own attachment.
+     * An attachment the minimised properties do not describe is refused, even
+     * the builder's own.
      *
      * @return void
      *
@@ -1387,9 +1358,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * Rows of `[what replaces the signed descriptor]`: a descriptor of another
-     * artifact or kind, a changed count, a malformed descriptor and one key
-     * missing, the kind among them.
+     * Rows of `[what replaces the signed descriptor]`: another artifact or
+     * kind, a changed count, a malformed descriptor and a missing key.
      *
      * @return iterable<string, array{0: array<string, int|string|null>|string|null}>
      */
@@ -1570,9 +1540,7 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * A builder as the importer makes one: a code, the references, a denial
-     * with its reason, a correlation id, properties, and the IP address and
-     * context of the source's line, and no origin.
+     * A builder as the importer makes one, with no origin.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
      */
@@ -1595,9 +1563,7 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The imported record of the builder, of the occurrence time and origin
-     * given, from the factory's source, under an id drawn at the import time,
-     * as the import builder mints it.
+     * The imported record of the builder, under an id drawn at the import time.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  string  $occurredAt
@@ -1622,9 +1588,8 @@ final class AuditRecordTest extends TestCase
     }
 
     /**
-     * The captured record of the builder, as the golden record is built, with
-     * the attachment given, under the id the pipeline would mint: the builder's
-     * own, or a UUID version 7 of the instant.
+     * The captured record of the builder, under the builder's own id or a UUID
+     * version 7 of the instant.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\DateTimeInterface  $occurredAt

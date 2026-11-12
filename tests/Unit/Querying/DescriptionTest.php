@@ -10,8 +10,7 @@ use SineMacula\Laravel\AuditLog\Querying\Description;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 
 /**
- * Unit tests for the description of an entry: what it holds and its array, with
- * the outcome as its value and the properties as given.
+ * Unit tests for the description of an entry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,8 +21,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 final class DescriptionTest extends TestCase
 {
     /**
-     * The array has every field under its key, in order, the outcome as its
-     * value and the properties as they are.
+     * The array has every field in order, the outcome as its value.
      *
      * @return void
      */
@@ -41,8 +39,7 @@ final class DescriptionTest extends TestCase
     }
 
     /**
-     * A description with no reason gives `null` for it, and its fields are as
-     * given.
+     * A description keeps its fields, and `null` for no reason.
      *
      * @return void
      */

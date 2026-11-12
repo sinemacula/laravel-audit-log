@@ -16,10 +16,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use Tests\TestCase;
 
 /**
- * Feature tests for reading a line of the import format: every field accepted
- * and refused, each reason a line is rejected for, the skew allowed into the
- * future, reserved codes and keys, and every value shaped as an encrypted
- * envelope removed and counted at any depth.
+ * Feature tests for reading a line of the import format.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,9 +74,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * A line of every field is read into its import line, as asserted by the
-     * import's source and region, its references as references and its decimal
-     * as the string the record stores.
+     * A line of every field is read into its import line.
      *
      * @return void
      */
@@ -175,8 +170,8 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * Rows of `[field, value, reason]`: a refused value of each field, and the
-     * reason the line is rejected for.
+     * Rows of `[field, value, reason]`: a refused value of each field and its
+     * rejection.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -246,8 +241,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * Rows of `[text, reason]`: lines that are not a line of the import format
-     * at all.
+     * Rows of `[text, reason]`: lines that are not of the import format at all.
      *
      * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection}>
      */
@@ -282,8 +276,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * A field the format does not have is `UNKNOWN_FIELD`, a source of the
-     * line's own among them.
+     * A field the format does not have is `UNKNOWN_FIELD`.
      *
      * @return void
      */
@@ -325,9 +318,8 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * A time is accepted up to the skew the setting allows after the clock,
-     * five minutes by default, and rejected a microsecond later; a skew of
-     * nothing allows no time after the clock.
+     * A time is accepted up to the configured skew after the clock, five
+     * minutes by default.
      *
      * @return void
      */
@@ -350,8 +342,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * A code under the package's reserved prefix is `RESERVED_CODE`, whatever
-     * follows the prefix.
+     * A code under the package's reserved prefix is `RESERVED_CODE`.
      *
      * @return void
      */
@@ -364,10 +355,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * Every value that is exactly an envelope's shape, at any depth of the
-     * properties and the context, in a map or a list, is removed and counted;
-     * an object of more or fewer keys is kept, and so is a whole properties
-     * object of that shape, which is removed and counted.
+     * Every envelope-shaped value is removed and counted at any depth.
      *
      * @return void
      */
@@ -405,8 +393,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * An IP address that is an envelope's JSON is removed and counted; any
-     * other value beginning with a brace is kept for the minimiser to judge.
+     * An IP address that is an envelope's JSON is removed and counted.
      *
      * @return void
      */
@@ -431,8 +418,8 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * A property key under the reserved `_audit` prefix, at any depth, is
-     * refused as the record refuses it; the context may hold one.
+     * A property key under the reserved `_audit` prefix is refused at any
+     * depth.
      *
      * @return void
      */
@@ -446,8 +433,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * An import whose source is this installation is rejected `OWN_SOURCE` line
-     * by line, should the import's own refusal be bypassed.
+     * A line whose source is this installation is rejected `OWN_SOURCE`.
      *
      * @return void
      */
@@ -459,8 +445,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * Whether a value is exactly an envelope's shape is read by its keys alone,
-     * as an object or as a map.
+     * The envelope shape is read by its keys alone, as an object or as a map.
      *
      * @return void
      */
@@ -504,9 +489,7 @@ final class ImportLineParserTest extends TestCase
     }
 
     /**
-     * The fields given, as a line, parsed as line 3 of the import's source;
-     * the decimal and the integer too large for PHP are written as JSON
-     * numbers.
+     * The fields given, as a line, parsed as line 3 of the import's source.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

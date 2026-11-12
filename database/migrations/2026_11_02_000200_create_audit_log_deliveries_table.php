@@ -36,8 +36,6 @@ return new class extends Migration {
         $mysql = $schema->getConnection()->getDriverName() === 'mysql';
 
         $schema->create($table, static function (Blueprint $blueprint) use ($table, $mysql): void {
-            // The entry's id and the destination's, so a receipt is kept once
-            // per destination of a record.
             $blueprint->uuid('entry_id');
             $blueprint->string('destination', 64);
 
@@ -59,8 +57,7 @@ return new class extends Migration {
                 $blueprint->engine('InnoDB');
             }
 
-            // Named short, like every index the package names, so it fits 63
-            // characters at the longest table name on any engine that keeps it.
+            // Named short, so it fits 63 characters at the longest table name.
             $blueprint->primary(['entry_id', 'destination'], $table . '_primary');
         });
     }
@@ -78,8 +75,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * a receipt is beside the entry it describes.
+     * The storage connection, so a receipt is beside the entry it describes.
      *
      * @return ?string
      *

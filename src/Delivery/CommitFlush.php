@@ -9,14 +9,9 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 
 /**
- * The audit work waiting on one outermost transaction's commit, run as one
- * commit callback: every piece of work runs whatever another does, the first
- * failure is thrown once all have run, and any later one is reported, since
- * only one exception can leave the commit. Everything thrown here has already
- * been sanitised and handled by the failure path.
- *
- * When the transaction was found aborted, so its commit was really a rollback,
- * nothing runs but each abandon step.
+ * Runs the audit work waiting on one outermost commit as a single callback:
+ * every piece runs, the first failure is thrown at the end and later ones are
+ * reported.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,10 +23,10 @@ final class CommitFlush
     /** @var list<array{work: \Closure(): void, abandon: ?\Closure(\Throwable): void}> The work ready to run, oldest first. */
     private array $entries = [];
 
-    /** @var bool Whether any work was deferred on this transaction or one nested in it, whether or not it is ready. */
+    /** @var bool Whether work was deferred on this transaction or one nested in it. */
     private bool $expecting = false;
 
-    /** @var ?\Throwable What showed the transaction was already aborted, if anything did. */
+    /** @var ?\Throwable What showed the transaction was already aborted, if anything. */
     private ?\Throwable $aborted = null;
 
     /**
@@ -41,13 +36,13 @@ final class CommitFlush
      */
     public function __construct(
 
-        /** The container the reporter and the write guard are resolved from when a later failure is reported. */
+        /** Resolves the reporter and the write guard for a later failure. */
         private readonly Container $container,
     ) {}
 
     /**
-     * Note that work was deferred, though it may join only when a nested
-     * transaction commits, after the commit it depends on has been asked for.
+     * Note that work was deferred, though it may join only once a nested
+     * transaction commits.
      *
      * @return void
      */
@@ -90,8 +85,8 @@ final class CommitFlush
     }
 
     /**
-     * Run all the work and throw the first failure at the end, or abandon it
-     * all if the transaction was aborted. Each piece of work runs once.
+     * Run all the work once and throw the first failure at the end, or abandon
+     * it all if the transaction was aborted.
      *
      * @return void
      *
@@ -123,8 +118,7 @@ final class CommitFlush
     }
 
     /**
-     * Run the work, or, when the transaction was aborted, its abandon step if
-     * it has one.
+     * Run the work, or its abandon step when the transaction was aborted.
      *
      * @param  \Closure(): void  $work
      * @param  ?\Closure(\Throwable): void  $abandon
@@ -151,8 +145,8 @@ final class CommitFlush
     }
 
     /**
-     * Report a failure no exception can carry out of the commit, inside the
-     * write guard, ignoring a reporter that fails.
+     * Report a failure no exception can carry out of the commit, ignoring a
+     * reporter that fails.
      *
      * @param  \Throwable  $failure
      * @return void
@@ -167,7 +161,7 @@ final class CommitFlush
             });
         } catch (\Throwable) {
             // Only one exception can leave a commit, and the first is on its
-            // way out, so there is nowhere left to say this one
+            // way out
         }
     }
 }

@@ -47,13 +47,7 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
- * Feature tests for writing a chunk of an import, on whichever engine the suite
- * runs against: one transaction of its own and no savepoint, refused inside a
- * host's; every line built before any is classified; the rows per insert of
- * each engine; a unique violation classified again once, a second making the
- * new lines conflicts; the counts committed with the rows; the key uses of the
- * new rows inserted after them, in the same transaction; and a dry run that
- * writes nothing.
+ * Feature tests for writing a chunk of an import.
  *
  * A concurrent import is stood in for by a row of the same source identity
  * inserted, on the chunk's own connection, just after it classifies: the
@@ -127,9 +121,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A chunk is one transaction of its own, begun and committed once, whose
-     * statements are the batch's claim, the classification, the inserts and the
-     * counts, in that order, with no savepoint.
+     * A chunk is one transaction of its own, with no savepoint, its statements
+     * in order.
      *
      * @return void
      */
@@ -146,9 +139,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Each chunk inserts the key uses of its new rows after the rows, in its
-     * one transaction, one key use for each entry's key: the entry of each
-     * actor's line under that actor's key.
+     * Each chunk inserts its new rows' key uses after the rows, in its one
+     * transaction.
      *
      * @return void
      */
@@ -174,8 +166,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Only the chunk's new rows have their key uses inserted: the same lines
-     * written again are duplicates, which insert neither a row nor a key use.
+     * A duplicate line inserts neither a row nor a key use.
      *
      * @return void
      */
@@ -199,8 +190,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A chunk whose key uses fail is rolled back whole: no row is kept without
-     * its key uses, and the batch's counts are not written.
+     * A chunk whose key uses fail is rolled back whole.
      *
      * @return void
      *
@@ -227,8 +217,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A chunk refuses to run inside a transaction on the storage connection,
-     * writing nothing, since it would become a savepoint of the host's.
+     * A chunk refuses to run inside a transaction on the storage connection.
      *
      * @return void
      *
@@ -253,9 +242,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Every line is built before any is classified: a first line of a pair that
-     * does not build is rejected and never the candidate, so the later valid
-     * line is new, not a duplicate of nothing.
+     * Every line is built before any is classified, so a rejected line is never
+     * a candidate.
      *
      * @return void
      */
@@ -271,8 +259,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A chunk of 100 new lines is inserted 24 rows to a statement on SQLite,
-     * five inserts, and in one insert on MySQL and PostgreSQL.
+     * A chunk of 100 lines is inserted 24 rows to a statement on SQLite and in
+     * one insert elsewhere.
      *
      * @return void
      */
@@ -297,9 +285,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A unique violation rolls the whole chunk back and classifies it once
-     * more: the row that caused it went with the rollback, so the lines are new
-     * again and each is stored once.
+     * A unique violation rolls the chunk back and classifies it once more.
      *
      * @return void
      */
@@ -318,9 +304,7 @@ final class ImportWriterTest extends TestCase
 
     /**
      * Rows of `[the driver's message, whether a chunk that meets it is tried
-     * again]`: a deadlock, a serialisation failure and a lock wait timeout are
-     * lost to a concurrent chunk; a lost connection never is, since its commit
-     * may have happened.
+     * again]`.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -335,9 +319,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A chunk lost to a concurrent one rolls back whole and is classified and
-     * written again after a short wait, so every line is stored once; a lost
-     * connection is rethrown and nothing is stored.
+     * A chunk lost to a concurrent one is written again; a lost connection is
+     * rethrown.
      *
      * @param  string  $message
      * @param  bool  $retried
@@ -369,8 +352,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A chunk that keeps losing to concurrent ones stops after its most
-     * attempts and is rethrown masked, with nothing stored.
+     * A chunk that keeps losing stops after its most attempts and is rethrown
+     * masked.
      *
      * @return void
      *
@@ -395,8 +378,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A second violation makes the chunk's new lines conflicts, listed with the
-     * rest, inserts nothing, and writes the batch's counts alone.
+     * A second violation makes the chunk's new lines conflicts and inserts
+     * nothing.
      *
      * @return void
      */
@@ -417,8 +400,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * The counts commit with the rows: a chunk whose batch is no longer running
-     * fails at its counts, and its rows roll back with them.
+     * The counts commit with the rows.
      *
      * @return void
      *
@@ -443,8 +425,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A chunk none of whose lines builds opens no transaction and writes
-     * nothing; its lines are rejected.
+     * A chunk of rejected lines opens no transaction.
      *
      * @return void
      */
@@ -460,8 +441,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A dry run builds and classifies a chunk, counting it as an import would,
-     * and issues no statement but reads.
+     * A dry run builds and classifies a chunk but issues no statement but
+     * reads.
      *
      * @return void
      */
@@ -480,8 +461,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Given the run's retention decisions, each built record already past its
-     * retention on arrival is counted.
+     * Each built record already past its retention on arrival is counted.
      *
      * @return void
      */
@@ -519,8 +499,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Insert a row of the first line's source identity after each of the first
-     * classifications, on the chunk's own connection, and return the count of
+     * Insert a row of the first line's identity after each of the first
      * classifications.
      *
      * @param  int  $times
@@ -551,8 +530,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Make the first inserts of entries, up to the number given, fail before
-     * they run, as the driver reports the message given.
+     * Make the first inserts of entries fail as the driver reports the message
+     * given.
      *
      * @param  int  $times
      * @param  string  $message
@@ -591,9 +570,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Log the chunk's transaction events and statements by what each is: the
-     * claim and the counts on the batch, the classification, the inserts and
-     * the key uses.
+     * Log the chunk's transaction events and statements by what each is.
      *
      * @return \ArrayObject<int, string>
      */
@@ -623,9 +600,7 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * What the statement is to the chunk: the savepoint, the counts or the
-     * claim on the batch, the classification, an insert of entries or of key
-     * uses, or `null` for anything else.
+     * What the statement is to the chunk, or `null` for anything else.
      *
      * @param  string  $sql
      * @param  string  $batches
@@ -721,9 +696,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * Encrypt the card of the encrypted code for its actor, under the package's
-     * encrypter and wrapper, and make each actor's key first, so a chunk only
-     * looks the keys up.
+     * Encrypt the card for each actor and make each actor's key first, so a
+     * chunk only looks them up.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  ...$actors
      * @return void
@@ -769,8 +743,8 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
-     * A line of the encrypted code of the number given, `rec-<number>`, by the
-     * actor, its card to be encrypted for them.
+     * A line of the encrypted code, `rec-<number>`, by the actor, its card to
+     * be encrypted for them.
      *
      * @param  int  $number
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $actor

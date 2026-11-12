@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\ReconcileResult;
 
 /**
- * Unit tests for the tally of one reconciliation: each outcome kept apart, the
- * operations examined as their sum, the counts it refuses, when it is complete,
- * and its array form.
+ * Unit tests for the tally of one reconciliation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,8 +34,7 @@ final class ReconcileResultTest extends TestCase
     }
 
     /**
-     * Each outcome is kept under its own name, and the operations examined are
-     * their sum, so every one is counted once.
+     * Each outcome is kept apart, and the operations examined are their sum.
      *
      * @return void
      */
@@ -50,9 +47,7 @@ final class ReconcileResultTest extends TestCase
     }
 
     /**
-     * Rows of `[the counts, whether the tally is complete]`: a failure or an
-     * unverifiable operation leaves it incomplete, and an unfinished prune run,
-     * which has nothing to record, does not.
+     * Rows of `[counts, complete]`: a failure or unverifiable is incomplete.
      *
      * @return iterable<string, array{0: array{0: int, 1: int, 2: int, 3: int, 4: int}, 1: bool}>
      */
@@ -67,8 +62,7 @@ final class ReconcileResultTest extends TestCase
     }
 
     /**
-     * The tally is complete exactly when nothing failed and nothing was left
-     * unverifiable.
+     * The tally is complete when nothing failed or was left unverifiable.
      *
      * @param  array{0: int, 1: int, 2: int, 3: int, 4: int}  $counts
      * @param  bool  $complete

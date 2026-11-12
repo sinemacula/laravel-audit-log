@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Runtime\ReadGuard;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 
 /**
- * Unit tests for the guard that refuses a read of the trail entered while a
- * read, or the notification of a package record, is running: when it is active,
- * what it returns, that it lets go however the work ends, and that only the
- * first refusal in a window is said.
+ * Unit tests for the guard that refuses reading the trail inside a read or a
+ * package record's notification.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,9 +55,8 @@ final class ReadGuardTest extends TestCase
     }
 
     /**
-     * A window inside another leaves the guard active when it ends, until the
-     * outermost one ends too, and a nested window that throws does not release
-     * the outer one.
+     * A nested window leaves the guard active until the outermost ends, even
+     * when the nested one throws.
      *
      * @return void
      */
@@ -111,10 +108,8 @@ final class ReadGuardTest extends TestCase
     }
 
     /**
-     * The first refusal in a window is the first and every later one in the
-     * same window, a nested window's included, is not; the end of the outermost
-     * window, by a return or a throw, forgets it, so the next window says its
-     * first refusal again.
+     * Only the first refusal in a window is the first, and the outermost
+     * window's end forgets it.
      *
      * @return void
      */
@@ -148,9 +143,8 @@ final class ReadGuardTest extends TestCase
     }
 
     /**
-     * Outside a window nothing is refused, so nothing is the first refusal and
-     * nothing is remembered for the next window, which would otherwise lose its
-     * own first refusal.
+     * Outside a window nothing is refused or remembered, so the next window
+     * still says its first refusal.
      *
      * @return void
      */
@@ -194,9 +188,8 @@ final class ReadGuardTest extends TestCase
     }
 
     /**
-     * An exception thrown from the work shows the guard's frame with the work
-     * withheld, even with the arguments kept, as a development setting keeps
-     * them.
+     * A thrown exception shows the guard's frame with the work withheld, even
+     * with arguments kept.
      *
      * @return void
      */

@@ -7,18 +7,13 @@ namespace SineMacula\Laravel\AuditLog\Contracts;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
 
 /**
- * Context contributor contract: one step of the ordered seam that fills the
- * gaps in a record as it is captured. The package's defaults come first (the
- * origin, then the request, then the actor), and `AuditLog::contribute()`
- * extends the seam with the application's own, in the order they are
- * registered.
+ * Context contributor contract: one ordered step that fills the gaps in a
+ * captured record, after the package's own.
  *
- * A contributor only fills gaps: it never replaces an explicit value, and the
- * first to fill a field wins, so a default that fills a field leaves nothing
- * for a later contributor. It is resolved from the current container for every
- * capture and must keep no state between calls. It must never call a guard's
- * `user()`, which loads a user and dispatches `Authenticated`. It may query at
- * its own cost: the package's query budgets cover the defaults only.
+ * The first to fill a field wins and an explicit value is never replaced. An
+ * implementation keeps no state and never calls a guard's `user()`, which loads
+ * a user and dispatches `Authenticated`; its queries fall outside the package's
+ * budgets.
  *
  * @api
  *

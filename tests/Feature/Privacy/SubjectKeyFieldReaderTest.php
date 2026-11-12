@@ -29,14 +29,7 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
- * Feature tests for the field reader that opens what the package's encrypter
- * sealed: a live or superseded key reveals each field's typed value; a key is
- * erased only when a verified erasure row of this log, read by the id the key
- * names, lists it as destroyed; an unknown, substituted, unjournalled or
- * unwrappable key, and an envelope that fails to open or decode, are
- * unreadable; the keys are read by id on the writer in one statement, the
- * journal once more only for a page holding an erased key; the answers keep the
- * order given; and nothing is kept from one page to the next.
+ * Feature tests for the field reader that opens what the encrypter sealed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -85,9 +78,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A live key reveals each field as the typed value it was sealed as, a
-     * string `true` apart from the boolean, and a map with its maps as arrays;
-     * a superseded key still reveals what it sealed.
+     * A live or superseded key reveals each field's typed value.
      *
      * @return void
      */
@@ -117,11 +108,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A tombstoned key is erased only when the erasure row it names is an
-     * erasure of this log, whose payload is its digest's and whose signature
-     * verifies under a key the ring holds, and lists the key as destroyed: a
-     * row whose payload, HMAC or signing key was changed, a row of another kind
-     * listing it, and a verified erasure of another owner leave it unreadable.
+     * A key is erased only when a verified erasure row of this log lists it.
      *
      * @return void
      */
@@ -169,10 +156,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A key with no wrapped key is unreadable without a verified erasure row
-     * listing it: one tombstoned with the id of no journal row, a live one
-     * whose wrapped key was removed, and an erased one still holding its
-     * wrapped key.
+     * A key with no wrapped key and no verified erasure row is unreadable.
      *
      * @return void
      */
@@ -204,11 +188,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A key row that was substituted is unreadable: one whose HMAC, owner,
-     * generation or creation time was changed fails its signature, one naming a
-     * signing key the ring does not hold cannot be judged, and one holding
-     * another key's wrapped key, or naming another wrapping key, fails to
-     * unwrap against its own row.
+     * A substituted key row is unreadable.
      *
      * @return void
      */
@@ -245,9 +225,8 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A field whose key no row has is unreadable, as is one naming a key by
-     * anything but its canonical lower-case id; a page naming no canonical id
-     * asks the key store nothing.
+     * A field naming no known canonical key id is unreadable; a page with none
+     * asks nothing.
      *
      * @return void
      *
@@ -272,10 +251,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * An envelope that does not open under its key is unreadable: one of
-     * another version, one whose ciphertext was altered, one sealed under
-     * another data key naming this key, and one whose plaintext is not typed
-     * plaintext, malformed or a float.
+     * An envelope that fails to open or decode is unreadable.
      *
      * @return void
      *
@@ -306,10 +282,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A wrapper that fails leaves the fields of the keys it fails to unwrap
-     * unreadable without failing the page: one that throws, for whatever reason
-     * and with whatever message, and one that answers anything but a data key's
-     * length.
+     * A failing wrapper leaves its fields unreadable but the page intact.
      *
      * @return void
      */
@@ -333,9 +306,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * Keys are read through the storage connection's writer, never a replica
-     * lagging behind it: a key and an erasure the replica has not seen are
-     * still found, so a field reveals and an erased one reads erased.
+     * Keys are read from the writer, never a lagging replica.
      *
      * @return void
      */
@@ -364,9 +335,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * The answers are in the order the fields were given, one for each, a key's
-     * fields and a repeated field included, whatever order the key store
-     * answers in; a page with no field asks nothing.
+     * Answers keep the order the fields were given, whatever the store returns.
      *
      * @return void
      *
@@ -398,9 +367,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * Each page reads the key store afresh, so the same reader reveals a field
-     * on one page and reads it erased on the next once an erasure committed in
-     * between; the reader holds nothing but what it was built with.
+     * Each page reads the key store afresh, so a later erasure shows.
      *
      * @return void
      */
@@ -432,9 +399,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * An erasure row of another log never makes a key of this one erased, even
-     * signed and listing the key: the key reads unreadable, and erased again
-     * once the log is the row's.
+     * Another log's erasure row never erases a key of this log.
      *
      * @return void
      */
@@ -464,9 +429,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A page's keys are one statement, however many fields and keys it holds;
-     * the journal is read once more only when the page holds an erased key,
-     * once however many erased keys and erasures it holds.
+     * A page reads keys once, and the journal once more only for erased keys.
      *
      * @return void
      */
@@ -501,8 +464,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * The reader the container builds, the package's own key wrapper bound
-     * first when none is.
+     * The container's reader, with the package's key wrapper bound if none is.
      *
      * @return \SineMacula\Laravel\AuditLog\Privacy\SubjectKeyFieldReader
      */
@@ -527,8 +489,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A wrapper whose every unwrap answers the data key given, or throws when
-     * none is, and which never wraps.
+     * A wrapper unwrapping to the given key, or throwing without one.
      *
      * @param  ?string  $answer
      * @return \SineMacula\Laravel\AuditLog\Contracts\KeyWrapper
@@ -576,8 +537,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
             }
 
             /**
-             * The answer, or a failure naming the wrapped key when there is
-             * none.
+             * The answer, or a failure naming the wrapped key without one.
              *
              * @param  string  $wrapped
              * @param  string  $wrapKeyId
@@ -595,8 +555,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * The field the envelope is at the segments of the entry, as the projector
-     * builds it.
+     * The projected field for the envelope at the entry's segments.
      *
      * @param  string  $entryId
      * @param  non-empty-list<int|string>  $segments
@@ -623,8 +582,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * The ciphertext with the first byte after its nonce flipped, still strict
-     * base64url of the same length.
+     * The ciphertext with the byte after its nonce flipped, still base64url.
      *
      * @param  string  $ciphertext
      * @return string
@@ -641,9 +599,8 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * Put the storage connection on a read/write split of two SQLite files,
-     * each given the journal and the key tables, so a key made through the
-     * split lands on the primary alone.
+     * Split the storage connection over two SQLite files, so new keys land on
+     * the primary alone.
      *
      * @return void
      */
@@ -672,8 +629,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * The statements run since the test began listening, or since they were
-     * last forgotten.
+     * The statements run since listening began or they were last forgotten.
      *
      * @return list<string>
      */

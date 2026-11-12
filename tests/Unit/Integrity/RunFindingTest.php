@@ -11,8 +11,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
 
 /**
- * Unit tests for a finding of a verification run as a whole: its line of
- * output, the status it gives, which is its finding's own, and its defaults.
+ * Unit tests for a finding of a verification run as a whole.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

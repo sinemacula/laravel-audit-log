@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the import batches table: one row per import, written by the storage
- * connection's writer before the import's first entry, then updated with its
- * counts and status until it ends. Its identity and source are never changed,
- * and a batch is never deleted.
+ * Create the import batches table: one row per import, written before its first
+ * entry, updated with its counts and status until it ends, and never deleted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,34 +35,27 @@ return new class extends Migration {
         $mysql = $schema->getConnection()->getDriverName() === 'mysql';
 
         $schema->create($table, static function (Blueprint $blueprint) use ($table, $mysql): void {
-            // The batch's id, which every entry it imports names.
             $blueprint->uuid('id')->primary();
 
-            // Where the records came from and in which format. No column is
-            // named a reserved word on any engine: `input_format`, never
-            // `format`.
+            // `input_format`, never `format`: no column is a reserved word.
             $blueprint->string('source_id', 64);
             $blueprint->string('source_region', 32)->nullable();
             $blueprint->string('input_format', 32);
 
-            // Who imported them and why.
             $blueprint->string('importer_type', 191);
             $blueprint->string('importer_id', 191);
             $blueprint->string('reason', 64);
             $blueprint->string('external_reference', 191)->nullable();
 
-            // The file's SHA-256, read before the first entry, and whether the
-            // records were verified against their source, which this package
-            // never claims; always written, so it has no default.
+            // Whether the records were verified against their source, which
+            // this package never claims; always written, so it has no default.
             $blueprint->string('file_sha256', 64);
             $blueprint->boolean('externally_verified');
 
-            // The hold placed with the import, if one was asked for.
             $blueprint->uuid('hold_id')->nullable();
 
-            // Where the import stands, and its counts: `integer()`, never
-            // `unsignedInteger()`, which PostgreSQL does not have, and
-            // `lines_read`, never `read`.
+            // `integer()`, never `unsignedInteger()`, which PostgreSQL lacks,
+            // and `lines_read`, never the reserved `read`.
             $blueprint->string('status', 16);
             $blueprint->integer('lines_read');
             $blueprint->integer('imported');
@@ -76,8 +67,6 @@ return new class extends Migration {
             // canonical JSON list.
             $blueprint->text('conflict_ids')->nullable();
 
-            // To the microsecond: when the batch started, was last written and
-            // ended.
             $blueprint->dateTime('started_at', 6);
             $blueprint->dateTime('updated_at', 6);
             $blueprint->dateTime('finished_at', 6)->nullable();
@@ -90,9 +79,7 @@ return new class extends Migration {
                 $blueprint->engine('InnoDB');
             }
 
-            // The batches still running, by when each was last written, so a
-            // stale one is found. Named short, so it fits PostgreSQL's 63
-            // characters at the longest table name.
+            // Finds a running batch gone stale.
             $blueprint->index(['status', 'updated_at'], $table . '_status_index');
         });
     }
@@ -110,8 +97,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * a batch is beside the entries it imported.
+     * The storage connection, so a batch is beside the entries it imported.
      *
      * @return ?string
      *

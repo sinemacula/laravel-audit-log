@@ -25,10 +25,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Tests\TestCase;
 
 /**
- * End-to-end tests for what an inbound request id or `traceparent` becomes on a
- * stored record: believed only with its own flag on and from a trusted proxy,
- * replaced or ignored when malformed, and never kept, reported or logged when
- * it is not believed.
+ * End-to-end tests for what an inbound request id or `traceparent` becomes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -178,8 +175,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A configured header name is the one believed, and the default name is
-     * then a header like any other.
+     * A configured header name is believed, and the default is then ignored.
      *
      * @return void
      */
@@ -218,8 +214,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A malformed id from a trusted proxy is replaced with a generated one, and
-     * the record is still written.
+     * A trusted malformed request id is replaced, and the record is written.
      *
      * @param  string  $requestId
      * @return void
@@ -256,8 +251,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A malformed `traceparent` from a trusted proxy is ignored, and the record
-     * is written with no trace id: none is ever generated.
+     * A trusted malformed `traceparent` is ignored; no trace id is generated.
      *
      * @param  string  $traceparent
      * @return void
@@ -273,8 +267,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A header that is not believed is not kept as a claim either: no column of
-     * the stored row, and nothing in Context, holds it.
+     * An unbelieved header is kept in no column and nowhere in Context.
      *
      * @return void
      */
@@ -293,8 +286,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A malformed header is dropped in silence, from a trusted proxy too:
-     * nothing is reported or logged, so it can reach no log or error tracker.
+     * A malformed header is dropped silently, never reported or logged.
      *
      * @return void
      */
@@ -321,9 +313,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A header sent twice is not believed, since an edge that overwrites it
-     * leaves exactly one value and a client's second value would otherwise
-     * decide.
+     * A repeated header is not believed, or a client's value would decide.
      *
      * @return void
      */
@@ -349,8 +339,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A malformed setting fails closed whichever peer the request came from,
-     * and what is reported names the setting and not the header.
+     * A malformed flag fails closed, reporting the setting and not the header.
      *
      * @return void
      */
@@ -370,10 +359,7 @@ final class TrustedHeadersTest extends TestCase
     }
 
     /**
-     * A record made in global middleware ahead of `TrustProxies` runs before
-     * the proxy is trusted, so the header is not believed and a generated id is
-     * kept for the rest of the request, though the proxy is trusted by the time
-     * the route records: pinned, and documented.
+     * A record before `TrustProxies` keeps a generated id for the request.
      *
      * @return void
      */

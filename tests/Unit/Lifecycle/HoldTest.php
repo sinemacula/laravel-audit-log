@@ -13,8 +13,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for an active hold: the fields it keeps, the ones it refuses,
- * whether its review date has passed, and the form a listing shows.
+ * Unit tests for an active hold.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,8 +61,7 @@ final class HoldTest extends TestCase
     }
 
     /**
-     * The listing form holds every field, the scope as its canonical form and
-     * the operator as its pair.
+     * The listing form holds every field, the scope in canonical form.
      *
      * @return void
      */
@@ -86,9 +84,7 @@ final class HoldTest extends TestCase
     }
 
     /**
-     * Rows of `[review date, instant, whether it has passed]`: a review date
-     * passes only once it is before the instant, never at it, and a hold with
-     * none never passes it.
+     * Rows of `[review date, instant, passed]`: passed only strictly before it.
      *
      * @return iterable<string, array{0: ?string, 1: string, 2: bool}>
      */
@@ -118,8 +114,7 @@ final class HoldTest extends TestCase
     }
 
     /**
-     * An instant that is not in the package's form is refused rather than
-     * compared as text.
+     * An instant not in the package's form is refused, not compared as text.
      *
      * @return void
      */
@@ -132,8 +127,7 @@ final class HoldTest extends TestCase
     }
 
     /**
-     * Rows of `[the fields to change, the message]`: each field that is
-     * malformed.
+     * Rows of `[the fields to change, the message]`: one malformed field each.
      *
      * @return iterable<string, array{0: HoldFields, 1: string}>
      */
@@ -173,9 +167,7 @@ final class HoldTest extends TestCase
     }
 
     /**
-     * An external reference of exactly 191 characters, multibyte ones counted
-     * as one each, is kept: protects against a limit off by one or counted in
-     * bytes.
+     * 191 multibyte characters fit: the limit counts characters, not bytes.
      *
      * @return void
      */

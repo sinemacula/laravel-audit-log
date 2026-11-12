@@ -8,26 +8,21 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\ReinstateCommand;
 use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
 use SineMacula\Laravel\AuditLog\Lifecycle\Reinstater;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for `audit-log:reinstate`: it reinstates an erased owner,
- * prints the reinstatement, the owner's fingerprint and never the owner, and
- * exits 0; an owner who is not erased exits 1, recorded `denied`; a failure
- * exits 1 printing its class and never its message; and every malformed
- * argument or option exits 2 before any statement.
+ * Feature tests for `audit-log:reinstate`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +32,7 @@ use Tests\TestCase;
 #[CoversClass(ReinstateCommand::class)]
 final class ReinstateCommandTest extends TestCase
 {
-    use MakesSubjectKeys, ReadsTheTrail;
+    use CountsStatements, MakesSubjectKeys, ReadsTheTrail;
 
     /** @var array<string, string> The options of the authority every reinstatement is asked for on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.reinstate'];
@@ -49,9 +44,7 @@ final class ReinstateCommandTest extends TestCase
     private string $printed = '';
 
     /**
-     * Freeze the clock, report to a recording handler, bind the package's key
-     * wrapper, and register the command with the console kernel, which keeps
-     * the test independent of the provider.
+     * Freeze the clock, record reports, bind the wrapper, register the command.
      *
      * @return void
      */
@@ -87,9 +80,7 @@ final class ReinstateCommandTest extends TestCase
     }
 
     /**
-     * An erased owner is reinstated, printed by the journal row, its
-     * fingerprint and the floor, recorded, and exits 0; nothing printed names
-     * the owner.
+     * An erased owner is reinstated and printed, never named, and exits 0.
      *
      * @return void
      */
@@ -131,8 +122,7 @@ final class ReinstateCommandTest extends TestCase
     }
 
     /**
-     * A failure exits 1 and prints its class, never its message, which can
-     * carry a statement's bindings.
+     * A failure prints its class, never its message, which can carry bindings.
      *
      * @return void
      *
@@ -150,8 +140,7 @@ final class ReinstateCommandTest extends TestCase
     }
 
     /**
-     * A reinstatement whose record could not be written still reinstates, says
-     * so, and exits 0.
+     * An unrecorded reinstatement still reinstates and warns.
      *
      * @return void
      */
@@ -167,8 +156,7 @@ final class ReinstateCommandTest extends TestCase
     }
 
     /**
-     * Rows of `[arguments and options, message]`: each malformed argument or
-     * option, and the refusal it prints.
+     * Rows of `[arguments and options, message]`: each malformed input.
      *
      * @return iterable<string, array{0: array<string, string>, 1: string}>
      */
@@ -216,26 +204,7 @@ final class ReinstateCommandTest extends TestCase
     }
 
     /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
-    }
-
-    /**
-     * Run the command on the owner, with the arguments and options given over
-     * the owner's and the authority's, keep what it printed, and return its
-     * exit code.
+     * Run the command on the owner and return its exit code.
      *
      * @param  array<string, string>  $given
      * @return int

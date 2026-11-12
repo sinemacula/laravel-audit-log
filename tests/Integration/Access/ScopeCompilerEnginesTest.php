@@ -18,15 +18,8 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\TestCase;
 
 /**
- * Integration tests for the one compiler of every read on whichever engine the
- * suite runs against, its statements run on rows the engine stored: a tenant
- * matches as an exact pair, the tenantless rows are those with both tenant
- * columns `null`, a caller's filter cannot reach past a scope of several
- * tenants, ids of one microsecond compare in the type the migration gave them,
- * and an export's keyset visits every row up to its bound exactly once.
- *
- * Rows are seeded with literal inserts of the columns each test is about, so
- * the statements read what the engine stored, not what the package wrote.
+ * Integration tests for the scope compiler's statements run on rows each engine
+ * stored: tenants, filters within a scope, microsecond ids and export keysets.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,9 +71,8 @@ final class ScopeCompilerEnginesTest extends TestCase
     }
 
     /**
-     * A caller's filter after a scope of several tenants narrows within them
-     * and never reaches another tenant's rows, even a filter naming that
-     * tenant, which the compiler already knows matches nothing.
+     * A caller's filter after a scope of several tenants never reaches another
+     * tenant's rows, even one naming that tenant.
      *
      * @return void
      */
@@ -103,9 +95,8 @@ final class ScopeCompilerEnginesTest extends TestCase
     }
 
     /**
-     * Two rows of one microsecond are ordered by their ids as the migrated
-     * column compares them, and the strict cursor after the higher one returns
-     * exactly the lower one and the older rows, never itself.
+     * Rows of one microsecond order by id as the migrated column compares them,
+     * and a strict cursor never returns its own row.
      *
      * @return void
      */
@@ -131,9 +122,8 @@ final class ScopeCompilerEnginesTest extends TestCase
     }
 
     /**
-     * Walking an export's keyset in chunks visits every row recorded up to the
-     * bound exactly once, in recording order, ties of one microsecond included,
-     * and never a row past the bound.
+     * An export's keyset visits every row up to its bound exactly once, in
+     * recording order.
      *
      * @return void
      */

@@ -11,9 +11,8 @@ use SineMacula\Laravel\AuditLog\Privacy\Enums\FieldState;
 use SineMacula\Laravel\AuditLog\Privacy\FieldReading;
 
 /**
- * Unit tests for what a field reader answers: a sealed reading holds its state
- * and no value and shows its marker, and a revealed reading holds its value and
- * no state and shows the value.
+ * Unit tests for a field reading: a sealed one holds a state and shows its
+ * marker, and a revealed one holds and shows its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

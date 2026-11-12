@@ -17,20 +17,14 @@ parameters:
         - database
         - tests
 
-    # Analyse against the supported PHP range (composer.json and the CI matrix)
-    # rather than the PHP running PHPStan. Version-gated rules are evaluated at
-    # the minimum, so features only valid on newer PHP, such as #[\Override] on
-    # properties (PHP 8.5+), are not demanded of code that must load on PHP 8.3;
-    # the trade-off is that PHP 8.4/8.5-only deprecation checks do not run.
+    # Analyse at the supported PHP range, so 8.5-only features such as
+    # #[\Override] on properties are not demanded of code that loads on 8.3.
     phpVersion:
         min: 80300
         max: 80599
 
-    # The package supports Laravel 12 alongside 13, so its floor sits below the
-    # 13.2 that introduced the model attributes. The legacy form is the only form
-    # available until the floor moves, which dropping 12 would mean. The leading
-    # wildcard is required because the config is staged outside the repository
-    # when it runs.
+    # Laravel 12 support keeps the floor below 13.2's model attributes. The
+    # leading wildcard is needed because qlty stages the config elsewhere.
     ignoreErrors:
         -
             identifier: sineMaculaLaravel.modelAttributeLaggingFloor

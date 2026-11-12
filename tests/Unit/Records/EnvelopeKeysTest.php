@@ -13,12 +13,7 @@ use SineMacula\Laravel\AuditLog\Records\EnvelopeKeys;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * Unit tests for the keys a record's envelopes name: every envelope found at
- * any depth of the properties and the context, in arrays and objects alike, and
- * an IP address stored as one; exactly the values the read path builds an
- * encrypted field from; the keys distinct, sorted bytewise and canonical
- * lower-case UUIDs; and an envelope the application shaped found like any
- * other.
+ * Unit tests for the keys a record's envelopes name.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,9 +36,8 @@ final class EnvelopeKeysTest extends TestCase
     private const string CIPHERTEXT = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
     /**
-     * An envelope is found at the top of a column, inside maps and lists at any
-     * depth, as an array or as a decoded object, in the properties and in the
-     * context, and nothing inside an envelope is read.
+     * An envelope is found at any depth of the properties and the context, as
+     * an array or an object, and nothing inside one is read.
      *
      * @return void
      */
@@ -67,10 +61,8 @@ final class EnvelopeKeysTest extends TestCase
     }
 
     /**
-     * An IP address stored as an envelope, text beginning `{` that decodes one
-     * level deep to exactly one, is found; any other IP address, text that is
-     * not JSON, JSON nested deeper, a list, and an envelope whose key is no
-     * UUID are not.
+     * An IP address stored as an envelope is found, and any other IP address is
+     * not.
      *
      * @return void
      */
@@ -129,8 +121,7 @@ final class EnvelopeKeysTest extends TestCase
 
     /**
      * A value names a key exactly when the read path builds an encrypted field
-     * from it, so every envelope a reader is asked to open has its key use and
-     * nothing else is given one.
+     * from it.
      *
      * @param  array<array-key, bool|float|int|string|null>  $candidate
      * @param  bool  $envelope
@@ -164,9 +155,8 @@ final class EnvelopeKeysTest extends TestCase
     }
 
     /**
-     * A key that is not a canonical lower-case UUID names no key use: a custom
-     * encrypter's own reference, an upper-case UUID and a UUID with braces are
-     * left out, though each is an envelope the reader would show.
+     * A key that is not a canonical lower-case UUID names no key use, though
+     * the reader would show its envelope.
      *
      * @return void
      */
@@ -183,9 +173,8 @@ final class EnvelopeKeysTest extends TestCase
     }
 
     /**
-     * A value the application itself shaped as an envelope, retained in its
-     * properties, is read as an envelope, as the read path reads it, and its
-     * key is found like any other.
+     * A value the application shaped as an envelope is read as one, and its key
+     * is found like any other.
      *
      * @return void
      */

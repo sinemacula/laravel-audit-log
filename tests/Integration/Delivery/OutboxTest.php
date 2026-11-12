@@ -30,12 +30,8 @@ use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\TestCase;
 
 /**
- * Integration tests for the outbox on the engine the suite runs against: one
- * row per insert, alone outside a transaction and in a savepoint inside one;
- * the candidates a drain may claim; a claim that holds only while the row is
- * unfailed, due and unleased; every later change fenced by the claim's token;
- * renewals, retries, failures and requeues; on SQLite, MySQL and PostgreSQL
- * alike.
+ * Integration tests for the outbox's inserts, candidates, claims and fenced
+ * changes, on SQLite, MySQL and PostgreSQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,8 +89,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a failed test left open, then drop what the
-     * test added and release the clock.
+     * Roll back any open transaction, drop what the test added and release the
+     * clock.
      *
      * @return void
      */
@@ -119,8 +115,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * An insert is one row under the id, holding the payload, with no attempt,
-     * due and created now, unclaimed and not failed.
+     * An insert is one due, unclaimed, unfailed row under the id, holding the
+     * payload, with no attempt.
      *
      * @return void
      */
@@ -143,8 +139,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Outside a transaction the insert opens none: no transaction begins, and
-     * the connection is at level 0 throughout.
+     * Outside a transaction an insert opens none.
      *
      * @return void
      */
@@ -169,8 +164,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Inside a host transaction the insert runs one level deeper, in a
-     * savepoint, and the host is back at its own level once it succeeds.
+     * Inside a host transaction an insert runs in a savepoint, and the host
+     * returns to its own level.
      *
      * @return void
      */
@@ -200,9 +195,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Inside a healthy host transaction an insert that fails on the probe
-     * table's `NOT NULL` column propagates, then the host writes again and
-     * commits: both host rows exist, and no outbox row does.
+     * A failed insert inside a healthy host propagates, and the host still
+     * commits its own rows with no outbox row.
      *
      * @return void
      *
@@ -269,9 +263,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * On a read/write split the row is inserted on the primary, the replica
-     * never sees it, and the outbox still finds it, because it reads the
-     * writer.
+     * On a read/write split the row is inserted on and read from the primary.
      *
      * @return void
      */
@@ -292,8 +284,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Moved to a connection of its own, the outbox inserts and reads there, and
-     * names that connection.
+     * Moved to its own connection, the outbox inserts, reads and is named
+     * there.
      *
      * @return void
      */
@@ -313,8 +305,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * The connection's name is the one the connection gives itself, so a name
-     * that selects its writer is named as the connection.
+     * The connection's name is its own, even when a name selecting its writer
+     * was used.
      *
      * @return void
      */
@@ -388,8 +380,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A row due after the instant given is no candidate, even a microsecond
-     * after it; one due exactly then is.
+     * A row due after the given instant is no candidate, even by a microsecond;
+     * one due exactly then is.
      *
      * @return void
      */
@@ -402,8 +394,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A row whose lease has not passed is no candidate, even when the lease
-     * ends this very microsecond.
+     * A row whose lease has not passed is no candidate, even when it ends this
+     * microsecond.
      *
      * @return void
      */
@@ -479,8 +471,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A claim writes a token of its own to the row and a lease that ends
-     * `lease_seconds` from now.
+     * A claim writes its own token and a lease ending `lease_seconds` from now.
      *
      * @return void
      */
@@ -501,8 +492,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A claim counts an attempt on the row, and gives the count, this attempt
-     * included.
+     * A claim counts an attempt and returns the count, this attempt included.
      *
      * @return void
      */
@@ -531,8 +521,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Each claim writes a new token, so a row reclaimed once its lease passed
-     * is owned by the second claim alone.
+     * Each claim writes a new token, so a reclaimed row belongs to the second
+     * claim alone.
      *
      * @return void
      */
@@ -584,8 +574,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A row another claim holds a live lease on is not claimed, and its owner
-     * is kept.
+     * A row with another claim's live lease is not claimed, and its owner is
+     * kept.
      *
      * @return void
      */
@@ -619,8 +609,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A candidate that another drain claims, fails or deletes before this claim
-     * is not claimed.
+     * A candidate another drain claims, fails or deletes first is not claimed.
      *
      * @return void
      */
@@ -645,8 +634,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A claim that changes no row reads nothing after its update, so a lost
-     * race costs one statement.
+     * A claim that changes no row reads nothing after its update.
      *
      * @return void
      */
@@ -709,8 +697,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A claim whose token is not the row's (it lost the row to a later claim)
-     * changes nothing and says so.
+     * A claim whose token is not the row's changes nothing and says so.
      *
      * @param  string  $operation
      * @return void
@@ -756,8 +743,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * The first owner of a row reclaimed past its lease changes nothing, even
-     * though its claim was once the row's.
+     * The first owner of a row reclaimed past its lease changes nothing.
      *
      * @param  string  $operation
      * @return void
@@ -803,8 +789,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A renewal within the same microsecond as the claim changes no column,
-     * which MySQL counts as no row changed, and the claim still owns the row.
+     * A renewal in the claim's microsecond changes no column, which MySQL
+     * counts as no row changed, and still owns the row.
      *
      * @return void
      */
@@ -821,8 +807,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A renewal that changes a row costs one statement; only one that changes
-     * none reads the row again.
+     * A renewal reads the row again only when it changes none.
      *
      * @return void
      */
@@ -844,15 +829,14 @@ final class OutboxTest extends TestCase
         $this->outbox()->renew($claim);
         $this->outbox()->renew(new OutboxClaim(self::ID, self::STALE_TOKEN, self::PAYLOAD, 1));
 
-        // The owner's renewal is the first statement alone; the stale one's is
-        // the next two
+        // The owner's renewal is the first statement; the stale one's are the
+        // next two
         self::assertSame(['update', 'update', 'select'], $queries);
     }
 
     /**
-     * A retry releases the claim, makes the row due at the instant given and
-     * names the error's class; the row is a candidate again once that instant
-     * comes, and not before.
+     * A retry releases the claim and makes the row due at the given instant,
+     * naming the error's class.
      *
      * @return void
      */
@@ -879,8 +863,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A failure keeps the row, with when it failed and the error's class, and
-     * releases the claim; the row is never a candidate again.
+     * A failure keeps the row with its time and error class, releases the
+     * claim, and is never a candidate again.
      *
      * @return void
      */
@@ -937,8 +921,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * An error class is cut on a character boundary, so a multibyte name never
-     * leaves half a character in the column.
+     * An error class is cut on a character boundary, never mid-character.
      *
      * @return void
      */
@@ -980,9 +963,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Requeueing unfails each failed row among the ids, resets its attempts,
-     * makes it due now and unclaimed, and keeps its error's class; a row that
-     * is not failed, among the ids or not, is left as it is.
+     * Requeueing resets each failed row among the ids to due, unclaimed and
+     * unattempted, keeping its error class, and leaves other rows alone.
      *
      * @return void
      */
@@ -1055,8 +1037,7 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * A list of ids longer than one statement binds is requeued in chunks,
-     * every failed row of it.
+     * A list of ids longer than one statement binds is requeued in chunks.
      *
      * @return void
      */
@@ -1128,8 +1109,8 @@ final class OutboxTest extends TestCase
     }
 
     /**
-     * Make the change the operation names with the claim, and return whether
-     * the outbox says the claim still owned the row.
+     * Apply the operation with the claim, and return whether the claim still
+     * owned the row.
      *
      * @param  string  $operation
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim

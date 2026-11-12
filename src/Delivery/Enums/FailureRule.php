@@ -8,15 +8,11 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 
 /**
- * What a failed write of one record does, decided once from its timing, whether
- * it was asked to fail closed and the configured failure mode: spill, report
- * and dispatch `AuditWriteFailed` and let the code go on, or spill, dispatch it
- * and throw, or dispatch it and throw without leaving a replayable spill.
+ * What a failed write of one record does, from its timing, whether it fails
+ * closed and the configured failure mode.
  *
- * A transactional record is never spilled, whatever else is set: it describes
- * work that has not committed, and a replay must never turn it into committed
- * evidence. A record asked to fail closed, or any record under the `throw`
- * mode, is spilled and thrown. Every other record is spilled and reported.
+ * A transactional record is never spilled: a replay must never turn uncommitted
+ * work into committed evidence.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,10 +34,7 @@ enum FailureRule: string
     case THROW = 'throw';
 
     /**
-     * The rule for a record of the timing, asked to fail closed or not, under
-     * the failure mode: `THROW` for a transactional record whatever else is
-     * set, then `SPILL_AND_THROW` for a record asked to fail closed or under
-     * the `throw` mode, and `REPORT` otherwise.
+     * The rule for a record; a transactional one always throws unspilled.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
      * @param  bool  $failClosed

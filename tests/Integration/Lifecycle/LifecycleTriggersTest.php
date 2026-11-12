@@ -13,22 +13,8 @@ use Tests\Concerns\RunsDocumentedSql;
 use Tests\TestCase;
 
 /**
- * Integration tests for the triggers and grants the storage note documents for
- * the lifecycle tables, run exactly as written on whichever engine the suite
- * runs against: they install; a journal row is never updated or deleted, even
- * by the maintenance user; a hold is never updated, and is deleted by the
- * maintenance user alone (on SQLite, which has no users, by anyone); an import
- * batch is never deleted and its identity never changed, while its progress is
- * written; the lock row is never deleted or renumbered, while its token and
- * time are written; and on PostgreSQL none of the four is truncated.
- *
- * On MySQL and PostgreSQL the documented grants are run too, for the logins
- * this worker creates, `audit_writer_<token>`, `audit_maintenance_<token>` and
- * `audit_verifier_<token>`, which are dropped when the test ends, as the
- * triggers are: the writer reads the journal and writes no row of it, and
- * updates a batch's progress alone; the maintenance user inserts a journal row
- * and never updates or deletes one; the verifier only reads. The tests cover
- * documented SQL, not a class of the package.
+ * Integration tests for the storage note's lifecycle triggers and grants, run
+ * as written on every engine; they cover documented SQL, not a package class.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,8 +45,7 @@ final class LifecycleTriggersTest extends TestCase
     private array $names = [];
 
     /**
-     * Run the documented grants for this worker's logins, where the engine has
-     * users, then the documented triggers.
+     * Run the documented grants for this worker's logins, then the triggers.
      *
      * @return void
      */
@@ -89,8 +74,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * Drop the documented triggers, close the logins' connections and drop the
-     * logins.
+     * Drop the triggers, close the logins' connections and drop the logins.
      *
      * @return void
      */
@@ -111,9 +95,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * Every documented trigger on the four lifecycle tables is installed, and
-     * no other: two on each table, on PostgreSQL a third for `TRUNCATE`, and on
-     * SQLite none for a hold's delete.
+     * Exactly the documented triggers are installed on the lifecycle tables.
      *
      * @return void
      */
@@ -134,8 +116,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A journal row is never updated, even by the tables' owner, and is left as
-     * it was.
+     * A journal row is never updated, even by the tables' owner.
      *
      * @return void
      */
@@ -152,9 +133,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A journal row is never deleted, by the tables' owner nor, on MySQL and
-     * PostgreSQL, by the maintenance user granted `DELETE` beyond the
-     * documented grants: the trigger has no maintenance exception.
+     * A journal row is never deleted, even by the maintenance user.
      *
      * @return void
      */
@@ -179,8 +158,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A hold is never updated, even by the tables' owner, and is left as it
-     * was.
+     * A hold is never updated, even by the tables' owner.
      *
      * @return void
      */
@@ -197,10 +175,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL a hold's delete by the tables' owner or by the
-     * writer granted `DELETE` beyond the documented grants is refused, while
-     * the maintenance user deletes it, as a release does, and the other hold
-     * stays.
+     * On MySQL and PostgreSQL only the maintenance user deletes a hold.
      *
      * @return void
      */
@@ -225,8 +200,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * On SQLite, which has no users, the holds have no delete trigger, so a
-     * release deletes its hold.
+     * On SQLite, which has no users, a release deletes its hold.
      *
      * @return void
      */
@@ -243,8 +217,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * Rows of `[column, value]`: each immutable batch column changed to a value
-     * no stored batch has.
+     * Rows of `[column, value]`, the value one no stored batch has.
      *
      * @return iterable<string, array{0: string, 1: bool|string}>
      */
@@ -256,8 +229,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A change to any immutable batch column, from or to null included, is
-     * refused, even by the tables' owner, and the batch is left as it was.
+     * A change to any immutable batch column is refused, even for the owner.
      *
      * @param  string  $column
      * @param  bool|string  $value
@@ -277,8 +249,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A batch's status, counts, conflict ids and times are written as an import
-     * runs, under the triggers, and read back as written.
+     * A batch's progress columns are written under the triggers.
      *
      * @return void
      */
@@ -309,8 +280,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * The lock's one row is never deleted or renumbered, even by the tables'
-     * owner, so every lifecycle transaction finds it.
+     * The lock's one row is never deleted or renumbered.
      *
      * @return void
      */
@@ -324,9 +294,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * The lock is taken by writing its token and time, under the triggers, and
-     * on MySQL and PostgreSQL by the maintenance user, who may write those two
-     * columns alone.
+     * The lock is taken by writing its token and time under the triggers.
      *
      * @return void
      */
@@ -352,8 +320,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * Rows of `[table]`: each lifecycle table the PostgreSQL truncate triggers
-     * are on.
+     * Rows of `[table]`: each table with a PostgreSQL truncate trigger.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -368,8 +335,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * On PostgreSQL a `TRUNCATE`, which no row trigger sees, is refused by the
-     * statement trigger, even for the tables' owner, and every row stays.
+     * On PostgreSQL a `TRUNCATE` is refused by the statement trigger.
      *
      * @param  string  $table
      * @return void
@@ -393,10 +359,8 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL the documented grants let the writer read the
-     * journal and write no row of it, and the maintenance user insert a row and
-     * neither update nor delete one: the engine, not a trigger, refuses the
-     * rest.
+     * The grants let the writer only read the journal, and the maintenance user
+     * only insert into it.
      *
      * @return void
      */
@@ -431,10 +395,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL the documented grants let the writer insert a
-     * batch and update its status, counts, conflict ids and times, and nothing
-     * else of it: each immutable column's update and the batch's delete are
-     * refused by the column grants, and the batch keeps its identity.
+     * The grants let the writer update only a batch's progress columns.
      *
      * @return void
      */
@@ -462,9 +423,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL the verifier reads the journal and the holds, as
-     * verification and the checks do, and writes neither, nor reads the lock or
-     * the batches it has no use for.
+     * The verifier reads the journal and holds, and writes neither.
      *
      * @return void
      */
@@ -497,8 +456,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A journal row with every column a row must have, numbered so its id and
-     * sequence are its own.
+     * A journal row, numbered so its id and sequence are its own.
      *
      * @param  int  $number
      * @return array<string, int|string>
@@ -523,8 +481,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A hold with every column a hold must have, numbered so its id and journal
-     * row are its own.
+     * A hold, numbered so its id and journal row are its own.
      *
      * @param  int  $number
      * @return array<string, int|string>
@@ -546,8 +503,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * A running batch with every column a batch must have, and no region,
-     * reference or hold.
+     * A running batch with no region, reference or hold.
      *
      * @return array<string, bool|int|string>
      */
@@ -574,8 +530,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * The progress a finished batch is written with: its status, its counts,
-     * its conflict ids and its times.
+     * The progress a finished batch is written with.
      *
      * @return array<string, int|string>
      */
@@ -595,8 +550,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * Grant the placeholder's login a privilege on the table beyond the
-     * documented grants.
+     * Grant the placeholder's login a privilege beyond the documented grants.
      *
      * @param  string  $privilege
      * @param  string  $table
@@ -613,8 +567,7 @@ final class LifecycleTriggersTest extends TestCase
     }
 
     /**
-     * The names of the triggers installed on the given tables, sorted bytewise,
-     * whatever order the engine's collation gives.
+     * The triggers on the tables, sorted bytewise whatever the collation.
      *
      * @param  list<string>  $tables
      * @return list<string>

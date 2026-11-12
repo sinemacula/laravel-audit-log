@@ -8,24 +8,8 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 use SineMacula\Laravel\AuditLog\Support\ValueNormaliser;
 
 /**
- * The keys a record's encryption envelopes name, as the key uses index them:
- * the distinct `k` of every value that is exactly an envelope, at any depth of
- * the properties and the context, and of an IP address stored as one, kept when
- * it is a canonical lower-case UUID, the form every key the package creates
- * has, and sorted bytewise.
- *
- * A value is an envelope exactly when the read path reads it as one: a map of
- * `v`, `k` and `c` and nothing else, in any order, `v` an integer from 1 to the
- * largest integer every reader of the stored JSON keeps exactly, and `k` and
- * `c` non-empty clean text. An envelope is a leaf: nothing inside it is read.
- * An IP address is one when it begins `{` and decodes, one level deep, to a map
- * that is. Whatever encrypter sealed an envelope it is found alike, so a key
- * use never misses an envelope the reader would show. An envelope the
- * application shaped itself never reaches a stored record: minimisation removes
- * every value that is exactly an envelope from the properties and the context a
- * record is given, before anything is sealed (`Privacy\RecordMinimiser`), so
- * every envelope a record holds is one its own sealer made, and no key use
- * links an entry to a key that sealed nothing in it.
+ * The keys a record's encryption envelopes name, for its key uses; minimising
+ * strips caller-shaped envelopes, so every one found was sealed for it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +21,7 @@ final class EnvelopeKeys
     /** @var string A canonical lower-case UUID: the only form of a key a key use names. */
     public const string KEY_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/';
 
-    /** @var list<string> The keys of an envelope, sorted: exactly these and nothing else. */
+    /** @var list<string> The keys of an envelope, sorted. */
     private const array ENVELOPE_MEMBERS = ['c', 'k', 'v'];
 
     /** @var int How deep an IP address's JSON is decoded: one map of scalars. */
@@ -49,9 +33,8 @@ final class EnvelopeKeys
     private function __construct() {}
 
     /**
-     * The distinct keys, sorted bytewise, of every envelope in the properties
-     * and the context, at any depth of arrays and objects, and of an IP address
-     * stored as one, each a canonical lower-case UUID.
+     * The distinct UUID keys, sorted bytewise, of every envelope in the
+     * properties, the context and an IP address stored as one.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -87,9 +70,8 @@ final class EnvelopeKeys
     }
 
     /**
-     * Whether the members are exactly an envelope: `v`, `k` and `c` and nothing
-     * else, `v` an integer from 1 to the largest every reader keeps exactly,
-     * and `k` and `c` non-empty clean text.
+     * Whether the members are exactly an envelope, read as the read path reads
+     * one.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -112,8 +94,8 @@ final class EnvelopeKeys
     }
 
     /**
-     * Gather the key of the value when it is an envelope, and otherwise of
-     * every envelope its members hold, at any depth.
+     * Gather the key of the value when it is an envelope, or of every envelope
+     * its members hold.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -141,8 +123,7 @@ final class EnvelopeKeys
     }
 
     /**
-     * Gather the key of an IP address stored as an envelope: one that begins
-     * `{` and decodes, one level deep, to a map that is exactly one.
+     * Gather the key of an IP address stored as an envelope.
      *
      * @param  ?string  $ip
      * @param  array<string, true>  $keys
@@ -186,8 +167,8 @@ final class EnvelopeKeys
     }
 
     /**
-     * Whether the value is an integer from 1 to the largest integer every
-     * reader of the stored JSON keeps exactly.
+     * Whether the value is an integer from 1 to the largest every JSON reader
+     * keeps exactly.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

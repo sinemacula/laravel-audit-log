@@ -10,23 +10,8 @@ use SineMacula\Laravel\AuditLog\Config\ScheduleSetting;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 
 /**
- * The retention settings, read from configuration on every call and validated
- * as they are read: how many days entries are kept
- * (`audit-log.retention.after_days`, and per category
- * `audit-log.retention.categories`), how many days a category must stay
- * readable (`audit-log.retention.preserve`), how much one prune deletes at a
- * time and for how long it runs, and when the package schedules it.
- *
- * A number of days is 0 to 36500, and 0 is forever, both for a retention and
- * for a preservation. A missing number takes its default; a number is an
- * integer, or the canonical digit string an environment line gives, within its
- * range. Each map is keyed by categories of the event-definition grammar, and a
- * list, a key of no category or a malformed value is refused. A missing
- * schedule takes its default, `null` or an empty one schedules nothing, and
- * anything else must be a cron expression. A category kept for a finite time
- * shorter than it must be preserved is refused before any run. Every malformed
- * value fails closed with an `InvalidArgumentException` naming the key and
- * never the value.
+ * The retention settings, read and validated on every call; a malformed value
+ * fails closed naming its key, never the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -154,8 +139,7 @@ final readonly class RetentionSettings
     }
 
     /**
-     * Whether any entry is kept for less than forever: the default retention,
-     * or the retention of any category, is a number of days.
+     * Whether the default or any category's retention is finite.
      *
      * @return bool
      *
@@ -171,8 +155,8 @@ final readonly class RetentionSettings
     }
 
     /**
-     * Read every retention setting, failing on the first malformed one, then
-     * refuse a category kept for a finite time shorter than it is preserved.
+     * Read every setting, failing on the first malformed one, then refuse a
+     * category kept for less than it is preserved.
      *
      * @return void
      *
@@ -220,9 +204,8 @@ final readonly class RetentionSettings
     }
 
     /**
-     * The map of days under the key: empty when it is not set or is `null`, and
-     * otherwise a map of categories to days from 0 to 36500, sorted bytewise by
-     * category.
+     * The map of categories to days under the key, empty when unset, sorted
+     * bytewise by category.
      *
      * @param  'categories'|'preserve'  $setting
      * @return array<string, int>

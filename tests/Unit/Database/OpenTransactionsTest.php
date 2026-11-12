@@ -24,9 +24,8 @@ use SineMacula\Laravel\AuditLog\Database\OpenTransactions;
 final class OpenTransactionsTest extends TestCase
 {
     /**
-     * Only a connection with a transaction open is named, by the name it gives
-     * itself and once, so a reader and a writer selector count as the one
-     * connection, and one that gives no name goes by the manager's key.
+     * Only a connection with a transaction open is named, once, by its own name
+     * or else the manager's key.
      *
      * @return void
      */

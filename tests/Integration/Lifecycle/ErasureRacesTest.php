@@ -29,16 +29,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for erasures racing holds and each other, in processes of
- * their own, on whichever engine the suite runs against and on a file database
- * on SQLite. The lifecycle lock orders them: a hold committed before the
- * erasure's lock blocks it, an erasure committed first stands and the hold that
- * waited for its lock follows it in the journal, and two erasures of one owner
- * destroy each key once, the second finding the owner already erased.
- *
- * The processes meet on file gates rather than on timing; a pause inside a held
- * lock only makes an overtaking likely should the lock fail, and no assertion
- * measures time.
+ * Integration tests for erasures racing holds and each other in processes of
+ * their own; they meet on file gates, not timing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,8 +61,7 @@ final class ErasureRacesTest extends TestCase
     private const string CATEGORY = 'finance';
 
     /**
-     * Stop the clock, bind the package's key wrapper, and store an entry
-     * encrypted under each of the owner's two keys.
+     * Stop the clock, bind the key wrapper and store an entry under each key.
      *
      * @return void
      */
@@ -91,8 +82,7 @@ final class ErasureRacesTest extends TestCase
     }
 
     /**
-     * Put the clock back, and remove what the children shared once the
-     * migrations have rolled back.
+     * Put the clock back and remove the children's files after the rollback.
      *
      * @return void
      */
@@ -107,9 +97,7 @@ final class ErasureRacesTest extends TestCase
     }
 
     /**
-     * A hold committed while the erasure waits for the lock is committed first:
-     * the erasure, reading the chain after its lock, sees the hold and is
-     * refused, and every key stays live.
+     * A hold committed while the erasure waits for the lock refuses it.
      *
      * @return void
      *
@@ -148,8 +136,7 @@ final class ErasureRacesTest extends TestCase
     }
 
     /**
-     * An erasure committed while a hold waits for the lock stands: every key is
-     * destroyed, and the hold commits after it, later in the journal.
+     * An erasure committed first stands, and the waiting hold follows it.
      *
      * @return void
      */
@@ -181,9 +168,7 @@ final class ErasureRacesTest extends TestCase
     }
 
     /**
-     * Two erasures of one owner destroy each key once: whichever takes the lock
-     * first destroys every key, and the other finds the owner already erased
-     * and writes nothing.
+     * Two erasures of one owner destroy each key once.
      *
      * @return void
      */
@@ -243,9 +228,7 @@ final class ErasureRacesTest extends TestCase
     }
 
     /**
-     * In a child: once its lock statement has run, inside the transaction, open
-     * the phase's arrival gate, wait for its release gate, and keep the lock
-     * briefly after it.
+     * In a child, meet the phase's gates once locked; hold the lock briefly.
      *
      * @param  string  $phase
      * @return void
@@ -270,8 +253,7 @@ final class ErasureRacesTest extends TestCase
     }
 
     /**
-     * In a child: just before its lock statement runs, open the phase's arrival
-     * gate and wait for its release gate.
+     * In a child, meet the phase's gates just before the lock is taken.
      *
      * @param  string  $phase
      * @return void
@@ -294,9 +276,7 @@ final class ErasureRacesTest extends TestCase
     }
 
     /**
-     * Open the phase's release gate just before this process's next lock
-     * statement runs, so the child goes on to commit while this process waits
-     * for the lock.
+     * Open the phase's release gate as this process asks for the lock.
      *
      * @param  string  $phase
      * @return void

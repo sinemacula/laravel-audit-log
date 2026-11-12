@@ -10,17 +10,13 @@ use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 
 /**
- * Fills the actor, the guard that gave it and the principal, tenant and session
- * that go with it: the ambient actor or, while a job frame is anywhere on the
- * stack, the actor the job carried from whoever dispatched it.
+ * Fills the actor, its guard and the principal, tenant and session that go with
+ * it: the ambient actor or, inside a job frame, the actor the job carried.
  *
- * An open actor is filled with all of it. An actor already settled to that same
- * actor gets the principal, tenant and session, never the guard, which a
- * capture names itself; one settled to anyone else, `by(null)` included, gets
- * nothing, so another person's context never lands on the record. A readable
- * guard user the job did not inherit beats the carried actor, which is never
- * resolved: it says who started the work. The carried actor is the one the
- * job's frame kept, since a sync job inside it leaves its own in Context.
+ * An actor settled to that same actor gets all but the guard, and one settled
+ * to anyone else gets nothing, so another person's context never lands on the
+ * record. A guard user the job did not inherit beats the carried actor: it says
+ * who started the work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

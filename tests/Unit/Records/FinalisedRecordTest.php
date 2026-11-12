@@ -13,11 +13,7 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the finalised record: the captured record and finalisation it
- * carries, its 37-column envelope in table order, and each value it refuses
- * because its column cannot hold it or an engine would store it differently, in
- * the order they are checked; and a record rebuilt from an envelope, which
- * returns its JSON columns as they were decoded and is checked like any other.
+ * Unit tests for the finalised record, its envelope and the values it refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -105,9 +101,8 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * The envelope is the captured record's 33 fields as they are, then
-     * `recorded_at`, `integrity_version`, `key_id` and `hmac`: the 37 columns
-     * of the entries table, in its order.
+     * The envelope is the captured record's 33 fields then the four
+     * finalisation columns: the entries table, in order.
      *
      * @return void
      */
@@ -121,9 +116,8 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * A record of the imported shape, which has a source record id, an import
-     * batch and a source digest, is finalised with its envelope kept as given,
-     * and so is a record built by the import.
+     * A record of the imported shape, or built by the import, is finalised with
+     * its envelope kept as given.
      *
      * @return void
      */
@@ -198,9 +192,8 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * The copy keeps every JSON type as it was: an empty object is no empty
-     * array, a list is no map, and a map with sequential numeric keys stays a
-     * map.
+     * The copy keeps every JSON type as it was, so `{}` stays an object and a
+     * numeric-key map stays a map.
      *
      * @return void
      */
@@ -222,10 +215,8 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * A decoded record returns its JSON columns as they were decoded, objects
-     * as objects, in place of the record's array views, which cannot tell `{}`
-     * from `[]` nor a map with sequential numeric keys from a list; its record
-     * keeps those views for reading.
+     * A decoded record returns its JSON columns as decoded, since the record's
+     * array views cannot tell `{}` from `[]`.
      *
      * @return void
      */
@@ -265,8 +256,7 @@ final class FinalisedRecordTest extends TestCase
 
     /**
      * A decoded record's envelope keeps the 37 columns of the entries table in
-     * their order: the decoded columns replace the record's in place, before
-     * the finalisation's columns.
+     * their order.
      *
      * @return void
      */
@@ -408,9 +398,7 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * A record may be recorded at the very instant its activity occurred, or
-     * one microsecond later; the equal time protects against a mutation that
-     * refuses it.
+     * A record may be recorded at the instant its activity occurred, or later.
      *
      * @return void
      */
@@ -479,9 +467,7 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * A derived key's fingerprint, ids of one and of 32 characters, and an id
-     * of every allowed character are accepted, as the integrity layer's key ids
-     * are.
+     * Key ids of the integrity layer's shapes and lengths are accepted.
      *
      * @return void
      */
@@ -552,9 +538,8 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * Each id or import batch id that is not a lower-case UUID fails closed,
-     * naming its column, because PostgreSQL would refuse it or return it in
-     * another form.
+     * An id that is not a lower-case UUID fails closed, as PostgreSQL would
+     * refuse it or return it in another form.
      *
      * @param  'id'|'import_batch_id'  $column
      * @param  string  $value
@@ -602,9 +587,8 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * A source digest that is not 64 lower-case hexadecimal characters fails
-     * closed, since its column would truncate, refuse or keep a value the
-     * importer never compares equal.
+     * A source digest that is not 64 lower-case hex characters fails closed, as
+     * its column would not keep it comparable.
      *
      * @param  string  $sourceDigest
      * @return void
@@ -632,8 +616,7 @@ final class FinalisedRecordTest extends TestCase
 
     /**
      * Rows of `[fields, recorded at, integrity version, key id, hmac, the
-     * message]`: two refused values at once, and the refusal of the one checked
-     * first.
+     * message]`: two refused values and the one checked first.
      *
      * @return iterable<string, array{0: array<string, string>, 1: string, 2: int, 3: string, 4: string, 5: string}>
      */
@@ -651,9 +634,7 @@ final class FinalisedRecordTest extends TestCase
     }
 
     /**
-     * With two refused values, the one checked first is the one named, in the
-     * order time, occurrence, integrity version, key id, HMAC, id, import batch
-     * id, source digest.
+     * With two refused values, the one checked first is the one named.
      *
      * @param  array<string, string>  $fields
      * @param  string  $recordedAt

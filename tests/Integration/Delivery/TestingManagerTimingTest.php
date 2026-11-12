@@ -18,15 +18,13 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\TestCase;
 
 /**
- * Integration tests for the default timing under both transaction managers, on
- * the engine the suite runs against: the manager Laravel's
- * `DatabaseTransactions` testing trait installs, whose wrapping transaction no
- * record ever selects, and Laravel's own, under which a host's outermost
- * transaction is selected. The current manager is the one consulted, however
- * long ago the recorder was resolved.
+ * Integration tests for the default timing under Laravel's own transaction
+ * manager and the one `DatabaseTransactions` installs, whose wrapping
+ * transaction no record selects.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,7 +36,7 @@ use Tests\TestCase;
 #[CoversClass(Recorder::class)]
 final class TestingManagerTimingTest extends TestCase
 {
-    use InteractsWithAuditStore;
+    use InteractsWithAuditStore, RunsInsideTheTestingWrapper;
 
     /** @var string The code every test records. */
     private const string CODE = 'invoice.approved';
@@ -66,15 +64,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * With only the wrapper open there is no transaction to select, by default
-     * or by naming its connection: the manager has it pending and leaves it out
-     * of those callbacks apply to, and neither record waits for it.
+     * With only the wrapper open, no transaction is selected by default or by
+     * name, and neither record waits.
      *
      * @return void
      */
     public function testTheWrapperIsNotSelected(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection, DatabaseTransactionsManager $manager): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection, DatabaseTransactionsManager $manager): void {
             self::assertCount(1, $manager->getPendingTransactions());
             self::assertCount(0, $manager->callbackApplicableTransactions());
 
@@ -87,14 +84,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * A record inside only the wrapper is written at once, the way a test
-     * expects to read it back, and the wrapper's rollback takes it away.
+     * A record inside only the wrapper is written at once, and the wrapper's
+     * rollback takes it.
      *
      * @return void
      */
     public function testARecordInsideOnlyTheWrapperIsWrittenAtOnce(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             $record = AuditLog::record(self::CODE);
 
             self::assertSame($record->id, $this->storedRow($record->id)['id']);
@@ -104,14 +101,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * A transaction the test opens inside the wrapper is selected, and its
-     * commit writes the record though the wrapper never commits.
+     * A transaction opened inside the wrapper is selected, and its commit
+     * writes the record.
      *
      * @return void
      */
     public function testANestedTransactionDefersToItsCommit(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             AuditLog::record(self::CODE);
@@ -128,14 +125,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * A transaction two levels inside the wrapper waits for the commit of the
-     * first level, as it does one level above under Laravel's own manager.
+     * A transaction two levels inside the wrapper waits for the first level's
+     * commit.
      *
      * @return void
      */
     public function testAnInnerCommitInsideTheWrapperWaitsForTheHostsOuterCommit(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
             $connection->beginTransaction();
 
@@ -152,14 +149,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * A transaction the test opens inside the wrapper drops the record when it
-     * rolls back, and the wrapper stays open.
+     * A transaction inside the wrapper drops the record when it rolls back, and
+     * the wrapper stays open.
      *
      * @return void
      */
     public function testANestedRollbackDropsTheRecord(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             AuditLog::record(self::CODE);
@@ -172,9 +169,8 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * A record made through a recorder resolved, and used, before the manager
-     * was swapped still defers to the new manager's transaction: the old
-     * manager knows of none, so consulting it would write the record at once.
+     * A recorder resolved before the manager was swapped consults the new
+     * manager.
      *
      * @return void
      */
@@ -186,7 +182,7 @@ final class TestingManagerTimingTest extends TestCase
 
         self::assertSame(1, $this->entryCount());
 
-        $this->insideTheTestingWrapper(function (Connection $connection) use ($recorder): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection) use ($recorder): void {
             $connection->beginTransaction();
 
             $recorder->record(self::CODE);
@@ -202,9 +198,8 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * Under Laravel's own manager the same single transaction is selected, and
-     * nothing is left out: a record is written on its commit and dropped on its
-     * rollback.
+     * Under Laravel's own manager a record is written on a single transaction's
+     * commit and dropped on its rollback.
      *
      * @return void
      */
@@ -234,14 +229,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * A transaction on a connection the wrapper does not cover is selected by
-     * default and by name, and its commit writes the record inside the wrapper.
+     * A transaction on a connection the wrapper does not cover is selected, and
+     * its commit writes the record.
      *
      * @return void
      */
     public function testATransactionOnAnotherConnectionIsSelected(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             $other = DB::connection(self::OTHER);
 
             $other->beginTransaction();
@@ -258,15 +253,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * Naming the wrapped connection while another connection is transacting
-     * finds the wrapper alone on it, which is not selected, so the record is
-     * written now.
+     * Pinning the wrapped connection while another is transacting writes the
+     * record now.
      *
      * @return void
      */
     public function testPinningTheWrappedConnectionWritesNowWhileAnotherIsOpen(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             DB::connection(self::OTHER)->beginTransaction();
 
             AuditLog::event(self::CODE)->afterCommit(self::CONNECTION)->record();
@@ -280,15 +274,14 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * The wrapper counts as an open transaction for `transactional()`, which
-     * asks the connection and not the manager: a test can exercise the timing
-     * inside it, and the wrapper's rollback takes the record away.
+     * The wrapper counts as open for `transactional()`, which asks the
+     * connection, and its rollback takes the record.
      *
      * @return void
      */
     public function testATransactionalRecordIsAcceptedInsideOnlyTheWrapper(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             AuditLog::event(self::CODE)->transactional()->record();
 
             self::assertSame(1, $this->entryCount());
@@ -298,8 +291,8 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * Under the `throw` mode a failed write surfaces from the nested commit in
-     * a savepoint of the wrapper, which stays usable on every engine.
+     * Under the `throw` mode a failed write surfaces at the nested commit, and
+     * the wrapper stays usable on every engine.
      *
      * @return void
      */
@@ -309,7 +302,7 @@ final class TestingManagerTimingTest extends TestCase
 
         $this->pointAtProbeTable();
 
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             AuditLog::record(self::CODE);
@@ -329,8 +322,7 @@ final class TestingManagerTimingTest extends TestCase
     }
 
     /**
-     * Register the second transacting connection, with a table prefix of its
-     * own.
+     * Register the second transacting connection with its own table prefix.
      *
      * @param  mixed  $app
      * @return void
@@ -347,39 +339,5 @@ final class TestingManagerTimingTest extends TestCase
         $config = $app->make(ConfigRepository::class);
 
         $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
-    }
-
-    /**
-     * Install the testing manager on the storage connection, open its wrapping
-     * transaction as `DatabaseTransactions` does, run the test inside it, and
-     * roll the wrapper back however the test ends.
-     *
-     * @param  \Closure(\Illuminate\Database\Connection, \Illuminate\Foundation\Testing\DatabaseTransactionsManager): void  $test
-     * @return void
-     */
-    private function insideTheTestingWrapper(\Closure $test): void
-    {
-        $connection = $this->storageConnection();
-        $manager    = new DatabaseTransactionsManager([$connection->getName()]);
-
-        $this->app?->instance('db.transactions', $manager);
-
-        $connection->setTransactionManager($manager);
-
-        $dispatcher = $connection->getEventDispatcher();
-
-        self::assertNotNull($dispatcher);
-
-        $connection->unsetEventDispatcher();
-        $connection->beginTransaction();
-        $connection->setEventDispatcher($dispatcher);
-
-        try {
-            $test($connection, $manager);
-        } finally {
-            $connection->unsetEventDispatcher();
-            $connection->rollBack();
-            $connection->setEventDispatcher($dispatcher);
-        }
     }
 }

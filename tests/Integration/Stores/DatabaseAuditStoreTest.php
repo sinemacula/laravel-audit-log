@@ -45,17 +45,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the database store on the engine the suite runs
- * against: one plain insert of the finalised record, alone outside a
- * transaction and in a savepoint inside one; a duplicate resolved to success
- * only when the existing row verifies with the same captured content, to a
- * conflict when it does not, and propagated when it cannot be verified or no
- * row holds the id; a record without an attachment written as before, never
- * touching the artifacts table; and a host transaction left usable by one
- * failed audit statement; and an imported record stored with its source digest;
- * and a record holding an envelope written with its key uses in one transaction
- * or savepoint, rolled back whole when they fail, and refused as already pruned
- * when its key uses outlived its entry, on SQLite, MySQL and PostgreSQL alike.
+ * Integration tests for the database store on the suite's engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -116,9 +106,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a failed test left open, then drop what the
-     * test added: the host table, the probe table, the custom table and the
-     * test-only index.
+     * Roll back any open transaction and drop what the test added.
      *
      * @return void
      */
@@ -141,8 +129,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A finalised record is stored as one row, which decodes to its envelope:
-     * every column, in table order, with the same canonical encoding.
+     * A finalised record is stored as one row that decodes to its envelope.
      *
      * @return void
      */
@@ -163,9 +150,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * An imported record is stored as one row with its source fields and its
-     * source digest, which the engine returns as written and the row's
-     * signature covers; storing it again is the same row, never a conflict.
+     * An imported record keeps its source digest and re-stores as the same row.
      *
      * @return void
      */
@@ -190,8 +175,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Outside a transaction the store opens none: no transaction begins, and
-     * the connection is at level 0 throughout.
+     * Outside a transaction the store opens none.
      *
      * @return void
      */
@@ -217,9 +201,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A record without an attachment is still one insert into the entries
-     * table, and outside a transaction the store opens none for it: nothing is
-     * read from or written to the artifacts table.
+     * A record without an attachment is one insert, never touching artifacts.
      *
      * @return void
      */
@@ -249,9 +231,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Inside a host transaction the insert runs one level deeper, in a
-     * savepoint, and the host is back at its own level once it succeeds; the
-     * row is the host's to commit.
+     * Inside a host transaction the insert runs in a savepoint.
      *
      * @return void
      */
@@ -302,9 +282,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The same captured record finalised again later, so with another
-     * `recorded_at` and HMAC, is the record stored already: the first row is
-     * kept, its time and HMAC included.
+     * The same content finalised later keeps the first row, time and HMAC.
      *
      * @return void
      */
@@ -326,8 +304,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The same captured record signed again after the ring's current key moved
-     * is the record stored already: the first row is kept under the first key.
+     * The same content signed under another key keeps the first row.
      *
      * @return void
      */
@@ -356,8 +333,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Another captured record under the same id, with different properties, is
-     * a conflict naming the id, and the first row is left as it was.
+     * Different content under the same id is a conflict; the first row stays.
      *
      * @return void
      *
@@ -385,9 +361,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A stored row whose properties were edited with its old HMAC left in place
-     * fails verification, so storing the same record again is a conflict, and
-     * never a success that would vouch for the edit.
+     * A tampered row with its old HMAC is a conflict, never a success.
      *
      * @return void
      *
@@ -414,8 +388,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * An existing row signed under a key the ring no longer holds cannot be
-     * verified, so the ring's `UnknownKeyException` propagates unchanged.
+     * A row under an unknown key propagates the ring's `UnknownKeyException`.
      *
      * @return void
      */
@@ -435,9 +408,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * An existing row with an integrity version this release does not verify
-     * cannot be judged: the signer's `\UnexpectedValueException` propagates,
-     * never a success, and the row is left as it was.
+     * A row of an unknown integrity version propagates the signer's exception.
      *
      * @return void
      *
@@ -464,10 +435,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Two imported records with distinct ids and one source identity violate
-     * the source-identity index: no row holds the second's id, so the insert's
-     * own `UniqueConstraintViolationException` propagates, and the first row is
-     * the only one.
+     * A source identity violation propagates the insert's own exception.
      *
      * @return void
      *
@@ -497,8 +465,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A violation of a unique index other than the id's, with no row under the
-     * record's id, propagates the insert's own exception.
+     * Another unique index's violation propagates the insert's own exception.
      *
      * @return void
      *
@@ -525,10 +492,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Inside a healthy host transaction an audit insert that fails on the probe
-     * table's `NOT NULL` column propagates the engine's `QueryException`, and
-     * the host writes again and commits: both host rows exist, and the probe
-     * table holds nothing.
+     * A failed audit insert leaves a healthy host transaction usable.
      *
      * @return void
      */
@@ -548,9 +512,7 @@ final class DatabaseAuditStoreTest extends TestCase
 
         $connection->commit();
 
-        // The failure is the probe insert itself, so the host transaction saw a
-        // failed statement: one thrown before any SQL ran would prove nothing
-        // about the savepoint
+        // A failure before any SQL ran would prove nothing about the savepoint
         self::assertSame(QueryException::class, $failure::class);
         self::assertInstanceOf(QueryException::class, $failure);
         self::assertStringStartsWith('insert into', $failure->getSql());
@@ -560,9 +522,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Inside a healthy host transaction a unique violation of another index
-     * propagates, and the host keeps the record it stored before, writes again
-     * and commits.
+     * A unique violation inside a host transaction leaves it usable.
      *
      * @return void
      */
@@ -591,10 +551,8 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Inside a healthy host transaction a duplicate is resolved after its
-     * savepoint is rolled back, so even on PostgreSQL the lookup runs in a
-     * usable transaction, and the host writes again and commits; whether the
-     * first row was committed before the host began or stored within it.
+     * A duplicate is resolved after its savepoint rolls back, so the host stays
+     * usable even on PostgreSQL.
      *
      * @return void
      */
@@ -624,9 +582,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Inside a healthy host transaction a conflict is raised after the
-     * savepoint is rolled back, so the host writes again and commits, and the
-     * first row is left as it was.
+     * A conflict comes after the savepoint rolls back, leaving the host usable.
      *
      * @return void
      */
@@ -653,10 +609,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * On PostgreSQL a host transaction a failed host statement already aborted
-     * stays aborted: the store's savepoint is refused, and that refusal
-     * propagates as the driver raised it, neither masked as a duplicate nor
-     * resolved; the host is left at its own level, to roll back.
+     * An aborted PostgreSQL host refuses the savepoint, and that propagates.
      *
      * @return void
      */
@@ -686,9 +639,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Outside a transaction an insert that fails on the probe table's `NOT
-     * NULL` column propagates exactly the `QueryException` the connection
-     * threw, unwrapped, and no lookup follows it.
+     * An insert failure propagates unwrapped, with no lookup after it.
      *
      * @return void
      */
@@ -714,8 +665,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Outside a transaction a duplicate's lookup takes no lock, on every
-     * engine; inside one it takes MySQL's shared lock, and no lock elsewhere.
+     * A duplicate's lookup locks only on MySQL inside a transaction.
      *
      * @return void
      */
@@ -754,9 +704,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The store writes to the table and connection the settings name when it is
-     * called, so a table of the application's own holds the record and the
-     * shipped one holds nothing.
+     * The store writes where the settings name at the time it is called.
      *
      * @return void
      */
@@ -785,9 +733,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A storage connection that is not a database connection supporting
-     * transactions is refused before anything is written, naming the
-     * connection.
+     * A connection without transaction support is refused before any write.
      *
      * @return void
      */
@@ -806,8 +752,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[driver, transaction level, whether the lookup takes a shared
-     * lock]`: MySQL inside a transaction, and every case that takes none.
+     * Rows of `[driver, level, locks]`: when the lookup takes a shared lock.
      *
      * @return iterable<string, array{0: string, 1: int, 2: bool}>
      */
@@ -823,10 +768,8 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The duplicate's lookup reads the writer and takes a shared lock exactly
-     * when the connection is MySQL's and a transaction is open, whatever engine
-     * the suite runs on (SQLite compiles no lock, so the builder is observed
-     * instead of the statement).
+     * The lookup reads the writer and locks only on MySQL in a transaction;
+     * SQLite compiles no lock, so the builder is observed.
      *
      * @param  string  $driver
      * @param  int  $level
@@ -862,9 +805,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A record holding envelopes is written with its key uses, one for each
-     * distinct key, in one transaction of its own: its entry's insert, then its
-     * key uses' one insert, both inside the transaction, which commits.
+     * An encrypted record writes its entry and key uses in one transaction.
      *
      * @return void
      */
@@ -892,9 +833,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * An envelope whose key is not a canonical lower-case UUID has no key use,
-     * so a record holding only such envelopes keeps its single insert, outside
-     * any transaction.
+     * An envelope with no canonical UUID key has no key use: one insert.
      *
      * @return void
      */
@@ -919,9 +858,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[what fails, the failure the store throws]`: the key uses'
-     * insert refused by a missing table, and by a key use already stored for
-     * the entry, which no pruned record explains.
+     * Rows of `[fault, thrown]`: a missing table, and an existing key use.
      *
      * @return iterable<string, array{0: string, 1: class-string<\Throwable>}>
      */
@@ -934,9 +871,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A key use that fails rolls the entry back with it, so no entry is kept
-     * without its key uses, and the failure propagates without a binding of the
-     * record in its message.
+     * A failed key use rolls back the entry and omits the record's bindings.
      *
      * @param  string  $fault
      * @param  class-string<\Throwable>  $thrown
@@ -960,9 +895,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Inside a host transaction the entry and its key uses are written in the
-     * one savepoint, one level deeper than the host, which is back at its own
-     * level once they succeed; the host's rollback takes both with it.
+     * Inside a host the entry and its key uses share one savepoint.
      *
      * @return void
      */
@@ -1000,9 +933,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The same encrypted record stored twice is one entry with its key uses
-     * once: the second's insert is refused, rolled back, and resolved to the
-     * entry already stored.
+     * The same encrypted record stored twice keeps one entry and its key uses.
      *
      * @return void
      */
@@ -1018,8 +949,8 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A bulk record holding an envelope writes its artifact, its entry and its
-     * key uses, in that order, in one transaction.
+     * A bundle holding an envelope writes its artifact, entry and key uses in
+     * one transaction.
      *
      * @return void
      */
@@ -1045,10 +976,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * Retention leaves a pruned entry's key uses, so an encrypted record stored
-     * again once pruned violates their key: the store finds the record in a
-     * seal with its entry gone and refuses it as already pruned, storing
-     * nothing and leaving the key uses as they were.
+     * A pruned encrypted record is refused as pruned, as its key uses remain.
      *
      * @return void
      */
@@ -1072,8 +1000,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The captured record of an approved invoice under the pinned id, finalised
-     * on the frozen clock.
+     * An approved invoice under the pinned id, finalised on the frozen clock.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
      */
@@ -1100,9 +1027,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The captured record under the pinned id holding the envelopes given, by
-     * default three naming two keys, one of them twice, finalised on the frozen
-     * clock.
+     * The record holding the envelopes, by default three naming two keys.
      *
      * @param  ?array<string, array{v: int, k: string, c: string}>  $envelopes
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
@@ -1131,8 +1056,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A captured bulk record of three approved invoices holding the envelope as
-     * its card, carrying its manifest sealed under the test encrypter.
+     * A bulk record of three invoices holding the envelope as its card.
      *
      * @param  array{v: int, k: string, c: string}  $envelope
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
@@ -1145,9 +1069,7 @@ final class DatabaseAuditStoreTest extends TestCase
 
         $pending->fillOrigin(Origin::HTTP);
 
-        // The envelope stands for a field the record's own sealer sealed, which
-        // minimising removes from what a record is given, so it is set on what
-        // minimising left, before the package's metadata
+        // Minimising strips sealed fields, so the envelope goes on what it left
         $minimised  = RecordFactory::minimisedOf($pending, null, $id);
         $minimised  = new Minimised(['card' => $envelope, ...$minimised->properties ?? []], $minimised->context, $minimised->ip);
         $attachment = Attachment::sealed($manifest, RecordFactory::encrypter());
@@ -1156,8 +1078,7 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * The package table an insert writes to, or the statement itself when it is
-     * anything else.
+     * The package table an insert writes to, or the statement itself otherwise.
      *
      * @param  string  $query
      * @return string

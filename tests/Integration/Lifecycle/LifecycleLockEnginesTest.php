@@ -19,20 +19,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for the lifecycle lock between real processes, on whichever
- * engine the suite runs against: an operation that asks for the lock while
- * another holds it waits for that one's commit; its first read after the lock
- * sees a row the other committed while it waited (MySQL's `read committed`,
- * PostgreSQL's default, SQLite's one writer); on SQLite the lock is the
- * database's write lock, taken by the first statement of the framework's
- * transaction on whatever PHP runs; and two operations racing again and again
- * never interleave.
- *
- * SQLite runs on a file in WAL mode, as the operations guidance advises, so a
- * read never blocks another process's commit and only the lock's update makes
- * an operation wait. The processes meet on file gates rather than on timing; a
- * pause inside a held lock only makes an interleaving likely should the lock
- * fail, and no assertion measures time.
+ * Integration tests for the lifecycle lock between real processes, SQLite on a
+ * WAL file; the processes meet on file gates, not timing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -85,9 +73,7 @@ final class LifecycleLockEnginesTest extends TestCase
     }
 
     /**
-     * An operation asking for the lock while another holds it waits for that
-     * one's commit: it runs only after the holder's last write inside the lock,
-     * which it then reads as committed, and it takes the lock after it.
+     * An operation asking for a held lock waits for the holder's commit.
      *
      * @return void
      */
@@ -122,11 +108,7 @@ final class LifecycleLockEnginesTest extends TestCase
     }
 
     /**
-     * A row the holder appends and commits while another operation waits for
-     * the lock is seen by that operation's first read after the lock, as the
-     * journal's head: MySQL's `read committed` reads it, PostgreSQL's default
-     * does, and SQLite's write lock begins the waiter's reading only once it is
-     * granted.
+     * The first read after the lock sees a row committed while waiting.
      *
      * @return void
      */
@@ -163,10 +145,7 @@ final class LifecycleLockEnginesTest extends TestCase
     }
 
     /**
-     * On SQLite the lock is taken inside the framework's transaction, by its
-     * first statement, on whatever PHP runs: the framework's begin and the
-     * lock's update come first, and while the work runs no other connection can
-     * begin a write until the commit.
+     * On SQLite the lock is the first statement of the framework's transaction.
      *
      * @return void
      */
@@ -198,9 +177,7 @@ final class LifecycleLockEnginesTest extends TestCase
     }
 
     /**
-     * Two processes racing operation after operation never interleave: each
-     * operation's lines, written inside the lock with a pause between them,
-     * stay together, and every operation of both is there.
+     * Two processes racing operations never interleave.
      *
      * @return void
      */
@@ -252,8 +229,7 @@ final class LifecycleLockEnginesTest extends TestCase
     }
 
     /**
-     * Start a child that, once the start gate opens, runs its operations one
-     * after another, each writing its begin and end lines inside the lock.
+     * Start a child that runs its operations once the start gate opens.
      *
      * @param  string  $name
      * @return int
@@ -278,9 +254,7 @@ final class LifecycleLockEnginesTest extends TestCase
     }
 
     /**
-     * Open the release gate just before this process's next lock statement
-     * runs, so the holder goes on to commit while this process waits for the
-     * lock.
+     * Open the release gate as this process asks for the lock.
      *
      * @return void
      */
@@ -326,8 +300,7 @@ final class LifecycleLockEnginesTest extends TestCase
     }
 
     /**
-     * Whether a second connection to the SQLite file may begin a write at once,
-     * waiting for no other.
+     * Whether another SQLite connection may begin a write without waiting.
      *
      * @return bool
      */

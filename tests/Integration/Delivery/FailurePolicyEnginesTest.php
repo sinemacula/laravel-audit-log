@@ -49,22 +49,9 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
- * Integration tests for the failure policy inside real transactions, on the
- * engine the suite runs against, with the writes really refused by the engine
- * and the spill written to the documented channel's real file.
- *
- * A transactional failure rolls the business change back and leaves no spill,
- * only its safe diagnostics. A failed insert in report mode leaves a healthy
- * host committing, because it ran in a savepoint. An after-commit record's
- * spill waits for the commit its row would have joined, so a rollback leaves
- * nothing a replay could bring back. A fail-closed row commits and rolls back
- * with the connection it was written on. On PostgreSQL a host that has already
- * failed refuses even the savepoint: the record is reported and spilled,
- * without a fatal error, unless the spill would wait for a commit that is
- * really a rollback, or the channel is on the aborted database itself, which is
- * what `audit-log:check` flags. Every insert reaches the writer of a read/write
- * split. A captured record follows the `REPORT` rule under either mode, and a
- * refusal of it is reported and signalled, never thrown.
+ * Integration tests for the failure policy inside real transactions, with
+ * writes refused by the engine and spills written to the documented channel's
+ * real file.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -105,7 +92,7 @@ final class FailurePolicyEnginesTest extends TestCase
     /** @var string A mode in which a record is written to the outbox. */
     private const string OUTBOX = 'outbox';
 
-    /** @var string The SQLSTATE of a statement run in a transaction PostgreSQL has already aborted. */
+    /** @var string The SQLSTATE of a statement in a transaction PostgreSQL has aborted. */
     private const string ABORTED = '25P02';
 
     /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter is asked to report. */
@@ -121,9 +108,8 @@ final class FailurePolicyEnginesTest extends TestCase
     private string $file = '';
 
     /**
-     * Create the table the host writes to, bind the reporter, spill to the
-     * documented channel in a file of the test's own and hear each
-     * `AuditWriteFailed`.
+     * Create the host's table, bind the reporter, spill to the documented
+     * channel in the test's own file, and hear each `AuditWriteFailed`.
      *
      * @return void
      */
@@ -160,8 +146,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a failed test left open, then undo what the
-     * test added, and remove the files.
+     * Roll back any open transaction, undo the test's additions, and remove the
+     * files.
      *
      * @return void
      */
@@ -190,8 +176,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A transactional record the engine refuses, left uncaught, rolls the host
-     * back, so neither the business change nor the record is kept.
+     * A refused transactional record rolls the host back, keeping neither the
+     * business change nor the record.
      *
      * @return void
      */
@@ -214,8 +200,7 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * In outbox mode a transactional record's refused insert rolls the host
-     * back in the same way.
+     * In outbox mode a refused transactional insert rolls the host back too.
      *
      * @return void
      */
@@ -252,8 +237,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A transactional failure leaves nothing a replay could turn into evidence,
-     * whether the host rolls back or catches the failure and commits.
+     * A transactional failure spills nothing, whether the host rolls back or
+     * commits.
      *
      * @param  string  $mode
      * @return void
@@ -287,9 +272,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A transactional failure still says what failed, in the event and the
-     * thrown exception, each holding only what is safe, and the package does
-     * not also report what it throws.
+     * A transactional failure emits only safe diagnostics and is not also
+     * reported.
      *
      * @param  string  $mode
      * @return void
@@ -324,9 +308,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * In report mode a refused insert costs only its savepoint: the record is
-     * spilled, reported and said, the host writes again and commits, and on
-     * PostgreSQL its transaction is not left aborted.
+     * In report mode a refused insert costs only its savepoint, and the host
+     * commits.
      *
      * @param  string  $mode
      * @return void
@@ -355,8 +338,7 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Rows of `[failure mode, write mode]`: a captured record under each mode
-     * it never reads, written to the store and to the outbox.
+     * Rows of `[failure mode, write mode]` for a captured record.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -371,10 +353,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A captured record the engine refuses inside a host follows the `REPORT`
-     * rule whatever the mode: never thrown, it costs only its savepoint, so the
-     * host writes again and commits, and the record is spilled, reported, said
-     * and signalled once each.
+     * A refused captured record inside a host is reported and never thrown,
+     * whatever the mode.
      *
      * @param  string  $failureMode
      * @param  string  $mode
@@ -408,10 +388,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A captured record written after the host commits, refused by the engine,
-     * follows the `REPORT` rule whatever the mode: the commit stands, and the
-     * record is spilled, reported and signalled once, with nothing thrown from
-     * the commit.
+     * A captured record refused after the host commits is reported and never
+     * thrown, whatever the mode.
      *
      * @param  string  $failureMode
      * @param  string  $mode
@@ -443,10 +421,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * An after-commit record whose outbox insert fails says so at once, the
-     * host rolls back, and the file holds no line, so a replay of it adds
-     * nothing. A record of work that was undone never comes back as evidence
-     * that it was done.
+     * A host rollback after a failed after-commit outbox insert leaves no
+     * replayable spill.
      *
      * @return void
      */
@@ -479,9 +455,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * The rollback of the transaction that selected the record takes its spill,
-     * and the outer transaction commits without it; an inner commit does not
-     * release the spill, whose fate waits for the outer.
+     * Rolling back the transaction that selected the record takes its spill,
+     * though the outer one commits.
      *
      * @return void
      */
@@ -516,9 +491,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * When the host commits, the same failure's spill is written as one line,
-     * at the commit, and a replay gives one row that verifies; a second replay
-     * adds nothing.
+     * A host commit after a failed insert writes one spill line, which replays
+     * once.
      *
      * @return void
      */
@@ -550,8 +524,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A failed-closed write in either mode is refused to the caller and spilled
-     * at once, and a host that catches it stays healthy enough to commit.
+     * A fail-closed failure is thrown and spilled at once, and a catching host
+     * can still commit.
      *
      * @param  string  $mode
      * @return void
@@ -579,8 +553,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * On a storage connection of its own a fail-closed entry has committed by
-     * the time the call returns, so the rollback of a host elsewhere leaves it.
+     * A fail-closed entry on a dedicated storage connection survives a host
+     * rollback elsewhere.
      *
      * @return void
      */
@@ -603,8 +577,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * On an outbox connection of its own a fail-closed row has committed by the
-     * time the call returns, so the rollback of a host elsewhere leaves it.
+     * A fail-closed row on a dedicated outbox connection survives a host
+     * rollback elsewhere.
      *
      * @return void
      */
@@ -628,8 +602,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * On a shared connection a fail-closed write has joined the enclosing
-     * transaction, so its rollback removes the row with the business change.
+     * On a shared connection a fail-closed row rolls back with the enclosing
+     * transaction.
      *
      * @param  string  $mode
      * @return void
@@ -660,9 +634,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A host PostgreSQL has already aborted refuses the savepoint itself. The
-     * record is reported with the state that says so, said and spilled at once,
-     * and the line is the evidence of an attempt a replay can keep.
+     * A host PostgreSQL has already aborted refuses the savepoint, and the
+     * record is reported and spilled.
      *
      * @param  string  $mode
      * @return void
@@ -696,9 +669,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * In report mode an aborted host is not made worse: the call returns, the
-     * transaction is left as the host left it, still aborted and still open,
-     * and the host's rollback leaves the connection working.
+     * In report mode an aborted host is left aborted and open, and its rollback
+     * leaves the connection working.
      *
      * @param  string  $mode
      * @return void
@@ -731,8 +703,7 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Rows of `[failure mode, whether the record is fail-closed]`: a record
-     * whose rule throws and spills.
+     * Rows of `[failure mode, fail closed]` for rules that throw and spill.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -745,9 +716,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Under a rule that throws, an aborted host gets the sanitised exception:
-     * no previous exception, no statement, and the state that says what
-     * happened. The record is spilled, said, and not also reported.
+     * Under a throwing rule an aborted host gets the sanitised exception, and
+     * the record is spilled but not reported.
      *
      * @param  string  $mode
      * @param  bool  $failClosed
@@ -777,8 +747,7 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A transactional record in an aborted host throws too and is never
-     * spilled, like any other transactional failure.
+     * A transactional record in an aborted host throws and is never spilled.
      *
      * @return void
      */
@@ -796,10 +765,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * An after-commit record in outbox mode would bind its spill to the
-     * selected transaction, but an aborted one never commits, whatever
-     * PostgreSQL then says. The spill is discarded, and the record is reported
-     * and said.
+     * An aborted host discards an after-commit outbox spill, since its commit
+     * is really a rollback.
      *
      * @return void
      */
@@ -823,10 +790,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * PostgreSQL ends the `COMMIT` of an aborted transaction with a rollback
-     * and reports a success, so Laravel runs its commit callbacks, as the
-     * host's own shows. The work before the failure is gone, and a spill bound
-     * to that commit would have been a record of it, so none was bound.
+     * PostgreSQL reports a successful `COMMIT` of an aborted transaction, so a
+     * spill bound to it would record undone work; none is bound.
      *
      * @return void
      */
@@ -861,11 +826,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A spill channel on the database of an aborted host fails with the store,
-     * so nothing durable is left: the failed spill is reported apart, and a
-     * line written once the host has gone shows the channel itself works. That
-     * is the condition `audit-log:check` flags, by name, with a failing exit
-     * code.
+     * A spill channel on an aborted host's database fails with it, which
+     * `audit-log:check` flags.
      *
      * @return void
      */
@@ -907,10 +869,7 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * On a read/write split whose replica lags, each write of the path lands on
-     * the primary and none on the replica: the entry of a sync write, the
-     * outbox row of an outbox write, and the entry and the receipt of its
-     * drain, which also reads the row it finds there.
+     * With a lagging replica, every write of the path lands on the primary.
      *
      * @return void
      */
@@ -947,7 +906,7 @@ final class FailurePolicyEnginesTest extends TestCase
 
     /**
      * Register a second session and a storage connection of the application's
-     * own, on the same database under a table prefix of its own.
+     * own, on the same database with its own table prefix.
      *
      * @param  mixed  $app
      * @return void
@@ -982,8 +941,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Make the next write in the mode a real refusal by the engine. Done before
-     * any transaction: MySQL commits an open one on any DDL.
+     * Make the next write in the mode a real refusal; done before any
+     * transaction because MySQL commits an open one on DDL.
      *
      * @param  string  $mode
      * @return void
@@ -1023,9 +982,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Make the spill channel one with the `database` driver, writing to a table
-     * on the host's connection, which is the storage connection, as a custom
-     * log driver would.
+     * Spill through a `database` channel writing to a table on the host's
+     * connection, as a custom log driver would.
      *
      * @return void
      */
@@ -1047,8 +1005,7 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * A logger whose one handler inserts each message in the spill table on the
-     * connection.
+     * A logger whose one handler inserts each message into the spill table.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return \Monolog\Logger
@@ -1088,8 +1045,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Skip unless the suite runs on PostgreSQL, the only engine that leaves a
-     * transaction aborted by a failed statement.
+     * Skip unless on PostgreSQL, the only engine that leaves a transaction
+     * aborted.
      *
      * @return void
      */
@@ -1103,8 +1060,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * Assert another session reads that many committed business changes, which
-     * on an in-memory SQLite database no other session can.
+     * Assert another session reads that many committed business changes; no
+     * other session can see in-memory SQLite.
      *
      * @param  int  $rows
      * @return void
@@ -1140,8 +1097,8 @@ final class FailurePolicyEnginesTest extends TestCase
     }
 
     /**
-     * The connection the host transacts on, which is the storage connection and
-     * the outbox connection unless a test moved them.
+     * The host's connection, which is also the storage and outbox connection
+     * unless a test moved them.
      *
      * @return \Illuminate\Database\Connection
      */

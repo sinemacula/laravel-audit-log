@@ -9,15 +9,8 @@ use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Finalises a captured record: stamps when it was recorded from the clock and
- * signs it, once.
- *
- * It runs once per record, after the record is captured and before it is
- * delivered; a retry or a replay reuses the finalised record it returned, byte
- * for byte, and never finalises the record again. The store never calls it. A
- * record is never recorded before its activity occurred: when the clock is
- * behind the time the record was captured with (a host whose clock lags the
- * capturing one), the record is stamped with the time it occurred instead.
+ * Stamps a captured record's recorded time and signs it, once, before delivery;
+ * a retry or replay reuses the result.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,10 +35,8 @@ final readonly class RecordFinaliser
     ) {}
 
     /**
-     * The record finalised now: recorded at the clock's instant, or at the time
-     * it occurred when that is later, and signed under the ring's signing key.
-     * Both times are in the package's fixed form, so comparing them as strings
-     * orders them as instants.
+     * The record signed and recorded now, never before it occurred if the clock
+     * lags; the fixed time form orders as strings.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord

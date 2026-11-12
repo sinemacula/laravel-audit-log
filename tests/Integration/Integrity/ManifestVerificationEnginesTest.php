@@ -24,24 +24,9 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for the check of bundles' artifacts by `audit-log:verify`
- * on whichever engine the suite runs against, each artifact written and changed
- * through the engine's own columns: a sealed bundle verifies, as do a
- * disclosure's and an export's artifacts and an empty disclosure, a missing
- * artifact, artifacts swapped between entries, an artifact stored as another
- * kind, members that are no canonical form, a changed member list, a changed
- * count and an artifact moved to another entry are each tampered with a finding
- * of their own, an artifact the application's key cannot open is unverifiable,
- * a bundle not yet sealed is not checked until it is, and the greatest manifest
- * the settings allow, sealed in the longest artifact there can be, verifies on
- * every engine.
- *
- * The memory limit is raised for the test, because it is often less than the
- * greatest manifest needs, and the assertions should be what fails rather than
- * the engine's limit. It claims no coverage because that manifest is among the
- * slowest things in the suite: a mutant whose covering tests included it would
- * be skipped as taking too long rather than run. The checks are pinned by the
- * manifest verifier's and the segment verifier's own tests.
+ * Integration tests for the check of bundles' artifacts by `audit-log:verify`,
+ * each written and changed through the engine's own columns. Covers nothing:
+ * the greatest manifest is too slow for mutation testing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,9 +63,8 @@ final class ManifestVerificationEnginesTest extends TestCase
     private string $memoryLimit = '';
 
     /**
-     * Register both commands, bind no anchor, nothing pruned and a clock
-     * stopped when every command runs, seal at a fixed time, and raise the
-     * memory limit.
+     * Register the commands, bind no anchor and nothing pruned, stop the clock,
+     * and raise the memory limit.
      *
      * @return void
      */
@@ -194,10 +178,8 @@ final class ManifestVerificationEnginesTest extends TestCase
     }
 
     /**
-     * A sealed disclosure and a sealed export in one seal, written through the
-     * engine's columns, verify together; the export's members replaced by a
-     * plaintext that is no export manifest are then tampered as malformed, read
-     * by the export's own reader.
+     * A disclosure and an export in one seal verify, and an export whose
+     * members are no export manifest is tampered as malformed.
      *
      * @return void
      */
@@ -220,9 +202,8 @@ final class ManifestVerificationEnginesTest extends TestCase
     }
 
     /**
-     * Two sealed bundles whose artifacts are swapped between their entries,
-     * through the engine's unique entry index, are tampered as swapped, at the
-     * earlier entry.
+     * Artifacts swapped between two sealed bundles are tampered as swapped, at
+     * the earlier entry.
      *
      * @return void
      */
@@ -335,9 +316,8 @@ final class ManifestVerificationEnginesTest extends TestCase
     }
 
     /**
-     * A bundle no seal holds yet is not checked: its missing artifact fails no
-     * run while it is pending, and is tampered once its entry is sealed, as the
-     * entry's own signature is.
+     * A pending bundle's missing artifact fails nothing until its entry is
+     * sealed, then is tampered.
      *
      * @return void
      */
@@ -406,10 +386,9 @@ final class ManifestVerificationEnginesTest extends TestCase
     }
 
     /**
-     * References whose manifest's canonical form is exactly the bytes given: as
-     * many of the longest id as fit, then two that make up the rest. Each pair
-     * encodes to its id's length and 14 bytes more, and its comma to one; the
-     * brackets add two, less the comma the last pair has not.
+     * References whose manifest's canonical form is exactly the bytes given:
+     * each pair encodes to its id's length plus 14, each comma to 1 and the
+     * brackets to 2.
      *
      * @param  int  $bytes
      * @return \Generator<int, \SineMacula\Laravel\AuditLog\Records\Reference, void, void>

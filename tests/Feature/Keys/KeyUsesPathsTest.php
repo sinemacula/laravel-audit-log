@@ -40,10 +40,8 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the key uses on every path that inserts an entry holding an
- * envelope, on whichever engine the suite runs against: the outbox drain, the
- * spill replay and an import each write the key uses of the entries they store,
- * through the store or with each chunk, and a dry import writes none.
+ * Feature tests for the key uses written by every path that inserts an entry
+ * holding an envelope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,9 +67,8 @@ final class KeyUsesPathsTest extends TestCase
     private array $files = [];
 
     /**
-     * Bind the package's key wrapper and its encrypter, as the provider will,
-     * define the code with its card encrypted for its actor, and keep reports
-     * from the framework.
+     * Bind the key wrapper and encrypter as the provider will, define the code
+     * with its card encrypted, and keep reports from the framework.
      *
      * @return void
      */

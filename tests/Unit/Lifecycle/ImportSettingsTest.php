@@ -11,9 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportSettings;
 
 /**
- * Unit tests for the import settings: the default of each, the values each
- * accepts, the exact message each malformed value fails closed with, the fixed
- * age of a stale batch, and the reader of every setting.
+ * Unit tests for the import settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,7 +21,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ImportSettings;
 #[CoversClass(ImportSettings::class)]
 final class ImportSettingsTest extends TestCase
 {
-    /** @var array<string, array{0: string, 1: int, 2: int, 3: int}> Each numeric reader, by its key under `audit-log.import.`: its method, default, least and greatest value. */
+    /** @var array<string, array{0: string, 1: int, 2: int, 3: int}> Each numeric reader by key: its method, default, least and greatest value. */
     private const array NUMBERS = [
         'chunk'            => ['chunk', 500, 100, 5000],
         'max_skew_seconds' => ['maxSkewSeconds', 300, 0, 86400],
@@ -31,9 +29,7 @@ final class ImportSettingsTest extends TestCase
     ];
 
     /**
-     * Raise every PHP warning as an exception, so each setting is also read
-     * quietly: inside a Laravel application a warning becomes an exception,
-     * which would turn reading the settings into an error.
+     * Raise warnings as exceptions, as Laravel does, so settings read quietly.
      *
      * @return void
      */
@@ -61,9 +57,7 @@ final class ImportSettingsTest extends TestCase
     }
 
     /**
-     * With nothing set, or none of the package's configuration at all, each
-     * number takes its default: chunks of 500 lines, five minutes of skew and
-     * lines of up to a mebibyte.
+     * With nothing set: chunks of 500 lines, five minutes of skew, 1 MiB lines.
      *
      * @return void
      */
@@ -77,8 +71,7 @@ final class ImportSettingsTest extends TestCase
     }
 
     /**
-     * Each number accepts its least and greatest value, as an integer or as the
-     * digit string an environment line gives, and is read again on every call.
+     * Each number accepts its bounds, as an integer or a digit string.
      *
      * @return void
      */
@@ -101,8 +94,7 @@ final class ImportSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[key, method, value, message]`: one below the least and one
-     * above the greatest value of each number, and forms that name no integer.
+     * Rows of `[key, method, value, message]`: out of range or not an integer.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -124,8 +116,7 @@ final class ImportSettingsTest extends TestCase
     }
 
     /**
-     * Each malformed number is refused by its reader and by validation, with a
-     * message naming its key and range.
+     * A malformed number is refused by its reader and by validation.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -160,8 +151,7 @@ final class ImportSettingsTest extends TestCase
     }
 
     /**
-     * Validation reads every setting, so a malformed one fails it whichever it
-     * is, and passes when all are well formed.
+     * Validation reads every setting, failing on any malformed one.
      *
      * @return void
      */

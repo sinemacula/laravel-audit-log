@@ -8,23 +8,13 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 
 /**
- * Runs the SQL the storage note documents exactly as it is written there: each
- * block is the fenced `sql` block straight after the HTML comment that names
- * its marker, so the grants and triggers a reader copies are the ones the tests
- * prove.
+ * Runs the SQL the storage note documents exactly as written, each block being
+ * the fenced `sql` block after the HTML comment naming its marker, so the SQL a
+ * reader copies is the SQL the tests prove.
  *
- * The documented SQL names the database `app_db`, the writer `audit_writer`,
- * the maintenance user `audit_maintenance` and the verifier `audit_verifier`; a
- * test replaces those whole words with its own before it runs a block. A MySQL
- * script is run statement by statement, split on the delimiter it declares, as
- * the `mysql` client splits it; a PostgreSQL or SQLite block is run whole, as
- * one script.
- *
- * On MySQL and PostgreSQL each worker creates logins of its own,
- * `audit_writer_<token>`, `audit_maintenance_<token>` and
- * `audit_verifier_<token>`, which a test drops when it ends, and a test tells a
- * refusal by the grants, the engine's privilege error, from a refusal by a
- * documented trigger, which names its table and statement.
+ * A test replaces the documented names with its own, per-worker logins on MySQL
+ * and PostgreSQL. A MySQL script runs statement by statement as the `mysql`
+ * client splits it; any other block runs whole.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,7 +69,7 @@ trait RunsDocumentedSql
         'started_at'          => '2026-01-01 00:00:00.000000',
     ];
 
-    /** @var list<string> The import batch columns the writer updates as an import runs: its status, its counts, its conflict ids and its times. */
+    /** @var list<string> The import batch columns the writer updates as an import runs. */
     protected const array BATCH_PROGRESS_COLUMNS = ['status', 'lines_read', 'imported', 'duplicates', 'conflicts', 'rejected', 'conflict_ids', 'updated_at', 'finished_at'];
 
     /** @var list<string> The lifecycle lock columns every lifecycle transaction updates. */
@@ -203,9 +193,8 @@ trait RunsDocumentedSql
     }
 
     /**
-     * Run the SQL on the connection's PDO, unprepared, as `unprepared()` does,
-     * which takes only literal SQL: this SQL is read from the notes or made
-     * from the names they give.
+     * Run the SQL unprepared on the connection's PDO, since `unprepared()`
+     * takes only literal SQL and this SQL is read from the notes.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $sql

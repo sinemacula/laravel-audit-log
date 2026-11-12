@@ -15,10 +15,7 @@ use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for an export's manifest: its canonical form of exactly its keys,
- * the zero-line export, the first and last positions, the values it refuses,
- * and the plaintexts it reads back by their version, exactly the canonical form
- * of a version it reads, without a catalogue, a setting or a container.
+ * Unit tests for an export's manifest and the plaintexts it reads back.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +42,7 @@ final class ExportManifestTest extends TestCase
 
     /**
      * The canonical manifest is the canonical encoding of exactly its keys,
-     * sorted bytewise, the snapshot's and the viewer's too, with the version
-     * first and the positions as recorded instant and id.
+     * sorted bytewise.
      *
      * @return void
      */
@@ -122,8 +118,7 @@ final class ExportManifestTest extends TestCase
 
     /**
      * The first and last positions are both `null` exactly when there are no
-     * lines; a position missing beside lines, or present beside none, is
-     * refused naming the position.
+     * lines; otherwise the missing position is named.
      *
      * @param  int  $lines
      * @param  ?array{0: string, 1: string}  $first
@@ -192,9 +187,8 @@ final class ExportManifestTest extends TestCase
     }
 
     /**
-     * A manifest parses with no application at all: an empty container and no
-     * facade root, so it reads no catalogue, setting or binding, and a manifest
-     * from an earlier release parses by its own version alone.
+     * A manifest parses by its own version alone, with no container or facade
+     * root.
      *
      * @return void
      */
@@ -374,9 +368,7 @@ final class ExportManifestTest extends TestCase
     }
 
     /**
-     * `ExportManifest` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *

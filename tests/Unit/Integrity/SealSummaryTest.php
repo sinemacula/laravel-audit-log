@@ -12,9 +12,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 
 /**
- * Unit tests for the seal summary: the tuple it keeps, taken from an envelope
- * and the digest given, its canonical form pinned by the golden anchor bytes,
- * the comparison of every field, and each malformed field refused.
+ * Unit tests for the seal summary.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

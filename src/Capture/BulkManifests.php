@@ -8,9 +8,8 @@ use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 
 /**
- * The manifests of bulk operations: refuses a bound store that keeps no
- * attachment before a single subject is read, then builds the manifest of the
- * subjects within the configured bounds, which are read on every call.
+ * Builds bulk operations' manifests within the configured bounds, refusing a
+ * store that keeps no attachment before any subject is read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -13,12 +13,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for a hold's scope: what each dimension keeps of a stored entry
- * row, a tenant's hold never keeping an entry of no tenant, every dimension
- * ANDed, the window half-open to the microsecond, narrowing that only ever
- * intersects, the refusals of an empty list, a limit exceeded and a window that
- * keeps nothing, and the canonical form, its digest and its strict reading
- * back.
+ * Unit tests for a hold's scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,8 +30,7 @@ final class HoldScopeTest extends TestCase
     private const string OTHER_BATCH = '01932b4e-b000-7000-8000-000000000002';
 
     /**
-     * Every row matches the scope of every entry, with a tenant or without,
-     * with any actor or none, at any time, of any batch.
+     * The scope of every entry matches every row.
      *
      * @return void
      */
@@ -50,9 +44,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A tenant's hold matches a row only when both tenant columns are the
-     * tenant's pair: another id, another type, or the type and id of two
-     * different tenants never match.
+     * A tenant's hold matches a row only when both tenant columns are its pair.
      *
      * @return void
      */
@@ -69,9 +61,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A tenant's hold never matches a row of no tenant, nor one whose tenant is
-     * half `null`: no `NULL` comparison makes a tenant's hold keep every entry
-     * of no tenant.
+     * A tenant's hold never matches a row of no tenant or a half-`null` tenant.
      *
      * @return void
      */
@@ -86,8 +76,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Adding the entries of no tenant to a tenant's hold adds those rows and no
-     * other tenant's.
+     * Adding the tenantless entries to a tenant's hold adds no other tenant's.
      *
      * @return void
      */
@@ -104,8 +93,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * The scope of no tenant matches only rows whose two tenant columns are
-     * both `null`.
+     * The tenantless scope matches only rows with both tenant columns `null`.
      *
      * @return void
      */
@@ -120,8 +108,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A reference's activity is matched as the actor's pair or the subject's,
-     * never as a type and an id from different columns.
+     * A reference matches the actor's pair or the subject's, never a mix.
      *
      * @return void
      */
@@ -137,8 +124,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Categories keep only rows of those categories, and narrowing them again
-     * keeps the intersection.
+     * Categories keep only their rows, and narrowing keeps the intersection.
      *
      * @return void
      */
@@ -159,8 +145,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * The window keeps a row at its start and before its end, never at its end,
-     * and either end may be open.
+     * The window is half-open, and either end may be open.
      *
      * @return void
      */
@@ -182,8 +167,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Rows of `[stored time, whether the window keeps it]`: one microsecond
-     * either side of each end, in each form an engine stores a time in.
+     * Rows of `[stored time, kept]`: a microsecond either side of each end.
      *
      * @return iterable<string, array{0: string, 1: bool}>
      */
@@ -203,8 +187,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * The window is compared to the microsecond, whatever form the engine
-     * returned the time in.
+     * The window is compared to the microsecond, in any engine's time form.
      *
      * @param  string  $occurredAt
      * @param  bool  $kept
@@ -219,9 +202,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A row whose time is missing or cannot be read is kept by any window, so a
-     * hold never lets go of an entry it cannot place; a scope with no window
-     * keeps it too.
+     * A row whose time is missing or unreadable is kept by any window.
      *
      * @return void
      */
@@ -269,8 +250,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * An import batch's hold matches only that batch's rows, never a row of no
-     * batch or of another.
+     * An import batch's hold matches only that batch's rows.
      *
      * @return void
      */
@@ -285,8 +265,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Every dimension is ANDed: a row that fails any one of them is not kept,
-     * however many others it meets.
+     * Every dimension is ANDed: failing any one excludes the row.
      *
      * @return void
      */
@@ -317,8 +296,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Rows of `[what builds the scope, the message]`: an empty list in each
-     * dimension that takes one.
+     * Rows of `[what builds the scope, the message]`: empty lists.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope, 1: string}>
      */
@@ -350,8 +328,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * One beyond each limit is refused, naming the limit, and the limit itself,
-     * counted after duplicates are dropped, is kept.
+     * One beyond each limit is refused; the limit itself is kept.
      *
      * @return void
      */
@@ -382,8 +359,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Rows of `[what builds the scope, the message]`: windows that keep
-     * nothing, given or narrowed to.
+     * Rows of `[what builds the scope, the message]`: empty windows.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope, 1: string}>
      */
@@ -420,8 +396,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Rows of `[what builds the scope, the message]`: narrowings that would
-     * keep nothing, and values a dimension refuses.
+     * Rows of `[what builds the scope, the message]`: other refusals.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope, 1: string}>
      */
@@ -445,8 +420,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A narrowing that would keep nothing, and a value outside its dimension's
-     * grammar, are refused, naming the dimension.
+     * An empty narrowing or a malformed value is refused by dimension.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $build
      * @param  string  $message
@@ -462,8 +436,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Narrowing the references again keeps those given that were held, and a
-     * reference given twice counts once.
+     * Narrowing the references keeps the intersection, each reference once.
      *
      * @return void
      */
@@ -477,10 +450,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * The canonical form sorts tenants and references by type then id, and
-     * categories bytewise, each once, so scopes built in any order have the
-     * same form and digest; the digest is the SHA-256 of its canonical
-     * encoding.
+     * Build order never changes the canonical form or its SHA-256 digest.
      *
      * @return void
      */
@@ -556,8 +526,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A scope's canonical form, encoded and decoded as the journal stores it,
-     * reads back as the same scope.
+     * A canonical form, encoded as the journal stores it, reads back the same.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\HoldScope  $scope
      * @return void
@@ -576,8 +545,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Rows of `[the keys to change, the key the refusal names]`: each way a
-     * stored form departs from the canonical one.
+     * Rows of `[the keys to change, the key the refusal names]`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -617,8 +585,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Each departure from the canonical form is refused, naming the key and
-     * never its value.
+     * A departure from the canonical form is refused, naming only the key.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -636,8 +603,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A stored form missing a key is refused naming the key, and one holding a
-     * key it does not define is refused without naming it.
+     * A missing key is refused by name, an unknown key without its name.
      *
      * @return void
      */
@@ -666,9 +632,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * Every row a scope is tested against, by what it is: an entry of a tenant
-     * by a user on an invoice, one of no tenant, one of no actor, one of
-     * another time and one of an import batch.
+     * Every row a scope is tested against, by what it is.
      *
      * @return array<string, array<string, int|string|null>>
      */
@@ -685,9 +649,7 @@ final class HoldScopeTest extends TestCase
     }
 
     /**
-     * A stored entry row: by a user on an invoice of an organisation, in the
-     * finance category, at noon on the first of November, of no batch, with the
-     * columns given replacing those.
+     * A stored entry row, with the columns given replacing the defaults.
      *
      * @param  array<string, int|string|null>  $columns
      * @return array<string, int|string|null>

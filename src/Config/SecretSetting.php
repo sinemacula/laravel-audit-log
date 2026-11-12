@@ -5,10 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Config;
 
 /**
- * Reads a secret or an application key the one way every settings class reads
- * one: its own bytes, or the strict decoding of what follows a `base64:`
- * prefix, of at least 32 bytes. Anything else is `null`, and the reader refuses
- * it with a message of its own that names the setting and never the value.
+ * Reads a secret or an application key: its own bytes, or the strict decoding
+ * of what follows a `base64:` prefix, of at least 32 bytes; `null` otherwise,
+ * which the caller refuses without naming the value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,9 +28,8 @@ final class SecretSetting
     private function __construct() {}
 
     /**
-     * The bytes of a secret or an application key: the strict decoding of what
-     * follows a `base64:` prefix, or the string itself, or `null` when the
-     * value is not a string, does not decode, or is shorter than 32 bytes.
+     * The bytes of a secret or an application key, or `null` when the value is
+     * not a string, does not decode, or is shorter than 32 bytes.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

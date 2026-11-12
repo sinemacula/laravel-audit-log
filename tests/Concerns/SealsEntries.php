@@ -27,14 +27,9 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Stores entries and seals them, as the package does, and reads back what the
- * seals hold: finalised records stored through the database store at the times
- * a test chooses, a sealer built from the container's collaborators on a clock
- * a test may freeze, the stored seals as raw rows, and an explicit key ring.
- *
- * A sealer runs on the container's clock until `sealAt()` freezes its own, so
- * entries a test records through the package are sealed, and a test that pins
- * the seal's times freezes it.
+ * Stores entries and seals them as the package does, and reads back what the
+ * seals hold; a sealer runs on the container's clock until `sealAt()` freezes
+ * its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,11 +45,9 @@ trait SealsEntries
     private ?FrozenClock $sealingClock = null;
 
     /**
-     * Store the number of finalised records through the database store, the
-     * first recorded at the time given, in UTC, and each next one microsecond
-     * later, each occurring when it is recorded. With a key id, they are signed
-     * under that key of the ring, which is the current key only while they are
-     * stored.
+     * Store the number of finalised records, the first recorded at the time
+     * given, in UTC, and each next one a microsecond later; with a key id they
+     * are signed under that key of the ring.
      *
      * @param  int  $count
      * @param  string  $recordedAt
@@ -173,6 +166,30 @@ trait SealsEntries
         self::assertContainsOnlyString($members);
 
         return array_values($members);
+    }
+
+    /**
+     * The ids in byte order, as the members are read back.
+     *
+     * @param  list<string>  $ids
+     * @return list<string>
+     */
+    protected static function sorted(array $ids): array
+    {
+        usort($ids, strcmp(...));
+
+        return $ids;
+    }
+
+    /**
+     * Seal in batches of the size given.
+     *
+     * @param  int  $batch
+     * @return void
+     */
+    protected function useBatch(int $batch): void
+    {
+        app(ConfigRepository::class)->set('audit-log.integrity.seal.batch', $batch);
     }
 
     /**

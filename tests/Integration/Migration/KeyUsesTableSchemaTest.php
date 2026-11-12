@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Integration\Migration;
 
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -13,20 +12,12 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
 use SineMacula\Laravel\AuditLog\Console\TableShape;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the key uses table the shipped migration
- * creates, on whichever engine the suite runs against: its two columns, keyed
- * by the key and the entry together, so a pair is recorded once, the entry
- * indexed on its own, and the collision guard, the setting that renames it and
- * its rollback.
- *
- * The migration runs for the longest table name the setting accepts, so the
- * index names are what the migration itself declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the key uses table the shipped migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,6 +27,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class KeyUsesTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped key uses migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_001300_create_audit_log_key_uses_table.php';
 
@@ -68,7 +61,7 @@ final class KeyUsesTableSchemaTest extends TestCase
 
         Schema::dropIfExists(self::TABLE);
 
-        $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
     }
 
     /**
@@ -86,9 +79,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the key's id and the entry's, in that order, neither
-     * nullable, both keyed together as the table's primary key, and the schema
-     * checks find nothing wrong with it.
+     * The key and entry columns, in order, are together the primary key.
      *
      * @return void
      */
@@ -106,8 +97,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * A key and an entry are paired once: the same pair again is refused, while
-     * the key with another entry and the entry with another key are both kept.
+     * A key and entry pair is recorded once.
      *
      * @return void
      */
@@ -123,9 +113,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * Besides the primary key, the entry alone is indexed, not unique, under a
-     * name after the table, so an entry's keys are found without reading a
-     * key's entries.
+     * The entry alone has a non-unique index named after the table.
      *
      * @return void
      */
@@ -141,8 +129,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys, so a pruned entry's key uses are left as
-     * they are and a key use never cascades into a key.
+     * The table has no foreign keys.
      *
      * @return void
      */
@@ -152,8 +139,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is binary without padding and on InnoDB, so a key use
-     * commits with its entry.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -170,10 +156,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `privacy.key_uses_table` setting that renames it, and leaves the table
-     * and its key uses as they were.
+     * An existing table is refused naming the setting, and keeps its rows.
      *
      * @return void
      */
@@ -182,7 +165,7 @@ final class KeyUsesTableSchemaTest extends TestCase
         DB::table(self::TABLE)->insert(self::row(1, 1));
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -197,8 +180,7 @@ final class KeyUsesTableSchemaTest extends TestCase
     }
 
     /**
-     * The table is created under whatever name its setting gives, and its
-     * indexes are named after it.
+     * A renamed table and its indexes are created under its setting's name.
      *
      * @return void
      */
@@ -208,7 +190,7 @@ final class KeyUsesTableSchemaTest extends TestCase
 
         self::assertFalse(Schema::hasTable(self::RENAMED));
 
-        $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
 
         self::assertTrue(Schema::hasTable(self::RENAMED));
 
@@ -224,7 +206,7 @@ final class KeyUsesTableSchemaTest extends TestCase
      */
     public function testDownDropsTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
     }
@@ -239,25 +221,5 @@ final class KeyUsesTableSchemaTest extends TestCase
     private static function row(int $key, int $entry): array
     {
         return ['key_id' => sprintf(self::KEY_ID, $key), 'entry_id' => sprintf(self::ENTRY_ID, $entry)];
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('The key uses migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

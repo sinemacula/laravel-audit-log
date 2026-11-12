@@ -9,20 +9,10 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\IntegrityKey;
 
 /**
- * The terms a read of the trail ran under, as its record names them: its
- * filters, the scope the policy answered, or `null` when none was, the keyed
- * fingerprint of each, and the id of the ring key that keyed them.
+ * The terms a read ran under, with keyed fingerprints of its filters and scope.
  *
- * A fingerprint is the lower-case hex HMAC-SHA256 of the canonical encoding of
- * the normalised filters, or of the scope, each under a label of its own, with
- * a key derived by HKDF-SHA256 from the secret of the ring key, with an empty
- * salt and an info string of its own, so it is never the key that signs rows,
- * seals or cursors. Filters and scopes are made of morph types and ids, which
- * are few and often sequential, so a digest anyone could compute would give
- * them back to whoever tried candidates until one matched; without the key, a
- * reader of the record learns of them only whether two reads under the same key
- * ran under the same terms. The derived key is made when the terms are and
- * never kept.
+ * They are keyed because morph types and ids are few and often sequential, so a
+ * plain digest would give them back to anyone trying candidates.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,10 +44,10 @@ final readonly class ReadTerms
         /** The scope the policy answered, or `null` when none was. */
         public ?AccessScope $scope,
 
-        /** The keyed fingerprint of the normalised filters, as 64 lower-case hex. */
+        /** The keyed fingerprint of the normalised filters. */
         public string $queryFingerprint,
 
-        /** The keyed fingerprint of the scope, as 64 lower-case hex, or `null` with no scope. */
+        /** The keyed fingerprint of the scope, or `null` with no scope. */
         public ?string $scopeFingerprint,
 
         /** The id of the ring key the fingerprints were keyed by. */
@@ -65,8 +55,7 @@ final readonly class ReadTerms
     ) {}
 
     /**
-     * The terms of a read under the filters and the scope, fingerprinted under
-     * the ring key.
+     * The terms of a read, fingerprinted under a key derived from the ring key.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\IntegrityKey  $key
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -89,7 +78,7 @@ final readonly class ReadTerms
     }
 
     /**
-     * The keyed fingerprint of the value under the label, as 64 lower-case hex.
+     * The hex HMAC of the value under the label.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

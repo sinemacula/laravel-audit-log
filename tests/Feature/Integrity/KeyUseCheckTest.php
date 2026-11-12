@@ -16,12 +16,8 @@ use SineMacula\Laravel\AuditLog\Keys\KeyUses;
 use Tests\TestCase;
 
 /**
- * Feature tests for the check that the key uses of a segment's entries are
- * complete, on whichever engine the suite runs against: an entry one of whose
- * keys has no key use naming it is missing, in the order given, whatever key
- * uses other entries have; an entry or a key that is not a canonical UUID is
- * never asked for; and the entries' key uses are read by entry on the writer,
- * one statement for each 500 entries and none for none.
+ * Feature tests for the check that a segment's entries have their key uses, on
+ * whichever engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,9 +34,8 @@ final class KeyUseCheckTest extends TestCase
     private const string SECOND_KEY = '01932b4e-9000-7000-8000-000000000002';
 
     /**
-     * An entry with a key use for each of its keys is not missing; one short of
-     * a key use for any of its keys is, though another entry has a key use of
-     * that key, and the entries are named in the order given.
+     * An entry short of a key use for any of its keys is missing, though
+     * another entry has one; entries are named in the order given.
      *
      * @return void
      */
@@ -62,9 +57,8 @@ final class KeyUseCheckTest extends TestCase
     }
 
     /**
-     * The entries' key uses are read through the entry index on the writer, one
-     * statement for each 500 entries: 501 entries take two, and the last
-     * entry's missing key use is found in the second.
+     * The key uses are read through the entry index on the writer, one
+     * statement per 500 entries, so 501 entries take two.
      *
      * @return void
      */
@@ -108,9 +102,8 @@ final class KeyUseCheckTest extends TestCase
     }
 
     /**
-     * An entry whose id is not a canonical lower-case UUID, and a key that is
-     * not one, are never asked for, since no key use names either; an entry
-     * naming no such key needs none, and nothing is read.
+     * An entry id or key that is not a canonical lower-case UUID is never asked
+     * for, since no key use can name it.
      *
      * @return void
      */

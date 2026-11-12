@@ -28,18 +28,8 @@ use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
 /**
- * Feature tests for the verification of the owners' key store, on whichever
- * engine the suite runs against, with owners erased and reinstated by hand as
- * an erasure and a reinstatement commit them: a key a verified erasure row
- * destroyed is clean, and one nulled or tombstoned without such a row listing
- * it is unjournalled; a key that holds a key while its owner's latest
- * transition is an erasure that did not keep it, or at or below the floor after
- * a reinstatement, is restored, while a kept key stays clean through the
- * reinstatement; an edited or copied row is substituted, and one under a key
- * that is not held unverifiable; a key use with no key is missing; a custom
- * encrypter skips the whole section, and without unwrapping no wrapper is
- * called; the keys are read in pages by id, and the fold keeps no destroyed
- * ids.
+ * Feature tests for the verification of the owners' key store, with erasures
+ * and reinstatements committed by hand.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,9 +83,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A key whose wrapped key was nulled while it stays live, and one
-     * tombstoned with an erasure id no journal row has, are each
-     * `key_destroyed_unjournalled`, counted at the first by id.
+     * A live key with a nulled wrapped key, and one tombstoned with an unknown
+     * erasure id, are each `key_destroyed_unjournalled`.
      *
      * @return void
      */
@@ -115,10 +104,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A key an erasure tombstoned whose row is put back as it was before is a
-     * live key of an owner whose latest transition is that erasure, which did
-     * not keep it: it is `key_restored`, though its signature and its wrapping
-     * are its own.
+     * A key put back after the erasure that did not keep it is `key_restored`,
+     * though its signature and wrapping are its own.
      *
      * @return void
      */
@@ -140,9 +127,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A key created for an owner after its erasure, above the floor and
-     * properly signed and wrapped, is `key_restored`, since no key is created
-     * for an erased owner until a reinstatement; the erased key stays clean.
+     * A key created for an erased owner before any reinstatement is
+     * `key_restored`, though properly signed and wrapped.
      *
      * @return void
      */
@@ -165,9 +151,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A key a partial erasure kept goes on holding its key, and is clean while
-     * the erasure is the owner's latest transition; the unit it destroyed is
-     * erased and clean too.
+     * A key a partial erasure kept is clean while that erasure is the owner's
+     * latest transition, as is the unit it destroyed.
      *
      * @return void
      */
@@ -189,9 +174,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * After a reinstatement, a key at or below the floor the erasure set that
-     * holds a key again is `key_restored`, while a key the next write creates
-     * above the floor is clean.
+     * After a reinstatement, a key at or below the erasure's floor that holds a
+     * key again is `key_restored`; a new key above it is clean.
      *
      * @return void
      */
@@ -218,8 +202,7 @@ final class KeyStoreVerifierTest extends TestCase
 
     /**
      * A key the latest erasure kept stays clean after the owner's
-     * reinstatement, though its generation is at or below the floor: the floor
-     * exempts what the erasure before the reinstatement kept.
+     * reinstatement, though at or below the floor.
      *
      * @return void
      */
@@ -243,10 +226,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A second erasure after the reinstatement replaces what the first kept: a
-     * key the first kept and the second did not is `key_restored` while it
-     * holds a key, so a kept key's exemption lasts only as long as the erasure
-     * that granted it.
+     * A key the first erasure kept and a later one did not is `key_restored`
+     * while it holds a key: the exemption lasts until the next erasure.
      *
      * @return void
      */
@@ -272,9 +253,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A key use naming a key no row has is `key_missing`, counted once per key
-     * however many entries name it, at the first by id; a key use of a key that
-     * exists is not.
+     * A key use naming a key no row has is `key_missing`, once per key at the
+     * first by id; one naming an existing key is not.
      *
      * @return void
      */
@@ -335,9 +315,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A wrapped key copied from another row does not unwrap under the row's own
-     * wrap context, so the row is `key_substituted` though its signature is its
-     * own; the row it was copied from is clean.
+     * A wrapped key copied from another row does not unwrap under its own
+     * context, so the row is `key_substituted`; the source is clean.
      *
      * @return void
      */
@@ -368,9 +347,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A key row signed under a key the ring does not hold, or wrapped under a
-     * key the wrapper does not hold, cannot be judged, and is
-     * `key_unverifiable` rather than substituted.
+     * A key row signed or wrapped under a key that is not held cannot be
+     * judged, and is `key_unverifiable` rather than substituted.
      *
      * @param  string  $column
      * @param  string  $value
@@ -409,10 +387,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * Without unwrapping, the wrapper is never called, so a wrapped key moved
-     * from another row is not found; everything else is still checked, and a
-     * restored key is still restored. With unwrapping, the same wrapper is
-     * called once for each key that holds one.
+     * Without unwrapping the wrapper is never called, so a moved wrapped key
+     * goes unfound; with it, the wrapper is called once per key.
      *
      * @return void
      */
@@ -443,9 +419,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A wrapper that throws anything at all for a key makes it
-     * `key_substituted`, and a wrapper that unwraps to anything but a data
-     * key's length does too.
+     * A wrapper that throws, or unwraps to anything but a data key's length,
+     * makes the key `key_substituted`.
      *
      * @return void
      */
@@ -503,9 +478,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A key tombstoned with the id of a verified erasure row that does not list
-     * it, another owner's, is `key_destroyed_unjournalled`; the keys that row
-     * does list stay clean.
+     * A key tombstoned with the id of a verified erasure that does not list it
+     * is `key_destroyed_unjournalled`; the keys it lists are clean.
      *
      * @return void
      */
@@ -527,9 +501,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A tombstone is believed only from a verified erasure: a row naming the
-     * key that is not an erasure, or whose payload was changed, proves no
-     * erasure, and the key is `key_destroyed_unjournalled`.
+     * A tombstone is believed only from a verified erasure row: a row of
+     * another kind, or with a changed payload, proves nothing.
      *
      * @return void
      */
@@ -557,9 +530,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * An erasure row whose signature fails proves no transition: the owner's
-     * key put back as it was is not found restored by it, and its tombstone
-     * would not be believed either.
+     * An erasure row whose signature fails proves no transition: no key is
+     * found restored by it, and its tombstones are not believed.
      *
      * @return void
      */
@@ -581,10 +553,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * The fold keeps no set of destroyed ids: a journal of four pages of
-     * erasure rows, each listing its own destroyed keys, raises the peak no
-     * more than one page of them does, measured against that page in this
-     * process, though it lists four times the ids.
+     * The fold keeps no set of destroyed ids: four pages of erasure rows raise
+     * the peak memory no more than one page does.
      *
      * @return void
      */

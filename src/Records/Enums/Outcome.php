@@ -5,8 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Records\Enums;
 
 /**
- * How the activity a record describes ended: it succeeded, it failed, or a
- * policy denied it.
+ * How the activity a record describes ended.
  *
  * @api
  *

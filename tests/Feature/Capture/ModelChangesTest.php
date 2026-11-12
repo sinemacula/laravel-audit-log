@@ -33,13 +33,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for watched models through the provider's wiring and Eloquent's
- * own events, each watch registered while the application boots: each change
- * written as one row under its code, a restore and a force delete one row each;
- * hidden and encrypted values never written; every path that changes a row
- * without a model event (query-builder writes, quiet saves, raw statements, a
- * plain pivot) and a custom event that stops the fallback writing nothing; a
- * subclass never watched through its parent; and the package's own read model
- * never watched.
+ * events.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,8 +63,8 @@ final class ModelChangesTest extends TestCase
     private array $refusals = [];
 
     /**
-     * Create the tagged invoices' tables, bind the reporter, and hear each
-     * capture failure.
+     * Create the tagged invoices' tables, bind the reporter and hear capture
+     * failures.
      *
      * @return void
      */
@@ -91,8 +85,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * Each change writes one row under its code, naming the model as subject: a
-     * creation, an update, a soft delete, a restore and a force delete.
+     * Each change writes one row under its code, naming the model as subject.
      *
      * @return void
      */
@@ -124,13 +117,8 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * A hidden field and encrypted ones, each watched with an explicit
-     * handling, never show their values: a snapshot writes each as its handling
-     * says, and an update writes an encrypted field's before and after so,
-     * while a field whose name the redactor masks is omitted from the changes
-     * as a whole, the omission naming it. A field this instance hides with no
-     * handling refuses the capture, which is said once, and the change itself
-     * goes on.
+     * Hidden and encrypted values never appear; a hidden field with no handling
+     * refuses the capture.
      *
      * @return void
      */
@@ -175,9 +163,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * Rows of `[a change no model event announces]`: query-builder writes, a
-     * quiet save, a save without events, a raw statement and a plain pivot's
-     * attachment, each given the saved invoice, the tagged invoice and the tag.
+     * Rows of `[a change no model event announces]`.
      *
      * @formatter:off
      *
@@ -223,9 +209,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * Each change no model event announces writes nothing, though the tables
-     * change: a gap of model capture, which `covering()` or an explicit record
-     * covers.
+     * A change no model event announces writes nothing.
      *
      * @formatter:off
      *
@@ -256,8 +240,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * A model whose custom event answers in place of Eloquent's own writes
-     * nothing for its creation, update or deletion: a gap of model capture.
+     * A custom event that answers in place of Eloquent's writes nothing.
      *
      * @return void
      */
@@ -274,8 +257,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * The package's read model is never watched: watching it is refused while
-     * the application boots, and writing an entry writes only that entry.
+     * The package's read model is never watched.
      *
      * @return void
      */
@@ -290,8 +272,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * A subclass of a watched model is not watched through its parent: its
-     * changes write nothing, while its parent's are recorded.
+     * A subclass of a watched model is not watched through its parent.
      *
      * @return void
      */
@@ -310,8 +291,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * A restore writes one restored row and no update, and a force delete one
-     * force-deleted row and no deletion.
+     * A restore and a force delete write one row each.
      *
      * @return void
      */
@@ -333,8 +313,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * A change inside a transaction is written when it commits, and a change
-     * rolled back is never written.
+     * A change in a transaction is written on commit and never on rollback.
      *
      * @return void
      */
@@ -358,9 +337,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * Watch the models while the application boots, as an application's
-     * provider would, noting what refusing to watch the package's read model
-     * says.
+     * Watch the models while the application boots, noting each refusal.
      *
      * @param  mixed  $app
      * @return void
@@ -409,8 +386,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * Every row of the watched invoices' and the pivot's tables, as one string,
-     * so any change to either shows.
+     * Every row of the invoices' and pivot's tables as one string.
      *
      * @return string
      */
@@ -456,8 +432,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * Create the tagged invoices', the tags' and the pivot's tables on the
-     * test's connection, and drop them before the application is destroyed.
+     * Create the tagged invoices', tags' and pivot tables, dropped on teardown.
      *
      * @return void
      */
@@ -489,8 +464,7 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
-     * Drop the pivot's, the tags' and the tagged invoices' tables from the
-     * test's connection.
+     * Drop the pivot, tags and tagged invoices tables.
      *
      * @return void
      */

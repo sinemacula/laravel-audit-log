@@ -10,25 +10,11 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Describes a watched model's change on a capture's builder: its code, the
- * model as its subject, the watched fields' values, and delivery after the
- * model's own connection commits, so a change rolled back is never recorded.
+ * Describes a watched model's change on a capture's builder, delivered after
+ * the model's connection commits.
  *
- * Before any value is read, every watched field is checked on the instance
- * itself: one it hides, or casts encrypted, is refused unless the watch gives
- * it an explicit handling, so a value the model keeps from view is never
- * recorded as read. Values are read raw, from the attributes, the changes and
- * the values before them, and never through an accessor, an appended attribute
- * or a cast.
- *
- * A creation keeps the watched fields as they were set, and an update the
- * watched fields it changed, each before and after, or nothing when it changed
- * none. An update that clears a soft-deleted model's deleted-at column is a
- * restore, which keeps the fields and the changes alongside it. A deletion and
- * a force deletion keep the fields as they are stored, never values set and not
- * saved, and name the model by the key it is stored under, as Eloquent deletes
- * by; the deletion a force deletion runs through is not recorded, before any
- * field is checked, so a force deletion is one record and at most one failure.
+ * Values are read raw, never through an accessor or cast, and a field hidden or
+ * cast encrypted on the instance is refused unless explicitly handled.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,10 +26,10 @@ final class ModelChangeDescriber
     /** @var string The key a record keeps the changes under. */
     private const string CHANGES = 'changes';
 
-    /** @var string The type of the cast Laravel encrypts a value with, before any argument. */
+    /** @var string The cast type Laravel encrypts a value with. */
     private const string ENCRYPTED_CAST = 'encrypted';
 
-    /** @var string The beginning of the short name of each cast class Laravel encrypts a value with. */
+    /** @var string Short-name prefix of Laravel's encrypting cast classes. */
     private const string ENCRYPTED_CAST_CLASS_PREFIX = 'AsEncrypted';
 
     /**
@@ -52,10 +38,8 @@ final class ModelChangeDescriber
     private function __construct() {}
 
     /**
-     * Describe the change of the watched model on the builder, and return it,
-     * or `null` when the change records nothing: an update of no watched field,
-     * or the deletion a force deletion runs through. An update and a restore
-     * are both told from the update itself.
+     * Describe the change on the builder, or `null` when it records nothing: an
+     * update of no watched field, or a force deletion's inner deletion.
      *
      * @param  \SineMacula\Laravel\AuditLog\Capture\ModelWatch  $watch
      * @param  \SineMacula\Laravel\AuditLog\Capture\Enums\ModelEvent  $change
@@ -92,10 +76,8 @@ final class ModelChangeDescriber
     }
 
     /**
-     * What the change keeps: the watched fields as set for a creation, as
-     * stored for a deletion, both those and the changes for a restore, and the
-     * changes alone for an update, which keeps nothing, `null`, when it changed
-     * no watched field.
+     * The properties the change keeps, or `null` for an update of no watched
+     * field.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -115,10 +97,8 @@ final class ModelChangeDescriber
     }
 
     /**
-     * The subject of the change: the model by its key, and for a deletion or a
-     * force deletion by the key it is stored under, which Eloquent deletes by,
-     * never a key set and not saved. A field the watch encrypts is then sealed
-     * for the row that was removed.
+     * The change's subject; a deletion is named by its stored key, which
+     * Eloquent deletes by, never an unsaved one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Capture\Enums\ModelEvent  $recorded
      * @param  \Illuminate\Database\Eloquent\Model  $model
@@ -141,8 +121,8 @@ final class ModelChangeDescriber
     }
 
     /**
-     * What a restore keeps: the watched fields as they now are, and beside them
-     * the watched fields it changed, when it changed any.
+     * What a restore keeps: the watched fields, and beside them the changes
+     * when there are any.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -159,8 +139,7 @@ final class ModelChangeDescriber
     }
 
     /**
-     * What an update keeps: the watched fields it changed, or `null` when it
-     * changed none.
+     * What an update keeps: the watched fields it changed, or `null` when none.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -176,8 +155,8 @@ final class ModelChangeDescriber
     }
 
     /**
-     * Refuse the capture when a watched field the watch keeps as it is read is
-     * hidden or cast encrypted on the instance.
+     * Refuse a watched field kept as read that is hidden or cast encrypted on
+     * the instance.
      *
      * @param  \SineMacula\Laravel\AuditLog\Capture\ModelWatch  $watch
      * @param  \Illuminate\Database\Eloquent\Model  $model
@@ -207,9 +186,8 @@ final class ModelChangeDescriber
     }
 
     /**
-     * Whether the cast encrypts the value: the `encrypted` cast with or without
-     * its argument, or a cast class whose short name begins `AsEncrypted`, each
-     * read without its arguments.
+     * Whether the cast encrypts: `encrypted`, or a cast class whose short name
+     * begins `AsEncrypted`, read without arguments.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -234,8 +212,7 @@ final class ModelChangeDescriber
     }
 
     /**
-     * Whether the update cleared a soft-deleted model's deleted-at column: the
-     * model soft deletes, and the column changed from a value to `null`.
+     * Whether the update cleared a soft-deleted model's deleted-at column.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @return bool
@@ -257,7 +234,7 @@ final class ModelChangeDescriber
 
     /**
      * Whether the model is being deleted for good, so its deletion is the force
-     * deletion's, recorded under its own code.
+     * deletion's.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @return bool
@@ -268,8 +245,7 @@ final class ModelChangeDescriber
     }
 
     /**
-     * The watched fields the attributes hold, in the watch's order, each as
-     * held.
+     * The watched fields the attributes hold, in the watch's order.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -284,7 +260,7 @@ final class ModelChangeDescriber
 
     /**
      * The watched fields the update changed, in the watch's order, each with
-     * its stored value before the change and its value after.
+     * its stored value before and its value after.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -305,8 +281,7 @@ final class ModelChangeDescriber
     }
 
     /**
-     * The name of the model's connection, whose commit its change waits for:
-     * the default connection's for a model that names none.
+     * The name of the model's connection, whose commit the change waits for.
      *
      * @param  \SineMacula\Laravel\AuditLog\Capture\ModelWatch  $watch
      * @param  \Illuminate\Database\Eloquent\Model  $model

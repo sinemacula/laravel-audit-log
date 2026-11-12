@@ -12,9 +12,8 @@ use SineMacula\Laravel\AuditLog\Privacy\SealingScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the scope a record's values are sealed in: the context it
- * gives each path, sharing one entry, log, tenant, category and list of owners,
- * and the parts and paths it refuses.
+ * Unit tests for the sealing scope: the context it gives each path from its
+ * shared parts, and the parts and paths it refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

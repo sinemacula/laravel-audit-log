@@ -21,20 +21,14 @@ use SineMacula\Laravel\AuditLog\Records\DisclosureManifest;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\RecordsStorageStatements;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
  * Feature tests for the check of the artifacts that verified entries' signed
- * manifests name, on whichever engine the suite runs against: bundles are
- * written as the store leaves them and changed through raw queries. They pin
- * the finding each change gives, for an artifact of every kind, that the
- * members must decrypt to exactly the canonical form of the kind the descriptor
- * names and describes, that each finding names the earliest entry, how a
- * descriptor is read from a stored entry, and that the artifacts are read in
- * batches of entries and their members in sub-batches of bytes, every statement
- * on the writer and none for no manifest.
+ * manifests name, changed through raw queries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,7 +38,7 @@ use Tests\TestCase;
 #[CoversClass(ManifestVerifier::class)]
 final class ManifestVerifierTest extends TestCase
 {
-    use SeedsArtifacts;
+    use RecordsStorageStatements, SeedsArtifacts;
 
     /** @var string An artifact id no bundle has. */
     private const string OTHER_ID = '01932b4e-9000-7000-8000-00000000ffff';
@@ -99,9 +93,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * An artifact missing with its entry, both deleted by a prune that
-     * committed after the segment read the entry, is no finding, and costs one
-     * read of the entries; an artifact missing beside its entry is missing.
+     * An artifact pruned with its entry after the segment read it is no
+     * finding, and one gone beside its entry is missing.
      *
      * @return void
      */
@@ -113,7 +106,7 @@ final class ManifestVerifierTest extends TestCase
         $this->artifactsTable()->whereIn('entry_id', [$pruned, $kept])->delete();
         DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $pruned)->delete();
 
-        $statements = $this->recordStatements();
+        $statements = $this->recordExecutedStatements();
 
         self::assertSame([[Finding::MANIFEST_MISSING, $kept]], $this->verifier()->findings($descriptors));
         self::assertCount(2, $statements);
@@ -121,9 +114,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * An artifact deleted after its columns were read and before its members
-     * are is missing, never unreadable; deleted with its entry, it is no
-     * finding.
+     * An artifact deleted between the reads of its columns and its members is
+     * missing, never unreadable; deleted with its entry it is no finding.
      *
      * @return void
      */
@@ -180,10 +172,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * Two bundles of the same members whose artifacts are swapped between their
-     * entries are each swapped, though each artifact's kind, count and digest
-     * are the ones signed: only the artifact's id tells them apart. Their
-     * members are never read.
+     * Two bundles of the same members whose artifacts are swapped are each
+     * swapped, told apart only by artifact id, their members never read.
      *
      * @return void
      */
@@ -202,9 +192,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * A disclosure's and an export's artifacts swapped between their entries
-     * are each swapped, before their kinds are compared: the stored kind of
-     * each is the other's, but the artifact is the wrong one first.
+     * Artifacts of two kinds swapped between their entries are each swapped,
+     * found before their kinds are compared.
      *
      * @return void
      */
@@ -279,8 +268,7 @@ final class ManifestVerifierTest extends TestCase
 
     /**
      * An artifact stored as a kind its descriptor does not name is the wrong
-     * kind, whether the stored kind or the signed one changed, and its members
-     * are never read by another kind's reader.
+     * kind, and is never read by another kind's reader.
      *
      * @return void
      */
@@ -314,9 +302,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * An artifact of every kind is checked: as written it has no finding,
-     * members that open to no canonical form of the kind are malformed, and
-     * another canonical form of the kind, of the signed count, is tampered.
+     * An artifact of every kind is checked: as written it passes, non-canonical
+     * members are malformed and other canonical ones tampered.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  string  $other
@@ -340,10 +327,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * Rows of `[kind, canonical form, count]`: an artifact signed and stored as
-     * one kind whose plaintext is another kind's canonical form, or no
-     * canonical form of its version, its descriptor's count and digest those of
-     * that plaintext.
+     * Rows of `[kind, canonical form, count]`: a plaintext that is no canonical
+     * form of its kind, signed with its own count and digest.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind, 1: string, 2: int}>
      */
@@ -363,10 +348,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * An artifact whose plaintext is not exactly a canonical form of the kind
-     * its descriptor names is malformed, even when its count and digest are the
-     * signed ones and another kind's reader would read it: each kind is read by
-     * its own reader.
+     * A plaintext that is not exactly a canonical form of the descriptor's kind
+     * is malformed, even with the signed count and digest.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  string  $canonical
@@ -436,9 +419,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * Members in canonical form that are not the ones signed are tampered:
-     * fewer or more than signed, or as many of other subjects, which do not
-     * give the signed digest.
+     * Canonical members that are not the ones signed are tampered: fewer, more,
+     * or as many of other subjects.
      *
      * @return void
      */
@@ -473,9 +455,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * An artifact counting another number of members, or holding another
-     * digest, than its manifest signed is a mismatch, whether the stored column
-     * or the signed value changed.
+     * An artifact whose member count or digest differs from its manifest's is a
+     * mismatch, whichever side changed.
      *
      * @return void
      */
@@ -513,8 +494,7 @@ final class ManifestVerifierTest extends TestCase
 
     /**
      * An artifact whose columns differ from its manifest's gives its finding
-     * without its members being read: protects against a check that opens every
-     * artifact.
+     * without its members being read.
      *
      * @param  array<string, int|string>  $columns
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\Finding  $finding
@@ -594,9 +574,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * Each finding is given once, at the earliest of the entries it was found
-     * at, bytewise, and the findings in the order of `Finding`, whatever order
-     * the entries come in: every artifact finding at once, each at two entries.
+     * Each finding is given once, at the bytewise earliest entry it was found
+     * at, in the order of `Finding`, whatever order entries come in.
      *
      * @return void
      */
@@ -665,9 +644,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * Rows of `[stored properties, the descriptor read]`: an entry's raw
-     * properties, and what is read of them, the stored value as it is, an empty
-     * map for a value that is no map, and `null` where there is none.
+     * Rows of `[stored properties, the descriptor read]`: the stored value as
+     * it is, an empty map for no map, and `null` for none.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -707,10 +685,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * Rows of `[descriptor]`: values a signed manifest descriptor is not, since
-     * it is exactly a lower-case UUID artifact id, a kind the package knows, a
-     * 64 lower-case hex digest and an integer count, positive for a bulk
-     * operation and never negative.
+     * Rows of `[descriptor]`: values that are not a lower-case UUID id, a known
+     * kind, a 64 lower-case hex digest and a valid count.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -765,8 +741,7 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * A stored entry signing a manifest that is no map, or a map that is no
-     * descriptor, a key added or its kind missing, is checked and is malformed,
+     * A manifest that is no map, or no descriptor, is checked and malformed,
      * never skipped.
      *
      * @return void
@@ -784,8 +759,7 @@ final class ManifestVerifierTest extends TestCase
 
     /**
      * A manifest keyed by an entry id that is not a lower-case UUID is
-     * malformed, and no statement binds it: protects every engine's UUID column
-     * from a value it would refuse.
+     * malformed and never bound, since a UUID column would refuse it.
      *
      * @return void
      */
@@ -800,8 +774,7 @@ final class ManifestVerifierTest extends TestCase
 
     /**
      * The artifacts of 250 bundles are read in three statements of at most 100
-     * entries each, and their members, which fit the byte bound, in one more
-     * statement per batch, never one per entry.
+     * entries, and their members in one more per batch.
      *
      * @return void
      */
@@ -819,10 +792,8 @@ final class ManifestVerifierTest extends TestCase
     }
 
     /**
-     * The members are read in sub-batches whose stored bytes sum to at most the
-     * bound: five artifacts under a bound of two read their members in three
-     * statements, each of at most two, and one larger than the bound is read
-     * alone.
+     * Members are read in sub-batches whose stored bytes sum to at most the
+     * bound, and one larger than the bound is read alone.
      *
      * @return void
      */
@@ -855,8 +826,7 @@ final class ManifestVerifierTest extends TestCase
 
     /**
      * Every statement reads the writer, so a replica's lag never reads as a
-     * missing artifact: with a reader that refuses to be used, a check of a
-     * bundle still passes.
+     * missing artifact.
      *
      * @return void
      */
@@ -942,24 +912,6 @@ final class ManifestVerifierTest extends TestCase
                 return;
             }
 
-            $statements->append(strtolower($query->sql));
-        });
-
-        return $statements;
-    }
-
-    /**
-     * Record, from now on, every statement the storage connection runs, in
-     * lower case.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function recordStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::connection(StorageConnection::name())->listen(static function (QueryExecuted $query) use ($statements): void {
             $statements->append(strtolower($query->sql));
         });
 

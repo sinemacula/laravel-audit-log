@@ -9,11 +9,9 @@ use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 
 /**
- * An anchor that hands every call to another and ends the process by `SIGKILL`
- * around an anchoring: before the call reaches the anchor, or after the anchor
- * has kept the summary and before its receipt is returned. Nothing runs after
- * the kill, so the process dies at exactly that boundary; it is for the
- * children of the crash tests only.
+ * An anchor that hands every call to another and dies by `SIGKILL` before an
+ * anchoring reaches it or after it kept the summary, for the crash tests'
+ * children only.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

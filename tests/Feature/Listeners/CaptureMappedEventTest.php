@@ -24,10 +24,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the routing bridge, the one wildcard listener every mapped
- * event reaches the capture through: an object event is captured, through its
- * own class's mapping or a parent's, and a string event or a payload of any
- * other shape is left alone; a contained failure never leaves the bridge.
+ * Feature tests for the wildcard listener routing mapped events to the capture.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,8 +41,7 @@ final class CaptureMappedEventTest extends TestCase
     private RecordingExceptionHandler $reporter;
 
     /**
-     * Fake the store, bind the reporter, and map the portal events on a
-     * registry of the test's own, since the application's freezes once booted.
+     * Fake the store and reporter, and replace the frozen booted registry.
      *
      * @return void
      */
@@ -65,8 +61,7 @@ final class CaptureMappedEventTest extends TestCase
     }
 
     /**
-     * An object event dispatched through the real dispatcher reaches the
-     * capture, through an interface mapping and through a parent class's.
+     * An object event is captured through an interface or parent mapping.
      *
      * @return void
      */
@@ -81,8 +76,7 @@ final class CaptureMappedEventTest extends TestCase
     }
 
     /**
-     * Handed straight to the bridge, an object event named by its class is
-     * captured.
+     * An object event handed straight to the bridge is captured.
      *
      * @return void
      */
@@ -97,8 +91,7 @@ final class CaptureMappedEventTest extends TestCase
     }
 
     /**
-     * A string event is ignored, even when its payload holds a mapped event
-     * object.
+     * A string event is ignored, even with a mapped event in its payload.
      *
      * @return void
      */
@@ -114,8 +107,7 @@ final class CaptureMappedEventTest extends TestCase
     }
 
     /**
-     * Rows of `[name, payload]`: payloads that are not one object of the class
-     * the event is named after.
+     * Rows of `[name, payload]` that are not one object of the named class.
      *
      * @return iterable<string, array{0: string, 1: list<object|string>}>
      */
@@ -147,8 +139,7 @@ final class CaptureMappedEventTest extends TestCase
     }
 
     /**
-     * A contained failure never leaves the bridge: the dispatch returns, the
-     * failure is reported and said once, and nothing is written.
+     * A contained failure is reported and dispatched once, and writes nothing.
      *
      * @return void
      */

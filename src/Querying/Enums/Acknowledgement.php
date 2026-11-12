@@ -5,10 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Querying\Enums;
 
 /**
- * How the record that journals an export was acknowledged before the export was
- * published: stored by the audit store, or accepted as a committed outbox row
- * that a drain will deliver. Accepted is not delivered: the row is durable, and
- * the store holds it only once a drain has run.
+ * How an export's journal record was acknowledged before publishing; accepted
+ * is durable in the outbox but not delivered until a drain runs.
  *
  * @api
  *

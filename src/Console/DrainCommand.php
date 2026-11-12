@@ -16,24 +16,8 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * `audit-log:drain`: delivers the outbox's due rows to the store, at most
- * `--limit` of them (100 unless given, from 1 to 10000), or, with
- * `--until-empty`, batch after batch of that many until no row that was due
- * when the run began is left to claim.
- *
- * It prints how many rows were delivered, completed as pruned because retention
- * had already pruned their record, retried, failed, taken over by another drain
- * and missed because another drain claimed them first, and exits non-zero when
- * any row failed; a pruned row is no failure. A limit it refuses is said before
- * anything is drained. Whatever stops the run, such as a missing table or a
- * transaction left open, is named by its class alone and reported as a
- * payload-free `AuditWriteFailedException`, so a scheduled run whose output is
- * discarded still raises it, and the tally of the rows already worked is
- * printed after it; the command never prints a message, a payload or a binding.
- *
- * The package neither schedules the command nor dispatches a job to run it: the
- * application runs it, from its scheduler or a worker of its own, as often as
- * the outbox needs.
+ * `audit-log:drain`: delivers the outbox's due rows to the store, `--limit` at
+ * a time, or with `--until-empty` until no row due at the start is left.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

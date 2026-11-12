@@ -9,22 +9,7 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 
 /**
  * Seals a field's typed plaintext under an owner's data key, and opens it, as
- * envelope version 1: AES-256-GCM with a fresh 96-bit nonce and a 128-bit tag,
- * stored as `{v: 1, k: <key row id>, c: base64url(nonce ‖ ciphertext ‖ tag)}`.
- *
- * Each envelope is sealed under a field key derived from the data key and the
- * entry id by HKDF-SHA256, so a derived key encrypts only the fields of one
- * entry, each with its own random nonce, far below the bound AES-GCM sets on
- * random nonces under one key. The additional data is the canonical JSON of the
- * envelope's domain, the entry id, the key id, the log id, the path and the
- * version, so an envelope opens only under its own key, at its own entry and
- * path, in its own log.
- *
- * A nonce is drawn from `random_bytes()` inside each seal and is never a
- * parameter, so no caller can make one repeat. Opening refuses a version other
- * than 1, a ciphertext that is not strict base64url of a nonce, a plaintext of
- * 1 to 1024 bytes and a tag, and a failed authentication, each with an
- * `UnexpectedValueException` that names nothing of the envelope or the key.
+ * AES-256-GCM envelope version 1.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,7 +39,7 @@ final class FieldCipher
     /** @var string HKDF info of every field key. */
     private const string FIELD_KEY_INFO = 'sinemacula/audit-log:field-key:v1';
 
-    /** @var string Why an envelope does not open; it names nothing of the envelope. */
+    /** @var string Refusal for an envelope that does not open; names nothing of it. */
     private const string UNOPENED = 'The envelope does not open under its key at its entry and path.';
 
     /**
@@ -63,9 +48,8 @@ final class FieldCipher
     private function __construct() {}
 
     /**
-     * The typed plaintext sealed under the data key as an envelope naming the
-     * key id, bound to the entry, the path and the log, under a nonce drawn
-     * here and nowhere else.
+     * The typed plaintext sealed as an envelope bound to the entry, path and
+     * log, under a nonce drawn here so no caller can repeat one.
      *
      * @param  string  $dataKey
      * @param  string  $keyId
@@ -108,8 +92,8 @@ final class FieldCipher
     }
 
     /**
-     * The typed plaintext an envelope holds, opened under the data key at the
-     * entry, the path and the log it was sealed for.
+     * The typed plaintext an envelope holds, opened at the entry, path and log
+     * it was sealed for.
      *
      * @param  string  $dataKey
      * @param  string  $keyId
@@ -153,8 +137,7 @@ final class FieldCipher
     }
 
     /**
-     * The additional data an envelope is authenticated with: the canonical JSON
-     * of its domain, entry id, key id, log id, path and version.
+     * The additional data an envelope is authenticated with.
      *
      * @param  string  $logId
      * @param  string  $keyId
@@ -175,8 +158,8 @@ final class FieldCipher
     }
 
     /**
-     * The key one entry's fields are sealed under: HKDF-SHA256 of the data key
-     * with the entry id as its salt, under the field key's own info.
+     * The key one entry's fields are sealed under, keeping each derived key far
+     * below AES-GCM's random-nonce bound.
      *
      * @param  string  $dataKey
      * @param  string  $entryId
@@ -194,10 +177,8 @@ final class FieldCipher
     }
 
     /**
-     * The bytes a ciphertext encodes, refused unless it is strict base64url,
-     * with no padding and in the one form its bytes encode to, of a nonce, a
-     * plaintext of 1 to 1024 bytes and a tag. A text equal to the encoding of
-     * what it decodes to holds nothing outside the alphabet.
+     * The bytes a ciphertext encodes, refused unless it is canonical unpadded
+     * base64url of a nonce, a 1 to 1024 byte plaintext and a tag.
      *
      * @param  string  $ciphertext
      * @return string
@@ -222,8 +203,7 @@ final class FieldCipher
     }
 
     /**
-     * A fresh nonce from the system's random source. A system that cannot give
-     * random bytes seals nothing.
+     * A fresh nonce from the system's random source.
      *
      * @return string
      *

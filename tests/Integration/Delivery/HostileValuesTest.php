@@ -31,13 +31,9 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for a record whose value reads as one of Laravel's phrases
- * for a deadlock or a lost connection, on the engine the suite runs against: a
- * real failing statement holds the value in its bindings, and a real constraint
- * failure in what the driver quotes, and neither may make an ordinary failure
- * look fatal. The record is still spilled and reported, nothing is thrown under
- * the report rule, and the host's transaction is left usable, its savepoint
- * rolled back.
+ * Integration tests for a record whose value matches Laravel's phrases for a
+ * deadlock or lost connection, which must not make an ordinary failure look
+ * fatal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,15 +56,14 @@ final class HostileValuesTest extends TestCase
     /** @var string A table that does not exist, so the insert really fails. */
     private const string MISSING_TABLE = 'audit_no_such_table';
 
-    /** @var string The spill channel, which writes nowhere; the lines are captured as they are logged. */
+    /** @var string The spill channel, which writes nowhere; lines are captured as logged. */
     private const string SPILL_CHANNEL = 'audit-spill';
 
-    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter is asked to report. */
+    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler The application's reporter. */
     private RecordingExceptionHandler $reporter;
 
     /**
-     * Create the table the host writes to, bind the reporter and capture the
-     * spill lines.
+     * Create the host's table, bind the reporter and capture spill lines.
      *
      * @return void
      */
@@ -128,9 +123,8 @@ final class HostileValuesTest extends TestCase
     }
 
     /**
-     * A statement that really fails, with the phrase among its bindings, inside
-     * a host: the record is spilled and reported, nothing is thrown under the
-     * report rule, and the host goes on and commits.
+     * A failed statement with the phrase in its bindings inside a host is
+     * spilled and reported, and the host commits.
      *
      * @param  string  $phrase
      * @return void
@@ -180,8 +174,7 @@ final class HostileValuesTest extends TestCase
     }
 
     /**
-     * With no host open the same failure was never fatal: this pins that the
-     * phrase changes nothing there either.
+     * With no host open the phrase changes nothing.
      *
      * @param  string  $phrase
      * @return void
@@ -198,10 +191,8 @@ final class HostileValuesTest extends TestCase
     }
 
     /**
-     * A real unique violation whose driver message can quote the value, as
-     * PostgreSQL's `DETAIL` and MySQL's duplicate entry do: Laravel must still
-     * roll back the savepoint, so the host stays usable and the class stays a
-     * unique violation.
+     * A unique violation whose driver message quotes the value still rolls back
+     * its savepoint and stays a unique violation.
      *
      * @param  string  $phrase
      * @return void
@@ -235,8 +226,8 @@ final class HostileValuesTest extends TestCase
     }
 
     /**
-     * An outbox insert that really fails inside a host follows the rule too,
-     * its savepoint rolled back.
+     * A failed outbox insert inside a host follows the rule and rolls back its
+     * savepoint.
      *
      * @return void
      */

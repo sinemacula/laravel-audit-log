@@ -16,9 +16,7 @@ use SineMacula\Laravel\AuditLog\Integrity\UnknownKeyException;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the owner fingerprint: keyed and stable, changed by a rotation
- * of the ring, derived under its own info, and reproduced under the key an
- * earlier row names.
+ * Unit tests for the owner fingerprint.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,10 +33,8 @@ final class OwnerFingerprintTest extends TestCase
     private const string RETIRED_SECRET = 'audit-log retired key 0123456789';
 
     /**
-     * The fingerprint is HMAC-SHA256, as lower-case hex, of the canonical
-     * encoding of the owner's type and id under the fingerprint key, named with
-     * the signing key's id; the same owner always gives the same one, and it is
-     * never the unkeyed digest.
+     * The fingerprint is the keyed HMAC-SHA256 of the canonical owner, stable
+     * and never the unkeyed digest.
      *
      * @return void
      */
@@ -74,9 +70,8 @@ final class OwnerFingerprintTest extends TestCase
     }
 
     /**
-     * The derivation's info is pinned, and the fingerprint key is HKDF-SHA256
-     * of the secret under it with an empty salt: never the secret, nor any
-     * other key the ring's secret gives.
+     * The fingerprint key is HKDF-SHA256 of the secret under its pinned info
+     * with an empty salt.
      *
      * @return void
      */

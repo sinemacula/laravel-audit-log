@@ -6,8 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Privacy\Enums;
 
 /**
  * Why an encrypted fragment of an entry is shown as a marker rather than as its
- * value: it is still sealed under its owner's key, its owner's keys have been
- * destroyed, or it could not be read at all.
+ * value.
  *
  * @api
  *
@@ -19,16 +18,15 @@ enum FieldState: string
     // Sealed under its owner's key, which the field reader does not open
     case ENCRYPTED = 'encrypted';
 
-    // Sealed under keys its owner's erasure destroyed, so the live store cannot
-    // read it; a restored backup does until the erasure is re-applied
+    // Sealed under keys an erasure destroyed; a restored backup reads it until
+    // the erasure is re-applied
     case ERASED = 'erased';
 
     // Malformed, or its field reader failed
     case UNREADABLE = 'unreadable';
 
     /**
-     * The marker an entry shows in the fragment's place: `[ENCRYPTED]`,
-     * `[ERASED]` or `[UNREADABLE]`.
+     * The marker an entry shows in the fragment's place.
      *
      * @return string
      */

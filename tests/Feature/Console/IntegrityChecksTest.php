@@ -20,11 +20,7 @@ use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use Tests\TestCase;
 
 /**
- * Feature tests for the integrity checks of `audit-log:check`: the checkpoints,
- * checkpoint members and integrity state tables have their shipped shape on the
- * storage connection, a connection that cannot be checked is left to the schema
- * subject or named by the class of what it threw, and a disk anchor's disk is
- * configured, which is checked without ever touching the disk.
+ * Feature tests for the integrity checks of `audit-log:check`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,8 +36,7 @@ final class IntegrityChecksTest extends TestCase
     private const string PUBLISH = '; publish and run the migrations (`vendor:publish --tag=audit-log-migrations`, then `migrate`).';
 
     /**
-     * The tables the shipped migrations create, with no anchor configured, have
-     * no problem.
+     * The shipped tables with no anchor configured have no problem.
      *
      * @return void
      */
@@ -65,8 +60,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * Each integrity table that does not exist is the one problem, named by its
-     * label, on the storage connection.
+     * Each missing integrity table is the one problem, named by its label.
      *
      * @param  string  $setting
      * @param  string  $table
@@ -123,8 +117,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * Rows of `[the storage connection's configuration, or `null` for none]`:
-     * connections the `schema` subject reports, so these checks say nothing.
+     * Rows of `[the storage connection's configuration, or null]`.
      *
      * @return iterable<string, array{0: ?array{driver: string, database: string}}>
      */
@@ -138,9 +131,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * A storage connection that is not configured, is not supported or cannot
-     * be opened is left to the `schema` subject: these checks report nothing of
-     * the tables, and still check the disk.
+     * An unusable connection is left to `schema`; the disk is still checked.
      *
      * @param  ?array{driver: string, database: string}  $connection
      * @return void
@@ -158,8 +149,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * A statement that fails while the tables are read is named by the class of
-     * what was thrown, never by its message, which holds the statement.
+     * A failing statement is named by its exception class, never its message.
      *
      * @return void
      */
@@ -184,9 +174,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * With the `disk` driver the disk must be configured in
-     * `filesystems.disks`, whether the setting names it or the default disk is
-     * taken; a configured disk is no problem.
+     * With the `disk` driver the disk must be in `filesystems.disks`.
      *
      * @return void
      */
@@ -206,8 +194,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * A disk whose configuration is not a map is not configured, as the
-     * filesystem manager would refuse it.
+     * A disk configured as a string is not configured.
      *
      * @return void
      */
@@ -219,8 +206,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * With no anchor configured no disk is checked, so a disk setting naming
-     * nothing configured is no problem.
+     * With no anchor configured no disk is checked.
      *
      * @return void
      */
@@ -251,8 +237,7 @@ final class IntegrityChecksTest extends TestCase
     }
 
     /**
-     * The disk is never resolved, read or written: a filesystem factory that
-     * refuses every call sees none, configured disk or not.
+     * The disk is never resolved, read or written.
      *
      * @return void
      */

@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Delivery\DrainResult;
 
 /**
- * Unit tests for a drain's tally: it starts at zero, counts each outcome apart,
- * a row completed as pruned among them, and has failures only once a row
- * failed.
+ * Unit tests for a drain's tally of outcomes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,8 +70,7 @@ final class DrainResultTest extends TestCase
 
     /**
      * Rows of `[how the outcome is added, whether the tally then has
-     * failures]`: only a failed row makes a drain unsuccessful, and a pruned
-     * row is complete.
+     * failures]`.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Delivery\DrainResult): void, 1: bool}>
      */

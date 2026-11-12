@@ -10,11 +10,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Privacy\TypedPlaintext;
 
 /**
- * Unit tests for typed plaintext: every type as its canonical JSON, a string
- * apart from the boolean it spells, a string cut on a character boundary to the
- * longest prefix whose encoding fits, any other value over the limit dropped,
- * and decoding that gives every type back and refuses anything else without
- * naming it.
+ * Unit tests for typed plaintext: canonical JSON per type, strings cut on a
+ * character boundary, oversized values dropped, and decoding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,8 +67,7 @@ final class TypedPlaintextTest extends TestCase
 
     /**
      * The string `"true"` and the boolean `true` are sealed apart and read back
-     * as what they were, as are a digit string and its integer and the string
-     * `"null"` and `null`.
+     * as they were, as are digit strings and `"null"`.
      *
      * @return void
      */
@@ -91,9 +87,8 @@ final class TypedPlaintextTest extends TestCase
     }
 
     /**
-     * Rows of `[string, the encoding it is cut to]`: strings over the limit, of
-     * characters that encode to one, two and six bytes, and a mixture whose
-     * first cut overshoots.
+     * Rows of `[string, the encoding it is cut to]`: one-, two- and six-byte
+     * characters over the limit, and a mixture whose first cut overshoots.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -180,9 +175,8 @@ final class TypedPlaintextTest extends TestCase
     }
 
     /**
-     * Any value but a string whose encoding passes the limit is `null`, and one
-     * whose encoding is the limit is kept: a list of 511 ones encodes to 1023
-     * bytes and one of 512 to 1025.
+     * Any value but a string is `null` once its encoding passes the limit: a
+     * list of 511 ones encodes to 1023 bytes, and of 512 to 1025.
      *
      * @return void
      */
@@ -307,9 +301,8 @@ final class TypedPlaintextTest extends TestCase
     }
 
     /**
-     * `TypedPlaintext` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * `TypedPlaintext` cannot be instantiated: its constructor is private, and
+     * is invoked here by reflection so the line is covered.
      *
      * @return void
      *

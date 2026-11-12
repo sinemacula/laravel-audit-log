@@ -15,18 +15,10 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
  * Builds, from verified journal rows, the record each lifecycle operation
- * needs, for `Reconciler` to write when no entry holds it: a hold, a release, a
- * prune run, an import, an erasure, a reinstatement and a rewrap run, each with
- * exactly the properties its code retains and the operation would have
- * recorded, by the row's operator, or by no one for a prune, with its outcome
- * and reason.
+ * needs, for `Reconciler` to write when no entry holds it.
  *
- * A builder answers `null` for a row, or a start row it needs, that does not
- * describe its operation, so the reconciler counts it unverifiable and never
- * records it. Only a committed operation is journalled, so every record here is
- * a success but a failed prune or import; a refusal wrote no row, and is never
- * reconciled. A rewrap run is journalled a batch to a row, so its record sums
- * the rows of its operation.
+ * A builder answers `null` for a row that does not describe its operation,
+ * which the reconciler counts unverifiable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,9 +39,7 @@ final class ReconciledOperations
     private function __construct() {}
 
     /**
-     * The record of a hold: its operation, its id, basis, scope digest and
-     * review date, the authority's reason, by its operator; `null` when the row
-     * and its payload do not describe a hold.
+     * The record of a hold; `null` when the row does not describe one.
      *
      * @formatter:off
      *
@@ -95,9 +85,7 @@ final class ReconciledOperations
     }
 
     /**
-     * The record of a release: its operation, the hold's id and the authority's
-     * reason, by its operator; `null` when the row and its payload do not
-     * describe a release.
+     * The record of a release; `null` when the row does not describe one.
      *
      * @formatter:off
      *
@@ -128,10 +116,8 @@ final class ReconciledOperations
     }
 
     /**
-     * The record of a finished prune run, by no one: the run's id, status,
-     * policy version and counts from its finish and start rows, a success for a
-     * complete or partial run and a failure otherwise; `null` without its
-     * start, or when the finish does not describe a run.
+     * The record of a finished prune run, by no one; `null` without its start
+     * or when the finish does not describe a run.
      *
      * @formatter:off
      *
@@ -176,11 +162,8 @@ final class ReconciledOperations
     }
 
     /**
-     * The record of a finished import, by the operator of its finish: its
-     * batch, the source, format and hold from its start row, and the status and
-     * counts from its finish, a success for a complete or partial import and a
-     * failure otherwise; `null` without its start, or when the finish does not
-     * describe an import.
+     * The record of a finished import; `null` without its start or when the
+     * finish does not describe one.
      *
      * @formatter:off
      *
@@ -226,9 +209,8 @@ final class ReconciledOperations
     }
 
     /**
-     * The record an operation needs: its code, its actor, the operator of the
-     * row given or no one, its evidence, its outcome and its reason; `null`
-     * when the row names an operator that is not a reference.
+     * The record, by the row's operator or no one; `null` when the operator is
+     * not a reference.
      *
      * @formatter:off
      *
@@ -264,10 +246,7 @@ final class ReconciledOperations
     }
 
     /**
-     * The record of an erasure, by its operator: its operation, its row, the
-     * owner's fingerprint and its key, how it ended, its counts, the reasons
-     * its kept keys were blocked and whether it accepted pending deliveries;
-     * `null` when the payload does not describe an erasure.
+     * The record of an erasure; `null` when the payload does not describe one.
      *
      * @formatter:off
      *
@@ -310,9 +289,7 @@ final class ReconciledOperations
     }
 
     /**
-     * The record of a reinstatement, by its operator: its operation, its row,
-     * the owner's fingerprint and its key and the generation floor; `null` when
-     * the payload does not describe a reinstatement.
+     * The record of a reinstatement; `null` when the payload is malformed.
      *
      * @formatter:off
      *
@@ -349,13 +326,8 @@ final class ReconciledOperations
     }
 
     /**
-     * The record of each rewrap run among the verified rows, by its operator,
-     * in the order its first batch was journalled: its operation, its status,
-     * the keys its batches rewrapped onto another wrapping key, the live keys
-     * they superseded, the keys they skipped, the wrapping key they wrapped
-     * onto and how many batches it committed; `null` for a run any of whose
-     * batches does not describe one. A run's batches journalled before the
-     * window are not among the rows, and are not counted.
+     * The record of each rewrap run, summing its batches in the window; `null`
+     * for a run with a batch that does not describe one.
      *
      * @formatter:off
      *
@@ -403,8 +375,7 @@ final class ReconciledOperations
     }
 
     /**
-     * The map of scalars under the key, its other values dropped, or `null`
-     * when there is none.
+     * The scalars of the map under the key, or `null` when there is none.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -420,8 +391,7 @@ final class ReconciledOperations
     }
 
     /**
-     * The record of a rewrap run from its first row and its totals; `null` when
-     * a batch did not describe one.
+     * The record of a rewrap run from its first row and its totals.
      *
      * @formatter:off
      *
@@ -455,9 +425,8 @@ final class ReconciledOperations
     }
 
     /**
-     * The run's totals with a batch's row added, its keys and its skipped keys,
-     * named or counted alone; `null` once a row does not describe a batch of
-     * the run.
+     * The run's totals with a batch added; `null` once a row does not describe
+     * a batch of the run.
      *
      * @formatter:off
      *
@@ -497,10 +466,8 @@ final class ReconciledOperations
     }
 
     /**
-     * The totals with a batch's keys added: each key whose wrapping key changed
-     * rewrapped, each whose state changed rotated, and the wrapping key its
-     * keys are now under; `null` when the keys are not a list of changes, each
-     * with its wrapping before and after.
+     * The totals with a batch's key changes added; `null` when the keys are not
+     * a list of changes.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -530,9 +497,8 @@ final class ReconciledOperations
     }
 
     /**
-     * What a rewrap batch's row lists of a key: whether its wrapping key
-     * changed, whether its state changed, and the wrapping key it is now under;
-     * `null` when it is not a change with its wrapping before and after.
+     * Whether the key's wrapping and state changed, and its wrapping key now;
+     * `null` when it is not a change.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -558,9 +524,8 @@ final class ReconciledOperations
     }
 
     /**
-     * How many keys an erasure kept and every reason they were kept for, from
-     * its payload's `kept`; `null` when that is not a list of kept keys, each
-     * with a list of reasons.
+     * How many keys an erasure kept and every reason given; `null` when `kept`
+     * is malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -589,9 +554,8 @@ final class ReconciledOperations
     }
 
     /**
-     * How many keys an erasure row's payload lists as destroyed, how many
-     * entries it says they sealed, and whether it accepted pending deliveries;
-     * `null` when it does not say each.
+     * The erasure's destroyed keys, entries affected and pending acceptance;
+     * `null` unless it says each.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -612,8 +576,7 @@ final class ReconciledOperations
     }
 
     /**
-     * The owner's fingerprint the payload names and the ring key it was taken
-     * under, or `null` unless each is a string.
+     * The owner's fingerprint and ring key, or `null` unless both are strings.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

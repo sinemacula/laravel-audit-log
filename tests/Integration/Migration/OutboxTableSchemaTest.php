@@ -4,26 +4,18 @@ declare(strict_types = 1);
 
 namespace Tests\Integration\Migration;
 
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the table the shipped outbox migration
- * creates, on whichever engine the suite runs against.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the table the shipped outbox migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,6 +25,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class OutboxTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped outbox migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000100_create_audit_log_outbox_table.php';
 
@@ -43,8 +37,7 @@ final class OutboxTableSchemaTest extends TestCase
     private const array TIMES = ['available_at', 'claimed_until', 'failed_at', 'created_at'];
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -62,7 +55,7 @@ final class OutboxTableSchemaTest extends TestCase
         Builder::defaultTimePrecision(0);
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
         } finally {
             Builder::defaultTimePrecision($precision);
         }
@@ -82,8 +75,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the nine columns a queued record needs, in order; only
-     * the claim and the failure may be missing.
+     * Nine columns in order; only the claim and the failure are nullable.
      *
      * @return void
      */
@@ -136,8 +128,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * The id is stored as a UUID, and the two short strings have the lengths
-     * the claim token and an exception's class name are cut to.
+     * The id is a UUID, and the short strings have the lengths they are cut to.
      *
      * @return void
      */
@@ -157,8 +148,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * The payload is long text, so an encrypted envelope of the largest record
-     * fits: `longtext` on MySQL, `text` on PostgreSQL and SQLite.
+     * The payload is long text, so the largest encrypted envelope fits.
      *
      * @return void
      */
@@ -171,9 +161,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * Every time is stored to the microsecond, as the migration declares
-     * whatever the builder's default, so a time written with six fractional
-     * digits reads back with all six.
+     * Every time is stored to the microsecond, whatever the builder's default.
      *
      * @return void
      */
@@ -202,10 +190,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * The only indexes beside the primary key are the one a drain claims by,
-     * whether the row has failed, then when it falls due, and the one the
-     * backlog's age is read by, whether the row has failed, then when it was
-     * queued.
+     * The only other indexes are the drain's and the backlog monitor's.
      *
      * @return void
      */
@@ -223,10 +208,8 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name, the
-     * primary key's included, fits PostgreSQL's 63 characters. SQLite names its
-     * primary key index itself and limits no name, so there the primary key is
-     * left out.
+     * Every index name fits PostgreSQL's 63 characters at the longest table
+     * name; SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -244,8 +227,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * The table has no foreign keys, so an outbox on a connection of its own
-     * needs nothing of the entries table, and each table is pruned on its own.
+     * The table has no foreign keys.
      *
      * @return void
      */
@@ -256,8 +238,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL every character column takes the table's binary collation
-     * without padding, whatever the connection's collation is.
+     * On MySQL every character column is binary without padding.
      *
      * @return void
      */
@@ -281,8 +262,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is on InnoDB, so an outbox insert joins the
-     * transaction it runs in.
+     * On MySQL the table is on InnoDB.
      *
      * @return void
      */
@@ -298,8 +278,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * Claim tokens that differ only in case are distinct, on every engine, so
-     * one claim is never taken for another.
+     * Claim tokens differing only in case are distinct.
      *
      * @return void
      */
@@ -318,16 +297,13 @@ final class OutboxTableSchemaTest extends TestCase
      */
     public function testRollsBackByDroppingTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `delivery.outbox.table` setting that renames it, and leaves the table as
-     * it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -336,7 +312,7 @@ final class OutboxTableSchemaTest extends TestCase
         DB::table(self::TABLE)->insert(self::row(1));
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -350,8 +326,7 @@ final class OutboxTableSchemaTest extends TestCase
     }
 
     /**
-     * A row with every column a row must have, numbered so each row's id is its
-     * own, with the given columns replaced.
+     * A full row, numbered so its id is its own.
      *
      * @param  int  $number
      * @param  array<string, string>  $columns
@@ -366,25 +341,5 @@ final class OutboxTableSchemaTest extends TestCase
             'created_at'   => '2026-11-01 12:00:00.000000',
             ...$columns,
         ];
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Outbox migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

@@ -6,9 +6,7 @@ namespace SineMacula\Laravel\AuditLog\Records\Enums;
 
 /**
  * What an artifact holds, as its row and its record's signed descriptor store
- * it: a bulk operation's subjects, the evidence of what a read disclosed, or an
- * export's manifest. A bulk operation names at least one subject; a disclosure
- * or an export may hold nothing, since a read can find no entry.
+ * it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,8 +25,7 @@ enum ArtifactKind: string
     case EXPORT = 'export';
 
     /**
-     * Whether an artifact of the kind may count no member: every kind but a
-     * bulk operation, which names at least one subject.
+     * Whether an artifact of the kind may count no member.
      *
      * @return bool
      */

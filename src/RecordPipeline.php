@@ -26,44 +26,13 @@ use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 
 /**
- * The pipeline a recorded activity runs, whether the application records it or
- * it is captured from an event: its definition is found, its timing is checked,
- * the contributors fill its gaps in order, the clock is read and the entry's id
- * minted, what they leave is minimised for that entry, a bulk operation's
- * manifest is sealed, the record is built from that with the clock's time, the
- * minted id and the configured source, and it is delivered.
+ * The pipeline every recorded or captured activity runs: its definition and
+ * timing are checked, the contributors fill its gaps, it is minimised, a bulk
+ * manifest is sealed, and the built record is delivered.
  *
- * The id is minted before minimising because every encrypted value is sealed
- * for the entry it belongs to: a package record keeps the id the package gave
- * it, and any other takes a UUID version 7 of the clock's time, read once.
- *
- * Nothing is consumed until the definition and the timing have been accepted,
- * the record minimised and any manifest sealed, so a refusal of any of them, a
- * minimiser's or an encrypter's failure among them, stores nothing and leaves
- * the builder usable, and a failed write follows the failure policy.
- *
- * A record captured from an event comes with its capture's signal: without a
- * timing of its own it is written immediately rather than after commit, it is
- * never fail-closed or transactional, and its failure is signalled rather than
- * thrown, without the failure mode being read. Nothing is recorded explicitly
- * while an event mapper runs: a mapper returns its builder and the capture
- * writes it. A capture of another event the mapper sets off, which comes with
- * its own signal, is written as any capture is, so a watched model it saves or
- * a Gate check it denies is never lost.
- *
- * A code under the reserved `audit_log.` prefix is written only with a package
- * write, which only the package's own activity (its read path and its
- * lifecycle) makes, and a package write only with such a code, fail-closed,
- * immediate and never a capture; anything else is refused before anything is
- * consumed. Naming a package code on a builder is no way to record one, since
- * the facade's builders are written without a package write. A package write's
- * check runs on the built record before it is delivered, and what it throws
- * propagates with nothing delivered; the delivery hands it the finalised record
- * once that is acknowledged.
- *
- * It writes with the definitions and contributors it was made with, and
- * resolves everything else from the current container on every write, so it
- * holds only frozen registration data and outlives requests safely.
+ * Nothing is consumed until the record is minimised and any manifest sealed, so
+ * a refusal before then stores nothing and leaves the builder usable. It holds
+ * only frozen registration data, so it outlives requests safely.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,16 +72,8 @@ final readonly class RecordPipeline
     ) {}
 
     /**
-     * Write the builder's record and return it. Minimising takes a snapshot
-     * of its own, because the first predates what the contributors filled;
-     * that first one stays for the definition, the timing, the connection and
-     * the manifest, which they cannot change. The entry's id is minted before
-     * minimising, from the clock read once. An explicit record without a timing
-     * is written after commit, and a captured one immediately. An explicit
-     * record is refused while an event mapper runs; a captured one, which its
-     * signal tells apart, is not. A reserved code is written only with a
-     * package write, whose check runs on the built record before it is
-     * delivered.
+     * Write the builder's record and return it. The id is minted before
+     * minimising because each encrypted value is sealed for its entry.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $capture

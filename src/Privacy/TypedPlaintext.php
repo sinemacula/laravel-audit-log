@@ -8,16 +8,8 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * The plaintext a field is sealed as: the canonical JSON of its value, for
- * every type, so the string `"true"` and the boolean `true` are sealed apart
- * and read back as what they were.
- *
- * The limit is measured on the encoding, never on the value: at most 1024
- * bytes. A string over it is cut to the longest prefix, on a character
- * boundary, whose encoding fits, so an escaped character costs what it costs
- * once encoded. Any other value over it is `null`, and the caller drops it
- * without asking an encrypter. A value with no canonical encoding, such as a
- * float or a string that is not UTF-8, is refused as the encoder refuses it.
+ * The plaintext a field is sealed as: the canonical JSON of its value, so the
+ * string `"true"` and the boolean `true` stay apart.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,9 +39,8 @@ final class TypedPlaintext
     private function __construct() {}
 
     /**
-     * The canonical encoding of the value, within the limit: a string cut to
-     * the longest prefix whose encoding fits, and `null` for any other value
-     * whose encoding does not.
+     * The canonical encoding within the limit: a string cut to the longest
+     * prefix that fits, `null` for any other value that does not.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -70,10 +61,8 @@ final class TypedPlaintext
     }
 
     /**
-     * The value a plaintext encodes: a map as an associative array, a list as a
-     * list, and a scalar or `null` as itself. Text that is not JSON, nests
-     * deeper than 64 levels, or encodes a float is refused, naming nothing of
-     * the text.
+     * The value a plaintext encodes; text that is not JSON, nests past 64
+     * levels or encodes a float is refused.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -97,10 +86,8 @@ final class TypedPlaintext
     }
 
     /**
-     * The encoding of the longest prefix of the string whose encoding fits.
-     * Each byte cut takes at least one byte and at most six off the encoding,
-     * so cutting a sixth of the excess, rounded up, never cuts below the
-     * longest prefix that fits, and every pass cuts at least one byte.
+     * The encoding of the longest prefix that fits; a byte encodes to at most
+     * six, so cutting a sixth of the excess never cuts too far.
      *
      * @param  string  $value
      * @return string

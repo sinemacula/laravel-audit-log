@@ -23,16 +23,8 @@ use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
 /**
- * Tampers with the lifecycle journal as someone holding the database's
- * credentials could, through raw statements that sign nothing again, and shows
- * that `audit-log:verify` finds each and exits non-zero: an edited payload, an
- * edited authority, a deleted row, a swapped pair, a row re-signed under a key
- * the ring does not hold, and a seal's commitment edited. The journal holds a
- * hold, another hold and the release of the first, and a seal commits to its
- * head.
- *
- * The evidence makes the change detectable; it never prevents it, which these
- * tests do by doing it.
+ * Tampers with the lifecycle journal through raw statements, as a holder of the
+ * database's credentials could, and shows verify finds each.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -87,9 +79,8 @@ final class JournalTamperingTest extends TestCase
     }
 
     /**
-     * Rows of `[the tampering, the findings it gives, by the sequence of the
-     * row or the seal each is found at]`: each change someone holding the
-     * database's credentials could make.
+     * Rows of `[the tampering, the findings it gives, by the sequence each is
+     * found at]`.
      *
      * @return iterable<string, array{0: \Closure(self): void, 1: array<string, string>}>
      */

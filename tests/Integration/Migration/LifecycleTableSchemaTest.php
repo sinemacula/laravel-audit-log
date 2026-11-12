@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Integration\Migration;
 
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -14,22 +13,12 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
 use SineMacula\Laravel\AuditLog\Console\TableShape;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
- * Integration tests for the shape of the lifecycle journal the shipped
- * migration creates, on whichever engine the suite runs against: its columns,
- * their types, lengths and nullability, the shape's indexes, a unique sequence,
- * a payload kept as text byte for byte, and the collision guard, the setting
- * that renames it and its rollback.
- *
- * The migration runs for the longest table name the setting accepts and with
- * the schema builder's default time precision lowered to whole seconds, so the
- * index names and the microsecond precision are what the migration itself
- * declares.
- *
- * Marked `#[CoversNothing]` because a migration is an anonymous class PHPUnit
- * cannot attribute coverage to.
+ * Integration tests for the lifecycle journal the shipped migration creates, on
+ * every engine; a migration is an anonymous class, so they cover nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,6 +28,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class LifecycleTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped lifecycle journal migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000700_create_audit_log_lifecycle_table.php';
 
@@ -69,8 +60,7 @@ final class LifecycleTableSchemaTest extends TestCase
     private const array TIMES = ['occurred_at'];
 
     /**
-     * Run the shipped migration for `TABLE`, with the schema builder's default
-     * time precision lowered to whole seconds while it runs.
+     * Migrate `TABLE` with the builder's default precision at whole seconds.
      *
      * @return void
      */
@@ -88,7 +78,7 @@ final class LifecycleTableSchemaTest extends TestCase
         Builder::defaultTimePrecision(0);
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
         } finally {
             Builder::defaultTimePrecision($precision);
         }
@@ -109,10 +99,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * The table holds the seventeen columns of a journal row, in order, each
-     * with the type family, length and nullability the shape gives it: only the
-     * authority, the seal, the hold and the link to the row before may be
-     * missing.
+     * Seventeen columns; only authority, seal, hold and link are nullable.
      *
      * @return void
      */
@@ -141,9 +128,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * The primary key is the row's id, and the other indexes are exactly the
-     * shape's: the unique sequence and the lookups by seal, by hold and by
-     * kind, each named after the table.
+     * The indexes are the primary key and the shape's four.
      *
      * @return void
      */
@@ -174,9 +159,8 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * At the longest table name the setting accepts, every index name fits
-     * PostgreSQL's 63 characters. SQLite names its primary key index itself and
-     * limits no name, so there the primary key is left out.
+     * Every index name fits PostgreSQL's 63 characters at the longest table
+     * name; SQLite names its own primary key, so it is left out.
      *
      * @return void
      */
@@ -203,8 +187,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * On MySQL the table is binary without padding and on InnoDB, as every
-     * table the package keeps.
+     * On MySQL the table is binary without padding and on InnoDB.
      *
      * @return void
      */
@@ -221,8 +204,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * A sequence is held by one row only, so two operations that both read the
-     * same head can never both extend it.
+     * A sequence is held by one row only.
      *
      * @return void
      */
@@ -236,9 +218,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * The payload is text, never a JSON column, so the bytes the digest covers
-     * are the bytes read back: keys keep their order and spacing, which a JSON
-     * column on MySQL would not; a sequence beyond a 32-bit integer is kept.
+     * The payload is text kept byte for byte, which a MySQL JSON column is not.
      *
      * @return void
      */
@@ -259,8 +239,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * The first row has no previous HMAC and names no authority, seal or hold;
-     * every other column is required.
+     * The first row needs no link, authority, seal or hold.
      *
      * @return void
      */
@@ -275,10 +254,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * Running the migration when the configured table already exists throws a
-     * `TableAlreadyExistsException` naming the table, the connection and the
-     * `lifecycle.journal_table` setting that renames it, and leaves the table
-     * as it was.
+     * An existing table is refused with an exception naming the setting.
      *
      * @return void
      */
@@ -287,7 +263,7 @@ final class LifecycleTableSchemaTest extends TestCase
         $before = DB::table(self::TABLE)->count();
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -302,8 +278,7 @@ final class LifecycleTableSchemaTest extends TestCase
     }
 
     /**
-     * The table is created under whatever name its setting gives, and its
-     * indexes are named after it.
+     * A renamed table and its indexes are created under its setting's name.
      *
      * @return void
      */
@@ -313,7 +288,7 @@ final class LifecycleTableSchemaTest extends TestCase
 
         self::assertFalse(Schema::hasTable(self::RENAMED));
 
-        $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
 
         self::assertTrue(Schema::hasTable(self::RENAMED));
 
@@ -329,14 +304,13 @@ final class LifecycleTableSchemaTest extends TestCase
      */
     public function testDownDropsTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
     }
 
     /**
-     * A first journal row with every column a row must have, numbered so its id
-     * and sequence are its own, with the given columns replaced.
+     * A first journal row, numbered so its id and sequence are its own.
      *
      * @param  int  $number
      * @param  array<string, int|string>  $columns
@@ -357,25 +331,5 @@ final class LifecycleTableSchemaTest extends TestCase
             'hmac'           => str_repeat('b', 64),
             ...$columns,
         ];
-    }
-
-    /**
-     * Require the shipped anonymous-class migration file and return the
-     * resulting `Migration` instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('The lifecycle journal migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

@@ -10,18 +10,8 @@ use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * The holds projection: one row per active hold, a convenience index for
- * listing holds and for `audit-log:check`, never what a prune or a release
- * decides from. A destructive decision replays the verified journal instead, so
- * a row deleted or inserted by hand changes nothing it does.
- *
- * A row is inserted when its hold is placed and deleted when it is released,
- * each inside the lifecycle transaction that appends the hold's journal row, so
- * the projection commits with the journal. A rebuild deletes every row and
- * inserts the holds the verified chain holds active, under the same lock. Drift
- * compares the rows with the replayed holds: a hold missing from the rows, a
- * row of no active hold, and a row whose scope, scope digest, basis or review
- * date is not its hold's are each named by hold id.
+ * The holds projection: one row per active hold, an index for listing and
+ * `audit-log:check`, never what a prune or a release decides from.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,7 +21,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 final readonly class HoldProjection
 {
     /**
-     * Insert the hold's row, inside the lifecycle transaction that journals it.
+     * Insert the hold's row.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Hold  $hold
@@ -46,8 +36,7 @@ final readonly class HoldProjection
     }
 
     /**
-     * Delete the hold's row, inside the lifecycle transaction that journals its
-     * release; a row already missing is no error.
+     * Delete the hold's row; a row already missing is no error.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $holdId
@@ -61,8 +50,7 @@ final readonly class HoldProjection
     }
 
     /**
-     * Every row of the projection as its stored columns, by the sequence of the
-     * journal row that placed it.
+     * Every row of the projection, by journal sequence.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return list<array<string, scalar|null>>
@@ -78,9 +66,7 @@ final readonly class HoldProjection
     }
 
     /**
-     * Replace every row with one per hold given, the holds the verified chain
-     * holds active, inside the lifecycle transaction, and return how many rows
-     * the projection now holds.
+     * Replace every row with one per hold given, returning the row count.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\Hold>  $holds
@@ -101,9 +87,8 @@ final readonly class HoldProjection
     }
 
     /**
-     * The ids of the holds the rows do not project as the replayed holds hold
-     * them, sorted: a hold with no row, a row of no hold, and a row whose
-     * scope, scope digest, basis or review date differs.
+     * The sorted ids of holds missing from the rows, rows of no hold, and rows
+     * that differ from their hold.
      *
      * @param  list<\SineMacula\Laravel\AuditLog\Lifecycle\Hold>  $replayed
      * @param  list<array<string, scalar|null>>  $rows
@@ -142,8 +127,7 @@ final readonly class HoldProjection
     }
 
     /**
-     * The row that projects the hold, in table order, with its times in the
-     * form the database stores.
+     * The row that projects the hold.
      *
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Hold  $hold
      * @return array<string, int|string|null>
@@ -173,9 +157,8 @@ final readonly class HoldProjection
     }
 
     /**
-     * What drift compares of a row: its scope, its scope digest, its basis and
-     * its review date as an instant, a review date that cannot be read kept as
-     * stored so it never equals a hold's.
+     * What drift compares of a row; an unreadable review date is kept so it
+     * never equals a hold's.
      *
      * @param  array<string, scalar|null>  $row
      * @return array{0: ?string, 1: ?string, 2: ?string, 3: ?string}
@@ -194,7 +177,7 @@ final readonly class HoldProjection
     }
 
     /**
-     * The value as text, or `null` for `null`.
+     * The value as text, keeping `null`.
      *
      * @param  scalar|null  $value
      * @return ?string
