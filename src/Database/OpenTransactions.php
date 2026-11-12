@@ -8,13 +8,8 @@ use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Database\DatabaseManager;
 
 /**
- * Which connections have a transaction open, read from every connection the
- * database manager holds, without opening one.
- *
- * It is read before anything is attempted, because Laravel forgets an open
- * transaction when its connection is lost. A deadlock or a lost connection on
- * any of these has ended a transaction the application is still inside, even
- * when the audit log writes to a connection of its own.
+ * The connections with a transaction open, read before anything is attempted,
+ * since Laravel forgets a transaction whose connection is lost.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,9 +30,8 @@ final readonly class OpenTransactions
     ) {}
 
     /**
-     * The name of each connection with a transaction open, as the connection
-     * gives it, so a name that selects a reader or a writer is compared as the
-     * connection; none when the resolver does not say which it holds.
+     * Each connection with a transaction open, by the name it gives itself;
+     * none when the resolver is not a database manager.
      *
      * @return list<string>
      */

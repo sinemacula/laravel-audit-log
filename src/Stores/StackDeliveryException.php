@@ -5,17 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Stores;
 
 /**
- * Thrown by a stack store once it has tried every destination and at least one
- * failed: it names each destination that failed and the class of what it failed
- * with, never the failure itself.
- *
- * The destinations that succeeded keep the record. Whether a failure was a
- * concurrency error, a lost connection or a statement refused by an aborted
- * PostgreSQL transaction is kept as a flag each, with the connection each
- * concurrency error or lost connection happened on, so a deadlock inside a host
- * transaction is still treated as fatal to that transaction, and a spill bound
- * to an aborted one is still discarded. It has no previous exception, so
- * neither a handler nor a log reaches a failure's message, SQL or bindings.
+ * Thrown by a stack store when any destination failed, naming each with its
+ * failure's class; it has no previous exception, so no record value leaks.
  *
  * @api
  *
@@ -41,7 +32,7 @@ final class StackDeliveryException extends \RuntimeException
         /** The id of the record not every destination received. */
         public readonly string $recordId,
 
-        /** Each destination that failed, in order, with the class of what it failed with. */
+        /** Each failed destination, in order, with its failure's class. */
         public readonly array $failures,
 
         /** Whether any destination failed with a concurrency error. */
@@ -50,10 +41,10 @@ final class StackDeliveryException extends \RuntimeException
         /** Whether any destination failed with a lost connection. */
         public readonly bool $causedByLostConnection,
 
-        /** Whether any destination's statement was refused because a PostgreSQL transaction was already aborted. */
+        /** Whether any destination's statement hit an aborted PostgreSQL transaction. */
         public readonly bool $causedByAbortedHost,
 
-        /** The connection each concurrency error or lost connection happened on, `null` for one that does not say. */
+        /** The connection of each concurrency error or lost connection, `null` when unnamed. */
         public readonly array $fatalConnections,
     ) {
         $named = array_map(static fn (string $destination, string $class): string => sprintf('%s (%s)', $destination, $class), array_keys($failures), $failures);

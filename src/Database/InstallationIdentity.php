@@ -10,22 +10,8 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
 
 /**
- * The installation's identity: one id, a UUID version 7, kept under
- * `installation.id` in the integrity state table, seeded by the migration that
- * creates the table and written once, through the storage connection's writer.
- *
- * The id is written with a plain insert, never an upsert, so the first write
- * wins and no later one replaces it. A seal run or a lifecycle operation that
- * finds none, because the seeded row was lost, writes it again, and a write
- * that loses a race to a concurrent first write reads the winner's id instead;
- * `audit-log:check` only reads it, and reports one that is absent. A lifecycle
- * operation confirms, before it takes its lock, that the maintenance connection
- * reads the same id the storage connection does, so its deletions and journal
- * rows land in the database that holds the entries and the seals. The value is
- * a JSON object `{id}`, as progress is; a value that is not one, or whose id is
- * not a lower-case UUID, reads as absent. The row is never progress, so
- * `IntegrityProgress` neither reads nor writes it. This is a database helper
- * and names no clock: each caller passes its own instant.
+ * The installation's id, a UUID v7 under `installation.id` in the integrity
+ * state table, written once with a plain insert so the first write wins.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,13 +43,13 @@ final readonly class InstallationIdentity
      */
     public function __construct(
 
-        /** The connections the storage and maintenance connections are resolved from on every call. */
+        /** Resolves the storage and maintenance connections on every call. */
         private DatabaseManager $database,
     ) {}
 
     /**
-     * The installation id, read through the storage connection's writer, and
-     * written there first, as at the given time, when there is none yet.
+     * The installation id through the storage connection's writer, written
+     * there first when there is none.
      *
      * @param  \DateTimeInterface  $at
      * @return string
@@ -85,9 +71,8 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * Ensure the installation id through the storage connection, then confirm
-     * the maintenance connection reads the same one; when both are the same
-     * connection, by name, no second read is made.
+     * Ensure the installation id, then confirm the maintenance connection reads
+     * the same one, so lifecycle writes land beside the entries.
      *
      * @param  \DateTimeInterface  $at
      * @return void
@@ -100,11 +85,8 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * Read the installation id through the storage connection and confirm the
-     * maintenance connection reads the same one, writing nothing: a storage
-     * connection that reads no id, or a malformed one, is refused, as is a
-     * maintenance connection that reads none or another; when both are the same
-     * connection, by name, no second read is made.
+     * Confirm both connections read the same well-formed installation id,
+     * writing nothing.
      *
      * @return void
      *
@@ -119,8 +101,8 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * The installation id read through the named connection's writer, or `null`
-     * when it reads none, or one that is malformed.
+     * The installation id through the connection's writer, or `null` when it is
+     * absent or malformed.
      *
      * @param  string  $connection
      * @return ?string
@@ -133,10 +115,8 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * The state table's row of a new installation id, a UUID version 7 of the
-     * given time, as written at that time in UTC to the microsecond: what the
-     * migration that creates the table seeds, and what `ensure()` writes when
-     * there is none.
+     * The state row of a new installation id, a UUID v7 of the given time, as
+     * the migration seeds it and `ensure()` writes it.
      *
      * @param  \DateTimeInterface  $at
      * @return array{name: string, value: string, updated_at: string}
@@ -155,9 +135,8 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * Confirm the maintenance connection reads the installation id given, the
-     * one the storage connection reads; when both are the same connection, by
-     * name, no read is made.
+     * Confirm the maintenance connection reads the given id; no read is made
+     * when it is the storage connection by name.
      *
      * @param  string  $storage
      * @return void
@@ -184,8 +163,7 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * Insert the installation id, a new UUID version 7, as written at the given
-     * time; a concurrent first write that won leaves its own in place.
+     * Insert a new installation id; a concurrent first write keeps its own.
      *
      * @param  string  $connection
      * @param  \DateTimeInterface  $at
@@ -204,8 +182,8 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * The stored value of the installation id's row, read through the named
-     * connection's writer, or `null` when there is no such row.
+     * The stored value of the installation id's row through the connection's
+     * writer, or `null` when there is none.
      *
      * @param  string  $connection
      * @return ?string
@@ -220,7 +198,7 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * A query of the state table on the named connection's writer.
+     * A query of the state table on the connection's writer.
      *
      * @param  string  $connection
      * @return \Illuminate\Database\Query\Builder
@@ -233,8 +211,7 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * The stored value of the installation id's row the storage connection
-     * reads, refused as absent when there is none.
+     * The stored value, refused as absent when there is none.
      *
      * @param  ?string  $value
      * @return string
@@ -247,8 +224,7 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * The id the storage connection reads, from the stored value of its row,
-     * refused as malformed when it holds none.
+     * The id in the stored value, refused as malformed when it holds none.
      *
      * @param  ?string  $value
      * @return string
@@ -261,8 +237,8 @@ final readonly class InstallationIdentity
     }
 
     /**
-     * The id a stored value holds: a JSON object of the one field `id`, a
-     * lower-case UUID, and `null` for anything else.
+     * The id in a stored value: a JSON object `{id}` holding a lower-case UUID,
+     * or `null` for anything else.
      *
      * @param  ?string  $value
      * @return ?string

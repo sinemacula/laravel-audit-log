@@ -15,23 +15,11 @@ use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
 use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 
 /**
- * Carries the request id, the trace id and the ambient actor into a queued job,
- * as hidden keys on the copy of Context the payload is made from, never on the
- * scoped repository. A request id is generated now if none exists yet, so
- * dispatching before the first record still carries it.
+ * Carries the request id, trace id and ambient actor into a queued job as
+ * hidden Context on the payload's copy, which is not encrypted in the queue.
  *
- * With no ambient actor inside a job, the actor that job carried goes on, so
- * its chained jobs keep it. Anything else a sync job left in Context is dropped
- * rather than sent on.
- *
- * This runs inside the host's `dispatch()`, and a malformed setting or an
- * unreferenceable user must not stop a job being queued. Any failure is
- * reported and the job goes without the actor, so no stale one goes out. A
- * handler that dispatches while it reports comes back here, so the failure is
- * reported once and not again from inside its own report.
- *
- * Hidden Context stays out of the logs, but it travels in the queue payload
- * unencrypted.
+ * It runs inside the host's `dispatch()`, so a failure is reported once and the
+ * job goes without the actor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,7 +48,8 @@ final readonly class CarryContextIntoJobs
     }
 
     /**
-     * Write what the job carries on the repository given.
+     * Write what the job carries; inside a job with no ambient actor, the actor
+     * it carried goes on to its chained jobs.
      *
      * @param  \Illuminate\Log\Context\Repository  $context
      * @param  \Illuminate\Container\Container  $container
@@ -94,9 +83,7 @@ final readonly class CarryContextIntoJobs
     }
 
     /**
-     * Report the failure, unless this is a dispatch the report itself made. A
-     * reporter that fails too is ignored: there is nowhere left to say so, and
-     * the job must still be queued.
+     * Report the failure, unless the report itself made this dispatch.
      *
      * @param  \Illuminate\Container\Container  $container
      * @param  \Throwable  $exception
@@ -109,8 +96,7 @@ final readonly class CarryContextIntoJobs
                 $container->make(ExceptionHandler::class)->report($exception);
             });
         } catch (\Throwable) {
-            // A broken reporter must not stop the host's dispatch, which this
-            // runs inside
+            // A broken reporter must not stop the host's dispatch
         }
     }
 }

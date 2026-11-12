@@ -8,19 +8,11 @@ use Illuminate\Container\Container;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 
 /**
- * Routes every object event the application dispatches to the capture of mapped
- * events, so an event reaches the mapping of its own class or of a parent class
- * or interface through one wildcard listener.
+ * Routes every object event to the capture of mapped events through one
+ * wildcard listener, so a parent class or interface mapping matches too.
  *
- * Only an object event, whose one payload entry is an object of the class the
- * event is named after, is captured; a string event and any other payload are
- * left alone at once. The capture contains its own failures, so the code that
- * dispatched the event and the listeners after this one go on.
- *
- * It holds nothing: the capture comes from the application serving the event
- * when it is handled, not from the container that built the listener, which
- * under Octane is the application the worker booted rather than the request's
- * sandbox.
+ * Resolves the capture per event, since under Octane the container that built
+ * the listener is the worker's, not the request's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,7 +22,8 @@ use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 final readonly class CaptureMappedEvent
 {
     /**
-     * Handle any dispatched event, by its name and payload.
+     * Capture the event when its one payload entry is an object of the class it
+     * is named after.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

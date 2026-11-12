@@ -5,10 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Stores\Enums;
 
 /**
- * The step of the write path that failed, as a failed write's diagnostics name
- * it: preparing the record, writing it to the store or the outbox, keeping it
- * aside after a failure, dispatching `AuditRecorded`, or delivering it from the
- * outbox.
+ * The write path step that failed, as named in a failed write's diagnostics.
  *
  * @api
  *

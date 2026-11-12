@@ -9,19 +9,8 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseTransactionsManager;
 
 /**
- * When a session of its own, a second PDO on the storage connection's database,
- * could not see or write what the storage connection does: the database is
- * in-memory SQLite, which no other PDO can open, or the storage connection
- * holds the base transaction Laravel's testing manager wraps a test in, whose
- * rows no other session could see on any engine.
- *
- * The export's snapshot and the key session both ask, and each decides for
- * itself what it does instead. Both connect with `sessionOptions()`, so a
- * storage connection configured with persistent PDO connections never hands a
- * session the very handle it is using itself. The testing transaction is judged
- * by the transactions manager the container holds, as the read gate judges it,
- * which is why the question lives here, outside the domain, and neither caller
- * resolves the container itself.
+ * Whether a second PDO on the storage connection's database could not see what
+ * it does: in-memory SQLite, or inside the testing manager's base transaction.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,11 +25,8 @@ final class DedicatedSession
     private function __construct() {}
 
     /**
-     * The configuration a session of its own connects with: the one given, its
-     * PDO options kept, with `PDO::ATTR_PERSISTENT` forced off. A persistent
-     * handle for the same DSN and credentials is the one the storage connection
-     * already holds, so a session that reused it would run its transactions on
-     * the storage connection's own and disconnect it when purged.
+     * The configuration with `PDO::ATTR_PERSISTENT` forced off, since a
+     * persistent handle would be the storage connection's own.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -59,8 +45,8 @@ final class DedicatedSession
     }
 
     /**
-     * Whether the connection is an in-memory SQLite database, which no other
-     * PDO can see: `:memory:`, or a URI whose mode is `memory`.
+     * Whether the connection is in-memory SQLite: `:memory:` or a URI with
+     * `mode=memory`.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return bool
@@ -75,10 +61,7 @@ final class DedicatedSession
 
     /**
      * Whether the connection's open transaction is the base one Laravel's
-     * testing manager wraps a test in: the bound manager would run the
-     * callbacks of a commit at the connection's level, as the read gate judges
-     * it. With no transaction open, no manager bound, or the framework's own,
-     * it never is.
+     * testing manager wraps a test in.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return bool

@@ -12,34 +12,11 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 
 /**
- * Tells the database failures that end a host's transaction from those a
- * savepoint recovers: a concurrency error (a deadlock, a serialisation failure,
- * a lock wait timeout or a locked database) and a lost connection, each as
- * Laravel itself recognises them, so the package and the framework agree, and a
- * PostgreSQL transaction that was already aborted before the write (SQLSTATE
- * `25P02`).
+ * Tells failures that end a host transaction from those a savepoint recovers,
+ * as Laravel recognises them, plus PostgreSQL's aborted transaction (`25P02`).
  *
- * Laravel recognises some of these by the exception's message, so it is read to
- * classify the failure and nothing of it is kept. A `QueryException`'s message
- * holds the statement with its bindings, so the message read is that of the
- * driver's own exception at the root of the chain, and a data or constraint
- * failure (SQLSTATE class `22` or `23`), whose driver message can quote a
- * value, is neither: a record's value can never make an ordinary failure look
- * fatal. A `DeadlockException` is always a concurrency error, because Laravel
- * throws it having left the savepoint it came from without a rollback. A lost
- * connection is only ever a database failure, so a phrase in anything else's
- * message does not count.
- *
- * A failure ends only the transaction on the connection it happened on, so
- * `connectionOf()` names that connection when the failure says, for the caller
- * to compare with the transactions that were open.
- *
- * Inside a host transaction a concurrency error is replaced by
- * `sanitisedDeadlock()`: an exception without the original's message or
- * previous exception, which Laravel still recognises, so the host's
- * `transaction()` retries it as it would the original. Inside a savepoint a
- * failed statement is replaced by `masked()` before Laravel sees it, for the
- * same reason.
+ * Only the driver's root message is read, and never for SQLSTATE class 22 or
+ * 23, whose message can quote a row's value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,9 +46,8 @@ final class FailureClassifier
     private const array VALUE_QUOTING_CLASSES = ['22', '23'];
 
     /**
-     * The exception a concurrency error inside a host transaction is replaced
-     * by: a `DeadlockException` with a fixed message and the code `40001`, and
-     * no previous exception, which Laravel recognises as a concurrency error.
+     * A `DeadlockException` with no message of the original or previous
+     * exception, which Laravel's `transaction()` still retries.
      *
      * @return \Illuminate\Database\DeadlockException
      */
@@ -81,11 +57,8 @@ final class FailureClassifier
     }
 
     /**
-     * The failed statement as Laravel may safely read it: the same class on the
-     * same connection, with no binding in its message and no value a driver's
-     * message quoted, so Laravel cannot take a record's value for a concurrency
-     * error and leave a savepoint without its rollback. The SQLSTATE and driver
-     * code are kept.
+     * The failed statement without bindings or quoted values, so Laravel cannot
+     * take a record's value for a deadlock and skip a savepoint rollback.
      *
      * @param  \Illuminate\Database\QueryException  $failure
      * @return \Illuminate\Database\QueryException
@@ -99,8 +72,7 @@ final class FailureClassifier
     }
 
     /**
-     * Throw the failed statement masked, as `masked()` gives it, so a caller
-     * that catches one rethrows it with no binding and no quoted value.
+     * Throw the failed statement as `masked()` gives it.
      *
      * @param  \Illuminate\Database\QueryException  $failure
      * @return never
@@ -113,10 +85,8 @@ final class FailureClassifier
     }
 
     /**
-     * Whether the failure is a concurrency error, as Laravel recognises one: a
-     * deadlock, a serialisation failure, a lock wait timeout or a locked
-     * database. Laravel's own `DeadlockException` always is, whatever its code
-     * and message became on the way.
+     * Whether Laravel recognises the failure as a concurrency error; its own
+     * `DeadlockException` always is one.
      *
      * @param  \Throwable  $failure
      * @return bool
@@ -133,11 +103,8 @@ final class FailureClassifier
     }
 
     /**
-     * Whether the failure is a statement PostgreSQL cancelled because it waited
-     * longer than `lock_timeout` for a lock (SQLSTATE `55P03`), read at the
-     * root of the chain. Laravel recognises MySQL's lock wait timeout as a
-     * concurrency error but not this one, which a caller that retries a whole
-     * transaction can treat the same way.
+     * Whether PostgreSQL cancelled the statement on `lock_timeout` (`55P03`),
+     * which Laravel does not count as a concurrency error.
      *
      * @param  \Throwable  $failure
      * @return bool
@@ -148,9 +115,8 @@ final class FailureClassifier
     }
 
     /**
-     * Whether the failure is a lost connection, as Laravel recognises one, and
-     * a database failure at all: a phrase in another exception's message says
-     * nothing of a database connection.
+     * Whether the failure is a database failure Laravel recognises as a lost
+     * connection.
      *
      * @param  \Throwable  $failure
      * @return bool
@@ -167,9 +133,8 @@ final class FailureClassifier
     }
 
     /**
-     * Whether the failure is a statement refused because the PostgreSQL
-     * transaction it ran in was already aborted (SQLSTATE `25P02`), read from
-     * the driver's error information or the failure's code.
+     * Whether the statement was refused because its PostgreSQL transaction was
+     * already aborted (`25P02`).
      *
      * @param  \Throwable  $failure
      * @return bool
@@ -184,8 +149,7 @@ final class FailureClassifier
     }
 
     /**
-     * The connection the failure happened on, when a query exception in its
-     * chain says, and `null` when none does.
+     * The connection a query exception in the failure's chain names, if any.
      *
      * @param  \Throwable  $failure
      * @return ?string
@@ -194,8 +158,7 @@ final class FailureClassifier
     {
         for ($current = $failure; $current !== null; $current = $current->getPrevious()) {
             if ($current instanceof QueryException) {
-                // Laravel documents a string, but the alias is whatever the
-                // code that threw the query exception gave it.
+                // Laravel documents a string, but a thrower can give anything
                 // @phpstan-ignore function.alreadyNarrowedType
                 return is_string($current->connectionName) ? $current->connectionName : null;
             }
@@ -205,9 +168,8 @@ final class FailureClassifier
     }
 
     /**
-     * Whether any of the connections failures happened on had a transaction
-     * open: a connection named is looked up among those open, and a failure
-     * that names none counts as the caller says.
+     * Whether any failed connection had a transaction open; a failure that
+     * names none counts as `$unnamedCounts` says.
      *
      * @param  array<int, ?string>  $failed
      * @param  list<string>  $open
@@ -226,8 +188,8 @@ final class FailureClassifier
     }
 
     /**
-     * The driver's own exception at the root of the failure's chain, whose
-     * message holds no binding, or the failure itself when it has none.
+     * The driver's exception at the root of the chain, whose message holds no
+     * binding.
      *
      * @param  \Throwable  $failure
      * @return \Throwable
@@ -256,7 +218,7 @@ final class FailureClassifier
 
     /**
      * Whether the failure is a data or constraint failure, whose driver message
-     * can quote a value of the row, so its message decides nothing.
+     * can quote a row's value.
      *
      * @param  \Throwable  $failure
      * @return bool
@@ -267,8 +229,8 @@ final class FailureClassifier
     }
 
     /**
-     * The driver's exception with the message of a data or constraint failure
-     * replaced by its SQLSTATE, and any other as it is.
+     * The driver's exception, its message replaced by the SQLSTATE when it can
+     * quote a value.
      *
      * @param  \Throwable  $failure
      * @return \Throwable
@@ -287,8 +249,7 @@ final class FailureClassifier
     }
 
     /**
-     * The failure's SQLSTATE: the first element of its error information, or
-     * else its code, whichever is a SQLSTATE first.
+     * The failure's SQLSTATE, from its error information or else its code.
      *
      * @param  \Throwable  $failure
      * @return ?string

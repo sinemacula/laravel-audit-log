@@ -7,24 +7,10 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Support\Facades\Config;
 
 /**
- * Reads the names of the entries table, `audit-log.entries.table`, and of the
- * artifacts table beside it, `audit-log.entries.artifacts_table`, which holds
- * each entry's artifact, a bulk operation's subjects, a read's disclosure or an
- * export's manifest, the one way the migrations, the model, the store and the
- * check command read them, and fails closed on a name the migration could not
- * build every index name from.
+ * The entries and artifacts table names, read on every call and refused unless
+ * every index name derived from them fits PostgreSQL's 63 characters.
  *
- * Each name is 1 to 47 lower-case ASCII letters, digits and underscores that
- * does not start with a digit, so the longest index name the migration derives
- * from it fits the 63 characters PostgreSQL keeps (and MySQL's 64) and needs no
- * quoting. Capitals are refused: every engine reports index names in lower
- * case, PostgreSQL folds an unquoted name to it, and MySQL's
- * `lower_case_table_names` treats the case of a table name differently from one
- * server to the next, so a name in lower case is the same name on each. A
- * schema-qualified name is refused, because its dot would be in every index
- * name: choose the schema with the storage connection instead. The settings are
- * read through the `Config` facade, because a migration and a model constructor
- * cannot be injected, and validated on every call.
+ * Lower case only, since MySQL's `lower_case_table_names` differs per server.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,8 +43,7 @@ final class EntrySettings
     private function __construct() {}
 
     /**
-     * The name of the entries table: the configured one, or `audit_log_entries`
-     * when none is configured.
+     * The entries table's name, `audit_log_entries` by default.
      *
      * @return string
      *
@@ -70,10 +55,7 @@ final class EntrySettings
     }
 
     /**
-     * The name of the artifacts table, which holds each entry's artifact beside
-     * it, a bulk operation's subjects, a read's disclosure or an export's
-     * manifest: the configured one, or `audit_log_artifacts` when none is
-     * configured.
+     * The artifacts table's name, `audit_log_artifacts` by default.
      *
      * @return string
      *
@@ -85,8 +67,8 @@ final class EntrySettings
     }
 
     /**
-     * The table name under the key, or the default when it is not set, refused
-     * with a message naming the key unless it fits the grammar.
+     * The table setting under the key, or the default, refused with a message
+     * naming the key unless it fits the grammar.
      *
      * @param  string  $key
      * @param  string  $default

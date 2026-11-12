@@ -11,25 +11,11 @@ use SineMacula\Laravel\AuditLog\Records\EnvelopeCodec;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * Writes a record whose write failed to the configured log channel, as one line
- * at `critical` that `audit-log:replay` can read back: the marker
- * `audit-log-spill:v1 `, then the record's envelope in the canonical encoding.
+ * Writes a record whose write failed to the failure channel as one `critical`
+ * line `audit-log:replay` reads back: the marker, then the canonical envelope.
  *
- * A finalised record is spilled with its integrity fields, so a replay can
- * verify it; a record that failed before it was finalised is spilled with
- * `unsigned` set and no signature, and a replay leaves it. Either is the
- * envelope the codec reads back, so a record with an attachment is spilled as
- * its complete bundle, the record and the attachment together. Every `%` in the
- * envelope is written as the JSON escape `\u0025`, which decodes to the same
- * value, because Monolog's `LineFormatter` rewrites a `%token%` in its output
- * even after the message is substituted; the HMAC is over decoded values, so
- * the line still verifies. The canonical encoding escapes every line break
- * inside its strings, so a line is one physical line whatever the record holds.
- * The line goes to the channel's own logger, past Laravel's wrapper, so no
- * shared log context joins it and no `MessageLogged` listener receives the
- * record, which would otherwise land beside the report that follows it. It is
- * never truncated, and a failure of the channel propagates to the caller, which
- * isolates it.
+ * Every `%` is written as `\u0025`, since Monolog's `LineFormatter` rewrites a
+ * `%token%` even after substitution; the HMAC is over decoded values.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +27,7 @@ final readonly class FailureSpill
     /** @var string What every spill line starts with, its trailing space included. */
     public const string MARKER = 'audit-log-spill:v1 ';
 
-    /** @var string The JSON escape every `%` is written as: six bytes, a backslash, `u`, `0`, `0`, `2`, `5`. */
+    /** @var string The JSON escape every `%` is written as, six bytes long. */
     private const string ESCAPED_PERCENT = '\u0025';
 
     /**
@@ -60,8 +46,8 @@ final readonly class FailureSpill
     ) {}
 
     /**
-     * Spill the finalised record with its integrity fields, as its columns or,
-     * with an attachment, as its bundle.
+     * Spill the finalised record with its integrity fields, so a replay can
+     * verify it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return void
@@ -76,8 +62,8 @@ final readonly class FailureSpill
     }
 
     /**
-     * Spill a record that was never finalised, marked `unsigned`, with no
-     * integrity fields, as its columns or, with an attachment, as its bundle.
+     * Spill a record that was never finalised, marked `unsigned`, which a
+     * replay leaves.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @return void
@@ -92,8 +78,8 @@ final readonly class FailureSpill
     }
 
     /**
-     * The spill line of the envelope: the marker, then its canonical encoding
-     * with every `%` escaped.
+     * The marker, then the envelope's canonical encoding with every `%`
+     * escaped.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -108,8 +94,7 @@ final readonly class FailureSpill
     }
 
     /**
-     * Write the envelope's line to the configured channel's own logger at
-     * `critical`, with no context.
+     * Write the envelope's line to the channel's own logger at `critical`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

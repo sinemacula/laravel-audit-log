@@ -7,11 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Database\Schema\Builder;
 
 /**
- * Migration collision guard.
- *
- * Helper for the shipped migration. Surfaces a clear error before any schema
- * mutation if the table the migration creates already exists, naming the
- * configuration key that renames it.
+ * Refuses the shipped migration before any schema change when its table already
+ * exists, naming the configuration key that renames it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +29,7 @@ final readonly class MigrationCollisionGuard
     ) {}
 
     /**
-     * Throw if the table already exists. The configuration key is the one,
-     * under `audit-log`, that names the table.
+     * Throw if the table exists, naming the `audit-log` key that renames it.
      *
      * @param  string  $table
      * @param  string  $configKey

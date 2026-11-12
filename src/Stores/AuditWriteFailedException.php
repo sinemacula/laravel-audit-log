@@ -5,16 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Stores;
 
 /**
- * Thrown, or reported, when a record could not be written, in place of the
- * exception the write failed with, which can hold the record's values in its
- * message, its SQL and its bindings.
- *
- * It holds only what may be said about the failure without saying anything of
- * the record: the record's id and code, the operation that failed, the store,
- * the exception's class, and, for a database failure, its SQLSTATE, its numeric
- * driver code and the connection's alias. Its message is built from those
- * alone, and it has no previous exception, so neither a handler nor a log
- * reaches the original.
+ * Thrown or reported in place of a failed write's exception, which can hold the
+ * record's values; it keeps only diagnostics and has no previous exception.
  *
  * @api
  *
@@ -47,7 +39,7 @@ final class AuditWriteFailedException extends \RuntimeException
     /** @var ?string The alias of the connection the write failed on, never its host or port. */
     public readonly ?string $connection;
 
-    /** @var ?string The id of the destination that failed, for a delivery to one of several; several ids separated by commas when a stack's destinations failed together. */
+    /** @var ?string The failed destination's id, comma-separated when several in a stack failed. */
     public readonly ?string $destination;
 
     /**
@@ -74,7 +66,7 @@ final class AuditWriteFailedException extends \RuntimeException
 
     /**
      * The message, built from the diagnostics alone, naming each optional field
-     * only when it is known.
+     * only when known.
      *
      * @param  \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics  $diagnostics
      * @return string
@@ -104,8 +96,8 @@ final class AuditWriteFailedException extends \RuntimeException
     }
 
     /**
-     * What the message is about: the record that was not written, or, for a
-     * drain stopped before it read any one record, none.
+     * What the message is about: the record, or none for a drain stopped before
+     * it read one.
      *
      * @param  \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics  $diagnostics
      * @return string

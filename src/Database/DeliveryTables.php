@@ -7,21 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Support\Facades\Config;
 
 /**
- * Where the delivery tables live and what they are called: the outbox
- * (`audit-log.delivery.outbox.table`, on
- * `audit-log.delivery.outbox.connection`) and the receipts of each destination
- * (`audit-log.delivery.deliveries_table`, always on the storage connection,
- * beside the entries they describe).
- *
- * A table name follows the entries table's grammar, 1 to 47 lower-case ASCII
- * letters, digits and underscores that does not start with a digit, so every
- * index name a migration derives from it fits the 63 characters PostgreSQL
- * keeps. The outbox connection is a name, or `null` or empty for the storage
- * connection; it may differ from the storage connection, so the outbox can sit
- * in the database the application's own transactions run on. Every setting is
- * read through the `Config` facade, because a migration cannot be injected, and
- * validated on every call; a malformed one fails closed with an
- * `InvalidArgumentException` naming the key and never the value.
+ * The delivery tables' names and the outbox's connection, read on every call; a
+ * malformed setting fails closed naming its key, never its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +38,7 @@ final class DeliveryTables
     private function __construct() {}
 
     /**
-     * The name of the outbox table: the configured one, or `audit_log_outbox`
-     * when none is configured.
+     * The outbox table's name, `audit_log_outbox` by default.
      *
      * @return string
      *
@@ -64,8 +50,8 @@ final class DeliveryTables
     }
 
     /**
-     * The name of the receipts table: the configured one, or
-     * `audit_log_deliveries` when none is configured.
+     * The receipts table's name, `audit_log_deliveries` by default; it is
+     * always on the storage connection.
      *
      * @return string
      *
@@ -77,9 +63,8 @@ final class DeliveryTables
     }
 
     /**
-     * The connection the outbox lives on: the configured one, or the storage
-     * connection when none is configured, which is `null` for the default
-     * connection.
+     * The outbox connection, or the storage connection when none is set, which
+     * is `null` for the default connection.
      *
      * @return ?string
      *
@@ -97,8 +82,7 @@ final class DeliveryTables
     }
 
     /**
-     * The name of the outbox connection: the configured one, the storage
-     * connection, or the default one.
+     * The outbox connection's name, falling back to the default connection.
      *
      * @return string
      *
@@ -110,8 +94,8 @@ final class DeliveryTables
     }
 
     /**
-     * Read a table setting, or the default when it is not set, and refuse a
-     * name the migrations could not build every index name from.
+     * The table setting under the key, or the default, refused unless every
+     * index name the migrations derive from it fits.
      *
      * @param  string  $key
      * @param  string  $default

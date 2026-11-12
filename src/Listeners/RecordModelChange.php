@@ -13,20 +13,11 @@ use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 
 /**
- * Records a watched model's change from the Eloquent event that announced it: a
- * creation, an update (or the restore it is), a deletion or a force deletion.
+ * Records a watched model's change from the Eloquent event that announced it,
+ * for the exact watched class only, never a subclass.
  *
- * Only a model whose exact class is watched is captured; any other, a subclass
- * of a watched class included, is left alone at once. Each event is captured on
- * its own, so two saves are two records, each described when its event fires
- * and delivered once the model's connection commits. The capture contains its
- * own failures, naming the model's class and this listener, so the change
- * itself goes on.
- *
- * It holds nothing: the watches and the capture come from the application
- * serving the change when it is handled, not from the container that built the
- * listener, which under Octane is the application the worker booted rather than
- * the request's sandbox.
+ * Resolves everything per event, since under Octane the container that built
+ * the listener is the worker's, not the request's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +42,7 @@ final readonly class RecordModelChange
     }
 
     /**
-     * Record the update of the model, or the restore it is, when its class is
-     * watched.
+     * Record the update, or the restore it is, when the class is watched.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @return void
@@ -98,8 +88,7 @@ final readonly class RecordModelChange
     }
 
     /**
-     * Capture the change of the model through the watch of its exact class, or
-     * do nothing when its class is not watched.
+     * Capture the change through the watch of the model's exact class, if any.
      *
      * @param  \SineMacula\Laravel\AuditLog\Capture\Enums\ModelEvent  $change
      * @param  \Illuminate\Database\Eloquent\Model  $model

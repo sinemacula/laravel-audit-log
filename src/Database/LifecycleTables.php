@@ -7,20 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Support\Facades\Config;
 
 /**
- * What the lifecycle tables are called: the journal of every destructive
- * operation (`audit-log.lifecycle.journal_table`), the projection of the active
- * holds (`audit-log.lifecycle.holds_table`), the one-row lock every lifecycle
- * transaction takes first (`audit-log.lifecycle.lock_table`) and the batches of
- * each import (`audit-log.import.batches_table`).
- *
- * All four live on the storage connection, beside the entries they describe,
- * and no setting moves them. A table name follows the entries table's grammar,
- * 1 to 47 lower-case ASCII letters, digits and underscores that does not start
- * with a digit, so every index name a migration derives from it fits the 63
- * characters PostgreSQL keeps. Every setting is read through the `Config`
- * facade, because a migration cannot be injected, and validated on every call;
- * a malformed one fails closed with an `InvalidArgumentException` naming the
- * key and never the value.
+ * The lifecycle and import tables' names, all on the storage connection; a
+ * malformed setting fails closed naming its key, never its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,8 +50,7 @@ final class LifecycleTables
     private function __construct() {}
 
     /**
-     * The name of the journal table: the configured one, or
-     * `audit_log_lifecycle` when none is configured.
+     * The journal table's name, `audit_log_lifecycle` by default.
      *
      * @return string
      *
@@ -75,8 +62,7 @@ final class LifecycleTables
     }
 
     /**
-     * The name of the holds table: the configured one, or `audit_log_holds`
-     * when none is configured.
+     * The holds table's name, `audit_log_holds` by default.
      *
      * @return string
      *
@@ -88,8 +74,7 @@ final class LifecycleTables
     }
 
     /**
-     * The name of the lock table: the configured one, or
-     * `audit_log_lifecycle_lock` when none is configured.
+     * The lock table's name, `audit_log_lifecycle_lock` by default.
      *
      * @return string
      *
@@ -101,8 +86,7 @@ final class LifecycleTables
     }
 
     /**
-     * The name of the import batches table: the configured one, or
-     * `audit_log_import_batches` when none is configured.
+     * The import batches table's name, `audit_log_import_batches` by default.
      *
      * @return string
      *
@@ -114,8 +98,7 @@ final class LifecycleTables
     }
 
     /**
-     * Read every lifecycle table setting, so the first malformed one fails
-     * closed, naming its key.
+     * Read every lifecycle table setting, so the first malformed one fails.
      *
      * @return void
      *
@@ -130,8 +113,8 @@ final class LifecycleTables
     }
 
     /**
-     * Read a table setting, or the default when it is not set, and refuse a
-     * name the migrations could not build every index name from.
+     * The table setting under the key, or the default, refused unless every
+     * index name the migrations derive from it fits.
      *
      * @param  string  $key
      * @param  string  $default

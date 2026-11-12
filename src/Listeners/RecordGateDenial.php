@@ -16,34 +16,11 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * Records the Gate's denials, when `audit-log.capture.gate.enabled` turns them
- * on, for the abilities `audit-log.capture.gate.only_abilities` and
- * `audit-log.capture.gate.except_abilities` select.
+ * Records the Gate's denials that `audit-log.capture.gate.*` turns on and
+ * selects, after the transaction so a rollback keeps their record.
  *
- * A denial is what the Gate itself treats as one: `false`, `null` or any other
- * falsy result, or a `Response` that is denied. A check with any other truthy
- * result is left alone at once, before any setting is read. A `Response` is
- * asked whether it denies only inside the capture, once capture is on and the
- * ability is selected, so with capture off it is never asked, and a response
- * that fails to say is a contained failure. Every denial evaluated is recorded,
- * the same one twice included. The actor is the user the Gate
- * checked, or explicitly no one for a guest, never whoever a guard holds now;
- * the Gate names no guard, so none is recorded. The ability is cleaned and cut
- * to 191 bytes, and the arguments are kept only as model references, class
- * names or a marker, with their full count. A denied response's code is kept as
- * the reason only when `audit-log.capture.gate.reason_codes` lists it, since a
- * token can look like a code; its message is free text and never read.
- *
- * A denial is written after the transaction, so a rollback around it keeps its
- * record.
- *
- * A malformed setting or a failure to record is contained by the capture, so
- * the Gate's check returns its result as before.
- *
- * It holds nothing: the capture and its settings come from the application
- * serving the check when it is handled, not from the container that built the
- * listener, which under Octane is the application the worker booted rather than
- * the request's sandbox.
+ * Resolves everything per check, since under Octane the container that built
+ * the listener is the worker's, not the request's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,9 +70,8 @@ final readonly class RecordGateDenial
     }
 
     /**
-     * Whether the Gate's result allows without asking anything of it: a truthy
-     * result that is not a `Response`, which is left alone before any setting
-     * is read.
+     * Whether the result is truthy and not a `Response`, so it is left alone
+     * before any setting is read.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -121,8 +97,8 @@ final readonly class RecordGateDenial
     }
 
     /**
-     * The reason a denial is recorded with: the denied response's code, a
-     * string or an integer, when the reason codes list it; otherwise none.
+     * The denied response's code when the reason codes list it, since a token
+     * can look like a code; its message is never read.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

@@ -7,19 +7,8 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Support\Facades\Config;
 
 /**
- * What the integrity tables are called: the seals
- * (`audit-log.integrity.checkpoints_table`), the entries each seal holds
- * (`audit-log.integrity.members_table`) and the operational progress of
- * sealing, anchoring and verification (`audit-log.integrity.state_table`).
- *
- * All three live on the storage connection, beside the entries they describe,
- * and no setting moves them. A table name follows the entries table's grammar,
- * 1 to 47 lower-case ASCII letters, digits and underscores that does not start
- * with a digit, so every index name a migration derives from it fits the 63
- * characters PostgreSQL keeps. Every setting is read through the `Config`
- * facade, because a migration cannot be injected, and validated on every call;
- * a malformed one fails closed with an `InvalidArgumentException` naming the
- * key and never the value.
+ * The integrity tables' names, all on the storage connection; a malformed
+ * setting fails closed naming its key, never its value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,8 +44,7 @@ final class IntegrityTables
     private function __construct() {}
 
     /**
-     * The name of the seals table: the configured one, or
-     * `audit_log_checkpoints` when none is configured.
+     * The seals table's name, `audit_log_checkpoints` by default.
      *
      * @return string
      *
@@ -68,8 +56,7 @@ final class IntegrityTables
     }
 
     /**
-     * The name of the members table: the configured one, or
-     * `audit_log_checkpoint_members` when none is configured.
+     * The seal members table's name, `audit_log_checkpoint_members` by default.
      *
      * @return string
      *
@@ -81,8 +68,7 @@ final class IntegrityTables
     }
 
     /**
-     * The name of the progress table: the configured one, or
-     * `audit_log_integrity_state` when none is configured.
+     * The progress table's name, `audit_log_integrity_state` by default.
      *
      * @return string
      *
@@ -94,8 +80,8 @@ final class IntegrityTables
     }
 
     /**
-     * Read a table setting, or the default when it is not set, and refuse a
-     * name the migrations could not build every index name from.
+     * The table setting under the key, or the default, refused unless every
+     * index name the migrations derive from it fits.
      *
      * @param  string  $key
      * @param  string  $default

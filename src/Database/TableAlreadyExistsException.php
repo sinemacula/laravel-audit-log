@@ -5,8 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Database;
 
 /**
- * Thrown when the table the shipped migration creates already exists in the
- * application's schema before the migration runs.
+ * Thrown when the table the shipped migration creates already exists.
  *
  * @api
  *
