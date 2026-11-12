@@ -7,7 +7,6 @@ namespace Tests\Integration\Querying;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
-use Illuminate\Foundation\Testing\DatabaseTransactionsManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -19,6 +18,7 @@ use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\ReadGate;
 use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use Tests\Concerns\ReadsTheTrail;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\TestCase;
 
 /**
@@ -32,7 +32,7 @@ use Tests\TestCase;
 #[CoversClass(ReadGate::class)]
 final class DisclosureTransactionsTest extends TestCase
 {
-    use ReadsTheTrail;
+    use ReadsTheTrail, RunsInsideTheTestingWrapper;
 
     /** @var string A connection of the outbox's own, on the engine under test. */
     private const string OUTBOX = 'audit_disclosure_outbox';
@@ -126,7 +126,7 @@ final class DisclosureTransactionsTest extends TestCase
      */
     public function testUnderTheTestingManagerTheGateEnters(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper(DB::connection(StorageConnection::resolvedName()), function (Connection $connection): void {
             $this->gate()->enter();
 
             $connection->beginTransaction();
@@ -205,40 +205,5 @@ final class DisclosureTransactionsTest extends TestCase
     private function gate(): ReadGate
     {
         return app(ReadGate::class);
-    }
-
-    /**
-     * Run the test inside the testing manager's base transaction.
-     *
-     * @param  \Closure(\Illuminate\Database\Connection): void  $test
-     * @return void
-     */
-    private function insideTheTestingWrapper(\Closure $test): void
-    {
-        $connection = DB::connection(StorageConnection::resolvedName());
-
-        self::assertInstanceOf(Connection::class, $connection);
-
-        $manager = new DatabaseTransactionsManager([(string) $connection->getName()]);
-
-        $this->app?->instance('db.transactions', $manager);
-
-        $connection->setTransactionManager($manager);
-
-        $dispatcher = $connection->getEventDispatcher();
-
-        self::assertNotNull($dispatcher);
-
-        $connection->unsetEventDispatcher();
-        $connection->beginTransaction();
-        $connection->setEventDispatcher($dispatcher);
-
-        try {
-            $test($connection);
-        } finally {
-            $connection->unsetEventDispatcher();
-            $connection->rollBack();
-            $connection->setEventDispatcher($dispatcher);
-        }
     }
 }

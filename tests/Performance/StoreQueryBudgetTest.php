@@ -33,21 +33,6 @@ final class StoreQueryBudgetTest extends PerformanceContractTestCase
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
 
     /**
-     * Roll back any transaction a failed test left open.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        while (DB::connection()->transactionLevel() > 0) {
-            DB::connection()->rollBack();
-        }
-
-        parent::tearDown();
-    }
-
-    /**
      * Outside a transaction a record is one insert and nothing else.
      *
      * @return void

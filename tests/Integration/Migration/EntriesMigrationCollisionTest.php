@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
@@ -25,6 +26,8 @@ use Tests\TestCase;
 #[CoversClass(MigrationCollisionGuard::class)]
 final class EntriesMigrationCollisionTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped entries migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000000_create_audit_log_entries_table.php';
 
@@ -76,7 +79,7 @@ final class EntriesMigrationCollisionTest extends TestCase
             . self::CONNECTION . '\'. Set `entries.table` in config/audit-log.php to a different name and re-run the migration.',
         );
 
-        $this->runMigrationUp($this->loadMigration());
+        $this->runMigrationUp($this->loadMigration(self::MIGRATION_PATH));
     }
 
     /**
@@ -91,7 +94,7 @@ final class EntriesMigrationCollisionTest extends TestCase
         });
 
         try {
-            $this->runMigrationUp($this->loadMigration());
+            $this->runMigrationUp($this->loadMigration(self::MIGRATION_PATH));
         } catch (TableAlreadyExistsException) { // @phpstan-ignore catch.neverThrown
             // Expected: the assertions below check what the guard left.
         }
@@ -107,32 +110,13 @@ final class EntriesMigrationCollisionTest extends TestCase
      */
     public function testWithoutACollisionTheTableIsCreated(): void
     {
-        $this->runMigrationUp($this->loadMigration());
+        $this->runMigrationUp($this->loadMigration(self::MIGRATION_PATH));
 
         self::assertTrue(Schema::hasTable(self::TABLE));
         self::assertTrue(Schema::hasColumn(self::TABLE, 'hmac'));
         self::assertTrue(Schema::hasColumn(self::TABLE, 'source_record_id'));
         self::assertTrue(Schema::hasColumn(self::TABLE, 'source_digest'));
         self::assertSame(array_keys(RowCodec::COLUMNS), array_column(Schema::getColumns(self::TABLE), 'name'));
-    }
-
-    /**
-     * Require the shipped migration file and return its instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Entries migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 
     /**

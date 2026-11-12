@@ -48,6 +48,7 @@ use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\StackDeliveryException;
 use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 use Tests\Concerns\SearchesForSecrets;
+use Tests\Concerns\TokenisesClosureParameters;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
@@ -63,7 +64,7 @@ use Tests\Fixtures\Records\RecordFactory;
 #[CoversNothing]
 final class DeliverySensitiveParametersTest extends TestCase
 {
-    use SearchesForSecrets;
+    use SearchesForSecrets, TokenisesClosureParameters;
 
     /** @var string The namespace every source file is named under. */
     private const string NAMESPACE = 'SineMacula\Laravel\AuditLog\\';
@@ -764,41 +765,6 @@ final class DeliverySensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of each closure in the source, in order, read from its
-     * tokens.
-     *
-     * @param  string  $source
-     * @return list<list<string>>
-     */
-    private static function closureParametersIn(string $source): array
-    {
-        $tokens     = self::significantTokens($source);
-        $parameters = [];
-
-        foreach ($tokens as $index => $token) {
-            if (!is_array($token) || !in_array($token[0], [T_FUNCTION, T_FN], true)) {
-                continue;
-            }
-
-            $open = self::nextAfter($tokens, $index);
-
-            if (($tokens[$open] ?? null) !== '(') {
-                continue;
-            }
-
-            $inside = self::argumentsAt($tokens, $open);
-
-            if ($inside === []) {
-                continue;
-            }
-
-            $parameters[] = $inside;
-        }
-
-        return $parameters;
-    }
-
-    /**
      * The arguments of each `new` of the class in the source, in order, each as
      * its text.
      *
@@ -852,93 +818,6 @@ final class DeliverySensitiveParametersTest extends TestCase
         }
 
         return $calls;
-    }
-
-    /**
-     * The index of the first token after the index that is not a space.
-     *
-     * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
-     * @param  int  $index
-     * @return int
-     */
-    private static function nextAfter(array $tokens, int $index): int
-    {
-        do {
-            $index++;
-        } while (($tokens[$index] ?? null) === ' ');
-
-        return $index;
-    }
-
-    /**
-     * The top-level arguments of the bracket that opens at the index, trimmed.
-     *
-     * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
-     * @param  int  $open
-     * @return list<string>
-     */
-    private static function argumentsAt(array $tokens, int $open): array
-    {
-        $depth     = 1;
-        $arguments = [''];
-        $count     = count($tokens);
-
-        for ($index = $open + 1; $index < $count; $index++) {
-            $text = is_array($tokens[$index]) ? $tokens[$index][1] : $tokens[$index];
-
-            $depth += self::depthChangeOf($text);
-
-            if ($depth === 0) {
-                break;
-            }
-
-            if ($depth === 1 && $text === ',') {
-                $arguments[] = '';
-
-                continue;
-            }
-
-            $arguments[array_key_last($arguments)] .= $text;
-        }
-
-        return array_values(array_filter(array_map(trim(...), $arguments), static fn (string $argument): bool => $argument !== ''));
-    }
-
-    /**
-     * What the text does to how many brackets are open.
-     *
-     * @param  string  $text
-     * @return int
-     */
-    private static function depthChangeOf(string $text): int
-    {
-        return match ($text) {
-            '(', '[', '#[', '{' => 1,
-            ')', ']', '}'       => -1,
-            default             => 0,
-        };
-    }
-
-    /**
-     * The source's tokens with its comments gone and each run of whitespace one
-     * space, so a list of parameters over many lines reads as one over one.
-     *
-     * @param  string  $source
-     * @return array<int, array{0: int, 1: string, 2: int}|string>
-     */
-    private static function significantTokens(string $source): array
-    {
-        $tokens = [];
-
-        foreach (token_get_all($source) as $token) {
-            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
-                continue;
-            }
-
-            $tokens[] = is_array($token) && $token[0] === T_WHITESPACE ? ' ' : $token;
-        }
-
-        return $tokens;
     }
 
     /**

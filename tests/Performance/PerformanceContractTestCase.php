@@ -82,13 +82,17 @@ abstract class PerformanceContractTestCase extends TestCase
     }
 
     /**
-     * Release the frozen clock.
+     * Roll back any transaction a test left open and release the frozen clock.
      *
      * @return void
      */
     #[\Override]
     protected function tearDown(): void
     {
+        while (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->rollBack();
+        }
+
         CarbonImmutable::setTestNow();
 
         parent::tearDown();
@@ -213,6 +217,57 @@ abstract class PerformanceContractTestCase extends TestCase
     protected function capturedRollbacks(): int
     {
         return $this->rollbacks;
+    }
+
+    /**
+     * The CPU time this process has used, user and system: waiting for a core
+     * uses none of it.
+     *
+     * @return int
+     */
+    protected static function cpuNanoseconds(): int
+    {
+        $usage = getrusage();
+
+        assert(is_array($usage));
+
+        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec'])  * 1000000000
+            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) * 1000;
+    }
+
+    /**
+     * Whether Xdebug is collecting coverage in this process.
+     *
+     * @return bool
+     */
+    protected static function isCollectingCoverage(): bool
+    {
+        return function_exists('xdebug_info') && in_array('coverage', xdebug_info('mode'), true);
+    }
+
+    /**
+     * An entries row with every required column, numbered so each id is unique.
+     *
+     * @param  int  $number
+     * @return array<string, int|string>
+     */
+    protected static function entryRow(int $number): array
+    {
+        return [
+            'id'                => sprintf('0195f4a2-7b1c-7000-8000-%012d', $number),
+            'record_version'    => 1,
+            'event'             => 'invoice.approved',
+            'event_version'     => 1,
+            'category'          => 'billing',
+            'outcome'           => 'success',
+            'provenance'        => 'captured',
+            'source_id'         => 'app',
+            'occurred_at'       => self::NOW,
+            'recorded_at'       => self::NOW,
+            'integrity_version' => 1,
+            'key_id'            => 'test-key',
+            'hmac'              => str_repeat('a', 64),
+        ];
     }
 
     /**

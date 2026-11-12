@@ -407,17 +407,4 @@ final class LateArrivalsTest extends TestCase
     {
         return DB::connection(StorageConnection::name())->table(EntrySettings::table());
     }
-
-    /**
-     * The ids in byte order, as the members are read back.
-     *
-     * @param  list<string>  $ids
-     * @return list<string>
-     */
-    private static function sorted(array $ids): array
-    {
-        usort($ids, strcmp(...));
-
-        return $ids;
-    }
 }

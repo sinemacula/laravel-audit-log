@@ -88,21 +88,6 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Roll back any transaction a test left open.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        while (DB::connection()->transactionLevel() > 0) {
-            DB::connection()->rollBack();
-        }
-
-        parent::tearDown();
-    }
-
-    /**
      * An unmapped event the bridge hears costs no statement.
      *
      * @return void

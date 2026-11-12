@@ -4,12 +4,12 @@ declare(strict_types = 1);
 
 namespace Tests\Integration\Migration;
 
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
@@ -24,6 +24,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class CheckpointMembersTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped checkpoint members migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_000400_create_audit_log_checkpoint_members_table.php';
 
@@ -44,7 +46,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
 
         Schema::dropIfExists(self::TABLE);
 
-        $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
     }
 
     /**
@@ -241,7 +243,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
      */
     public function testRollsBackByDroppingTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
     }
@@ -256,7 +258,7 @@ final class CheckpointMembersTableSchemaTest extends TestCase
         DB::table(self::TABLE)->insert(self::row(1, 1));
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -294,24 +296,5 @@ final class CheckpointMembersTableSchemaTest extends TestCase
             'entry_id'      => sprintf('01932b4e-8a40-7000-8000-%012d', $entry),
             'hmac'          => str_repeat('a', 64),
         ];
-    }
-
-    /**
-     * Require the shipped migration file and return its instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Checkpoint members migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

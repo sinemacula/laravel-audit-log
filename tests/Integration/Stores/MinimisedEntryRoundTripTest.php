@@ -210,7 +210,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testATruncatedIpv6StoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'truncate');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'truncate');
 
         $stored = $this->storedAndVerified(self::fromAddress('2001:db8:abcd:12::1')->immediately()->record());
 
@@ -224,7 +224,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testAHashedIpStoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'hash');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'hash');
 
         $record = self::fromAddress(self::IP)->immediately()->record();
         $stored = $this->storedAndVerified($record);
@@ -361,7 +361,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testTheDefaultEncryptersEnvelopesStoreAndVerify(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'encrypt');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'encrypt');
 
         $pending = self::underDefinition(EventDefinition::for(self::CODE)->retain('amount')->encrypt('ssn', KeyOwner::ACTOR))
             ->by(Reference::of('user', '7'))
@@ -396,7 +396,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testAContextOverItsBudgetStoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.max_context_bytes', 1024);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_context_bytes', 1024);
 
         $kept = str_repeat('b', 900);
 
@@ -420,7 +420,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testPropertiesOverTheirBudgetStoreAndVerify(): void
     {
-        self::config()->set('audit-log.redaction.max_bytes', 8192);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_bytes', 8192);
 
         $fields = [];
 
@@ -486,7 +486,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testADeferredRecordStoresWhatWasMinimisedAtCapture(): void
     {
-        self::config()->set('audit-log.redaction.key', str_repeat('a', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('a', 32));
 
         $hash       = app(IdentifierHasher::class)->identifier('alice@example.com');
         $connection = DB::connection();
@@ -497,7 +497,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
 
         self::assertSame(0, $this->entryCount());
 
-        self::config()->set('audit-log.redaction.key', str_repeat('b', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('b', 32));
 
         $connection->commit();
 
@@ -538,7 +538,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
     #[DataProvider('provideEdits')]
     public function testAnEditedMinimisedValueFailsVerification(string $column, ?string $path, int|string|null $value): void
     {
-        self::config()->set('audit-log.redaction.ip', 'hash');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'hash');
 
         app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
 
@@ -575,8 +575,8 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testAKeyPastWhatAnEngineAllowsStoresAndVerifies(): void
     {
-        self::config()->set('audit-log.redaction.max_bytes', self::RAISED_BUDGET);
-        self::config()->set('audit-log.redaction.max_context_bytes', self::RAISED_BUDGET);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_bytes', self::RAISED_BUDGET);
+        app(ConfigRepository::class)->set('audit-log.redaction.max_context_bytes', self::RAISED_BUDGET);
 
         $key     = str_repeat('k', self::PAST_ANY_ENGINE_BYTES);
         $pending = AuditLog::event(self::CODE)->withProperties([$key => 'v', 'outer' => [$key => 'v'], 'kept' => 1]);
@@ -614,7 +614,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     public function testTheStoredPropertiesEqualTheReturnedRecord(): void
     {
-        self::config()->set('audit-log.redaction.ip', 'truncate');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'truncate');
 
         app()->instance(FieldEncrypter::class, new RecordingFieldEncrypter);
 
@@ -699,7 +699,7 @@ final class MinimisedEntryRoundTripTest extends TestCase
      */
     private function recordedWithAnEnvelope(string $ciphertext): AuditRecord
     {
-        self::config()->set('audit-log.redaction.ip', 'encrypt');
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'encrypt');
 
         app()->instance(FieldEncrypter::class, new MalformedFieldEncrypter(['v' => 1, 'k' => 'k', 'c' => $ciphertext]));
 
@@ -736,15 +736,5 @@ final class MinimisedEntryRoundTripTest extends TestCase
         AuditLog::swap($recorder);
 
         return AuditLog::event($definition->code);
-    }
-
-    /**
-     * The application's configuration.
-     *
-     * @return \Illuminate\Config\Repository
-     */
-    private static function config(): ConfigRepository
-    {
-        return app(ConfigRepository::class);
     }
 }

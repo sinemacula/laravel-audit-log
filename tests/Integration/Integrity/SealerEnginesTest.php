@@ -322,17 +322,4 @@ final class SealerEnginesTest extends TestCase
 
         $config->set('audit-log.storage.connection', self::SPLIT_CONNECTION);
     }
-
-    /**
-     * The ids in byte order, as the members are read back.
-     *
-     * @param  list<string>  $ids
-     * @return list<string>
-     */
-    private static function sorted(array $ids): array
-    {
-        usort($ids, strcmp(...));
-
-        return $ids;
-    }
 }

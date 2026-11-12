@@ -525,32 +525,6 @@ final class MinimiserLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * The CPU time this process has used, user and system: waiting for a core
-     * uses none of it.
-     *
-     * @return int
-     */
-    private static function cpuNanoseconds(): int
-    {
-        $usage = getrusage();
-
-        assert(is_array($usage));
-
-        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec'])  * 1000000000
-            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) * 1000;
-    }
-
-    /**
-     * Whether Xdebug is collecting coverage in this process.
-     *
-     * @return bool
-     */
-    private static function isCollectingCoverage(): bool
-    {
-        return function_exists('xdebug_info') && in_array('coverage', xdebug_info('mode'), true);
-    }
-
-    /**
      * Raise the property budget to its ceiling, so nothing is omitted and what
      * was done to a value shows.
      *

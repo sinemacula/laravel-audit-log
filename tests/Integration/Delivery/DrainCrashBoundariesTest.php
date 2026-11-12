@@ -409,7 +409,7 @@ final class DrainCrashBoundariesTest extends TestCase
         $parent   = posix_getpid();
         $database = $this->destination('database');
 
-        $this->bindStore(new CallbackStore(static function (FinalisedRecord $record) use ($parent, $database): void {
+        app()->instance(AuditStore::class, new CallbackStore(static function (FinalisedRecord $record) use ($parent, $database): void {
             if (posix_getpid() !== $parent) {
                 throw new \DomainException('Down.');
             }
@@ -651,7 +651,7 @@ final class DrainCrashBoundariesTest extends TestCase
             $destinations[$name] = $this->destination($name);
         }
 
-        $this->bindStore(count($destinations) === 1 ? reset($destinations) : new StackAuditStore($destinations));
+        app()->instance(AuditStore::class, count($destinations) === 1 ? reset($destinations) : new StackAuditStore($destinations));
     }
 
     /**
@@ -673,17 +673,6 @@ final class DrainCrashBoundariesTest extends TestCase
 
             $store->store($record);
         }, $store->isDurable(), $store->participatesIn($connection) ? [$connection] : []);
-    }
-
-    /**
-     * Bind the store.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
-     * @return void
-     */
-    private function bindStore(AuditStore $store): void
-    {
-        app()->instance(AuditStore::class, $store);
     }
 
     /**

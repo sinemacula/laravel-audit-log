@@ -265,16 +265,6 @@ final class ArtifactKindsRoundTripTest extends TestCase
     }
 
     /**
-     * The rows of the artifacts table.
-     *
-     * @return int
-     */
-    private function artifactCount(): int
-    {
-        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
-    }
-
-    /**
      * The canonical form with a disclosure's nonce blanked, to compare builds.
      *
      * @param  string  $canonical

@@ -569,16 +569,6 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
-     * The number of rows in the artifacts table.
-     *
-     * @return int
-     */
-    private function artifactCount(): int
-    {
-        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
-    }
-
-    /**
      * A bulk record of three members, finalised on the frozen clock.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord

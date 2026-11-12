@@ -7,6 +7,7 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
  * A drift guard keeping the README in step with the lifecycle: it catches an
@@ -20,6 +21,8 @@ use PHPUnit\Framework\TestCase;
 #[CoversNothing]
 final class LifecycleReadmeTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var list<string> The sections of the shipped configuration the lifecycle reads. */
     private const array SECTIONS = ['lifecycle', 'retention', 'import'];
 
@@ -158,47 +161,5 @@ final class LifecycleReadmeTest extends TestCase
         self::assertNotNull($line, sprintf('The shipped configuration has no line for `%s`.', $leaf));
 
         return preg_match('/^env\(\'([A-Z0-9_]+)\'/', $line, $env) === 1 ? $env[1] : null;
-    }
-
-    /**
-     * Every README configuration row, by key without backticks, as cells.
-     *
-     * @return array<string, list<string>>
-     */
-    private static function configurationRows(): array
-    {
-        preg_match_all('/^\| `([a-z_.]+)` +\|.*\|$/m', self::readme(), $matches, PREG_SET_ORDER);
-
-        $rows = [];
-
-        foreach ($matches as $match) {
-            $rows[$match[1]] = array_map(trim(...), explode('|', trim($match[0], '|')));
-        }
-
-        return $rows;
-    }
-
-    /**
-     * The README.
-     *
-     * @return string
-     */
-    private static function readme(): string
-    {
-        $readme = file_get_contents(self::root() . '/README.md');
-
-        self::assertIsString($readme);
-
-        return $readme;
-    }
-
-    /**
-     * The repository's root.
-     *
-     * @return string
-     */
-    private static function root(): string
-    {
-        return dirname(__DIR__, 3);
     }
 }

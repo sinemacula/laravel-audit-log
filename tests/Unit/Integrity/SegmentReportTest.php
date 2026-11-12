@@ -10,6 +10,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\AnchorStatus;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
+use Tests\Concerns\RaisesWarningsAsExceptions;
 
 /**
  * Unit tests for one segment's report.
@@ -22,6 +23,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 #[CoversClass(SegmentReport::class)]
 final class SegmentReportTest extends TestCase
 {
+    use RaisesWarningsAsExceptions;
+
     /** @var string A seal's id. */
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
@@ -33,35 +36,6 @@ final class SegmentReportTest extends TestCase
 
     /** @var string The second entry id, bytewise. */
     private const string SECOND = '01932b4e-8a40-7000-8000-000000000002';
-
-    /**
-     * Raise every warning as an exception, as Laravel does, so each report is
-     * built quietly.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        set_error_handler(static function (int $level, string $message): never {
-            throw new \ErrorException($message, 0, $level);
-        });
-    }
-
-    /**
-     * Restore the error handler after each test.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        restore_error_handler();
-
-        parent::tearDown();
-    }
 
     /**
      * The line's keys and their order are pinned.

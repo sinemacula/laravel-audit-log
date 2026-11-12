@@ -40,21 +40,6 @@ final class BulkWriteBudgetTest extends PerformanceContractTestCase
     private const int ALLOWANCE = 65536;
 
     /**
-     * Roll back any transaction a test left open.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        while (DB::connection()->transactionLevel() > 0) {
-            DB::connection()->rollBack();
-        }
-
-        parent::tearDown();
-    }
-
-    /**
      * A thousand-subject bulk write is two inserts, the artifact's then the
      * entry's, in one transaction of its own.
      *

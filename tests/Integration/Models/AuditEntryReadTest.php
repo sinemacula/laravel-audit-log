@@ -5,12 +5,12 @@ declare(strict_types = 1);
 namespace Tests\Integration\Models;
 
 use Illuminate\Config\Repository as ConfigRepository;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Casts\UtcInstant;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
@@ -26,6 +26,8 @@ use Tests\TestCase;
 #[CoversClass(UtcInstant::class)]
 final class AuditEntryReadTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string The default entries table. */
     private const string TABLE = 'audit_log_entries';
 
@@ -171,7 +173,7 @@ final class AuditEntryReadTest extends TestCase
         $config->set('audit-log.storage.connection', self::STORAGE);
         $config->set('audit-log.entries.table', self::CUSTOM_TABLE);
 
-        $migration = $this->loadMigration();
+        $migration = $this->loadMigration(self::MIGRATION_PATH);
 
         $migration->up(); // @phpstan-ignore method.notFound
 
@@ -191,24 +193,5 @@ final class AuditEntryReadTest extends TestCase
         }
 
         self::assertFalse(Schema::connection(self::STORAGE)->hasTable(self::CUSTOM_TABLE));
-    }
-
-    /**
-     * Require the shipped migration file and return its instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('Entries migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

@@ -575,17 +575,4 @@ final class ConcurrentSealersTest extends TestCase
     {
         return function_exists('xdebug_info') && in_array('develop', xdebug_info('mode'), true);
     }
-
-    /**
-     * The ids in byte order, as the members are read back.
-     *
-     * @param  list<string>  $ids
-     * @return list<string>
-     */
-    private static function sorted(array $ids): array
-    {
-        usort($ids, strcmp(...));
-
-        return $ids;
-    }
 }

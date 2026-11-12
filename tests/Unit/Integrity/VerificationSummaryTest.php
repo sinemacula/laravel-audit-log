@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Integrity\RunFinding;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentReport;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationSummary;
 use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
+use Tests\Concerns\RaisesWarningsAsExceptions;
 
 /**
  * Unit tests for what one verification run established and when it fails.
@@ -29,40 +30,13 @@ use SineMacula\Laravel\AuditLog\Integrity\VerificationTally;
 #[CoversClass(VerificationSummary::class)]
 final class VerificationSummaryTest extends TestCase
 {
+    use RaisesWarningsAsExceptions;
+
     /** @var string A seal's id. */
     private const string SEAL_ID = '01932b4e-9000-7000-8000-000000000001';
 
     /** @var string An entry's id. */
     private const string ENTRY_ID = '01932b4e-8a40-7000-8000-000000000001';
-
-    /**
-     * Raise every warning as an exception, as Laravel does, so each summary is
-     * built quietly.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        set_error_handler(static function (int $level, string $message): never {
-            throw new \ErrorException($message, 0, $level);
-        });
-    }
-
-    /**
-     * Restore the error handler after each test.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        restore_error_handler();
-
-        parent::tearDown();
-    }
 
     /**
      * A run whose every segment is valid and anchored, under an anchor whose

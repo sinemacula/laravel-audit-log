@@ -22,6 +22,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
  * A drift guard for the lifecycle note and the operations guide's lifecycle
@@ -35,6 +36,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 #[CoversNothing]
 final class LifecycleDocumentationTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var string The lifecycle note, from the repository's root. */
     private const string LIFECYCLE_NOTE = '/docs/design/lifecycle.md';
 
@@ -361,56 +364,5 @@ final class LifecycleDocumentationTest extends TestCase
         $pattern = '/^ *\| `' . preg_quote($command, '/') . '(?: [^`]*)?` +\|.*$/m';
 
         return preg_match($pattern, $table, $row) === 1 ? $row[0] : '';
-    }
-
-    /**
-     * The text of the section under the heading, up to the next section.
-     *
-     * @param  string  $markdown
-     * @param  string  $heading
-     * @return string
-     */
-    private static function section(string $markdown, string $heading): string
-    {
-        $pattern = '/^## ' . preg_quote($heading, '/') . '\n(.*?)(?=^## |\z)/ms';
-
-        return preg_match($pattern, $markdown, $matches) === 1 ? $matches[1] : '';
-    }
-
-    /**
-     * The Markdown without fenced code, so a `#` comment is never a heading.
-     *
-     * @param  string  $markdown
-     * @return string
-     */
-    private static function withoutCodeBlocks(string $markdown): string
-    {
-        return (string) preg_replace('/^ *(```|~~~)[^\n]*\n.*?^ *\1[ \t]*$/ms', '', $markdown);
-    }
-
-    /**
-     * The text with whitespace runs collapsed, so a wrapped sentence matches.
-     *
-     * @param  string  $text
-     * @return string
-     */
-    private static function collapsed(string $text): string
-    {
-        return (string) preg_replace('/\s+/', ' ', $text);
-    }
-
-    /**
-     * A file of the repository, by its path from the root.
-     *
-     * @param  string  $path
-     * @return string
-     */
-    private static function read(string $path): string
-    {
-        $contents = file_get_contents(dirname(__DIR__, 3) . $path);
-
-        self::assertIsString($contents, sprintf('%s cannot be read.', $path));
-
-        return $contents;
     }
 }

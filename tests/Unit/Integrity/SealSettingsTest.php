@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
+use Tests\Concerns\RaisesWarningsAsExceptions;
 
 /**
  * Unit tests for the sealing settings.
@@ -21,6 +22,8 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 #[CoversClass(SealSettings::class)]
 final class SealSettingsTest extends TestCase
 {
+    use RaisesWarningsAsExceptions;
+
     /** @var string The refusal of a malformed log id. */
     private const string LOG_ID = '`audit-log.integrity.log_id` must be 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or a digit.';
 
@@ -47,35 +50,6 @@ final class SealSettingsTest extends TestCase
         'seal.sweep_schedule' => ['sweepSchedule', '15 3 * * *'],
         'verify.schedule'     => ['verifySchedule', '45 3 * * *'],
     ];
-
-    /**
-     * Raise every warning as an exception, as Laravel does, so each setting is
-     * read quietly.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        set_error_handler(static function (int $level, string $message): never {
-            throw new \ErrorException($message, 0, $level);
-        });
-    }
-
-    /**
-     * Restore the error handler after each test.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        restore_error_handler();
-
-        parent::tearDown();
-    }
 
     /**
      * With nothing set, or none of the package's configuration at all, each

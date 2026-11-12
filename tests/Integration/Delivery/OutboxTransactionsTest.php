@@ -25,6 +25,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\CapturesLogLines;
 use Tests\Concerns\InteractsWithOutbox;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
@@ -45,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(OutboxWriter::class)]
 final class OutboxTransactionsTest extends TestCase
 {
-    use CapturesLogLines, InteractsWithOutbox;
+    use CapturesLogLines, InteractsWithOutbox, RunsInsideTheTestingWrapper;
 
     /** @var string A table the host transaction writes to. */
     private const string HOST_TABLE = 'audit_host_writes';
@@ -455,7 +456,7 @@ final class OutboxTransactionsTest extends TestCase
      */
     public function testInsideOnlyTheWrapperIsInsertedNow(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection, DatabaseTransactionsManager $manager): void {
+        $this->insideTheTestingWrapper($this->outboxConnection(), function (Connection $connection, DatabaseTransactionsManager $manager): void {
             self::assertCount(0, $manager->callbackApplicableTransactions());
 
             $this->write();
@@ -478,7 +479,7 @@ final class OutboxTransactionsTest extends TestCase
     {
         $this->pointOutboxAtProbeTable();
 
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->outboxConnection(), function (): void {
             $this->write();
 
             self::assertCount(1, $this->spillLines());
@@ -493,7 +494,7 @@ final class OutboxTransactionsTest extends TestCase
      */
     public function testANestedTransactionInsideTheWrapperHoldsTheRow(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->outboxConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->write();
@@ -517,7 +518,7 @@ final class OutboxTransactionsTest extends TestCase
      */
     public function testANestedRollbackInsideTheWrapperRemovesTheRow(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->outboxConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->write();
@@ -539,7 +540,7 @@ final class OutboxTransactionsTest extends TestCase
     {
         $this->pointOutboxAtProbeTable();
 
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->outboxConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->write();
@@ -562,7 +563,7 @@ final class OutboxTransactionsTest extends TestCase
     {
         $this->pointOutboxAtProbeTable();
 
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->outboxConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->write();
@@ -674,39 +675,5 @@ final class OutboxTransactionsTest extends TestCase
         }
 
         self::assertSame($rows, DB::connection(self::READER)->table(DeliveryTables::outboxTable())->count());
-    }
-
-    /**
-     * Install the testing manager, open its wrapping transaction as
-     * `DatabaseTransactions` does, run the test inside it, then roll the
-     * wrapper back.
-     *
-     * @param  \Closure(\Illuminate\Database\Connection, \Illuminate\Foundation\Testing\DatabaseTransactionsManager): void  $test
-     * @return void
-     */
-    private function insideTheTestingWrapper(\Closure $test): void
-    {
-        $connection = $this->outboxConnection();
-        $manager    = new DatabaseTransactionsManager([$connection->getName()]);
-
-        $this->app?->instance('db.transactions', $manager);
-
-        $connection->setTransactionManager($manager);
-
-        $dispatcher = $connection->getEventDispatcher();
-
-        self::assertNotNull($dispatcher);
-
-        $connection->unsetEventDispatcher();
-        $connection->beginTransaction();
-        $connection->setEventDispatcher($dispatcher);
-
-        try {
-            $test($connection, $manager);
-        } finally {
-            $connection->unsetEventDispatcher();
-            $connection->rollBack();
-            $connection->setEventDispatcher($dispatcher);
-        }
     }
 }

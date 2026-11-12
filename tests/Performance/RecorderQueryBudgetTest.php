@@ -86,21 +86,6 @@ final class RecorderQueryBudgetTest extends PerformanceContractTestCase
     private const string GUARD = 'web';
 
     /**
-     * Roll back any transaction a test left open.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        while (DB::connection()->transactionLevel() > 0) {
-            DB::connection()->rollBack();
-        }
-
-        parent::tearDown();
-    }
-
-    /**
      * The defaults fill an HTTP frame's context from a real session guard
      * without a statement.
      *

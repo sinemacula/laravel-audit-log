@@ -717,19 +717,6 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * The ids sorted bytewise, as the members are.
-     *
-     * @param  list<string>  $ids
-     * @return list<string>
-     */
-    private static function sorted(array $ids): array
-    {
-        usort($ids, strcmp(...));
-
-        return $ids;
-    }
-
-    /**
      * How many of the entries the seal at the sequence holds are still stored.
      *
      * @param  int  $sequence

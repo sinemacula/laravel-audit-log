@@ -147,7 +147,7 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
         DB::table('audit_log_outbox')->delete();
 
         foreach (array_chunk(range(1, $count), 50) as $numbers) {
-            DB::table('audit_log_entries')->insert(array_map(self::entry(...), $numbers));
+            DB::table('audit_log_entries')->insert(array_map(self::entryRow(...), $numbers));
             DB::table('audit_log_outbox')->insert(array_map(self::outboxRow(...), $numbers));
         }
     }
@@ -164,31 +164,6 @@ final class FreshnessQueryBudgetTest extends PerformanceContractTestCase
         assert($kernel instanceof Kernel);
 
         return $kernel->call('audit-log:check', ['--freshness' => true]);
-    }
-
-    /**
-     * An entries row with every required column, numbered so each id is unique.
-     *
-     * @param  int  $number
-     * @return array<string, int|string>
-     */
-    private static function entry(int $number): array
-    {
-        return [
-            'id'                => sprintf('0195f4a2-7b1c-7000-8000-%012d', $number),
-            'record_version'    => 1,
-            'event'             => 'invoice.approved',
-            'event_version'     => 1,
-            'category'          => 'billing',
-            'outcome'           => 'success',
-            'provenance'        => 'captured',
-            'source_id'         => 'app',
-            'occurred_at'       => self::NOW,
-            'recorded_at'       => self::NOW,
-            'integrity_version' => 1,
-            'key_id'            => 'test-key',
-            'hmac'              => str_repeat('a', 64),
-        ];
     }
 
     /**

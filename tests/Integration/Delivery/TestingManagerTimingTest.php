@@ -18,6 +18,7 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\TestCase;
 
 /**
@@ -35,7 +36,7 @@ use Tests\TestCase;
 #[CoversClass(Recorder::class)]
 final class TestingManagerTimingTest extends TestCase
 {
-    use InteractsWithAuditStore;
+    use InteractsWithAuditStore, RunsInsideTheTestingWrapper;
 
     /** @var string The code every test records. */
     private const string CODE = 'invoice.approved';
@@ -70,7 +71,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testTheWrapperIsNotSelected(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection, DatabaseTransactionsManager $manager): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection, DatabaseTransactionsManager $manager): void {
             self::assertCount(1, $manager->getPendingTransactions());
             self::assertCount(0, $manager->callbackApplicableTransactions());
 
@@ -90,7 +91,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testARecordInsideOnlyTheWrapperIsWrittenAtOnce(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             $record = AuditLog::record(self::CODE);
 
             self::assertSame($record->id, $this->storedRow($record->id)['id']);
@@ -107,7 +108,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testANestedTransactionDefersToItsCommit(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             AuditLog::record(self::CODE);
@@ -131,7 +132,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testAnInnerCommitInsideTheWrapperWaitsForTheHostsOuterCommit(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
             $connection->beginTransaction();
 
@@ -155,7 +156,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testANestedRollbackDropsTheRecord(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             AuditLog::record(self::CODE);
@@ -181,7 +182,7 @@ final class TestingManagerTimingTest extends TestCase
 
         self::assertSame(1, $this->entryCount());
 
-        $this->insideTheTestingWrapper(function (Connection $connection) use ($recorder): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection) use ($recorder): void {
             $connection->beginTransaction();
 
             $recorder->record(self::CODE);
@@ -235,7 +236,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testATransactionOnAnotherConnectionIsSelected(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             $other = DB::connection(self::OTHER);
 
             $other->beginTransaction();
@@ -259,7 +260,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testPinningTheWrappedConnectionWritesNowWhileAnotherIsOpen(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             DB::connection(self::OTHER)->beginTransaction();
 
             AuditLog::event(self::CODE)->afterCommit(self::CONNECTION)->record();
@@ -280,7 +281,7 @@ final class TestingManagerTimingTest extends TestCase
      */
     public function testATransactionalRecordIsAcceptedInsideOnlyTheWrapper(): void
     {
-        $this->insideTheTestingWrapper(function (): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (): void {
             AuditLog::event(self::CODE)->transactional()->record();
 
             self::assertSame(1, $this->entryCount());
@@ -301,7 +302,7 @@ final class TestingManagerTimingTest extends TestCase
 
         $this->pointAtProbeTable();
 
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             AuditLog::record(self::CODE);
@@ -338,39 +339,5 @@ final class TestingManagerTimingTest extends TestCase
         $config = $app->make(ConfigRepository::class);
 
         $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
-    }
-
-    /**
-     * Install the testing manager on the storage connection, open its wrapping
-     * transaction as `DatabaseTransactions` does, run the test inside it, then
-     * roll the wrapper back.
-     *
-     * @param  \Closure(\Illuminate\Database\Connection, \Illuminate\Foundation\Testing\DatabaseTransactionsManager): void  $test
-     * @return void
-     */
-    private function insideTheTestingWrapper(\Closure $test): void
-    {
-        $connection = $this->storageConnection();
-        $manager    = new DatabaseTransactionsManager([$connection->getName()]);
-
-        $this->app?->instance('db.transactions', $manager);
-
-        $connection->setTransactionManager($manager);
-
-        $dispatcher = $connection->getEventDispatcher();
-
-        self::assertNotNull($dispatcher);
-
-        $connection->unsetEventDispatcher();
-        $connection->beginTransaction();
-        $connection->setEventDispatcher($dispatcher);
-
-        try {
-            $test($connection, $manager);
-        } finally {
-            $connection->unsetEventDispatcher();
-            $connection->rollBack();
-            $connection->setEventDispatcher($dispatcher);
-        }
     }
 }

@@ -38,7 +38,6 @@ final class NullAuditStoreTest extends TestCase
         $store->store($record);
 
         self::assertInstanceOf(DurableAuditStore::class, $store);
-        self::assertSame([], get_object_vars($store));
         self::assertSame([], (new \ReflectionObject($store))->getProperties());
     }
 

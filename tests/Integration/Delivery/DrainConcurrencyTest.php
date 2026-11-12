@@ -338,7 +338,7 @@ final class DrainConcurrencyTest extends TestCase
         $database   = app(DatabaseAuditStore::class);
         $connection = StorageConnection::resolvedName();
 
-        $this->bindStore(new CallbackStore(function (FinalisedRecord $record) use ($parent, $database): void {
+        app()->instance(AuditStore::class, new CallbackStore(function (FinalisedRecord $record) use ($parent, $database): void {
             $this->appendToChildFile(self::CALLS, $record->record->id);
 
             if (posix_getpid() !== $parent) {
@@ -380,7 +380,7 @@ final class DrainConcurrencyTest extends TestCase
      */
     public function testConcurrentRetriesStoreOnce(): void
     {
-        $this->bindStore(CallbackStore::failingWith(new \DomainException('Down.')));
+        app()->instance(AuditStore::class, CallbackStore::failingWith(new \DomainException('Down.')));
 
         $ids = array_map(fn (): string => $this->enqueue($this->finalisedRecord()), range(1, 20));
 
@@ -389,7 +389,7 @@ final class DrainConcurrencyTest extends TestCase
         $database   = app(DatabaseAuditStore::class);
         $connection = StorageConnection::resolvedName();
 
-        $this->bindStore(new CallbackStore(function (FinalisedRecord $record) use ($database): void {
+        app()->instance(AuditStore::class, new CallbackStore(function (FinalisedRecord $record) use ($database): void {
             $this->appendToChildFile(self::CALLS, $record->record->id);
 
             $database->store($record);
@@ -437,7 +437,7 @@ final class DrainConcurrencyTest extends TestCase
      */
     public function testADestinationSlowerThanTheLeaseIsRenewedBetweenDestinations(): void
     {
-        $this->bindStore(new StackAuditStore([
+        app()->instance(AuditStore::class, new StackAuditStore([
             'slow' => new CallbackStore(function (): void {
                 $this->appendToChildFile(self::CALLS, 'slow');
 
@@ -496,7 +496,7 @@ final class DrainConcurrencyTest extends TestCase
      */
     private function bindCountingStore(): void
     {
-        $this->bindStore(new CallbackStore(function (FinalisedRecord $record): void {
+        app()->instance(AuditStore::class, new CallbackStore(function (FinalisedRecord $record): void {
             $this->appendToChildFile(self::CALLS, $record->record->id);
         }));
     }
@@ -512,7 +512,7 @@ final class DrainConcurrencyTest extends TestCase
     {
         $parent = posix_getpid();
 
-        $this->bindStore(new CallbackStore(function (FinalisedRecord $record) use ($parent, $childFails): void {
+        app()->instance(AuditStore::class, new CallbackStore(function (FinalisedRecord $record) use ($parent, $childFails): void {
             $this->appendToChildFile(self::CALLS, $record->record->id);
 
             if (posix_getpid() === $parent) {
@@ -526,17 +526,6 @@ final class DrainConcurrencyTest extends TestCase
                 throw new \DomainException('Down.');
             }
         }));
-    }
-
-    /**
-     * Bind the store.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
-     * @return void
-     */
-    private function bindStore(AuditStore $store): void
-    {
-        app()->instance(AuditStore::class, $store);
     }
 
     /**

@@ -269,17 +269,6 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * Seal in batches of the size given.
-     *
-     * @param  int  $batch
-     * @return void
-     */
-    private function useBatch(int $batch): void
-    {
-        app(ConfigRepository::class)->set('audit-log.integrity.seal.batch', $batch);
-    }
-
-    /**
      * Insert copies of one finalised entry a chunk at a time, the first the
      * offset in microseconds after the time given, each next a microsecond
      * later.
@@ -451,21 +440,5 @@ final class SealScanLoadTest extends PerformanceContractTestCase
         }
 
         return $least;
-    }
-
-    /**
-     * The CPU time this process has used, user and system: waiting for a core
-     * uses none of it.
-     *
-     * @return int
-     */
-    private static function cpuNanoseconds(): int
-    {
-        $usage = getrusage();
-
-        assert(is_array($usage));
-
-        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec'])  * 1000000000
-            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) * 1000;
     }
 }

@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Integration\Migration;
 
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -13,6 +12,7 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Console\SchemaChecks;
 use SineMacula\Laravel\AuditLog\Console\TableShape;
 use SineMacula\Laravel\AuditLog\Database\TableAlreadyExistsException;
+use Tests\Concerns\LoadsShippedMigrations;
 use Tests\TestCase;
 
 /**
@@ -27,6 +27,8 @@ use Tests\TestCase;
 #[CoversNothing]
 final class OwnerErasuresTableSchemaTest extends TestCase
 {
+    use LoadsShippedMigrations;
+
     /** @var string Absolute path to the shipped owner erasures migration file. */
     private const string MIGRATION_PATH = __DIR__ . '/../../../database/migrations/2026_11_02_001200_create_audit_log_owner_erasures_table.php';
 
@@ -58,7 +60,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
         Builder::defaultTimePrecision(0);
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
         } finally {
             Builder::defaultTimePrecision($precision);
         }
@@ -191,7 +193,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
         DB::table(self::TABLE)->insert(self::row(1, 'erased', 1));
 
         try {
-            $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+            $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
             self::fail('Expected the migration to stop.');
         } catch (TableAlreadyExistsException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(
@@ -216,7 +218,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
 
         self::assertFalse(Schema::hasTable(self::RENAMED));
 
-        $this->loadMigration()->up(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->up(); // @phpstan-ignore method.notFound
 
         self::assertTrue(Schema::hasTable(self::RENAMED));
 
@@ -232,7 +234,7 @@ final class OwnerErasuresTableSchemaTest extends TestCase
      */
     public function testDownDropsTheTable(): void
     {
-        $this->loadMigration()->down(); // @phpstan-ignore method.notFound
+        $this->loadMigration(self::MIGRATION_PATH)->down(); // @phpstan-ignore method.notFound
 
         self::assertFalse(Schema::hasTable(self::TABLE));
     }
@@ -256,24 +258,5 @@ final class OwnerErasuresTableSchemaTest extends TestCase
             'journal_sequence' => $sequence,
             'created_at'       => '2026-11-01 12:00:00.000000',
         ];
-    }
-
-    /**
-     * Require the shipped migration file and return its instance.
-     *
-     * @return \Illuminate\Database\Migrations\Migration
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function loadMigration(): Migration
-    {
-        $migration = include self::MIGRATION_PATH;
-
-        if (!$migration instanceof Migration) {
-            self::fail('The owner erasures migration file did not return a Migration instance.');
-        }
-
-        return $migration;
     }
 }

@@ -6,11 +6,11 @@ namespace Tests\Integration\Stores;
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
-use Illuminate\Foundation\Testing\DatabaseTransactionsManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Tests\Concerns\InteractsWithAuditStore;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
@@ -25,7 +25,7 @@ use Tests\TestCase;
 #[CoversClass(DatabaseAuditStore::class)]
 final class HostTransactionCallbacksTest extends TestCase
 {
-    use InteractsWithAuditStore;
+    use InteractsWithAuditStore, RunsInsideTheTestingWrapper;
 
     /** @var string The id records are pinned to. */
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
@@ -156,7 +156,7 @@ final class HostTransactionCallbacksTest extends TestCase
      */
     public function testUnderTheTestingManagerAHostCallbackRunsOnceAtTheHostCommit(): void
     {
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->registerHostCallback($connection);
@@ -184,7 +184,7 @@ final class HostTransactionCallbacksTest extends TestCase
     {
         $this->pointAtProbeTable();
 
-        $this->insideTheTestingWrapper(function (Connection $connection): void {
+        $this->insideTheTestingWrapper($this->storageConnection(), function (Connection $connection): void {
             $connection->beginTransaction();
 
             $this->registerHostCallback($connection);
@@ -198,38 +198,6 @@ final class HostTransactionCallbacksTest extends TestCase
         });
 
         self::assertSame(1, $this->callbacks);
-    }
-
-    /**
-     * Run the test in the testing manager's wrapper, rolled back afterwards.
-     *
-     * @param  \Closure(\Illuminate\Database\Connection): void  $test
-     * @return void
-     */
-    private function insideTheTestingWrapper(\Closure $test): void
-    {
-        $connection = $this->storageConnection();
-        $manager    = new DatabaseTransactionsManager([$connection->getName()]);
-
-        $this->app?->instance('db.transactions', $manager);
-
-        $connection->setTransactionManager($manager);
-
-        $dispatcher = $connection->getEventDispatcher();
-
-        self::assertNotNull($dispatcher);
-
-        $connection->unsetEventDispatcher();
-        $connection->beginTransaction();
-        $connection->setEventDispatcher($dispatcher);
-
-        try {
-            $test($connection);
-        } finally {
-            $connection->unsetEventDispatcher();
-            $connection->rollBack();
-            $connection->setEventDispatcher($dispatcher);
-        }
     }
 
     /**

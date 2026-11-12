@@ -169,6 +169,30 @@ trait SealsEntries
     }
 
     /**
+     * The ids in byte order, as the members are read back.
+     *
+     * @param  list<string>  $ids
+     * @return list<string>
+     */
+    protected static function sorted(array $ids): array
+    {
+        usort($ids, strcmp(...));
+
+        return $ids;
+    }
+
+    /**
+     * Seal in batches of the size given.
+     *
+     * @param  int  $batch
+     * @return void
+     */
+    protected function useBatch(int $batch): void
+    {
+        app(ConfigRepository::class)->set('audit-log.integrity.seal.batch', $batch);
+    }
+
+    /**
      * Configure an explicit key ring of the keys given, by id, signing under
      * the current one.
      *

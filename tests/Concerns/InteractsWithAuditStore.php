@@ -102,6 +102,16 @@ trait InteractsWithAuditStore
     }
 
     /**
+     * The number of rows in the artifacts table.
+     *
+     * @return int
+     */
+    protected function artifactCount(): int
+    {
+        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
+    }
+
+    /**
      * Add a unique index on the entries table's `request_id`, so two records
      * with one request id violate an index other than the id's.
      *

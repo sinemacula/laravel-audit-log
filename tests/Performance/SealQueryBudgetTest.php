@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Performance;
 
 use Carbon\CarbonImmutable;
-use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -451,17 +450,6 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     private static function readsTheState(string $statement): bool
     {
         return str_contains($statement, IntegrityTables::stateTable()) && str_starts_with(strtolower($statement), 'select');
-    }
-
-    /**
-     * Seal in batches of the size given.
-     *
-     * @param  int  $batch
-     * @return void
-     */
-    private function useBatch(int $batch): void
-    {
-        app(ConfigRepository::class)->set('audit-log.integrity.seal.batch', $batch);
     }
 
     /**

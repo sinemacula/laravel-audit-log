@@ -659,25 +659,4 @@ final class ReceiptsTest extends TestCase
             default                                                                                          => null,
         };
     }
-
-    /**
-     * The rows of the table matching the id, counted over the connection's own
-     * PDO so the count sees its open transaction and is not reported as a
-     * statement.
-     *
-     * @param  \Illuminate\Database\Connection  $connection
-     * @param  string  $table
-     * @param  string  $column
-     * @param  string  $id
-     * @return int
-     */
-    private static function rawCount(Connection $connection, string $table, string $column, string $id): int
-    {
-        $grammar   = $connection->getQueryGrammar();
-        $statement = $connection->getPdo()->prepare(sprintf('select count(*) from %s where %s = ?', $grammar->wrapTable($table), $grammar->wrap($column)));
-
-        $statement->execute([$id]);
-
-        return (int) $statement->fetchColumn();
-    }
 }

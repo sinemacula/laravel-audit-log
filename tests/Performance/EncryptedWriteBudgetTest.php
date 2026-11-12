@@ -98,21 +98,6 @@ final class EncryptedWriteBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * Roll back any transaction a test left open.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        while (DB::connection()->transactionLevel() > 0) {
-            DB::connection()->rollBack();
-        }
-
-        parent::tearDown();
-    }
-
-    /**
      * A record that encrypts nothing keeps its single insert and asks nothing
      * of the key store.
      *

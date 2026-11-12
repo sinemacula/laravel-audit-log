@@ -186,7 +186,17 @@ final class RecordingAnchor implements CheckpointAnchor
     {
         $this->reach('latest');
 
-        return $this->head();
+        if (!$this->discovery) {
+            throw new \LogicException('This anchor cannot discover its head, so it must never be asked for it.');
+        }
+
+        if ($this->held === []) {
+            return null;
+        }
+
+        $sequence = max(array_keys($this->held));
+
+        return new AnchoredHead($sequence, $this->held[$sequence]);
     }
 
     /**
@@ -205,29 +215,6 @@ final class RecordingAnchor implements CheckpointAnchor
         }
 
         $this->held[$seal->sequence] = $seal->sealDigest;
-    }
-
-    /**
-     * The highest sequence held and its digest, or `null` when nothing is
-     * held; an anchor made unable to discover refuses to be asked.
-     *
-     * @return ?\SineMacula\Laravel\AuditLog\Integrity\AnchoredHead
-     *
-     * @throws \LogicException
-     */
-    private function head(): ?AnchoredHead
-    {
-        if (!$this->discovery) {
-            throw new \LogicException('This anchor cannot discover its head, so it must never be asked for it.');
-        }
-
-        if ($this->held === []) {
-            return null;
-        }
-
-        $sequence = max(array_keys($this->held));
-
-        return new AnchoredHead($sequence, $this->held[$sequence]);
     }
 
     /**

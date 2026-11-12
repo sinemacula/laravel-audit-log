@@ -20,6 +20,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportLineParser;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
  * A drift guard for the retention and import guides: it catches an omission or
@@ -33,6 +34,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ImportLineParser;
 #[CoversNothing]
 final class LifecycleGuidesTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var string The retention guide, from the repository's root. */
     private const string RETENTION_GUIDE = '/docs/guides/retention.md';
 
@@ -277,20 +280,6 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The text of the section under the heading, up to the next section.
-     *
-     * @param  string  $guide
-     * @param  string  $heading
-     * @return string
-     */
-    private static function section(string $guide, string $heading): string
-    {
-        $pattern = '/^## ' . preg_quote($heading, '/') . '\n(.*?)(?=^## |\z)/ms';
-
-        return preg_match($pattern, $guide, $matches) === 1 ? $matches[1] : '';
-    }
-
-    /**
      * The methods called on `AuditLog::lifecycle()`, each once, in order.
      *
      * @param  string  $text
@@ -323,20 +312,5 @@ final class LifecycleGuidesTest extends TestCase
     private static function guides(): string
     {
         return implode("\n", array_map(self::read(...), [self::RETENTION_GUIDE, self::IMPORT_GUIDE, self::PRIVACY_GUIDE]));
-    }
-
-    /**
-     * A file of the repository, by its path from the root.
-     *
-     * @param  string  $path
-     * @return string
-     */
-    private static function read(string $path): string
-    {
-        $contents = file_get_contents(dirname(__DIR__, 3) . $path);
-
-        self::assertIsString($contents, sprintf('%s cannot be read.', $path));
-
-        return $contents;
     }
 }

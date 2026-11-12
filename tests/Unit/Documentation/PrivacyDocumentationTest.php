@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureRefusal;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
  * A drift guard for the privacy note and every document's claims about personal
@@ -22,6 +23,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
 #[CoversNothing]
 final class PrivacyDocumentationTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var string The privacy note, from the repository's root. */
     private const string PRIVACY_NOTE = '/docs/design/privacy.md';
 
@@ -388,67 +391,5 @@ final class PrivacyDocumentationTest extends TestCase
         }
 
         return $keys;
-    }
-
-    /**
-     * The text of the section under the heading, up to the next section.
-     *
-     * @param  string  $markdown
-     * @param  string  $heading
-     * @return string
-     */
-    private static function section(string $markdown, string $heading): string
-    {
-        $pattern = '/^## ' . preg_quote($heading, '/') . '\n(.*?)(?=^## |\z)/ms';
-
-        return preg_match($pattern, $markdown, $matches) === 1 ? $matches[1] : '';
-    }
-
-    /**
-     * The Markdown without fenced code blocks, so a `#` comment is never a
-     * heading or a sentence.
-     *
-     * @param  string  $markdown
-     * @return string
-     */
-    private static function withoutCodeBlocks(string $markdown): string
-    {
-        return (string) preg_replace('/^ *(```|~~~)[^\n]*\n.*?^ *\1[ \t]*$/ms', '', $markdown);
-    }
-
-    /**
-     * The text with whitespace runs collapsed, so a wrapped sentence matches.
-     *
-     * @param  string  $text
-     * @return string
-     */
-    private static function collapsed(string $text): string
-    {
-        return (string) preg_replace('/\s+/', ' ', $text);
-    }
-
-    /**
-     * A file of the repository, by its path from the root.
-     *
-     * @param  string  $path
-     * @return string
-     */
-    private static function read(string $path): string
-    {
-        $contents = file_get_contents(self::root() . $path);
-
-        self::assertIsString($contents, sprintf('%s cannot be read.', $path));
-
-        return $contents;
-    }
-
-    /**
-     * The repository's root directory.
-     *
-     * @return string
-     */
-    private static function root(): string
-    {
-        return dirname(__DIR__, 3);
     }
 }

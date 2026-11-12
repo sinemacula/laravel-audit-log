@@ -141,7 +141,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
 
         $empty = $this->capturedStatements();
 
-        DB::table('audit_log_entries')->insert(array_map(self::row(...), range(1, 200)));
+        DB::table('audit_log_entries')->insert(array_map(self::entryRow(...), range(1, 200)));
 
         $this->sealAt('2026-11-02 00:00:00');
         $this->sealAll();
@@ -223,7 +223,7 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
      */
     public function testTheIntegrityChecksWriteNothing(): void
     {
-        DB::table('audit_log_entries')->insert(array_map(self::row(...), range(1, 20)));
+        DB::table('audit_log_entries')->insert(array_map(self::entryRow(...), range(1, 20)));
 
         $this->sealAt('2026-11-02 00:00:00');
         $this->sealAll();
@@ -382,30 +382,5 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         }
 
         return $rows;
-    }
-
-    /**
-     * An entries row with every required column, numbered so each id is unique.
-     *
-     * @param  int  $number
-     * @return array<string, int|string>
-     */
-    private static function row(int $number): array
-    {
-        return [
-            'id'                => sprintf('0195f4a2-7b1c-7000-8000-%012d', $number),
-            'record_version'    => 1,
-            'event'             => 'invoice.approved',
-            'event_version'     => 1,
-            'category'          => 'billing',
-            'outcome'           => 'success',
-            'provenance'        => 'captured',
-            'source_id'         => 'app',
-            'occurred_at'       => self::NOW,
-            'recorded_at'       => self::NOW,
-            'integrity_version' => 1,
-            'key_id'            => 'test-key',
-            'hmac'              => str_repeat('a', 64),
-        ];
     }
 }

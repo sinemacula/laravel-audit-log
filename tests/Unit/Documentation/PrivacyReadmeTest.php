@@ -7,6 +7,7 @@ namespace Tests\Unit\Documentation;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Concerns\ReadsTheDocumentation;
 
 /**
  * A drift guard keeping the README in step with owners' keys and erasure: it
@@ -20,6 +21,8 @@ use PHPUnit\Framework\TestCase;
 #[CoversNothing]
 final class PrivacyReadmeTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var string The section of the shipped configuration the owners' keys read. */
     private const string SECTION = 'privacy';
 
@@ -164,7 +167,7 @@ final class PrivacyReadmeTest extends TestCase
      */
     public function testTheUsageStatesTheTwoOutcomesAndWhatCredentialsCanDo(): void
     {
-        $usage = self::flattened(self::between(self::readme(), '### Encrypted fields and erasure', '### Guides'));
+        $usage = self::collapsed(self::between(self::readme(), '### Encrypted fields and erasure', '### Guides'));
 
         self::assertStringContainsString('An erasure revokes the owner\'s fields in the live store when it commits; it is complete only once the procedure', $usage);
         self::assertStringContainsString('Database credentials can still destroy or restore keys, and `audit-log:verify` and `audit-log:check` make that detectable', $usage);
@@ -183,7 +186,7 @@ final class PrivacyReadmeTest extends TestCase
 
         self::assertNotNull($row);
         self::assertStringStartsWith(self::MAINTENANCE_ROW, $row[3]);
-        self::assertStringContainsString(self::RESTORE_CHECK, self::flattened(self::readme()));
+        self::assertStringContainsString(self::RESTORE_CHECK, self::collapsed(self::readme()));
     }
 
     /**
@@ -225,24 +228,6 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * README configuration rows in order, by key without backticks, as cells.
-     *
-     * @return array<string, list<string>>
-     */
-    private static function configurationRows(): array
-    {
-        preg_match_all('/^\| `([a-z_.]+)` +\|.*\|$/m', self::readme(), $matches, PREG_SET_ORDER);
-
-        $rows = [];
-
-        foreach ($matches as $match) {
-            $rows[$match[1]] = array_map(trim(...), explode('|', trim($match[0], '|')));
-        }
-
-        return $rows;
-    }
-
-    /**
      * The text between the two headings, which the test fails without.
      *
      * @param  string  $text
@@ -261,40 +246,5 @@ final class PrivacyReadmeTest extends TestCase
         self::assertIsInt($end, sprintf('The README has no `%s` after `%s`.', $to, $from));
 
         return substr($text, $start, $end - $start);
-    }
-
-    /**
-     * The text with whitespace runs collapsed, so a wrapped sentence matches.
-     *
-     * @param  string  $text
-     * @return string
-     */
-    private static function flattened(string $text): string
-    {
-        return (string) preg_replace('/\s+/', ' ', $text);
-    }
-
-    /**
-     * The README.
-     *
-     * @return string
-     */
-    private static function readme(): string
-    {
-        $readme = file_get_contents(self::root() . '/README.md');
-
-        self::assertIsString($readme);
-
-        return $readme;
-    }
-
-    /**
-     * The repository's root.
-     *
-     * @return string
-     */
-    private static function root(): string
-    {
-        return dirname(__DIR__, 3);
     }
 }

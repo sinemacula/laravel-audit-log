@@ -181,14 +181,4 @@ final class PrunedRedeliveryEnginesTest extends TestCase
     {
         return $this->storageConnection()->table(EntrySettings::table())->where('id', $id)->count();
     }
-
-    /**
-     * The number of rows in the artifacts table.
-     *
-     * @return int
-     */
-    private function artifactCount(): int
-    {
-        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
-    }
 }

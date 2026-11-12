@@ -321,7 +321,7 @@ final class BundleDeliveryEnginesTest extends TestCase
     {
         $database = app(DatabaseAuditStore::class);
 
-        $this->bindStore($this->storeKeepingAttachments(function (FinalisedRecord $record) use ($database): void {
+        app()->instance(AuditStore::class, $this->storeKeepingAttachments(function (FinalisedRecord $record) use ($database): void {
             $this->appendToChildFile(self::CALLS, 'database');
 
             $database->store($record);
@@ -357,7 +357,7 @@ final class BundleDeliveryEnginesTest extends TestCase
      */
     public function testADrainKilledInsideTheSharedTransactionLeavesNeitherRow(): void
     {
-        $this->bindStore(app(DatabaseAuditStore::class));
+        app()->instance(AuditStore::class, app(DatabaseAuditStore::class));
 
         $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled(self::MEMBERS)));
 
@@ -385,7 +385,7 @@ final class BundleDeliveryEnginesTest extends TestCase
      */
     public function testADrainToAStoreKeepingNoAttachmentsKeepsTheRow(): void
     {
-        $this->bindStore(new StackAuditStore([
+        app()->instance(AuditStore::class, new StackAuditStore([
             'database' => app(DatabaseAuditStore::class),
             'log'      => new LogAuditStore(app(LogManager::class), new NdjsonFormatter, 'null'),
         ]));
@@ -410,7 +410,7 @@ final class BundleDeliveryEnginesTest extends TestCase
         self::assertSame(1, $this->entryCount());
         self::assertSame(1, $this->artifactCount());
 
-        $this->bindStore(new StackAuditStore(['database' => app(DatabaseAuditStore::class)]));
+        app()->instance(AuditStore::class, new StackAuditStore(['database' => app(DatabaseAuditStore::class)]));
 
         self::assertSame(1, app(Replayer::class)->outbox(false)->replayed());
 
@@ -430,7 +430,7 @@ final class BundleDeliveryEnginesTest extends TestCase
             $this->steps[] = 'call other';
         });
 
-        $this->bindStore(new StackAuditStore(['database' => app(DatabaseAuditStore::class), 'other' => $other]));
+        app()->instance(AuditStore::class, new StackAuditStore(['database' => app(DatabaseAuditStore::class), 'other' => $other]));
 
         $id = $this->enqueue($this->finalisedRecord(RecordFactory::bundled(self::MEMBERS)));
 
@@ -508,16 +508,6 @@ final class BundleDeliveryEnginesTest extends TestCase
 
         self::assertSame(self::MEMBERS, (int) $artifact->member_count);
         self::assertSame(json_encode($members, Manifest::JSON_FLAGS), app(StringEncrypter::class)->decryptString((string) $artifact->members));
-    }
-
-    /**
-     * The rows of the artifacts table.
-     *
-     * @return int
-     */
-    private function artifactCount(): int
-    {
-        return $this->storageConnection()->table(EntrySettings::artifactsTable())->count();
     }
 
     /**
@@ -607,17 +597,6 @@ final class BundleDeliveryEnginesTest extends TestCase
         DB::purge(self::MOVED_OUTBOX_CONNECTION);
 
         self::runMigration(self::OUTBOX_MIGRATION);
-    }
-
-    /**
-     * Bind the store.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Contracts\AuditStore  $store
-     * @return void
-     */
-    private function bindStore(AuditStore $store): void
-    {
-        app()->instance(AuditStore::class, $store);
     }
 
     /**
@@ -714,26 +693,5 @@ final class BundleDeliveryEnginesTest extends TestCase
             str_contains($query, EntrySettings::table())          => 'insert entry',
             default                                               => null,
         };
-    }
-
-    /**
-     * The rows of the table matching the id, counted over the connection's own
-     * PDO so the count sees its open transaction and is not reported as a
-     * statement.
-     *
-     * @param  \Illuminate\Database\Connection  $connection
-     * @param  string  $table
-     * @param  string  $column
-     * @param  string  $id
-     * @return int
-     */
-    private static function rawCount(Connection $connection, string $table, string $column, string $id): int
-    {
-        $grammar   = $connection->getQueryGrammar();
-        $statement = $connection->getPdo()->prepare(sprintf('select count(*) from %s where %s = ?', $grammar->wrapTable($table), $grammar->wrap($column)));
-
-        $statement->execute([$id]);
-
-        return (int) $statement->fetchColumn();
     }
 }

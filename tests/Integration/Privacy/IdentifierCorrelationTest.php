@@ -119,13 +119,13 @@ final class IdentifierCorrelationTest extends TestCase
      */
     public function testAChangedKeyChangesTheFingerprint(): void
     {
-        self::config()->set('audit-log.redaction.key', str_repeat('a', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('a', 32));
 
         $first = (string) $this->storedHashOf(self::IDENTIFIER);
 
         self::assertSame($first, $this->storedHashOf(self::IDENTIFIER));
 
-        self::config()->set('audit-log.redaction.key', str_repeat('b', 32));
+        app(ConfigRepository::class)->set('audit-log.redaction.key', str_repeat('b', 32));
 
         $changed = $this->storedHashOf(self::IDENTIFIER);
 
@@ -155,7 +155,7 @@ final class IdentifierCorrelationTest extends TestCase
      */
     public function testDropModeStoresNoHash(): void
     {
-        self::config()->set('audit-log.redaction.identifiers', 'drop');
+        app(ConfigRepository::class)->set('audit-log.redaction.identifiers', 'drop');
 
         $stored = $this->storedAndVerified(self::failedSignIn(self::IDENTIFIER)->record());
 
@@ -264,15 +264,5 @@ final class IdentifierCorrelationTest extends TestCase
         $hash       = is_array($properties) ? ($properties['_audit']['identifier_hash'] ?? null) : null;
 
         return is_string($hash) ? $hash : null;
-    }
-
-    /**
-     * The application's configuration.
-     *
-     * @return \Illuminate\Config\Repository
-     */
-    private static function config(): ConfigRepository
-    {
-        return app(ConfigRepository::class);
     }
 }

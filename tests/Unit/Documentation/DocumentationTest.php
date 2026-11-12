@@ -67,6 +67,7 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailedOperation;
 use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 use SineMacula\Laravel\AuditLog\Testing\Concerns\InteractsWithAuditLog;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
+use Tests\Concerns\ReadsTheDocumentation;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Stores\DocumentedSpillChannel;
 
@@ -82,6 +83,8 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 #[CoversNothing]
 final class DocumentationTest extends TestCase
 {
+    use ReadsTheDocumentation;
+
     /** @var list<class-string<\BackedEnum>> The public enums whose every value is documented. */
     private const array ENUMS = [
         Outcome::class,
@@ -2525,20 +2528,6 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The text of a `## ` section of a note, up to the next section.
-     *
-     * @param  string  $note
-     * @param  string  $heading
-     * @return string
-     */
-    private static function section(string $note, string $heading): string
-    {
-        $pattern = '/^## ' . preg_quote($heading, '/') . '\n(.*?)(?=^## |\z)/ms';
-
-        return preg_match($pattern, $note, $matches) === 1 ? $matches[1] : '';
-    }
-
-    /**
      * The backticked source, configuration or database paths a section anchors.
      *
      * @param  string  $section
@@ -2850,18 +2839,6 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The Markdown without its fenced code blocks, so a `#` comment in a code
-     * block is never read as a heading.
-     *
-     * @param  string  $markdown
-     * @return string
-     */
-    private static function withoutCodeBlocks(string $markdown): string
-    {
-        return (string) preg_replace('/^ *(```|~~~)[^\n]*\n.*?^ *\1[ \t]*$/ms', '', $markdown);
-    }
-
-    /**
      * The text of the README, every guide and every design note.
      *
      * @return string
@@ -2883,41 +2860,5 @@ final class DocumentationTest extends TestCase
     private static function prose(string $path): string
     {
         return self::collapsed(self::read($path));
-    }
-
-    /**
-     * The text with every run of whitespace made one space.
-     *
-     * @param  string  $text
-     * @return string
-     */
-    private static function collapsed(string $text): string
-    {
-        return (string) preg_replace('/\s+/', ' ', $text);
-    }
-
-    /**
-     * The contents of a file of the repository.
-     *
-     * @param  string  $path
-     * @return string
-     */
-    private static function read(string $path): string
-    {
-        $contents = file_get_contents(self::root() . $path);
-
-        self::assertIsString($contents, sprintf('%s cannot be read.', $path));
-
-        return $contents;
-    }
-
-    /**
-     * The repository's root directory.
-     *
-     * @return string
-     */
-    private static function root(): string
-    {
-        return dirname(__DIR__, 3);
     }
 }
