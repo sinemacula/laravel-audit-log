@@ -11,9 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 
 /**
- * Unit tests for the source settings: a configured id kept as given, the slug
- * of the application's name in its place, how that slug is cut and when it
- * fails closed, the optional region, and the values no message ever shows.
+ * Unit tests for the source settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -94,8 +92,7 @@ final class SourceSettingsTest extends TestCase
 
     /**
      * The slug is ASCII whatever the name's script, so the column holds the
-     * same id on every engine, and a name past the column in multi-byte
-     * characters is cut like any other.
+     * same id on every engine.
      *
      * @return void
      */
@@ -178,9 +175,8 @@ final class SourceSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[id]`: other types, including falsy values that must not read as
-     * no id, one character past the column, in single-byte and multi-byte
-     * characters, and text cleaning would change.
+     * Rows of `[id]`: other types, including falsy values, one character too
+     * long and text cleaning would change.
      *
      * @return iterable<string, array{0: array<never, never>|bool|int|string}>
      */
@@ -266,9 +262,8 @@ final class SourceSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[region]`: other types, including falsy values that must not
-     * read as none, one character past the column, in single-byte and
-     * multi-byte characters, and text cleaning would change.
+     * Rows of `[region]`: other types, including falsy values, one character
+     * too long and text cleaning would change.
      *
      * @return iterable<string, array{0: array<never, never>|bool|int|string}>
      */

@@ -68,9 +68,7 @@ final class RecordVersionTest extends TestCase
     }
 
     /**
-     * `RecordVersion` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *

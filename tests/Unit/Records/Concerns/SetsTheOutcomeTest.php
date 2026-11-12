@@ -15,9 +15,7 @@ use Tests\Unit\Stubs\Enums\StubColour;
 use Tests\Unit\Stubs\Enums\StubPriority;
 
 /**
- * Unit tests for a pending record's outcome: success by default, failure and
- * denial with an optional machine-readable reason, given as a string or a
- * string-backed enum, the reasons refused, and the last outcome winning.
+ * Unit tests for a pending record's outcome and its reason.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

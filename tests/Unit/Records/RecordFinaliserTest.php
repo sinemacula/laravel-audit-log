@@ -20,10 +20,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Unit tests for the record finaliser: a record stamped with the clock's
- * instant in UTC, to the microsecond, never before the activity occurred, and
- * signed under the ring's signing key, the same bytes each time it is finalised
- * at one instant.
+ * Unit tests for the record finaliser.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,10 +50,8 @@ final class RecordFinaliserTest extends TestCase
     }
 
     /**
-     * The record is finalised as the signer signs it at the clock's instant:
-     * the captured record kept, recorded then, under the ring's key and the
-     * current integrity version, with the signer's HMAC; the finalised record
-     * verifies once stored and read back.
+     * The record is finalised at the clock's instant, signed under the ring's
+     * key, and verifies once stored and read back.
      *
      * @return void
      */
@@ -94,9 +89,8 @@ final class RecordFinaliserTest extends TestCase
     }
 
     /**
-     * A clock behind the time the activity occurred, by a microsecond or by an
-     * hour, stamps the record with the time it occurred, so it is never
-     * recorded before it; a clock exactly at it stamps that time too.
+     * A clock behind the time the activity occurred stamps that time, so a
+     * record is never recorded before it occurred.
      *
      * @return void
      */
@@ -116,9 +110,8 @@ final class RecordFinaliserTest extends TestCase
     }
 
     /**
-     * Finalising one record twice at one instant gives the same finalised
-     * record byte for byte, and at another instant the same captured content
-     * with another time and HMAC.
+     * Finalising one record twice at one instant gives the same bytes, and at
+     * another instant another time and HMAC.
      *
      * @return void
      */

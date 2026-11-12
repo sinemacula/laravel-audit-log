@@ -26,19 +26,8 @@ use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the envelope codec: the canonical envelope it encodes and its
- * bound; decoding without loss, so numeric-key maps, empty containers, `null`
- * columns, an imported record's fields, Unicode and the largest integers come
- * back with the same canonical bytes and signature; each refusal as its own
- * failure, in a fixed order; that nothing is minimised, sanitised or finalised
- * again; a bundle of an artifact of each kind, an empty disclosure among them,
- * and the kinds and counts it refuses; and that no refusal carries the
- * envelope.
- *
- * Envelopes are signed here directly with the key's secret, as the signer
- * signs, so a value capture never produces (an object at the top of a column, a
- * redactable value) can be signed and read back. The ring and the signer are
- * the package's own.
+ * Unit tests for the envelope codec. Envelopes are signed here with the key's
+ * secret directly, to sign values capture would never produce.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -159,8 +148,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * A record whose envelope is exactly the bound is encoded, and one byte
-     * more is refused as oversize, naming its id (protects against an
-     * off-by-one mutation of the bound).
+     * more is refused as oversize, naming its id.
      *
      * @return void
      */
@@ -184,12 +172,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[columns in place of the captured record's]`: numeric-key maps,
-     * alone, out of order and nested three deep; empty lists and empty maps,
-     * nested and at the top; a one-key map whose key is `0` and a map with
-     * sequential numeric keys, signed from objects; `null` context and
-     * properties; an imported record's fields; 4-byte Unicode; the largest
-     * integers; and a decimal as a string.
+     * Rows of `[columns in place of the captured record's]`: values whose JSON
+     * type or bytes a careless decode would lose.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -254,8 +238,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * A decoded envelope gives every column in table order, each of the type
-     * and canonical value it was decoded as: an object stays an object and a
-     * list a list.
+     * and canonical value it was decoded as.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -315,10 +298,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * The record keeps array views of its JSON columns for reading, while the
-     * finalised record gives them as decoded: a map with sequential numeric
-     * keys reads as a list and stays a map, and `{}` reads as `[]` and stays
-     * `{}`.
+     * The record keeps array views of its JSON columns, while the finalised
+     * record keeps them as decoded, so `{}` stays `{}`.
      *
      * @return void
      */
@@ -361,9 +342,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * An envelope with a column its version does not have is malformed, even
-     * one the signature does not cover, and so is an `unsigned` that is not
-     * `true`.
+     * An envelope with a column its version does not have, signed or not, is
+     * malformed, and so is an `unsigned` that is not `true`.
      *
      * @return void
      */
@@ -461,8 +441,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * A float anywhere is malformed, never a mismatch: it has no canonical
-     * form, so the signature cannot be checked, and nothing the package signs
-     * holds one.
+     * form, so the signature cannot be checked.
      *
      * @return void
      */
@@ -558,8 +537,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * An envelope signed with a key the ring does not hold is unverifiable,
-     * never a mismatch: under a ring without that key, under one that derives
-     * its key from `app.key`, and under a key id the ring never had.
+     * never a mismatch.
      *
      * @return void
      */
@@ -635,9 +613,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * An envelope whose id is not the one expected is an id mismatch naming the
-     * envelope's own id; the expected id, exactly, passes, and no id expected
-     * passes too.
+     * An envelope whose id is not the one expected is an id mismatch naming its
+     * own id; the expected id or none passes.
      *
      * @return void
      */
@@ -659,8 +636,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * An input longer than the encoded bound is refused as oversize before it
-     * is parsed, so even one that is not JSON is never read; an input exactly
-     * as long is parsed (protects against an off-by-one mutation of the bound).
+     * is parsed; one exactly as long is parsed.
      *
      * @return void
      */
@@ -710,9 +686,7 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * With two failures, the one checked first is the one named, in the order
-     * the input's size, its JSON, unsigned, a version's type, a version's
-     * support, the schema, the key, the signature, the id and the record.
+     * With two failures, the one checked first is the one named.
      *
      * @param  string  $input
      * @param  ?string  $expectedId
@@ -761,8 +735,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * The deepest JSON column the store reads back decodes inside an envelope,
-     * whose own object is one level more; a column one level deeper, which the
-     * store cannot read back either, is malformed.
+     * and one level deeper is malformed.
      *
      * @return void
      */
@@ -786,9 +759,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * Nothing is minimised or sanitised again: a value capture would redact, a
-     * full IP address, a control character and an array deeper than capture
-     * keeps, all signed directly, come back whole.
+     * Nothing is minimised or sanitised again: values capture would change,
+     * signed directly, come back whole.
      *
      * @return void
      */
@@ -857,9 +829,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * The id, which need not be a version 7 UUID, and both times are kept as
-     * signed, never regenerated or stamped again; a record recorded at the
-     * instant it occurred is kept too.
+     * The id and both times are kept as signed, never regenerated or stamped
+     * again.
      *
      * @return void
      */
@@ -916,9 +887,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * No refusal carries the envelope: its message is fixed, it has no previous
-     * exception, and no frame of its trace holds a value of it, with the
-     * arguments of every frame kept.
+     * No refusal carries the envelope in its message, its previous exception or
+     * any frame of its trace.
      *
      * @return void
      */
@@ -980,10 +950,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A record with an attachment is a bundle of three keys: its attachment,
-     * naming the record as its entry, the bundle version, and its columns;
-     * never finalised, the same bundle with `unsigned` set beside it and no
-     * integrity field in its record.
+     * A record with an attachment is a bundle of its attachment, the bundle
+     * version and its columns; never finalised, it is marked `unsigned`.
      *
      * @return void
      */
@@ -1004,8 +972,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * A bundle encodes to the canonical encoding of its three keys and decodes
-     * to a record that encodes to exactly the same bytes, with its signature
-     * and every field of its attachment, the sealed members as they were.
+     * back to the same bytes, its attachment kept whole.
      *
      * @return void
      *
@@ -1028,18 +995,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * The golden bundle, of the golden members sealed once under the test
-     * encrypter and signed under the golden key, decodes and encodes back byte
-     * for byte; its manifest is the settled golden, its signed descriptor names
-     * its kind, and its members open to the golden canonical form.
-     *
-     * The fixture holds the golden secret and key id, the members, their
-     * digest, and the bundle's canonical envelope: the bulk record of three
-     * invoices, its ids pinned, finalised under `k2026`. Its record's signed
-     * descriptor is the four keys `artifact_id`, `kind`, `digest` and `count`,
-     * and its `hmac` is the record signed over them with the golden secret, as
-     * `RecordSigner` signs; the sealed members and every other field are as
-     * they were first sealed.
+     * The golden bundle decodes and encodes back byte for byte, and its members
+     * open to the golden canonical form.
      *
      * @return void
      *
@@ -1073,9 +1030,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle of a disclosure encodes to the canonical encoding of its three
-     * keys and decodes to a record that encodes to exactly the same bytes, its
-     * attachment of the `disclosure` kind kept whole.
+     * A bundle of a disclosure decodes and encodes back to the same bytes, its
+     * `disclosure` attachment kept whole.
      *
      * @return void
      *
@@ -1114,9 +1070,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle whose signed descriptor and attachment both name a kind the
-     * release does not know is malformed, naming the record's id, though the
-     * record verifies and the descriptor describes the attachment.
+     * A bundle whose attachment names a kind the release does not know is
+     * malformed, though its record verifies.
      *
      * @return void
      */
@@ -1170,9 +1125,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A record whose attachment was described from its entry, and so carries no
-     * members, is never encoded: neither its envelope, signed or unsigned, nor
-     * its encoding is made, so it can never be queued or spilled.
+     * A record whose attachment carries no members is never encoded, so it can
+     * never be queued or spilled.
      *
      * @return void
      */
@@ -1202,10 +1156,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[the bundle's keys in place of its own, the id named]`: a bundle
-     * without one of its keys, with a key added, or holding its record as
-     * something other than an object; one without its version is not a bundle
-     * at all and is held to a plain envelope's schema.
+     * Rows of `[the bundle's keys in place of its own, the id named]`: a key
+     * missing or added, or a record that is not an object.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1232,9 +1184,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle with a key missing, a key added, a version that is not an
-     * integer, or a record or attachment that is not an object is malformed,
-     * naming its record's id where it has one.
+     * A bundle of the wrong keys or shape is malformed, naming its record's id
+     * where it has one.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1304,8 +1255,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * A bundle version this release does not read is unsupported, and one that
-     * is not an integer is malformed, each naming the record's id, before the
-     * record is read at all.
+     * is not an integer is malformed, before the record is read.
      *
      * @param  string  $version
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure  $failure
@@ -1323,8 +1273,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * An attachment that names another entry, or names it in another form, is
-     * malformed, even though the record verifies and the descriptor describes
-     * it.
+     * malformed, though the record verifies.
      *
      * @return void
      */
@@ -1341,10 +1290,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * Rows of `[record fields in place of its own, attachment fields in place
-     * of its own]`: an attachment whose id, kind, digest or count is not the
-     * signed descriptor's, a signed descriptor that is not the attachment's, one with
-     * a field added, and a record that signs no descriptor at all.
+     * Rows of `[record fields, attachment fields]`: an attachment and a signed
+     * descriptor that disagree, or a record that signs no descriptor.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1377,9 +1324,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle whose attachment is not the one its record's signed descriptor
-     * describes, or that its constructor refuses, is malformed, naming the
-     * record's id, though the record verifies.
+     * A bundle whose attachment is not the one its signed descriptor describes
+     * is malformed, though the record verifies.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1451,8 +1397,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * A plain envelope whose properties hold a manifest descriptor is
-     * malformed, though it verifies, so a bulk record never comes back without
-     * its members; one whose metadata holds anything else decodes.
+     * malformed, so a bulk record never comes back without its members.
      *
      * @return void
      */
@@ -1479,9 +1424,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle that says it is unsigned is counted as unsigned, naming its
-     * record's id, never verified, whatever its record lacks; the bundle a
-     * record never finalised is spilled as is one.
+     * A bundle that says it is unsigned is counted as unsigned, never verified,
+     * whatever its record lacks.
      *
      * @return void
      */
@@ -1512,11 +1456,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle whose envelope is exactly the bound is encoded, and one byte
-     * more is refused as oversize, naming its record's id: the bound applies to
-     * the whole bundle, its attachment included (protects against an off-by-one
-     * mutation of the bound, and against a bound on the record's columns
-     * alone).
+     * A bundle whose whole envelope, attachment included, is exactly the bound
+     * is encoded, and one byte more is refused.
      *
      * @return void
      */
@@ -1545,9 +1486,7 @@ final class EnvelopeCodecTest extends TestCase
 
     /**
      * A bundle's record is held to its version's schema and verified exactly as
-     * a plain envelope is: a changed column is a signature mismatch, an unknown
-     * key, an unsupported version, a column missing, added or of another kind,
-     * and a value its constructor refuses, each as it would be.
+     * a plain envelope is.
      *
      * @return void
      */
@@ -1581,9 +1520,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * The expected id is the bundle's record's: another id, or the attachment's
-     * own, is an id mismatch naming the record's id, and the record's id,
-     * exactly, passes, as does no id expected.
+     * The expected id is the bundle's record's: any other is an id mismatch
+     * naming the record's id.
      *
      * @return void
      */
@@ -1633,9 +1571,7 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * With two failures of a bundle, the one checked first is the one named, in
-     * the order unsigned, the bundle's keys, its version, its record as any
-     * record's, its attachment, the id and the descriptor.
+     * With two failures of a bundle, the one checked first is the one named.
      *
      * @param  string  $input
      * @param  ?string  $expectedId
@@ -1649,10 +1585,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle's record is decoded to the same depth as a plain envelope, one
-     * level inside the bundle, so its deepest column is one level shallower
-     * than a plain envelope's, far deeper than capture keeps; a column one
-     * level deeper is malformed, never cut.
+     * A bundle's record is decoded to the same depth as a plain envelope; a
+     * column one level deeper is malformed, never cut.
      *
      * @return void
      */
@@ -1676,9 +1610,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * No refusal of a bundle carries it: neither its record nor its
-     * attachment's members are in the refusal's message, its previous exception
-     * or any frame of its trace, with the arguments of every frame kept.
+     * No refusal of a bundle carries its record or its members in its message,
+     * previous exception or trace.
      *
      * @return void
      */
@@ -1729,10 +1662,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * The envelope's columns: a captured record finalised under `k2026`, with
-     * the fields given in place of its own and signed over the result with the
-     * secret, as the signer signs, unless an HMAC is given; then the columns
-     * given after signing put in place, unsigned.
+     * The columns of a captured record finalised under `k2026`, the fields
+     * given put in place before signing and the columns given after.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1874,10 +1805,9 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * Run the test with room for envelopes at their bounds, then restore the
-     * memory limit, as far as what the process still holds allows: a debugger
-     * can keep the last exceptions' frames, and a limit below them is refused
-     * with a warning. An unlimited process stays so.
+     * Run the test with room for envelopes at their bounds, then lower the
+     * memory limit no further than the process holds, as a lower limit is
+     * refused.
      *
      * @param  \Closure(): void  $test
      * @return void
@@ -1900,9 +1830,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A codec over a signer of the explicit ring of the keys given, signing
-     * with the current one, or, with no keys, of the key derived from
-     * `app.key`.
+     * A codec signing with the current of the keys given, or with the key
+     * derived from `app.key` when none are.
      *
      * @param  array<string, string>  $keys
      * @param  ?string  $current
@@ -1946,11 +1875,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * A bundle's envelope as arrays: the bulk record finalised under `k2026`,
-     * with the record's columns given in place of its own and signed over the
-     * result with the secret, as the signer signs, unless an HMAC is given;
-     * its attachment's fields given in place of its own; then the keys given at
-     * the top in place of the bundle's.
+     * A bundle's envelope of the bulk record finalised under `k2026`, the
+     * fields and keys given put in place of its own.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -2020,11 +1946,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * Assert that a bundle of an artifact of the kind, holding the number of
-     * members given, encodes to the canonical encoding of its three keys and
-     * decodes to a record that encodes to exactly the same bytes, with its
-     * signature and every field of its attachment, which opens to the canonical
-     * form its kind's builder made.
+     * Assert that a bundle of the kind and count given round-trips to the same
+     * bytes and its members open to its builder's canonical form.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  int  $count
@@ -2089,9 +2012,8 @@ final class EnvelopeCodecTest extends TestCase
     }
 
     /**
-     * The bulk record finalised with its attachment's sealed members replaced
-     * by a string of the length given, for a bundle of an exact size; the
-     * descriptor still describes it.
+     * The bulk record finalised with sealed members of the length given, for a
+     * bundle of an exact size.
      *
      * @param  int  $length
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord

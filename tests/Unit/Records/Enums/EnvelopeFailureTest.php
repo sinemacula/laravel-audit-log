@@ -21,9 +21,8 @@ use SineMacula\Laravel\AuditLog\Records\Enums\EnvelopeFailure;
 final class EnvelopeFailureTest extends TestCase
 {
     /**
-     * The cases, in order, with their values, so a renamed, reordered or added
-     * case fails: the values are what a drain or a replay counts each refusal
-     * under.
+     * The cases, in order, with the values a drain or a replay counts each
+     * refusal under.
      *
      * @return void
      */

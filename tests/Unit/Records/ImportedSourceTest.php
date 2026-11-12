@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 
 /**
- * Unit tests for an imported record's source: the fields it keeps exactly, the
- * lengths and the clean text its source id, region and record id must have, the
- * lower-case UUID its batch id must be, the lower-case hex its digest must be,
- * and refusals that name the field and never its value.
+ * Unit tests for an imported record's source and the values it refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

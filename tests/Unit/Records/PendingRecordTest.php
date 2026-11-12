@@ -21,10 +21,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for the pending record's lifecycle: nothing is written without
- * `record()`, the recorder seam, single use, the snapshot it gives without
- * being used up, that no method takes a provenance, that the order of different
- * calls never matters, and that every programming error is an SPL exception.
+ * Unit tests for the pending record's lifecycle.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -282,9 +279,8 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * A bulk builder's manifest travels in its snapshot, the same instance, and
-     * in the final snapshot that uses the builder up, and taking a snapshot
-     * leaves the manifest in place.
+     * A bulk builder's manifest travels in each snapshot, the same instance,
+     * and stays in place.
      *
      * @return void
      *
@@ -408,9 +404,8 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * `forPackage()` names the activity's code, under the reserved prefix, and
-     * returns the builder; the last code given wins, whichever way it was
-     * given.
+     * `forPackage()` names the activity's code under the reserved prefix; the
+     * last code given wins.
      *
      * @return void
      */
@@ -434,9 +429,8 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * `event()` still refuses a code under the reserved prefix, given as the
-     * package's activity or as its value, and the builder keeps the code it
-     * had.
+     * `event()` refuses a code under the reserved prefix, and the builder keeps
+     * the code it had.
      *
      * @return void
      */
@@ -496,9 +490,7 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * Rows of `[call]`: one call of each public mutator, the eighteen fluent
-     * methods, the nine fillers, the manifest given either way, the package's
-     * own code and the id of the package's own record, each with a valid
+     * Rows of `[call]`: one call of each public mutator, each with a valid
      * argument.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
@@ -569,9 +561,7 @@ final class PendingRecordTest extends TestCase
 
     /**
      * Rows of `[call]`: one call of each public mutator with an argument it
-     * would refuse, or with `null` where a filler then does nothing; a mutator
-     * that takes no argument, or only an origin or an activity, is called as it
-     * always is.
+     * would refuse, or `null` where a filler then does nothing.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void}>
      */
@@ -685,9 +675,7 @@ final class PendingRecordTest extends TestCase
 
     /**
      * Every public mutator of a consumed builder throws the reuse refusal
-     * before it looks at its argument: an argument it would refuse does not
-     * turn the refusal into an `\InvalidArgumentException`, and `null` does not
-     * let a filler return without it.
+     * before it looks at its argument.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): void  $call
      * @return void
@@ -705,9 +693,8 @@ final class PendingRecordTest extends TestCase
     }
 
     /**
-     * Each set of mutator rows covers every public method of the builder but
-     * the lifecycle ones and its one read, so a new mutator without a row fails
-     * here.
+     * Each set of mutator rows covers every public mutator, so a new one
+     * without a row fails here.
      *
      * @return void
      */
@@ -770,9 +757,7 @@ final class PendingRecordTest extends TestCase
 
     /**
      * The full builder's calls made in any of the orders give equal snapshots,
-     * and equal snapshots give equal records;
-     * `AuditRecordTest::testPermutedCallOrdersGiveEqualEnvelopes` checks the
-     * envelope.
+     * and equal snapshots give equal records.
      *
      * @param  list<string>  $order
      * @return void

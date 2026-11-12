@@ -17,12 +17,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for an artifact's manifest: a bulk operation's canonical form and
- * the golden digest, de-duplication and bytewise order, the subjects it takes
- * and refuses, the count, input and byte bounds it refuses rather than
- * truncates, the content of any kind taken as given, the counts each kind
- * allows, its id, its descriptor naming its kind, and the plaintexts it reads
- * back as canonical.
+ * Unit tests for an artifact's manifest and the plaintexts it reads back.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,9 +56,8 @@ final class ManifestTest extends TestCase
     }
 
     /**
-     * The golden subjects, out of order and with a duplicate, give the golden
-     * canonical form, its count and its digest, and so does every order of
-     * them.
+     * The golden subjects, in any order and with a duplicate, give the golden
+     * canonical form, count and digest.
      *
      * @return void
      *
@@ -84,9 +78,7 @@ final class ManifestTest extends TestCase
 
     /**
      * Members are kept once on the exact pair and sorted bytewise on the type,
-     * then on the id: upper case before lower case, a shorter prefix first, a
-     * multibyte character after ASCII, and ids compared as strings, never as
-     * numbers. A pair differing only in case is a different member.
+     * then on the id, compared as strings.
      *
      * @return void
      *
@@ -333,10 +325,8 @@ final class ManifestTest extends TestCase
     }
 
     /**
-     * References of the longest type and id, in multibyte characters, count by
-     * their bytes, not their characters: a pair of 191 two-byte and 191
-     * three-byte characters encodes to 964 bytes, which a bound of 964 keeps
-     * and a bound of 963 refuses.
+     * Multibyte references count by their bytes: the longest pair encodes to
+     * 964 bytes, which a bound of 963 refuses.
      *
      * @return void
      *
@@ -358,9 +348,8 @@ final class ManifestTest extends TestCase
     }
 
     /**
-     * A manifest whose canonical form is exactly the byte bound is kept whole,
-     * so the running count is the encoding's length to the byte, and one byte
-     * less refuses it.
+     * A manifest whose canonical form is exactly the byte bound is kept, and
+     * one byte less refuses it.
      *
      * @return void
      *

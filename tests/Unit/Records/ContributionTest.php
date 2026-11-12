@@ -16,9 +16,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the view of a pending record a contributor gets: each filler
- * reaches the builder, the builder's rules stay in force through it, what it
- * reads, and that it offers no way to record the record or choose its timing.
+ * Unit tests for the view of a pending record a contributor gets.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
