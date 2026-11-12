@@ -32,20 +32,11 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
- * Reads the trail as an application does and inspects what each read leaves:
- * the read path's bindings, defaults that the provider's own bindings make a
- * no-op of; an access policy answered by a closure, or one that sees every
- * entry, with its encrypted fields revealed or not, or the entries of some
- * tenants; entries seeded through the database store, signed as the package
- * signs them; the records of the package's own codes, decoded as stored, and
- * their properties compared as the engine keeps them; the plaintext of a read's
- * disclosure; the viewer the tests read for; and the statements run on any
- * connection.
+ * Reads the trail as an application does and inspects what each read leaves.
  *
- * A seeded entry is a captured record of an approved invoice, in the `finance`
- * category, by `user` 42 on `invoice` `inv_0042` for `organisation` `org_01`,
- * with the fields given, under their stored, snake_case keys, in place of its
- * own; it occurs and is recorded at the instant given.
+ * A seeded entry is a captured invoice approval in the `finance` category, by
+ * `user` 42 on `invoice` `inv_0042` for `organisation` `org_01`, with the
+ * fields given in place of its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -251,11 +242,9 @@ trait ReadsTheTrail
     }
 
     /**
-     * Assert stored properties, or a part of them, are the expected ones:
-     * identical, key order included, where the storage connection keeps the
-     * order a JSON object's keys were written in, and identical but for that
-     * order on MySQL, whose JSON column stores every object with its keys
-     * sorted. A list keeps its order on every engine.
+     * Assert stored properties are the expected ones, key order included except
+     * on MySQL, whose JSON column sorts object keys; a list keeps its order on
+     * every engine.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

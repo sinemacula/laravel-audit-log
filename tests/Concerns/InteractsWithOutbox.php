@@ -17,21 +17,11 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
  * Reads and seeds the outbox and the deliveries table as the gateways write
- * them, moves the clock the gateways read, and forces a failed outbox insert.
+ * them, moves the clock they read, and forces a failed outbox insert.
  *
- * Every time a helper takes or gives is an instant in the package's form
- * (`2026-11-01T12:00:00.000000Z`), whatever the engine stores, so one assertion
- * holds on SQLite, MySQL and PostgreSQL alike. The clock is moved through
- * `CarbonImmutable::setTestNow()`, which the package's system clock reads; a
- * class that moves it puts it back in its `tearDown()`.
- *
- * The forced failure is a real one on every engine: the probe table has every
- * column of the outbox as nullable `text`, and a `probe` column that is `NOT
- * NULL` without a default, which an insert never writes. The outbox can also be
- * moved to a connection of its own, with a table prefix of its own, and its
- * table and the deliveries table migrated onto further connections, such as the
- * two sides of a read/write split. A class that does any of these undoes it in
- * its `tearDown()`.
+ * Times are instants in the package's form whatever the engine stores, so one
+ * assertion holds on every engine. A class that moves the clock, the outbox or
+ * its tables undoes it in its `tearDown()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -234,11 +224,9 @@ trait InteractsWithOutbox
     }
 
     /**
-     * Move the outbox to a connection of its own, to the test database with a
-     * table prefix of its own, under a table name of its own, and create its
-     * table there. PostgreSQL keeps index names per schema and a prefix does
-     * not reach an index the migration names, so the name keeps the moved
-     * table's index apart from the storage connection's.
+     * Move the outbox to a connection, table prefix and table name of its own,
+     * and create its table there; PostgreSQL keeps index names per schema and a
+     * prefix does not reach a migration's index name.
      *
      * @return void
      */
@@ -283,10 +271,9 @@ trait InteractsWithOutbox
     }
 
     /**
-     * Create the outbox and the deliveries table on each connection given, and
-     * the seals and their members a drain's tombstones read, as the shipped
-     * migrations would with the storage connection there, then put the storage
-     * and the outbox connections back as they were.
+     * Create the outbox, the deliveries table, and the seals and members a
+     * drain's tombstones read on each connection given, then put the storage
+     * and outbox connections back.
      *
      * @param  list<string>  $connections
      * @return void

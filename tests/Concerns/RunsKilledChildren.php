@@ -16,26 +16,15 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 
 /**
- * Runs work in real child processes that end the way a killed worker ends: by
- * `SIGKILL`, at a chosen statement or when the work is done, so nothing runs a
- * destructor, a shutdown function, a rollback or a commit callback. What the
- * child left is what the database and the files hold when it is gone: SQLite
- * rolls a hot journal back when the file is next opened, and MySQL and
- * PostgreSQL roll back server-side when the socket closes.
+ * Runs work in child processes that end as a killed worker does, by `SIGKILL`
+ * at a chosen statement or when the work is done, so no destructor, shutdown
+ * function, rollback or commit callback runs.
  *
  * A kill point is a regular expression matched against each statement with its
- * bindings in place, so a kill can name a row or a destination. Before the
- * statement runs, or after it has; after one, the word `commit` is also matched
- * straight after an outermost commit, from the first of its callbacks, so
- * before any other callback has run, and the words `after callbacks` once they
- * all have. The tests run on Laravel's own transactions manager and no test
- * wrapper transaction, so a commit is a commit.
- *
- * In-memory SQLite cannot be shared across a fork, so a class calls
- * `useFileDatabaseOnSqlite()` from `defineEnvironment()`, and
- * `removeChildren()` from its `tearDown()`, after `parent::tearDown()` has
- * rolled its migrations back. The files a child and its parent share, gates
- * included, live in a directory of the test's own, which that call removes.
+ * bindings in place; after a commit, `commit` matches before its other
+ * callbacks run and `after callbacks` once they have. A class calls
+ * `useFileDatabaseOnSqlite()` from `defineEnvironment()` and `removeChildren()`
+ * after `parent::tearDown()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -105,11 +94,9 @@ trait RunsKilledChildren
     }
 
     /**
-     * Start the work in a child process and return its process id, leaving this
-     * process to race it.
-     *
-     * Every connection is closed first, so the child shares no socket or file
-     * lock with this process, which reconnects when it next needs to.
+     * Start the work in a child process and return its pid, leaving this
+     * process to race it; every connection is closed first so the child shares
+     * no socket or file lock.
      *
      * @template TResult
      *
@@ -334,10 +321,11 @@ trait RunsKilledChildren
     /**
      * Kill this process before each statement matching the first pattern, on
      * the default and the outbox connection, and after each statement or commit
-     * matching the second. Laravel runs commit callbacks before it dispatches
-     * `TransactionCommitted`, so the gap between a commit and its callbacks is
-     * reached from a callback of its own, registered as the outermost
-     * transaction begins, which makes it the first to run.
+     * matching the second.
+     *
+     * Laravel runs commit callbacks before `TransactionCommitted`, so the
+     * commit point is reached from a callback registered as the outermost
+     * transaction begins.
      *
      * @param  ?string  $killBefore
      * @param  ?string  $killAfter

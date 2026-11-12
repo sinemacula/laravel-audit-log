@@ -12,10 +12,9 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * A queued job that records one activity, runs another job on the sync queue,
- * and records another: what it records after shows the frame it got back,
- * whether the inner job succeeded or threw. It can sign someone in just for the
- * inner job, and send another on the sync queue once it has signed them out.
+ * A queued job that records, runs another job on the sync queue, and records
+ * again, so the second record shows the frame it got back; it can sign someone
+ * in for the inner job alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

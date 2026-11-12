@@ -11,12 +11,9 @@ use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * An `AuditRecorded` listener that reads the first page of the trail, in the
- * category given, for the viewer given, each time it hears a record, as an
- * application's listener that keeps a feed of the trail would. It keeps the
- * code of every record it heard, in order, and what each read gave it, the page
- * or the refusal it caught, in the order the reads ended, so a read refused
- * inside another comes before the page of the read it was inside.
+ * An `AuditRecorded` listener that reads the trail's first page for each record
+ * it hears, as a feed would, keeping each code heard and each page or refusal
+ * in the order the reads ended.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -9,10 +9,9 @@ use SineMacula\Laravel\AuditLog\Privacy\FieldContext;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * A field encrypter that holds a key for every owner and keeps what it was
- * given, the context of each call among it. Its envelope is
- * `{v: 1, k: 'key_' . id, c: base64 of the plaintext}`, so a test can read back
- * what was sealed, under whose key, and for which entry and path.
+ * A field encrypter that keeps each call and its context, sealing as `{v: 1, k:
+ * 'key_' . id, c: base64 of the plaintext}` so a test can read back what was
+ * sealed and under whose key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

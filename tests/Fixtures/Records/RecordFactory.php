@@ -38,12 +38,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 
 /**
- * Records for tests: captured records built through the public builder, as an
- * application builds them, records carrying a sealed artifact of any kind, a
- * bulk operation's subjects, a disclosure or an export's manifest, with the
- * canonical forms each kind's builder makes, imported records built as the
- * importer builds them, and records of a shape neither capture nor import ever
- * produces.
+ * Records for tests: captured, carrying an artifact of any kind, imported, and
+ * of shapes neither capture nor import produces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,10 +69,10 @@ final class RecordFactory
     /** @var string The id of the log a minimised record's values are sealed for. */
     private const string LOG_ID = 'app-eu-1';
 
-    /** @var string The code of the permissive definition minimising defaults to; not the builder's, which may have none. */
+    /** @var string The code of the default permissive definition, since the builder may have none. */
     private const string PERMISSIVE_CODE = 'invoice.approved';
 
-    /** @var string The key of the test encrypter: the `app.key` the Feature and Integration tests configure, so their encrypter opens what it sealed. */
+    /** @var string The test encrypter's key: the `app.key` the Feature and Integration tests configure. */
     private const string ENCRYPTION_KEY = 'laravel-audit-log test key!!!!!!';
 
     /** @var int The greatest canonical form a bulk record's manifest may encode to, in bytes: the setting's greatest. */
@@ -88,10 +84,9 @@ final class RecordFactory
     private function __construct() {}
 
     /**
-     * A captured record of an approved invoice, built through the builder and
-     * the record's one named constructor: by a user, on an invoice, for an
-     * organisation, over HTTP, with the properties given. With an id, the UUID
-     * factory is pinned to it for this one call and then restored.
+     * A captured approval of an invoice, built through the builder: by a user,
+     * for an organisation, over HTTP, with the properties given; an id pins the
+     * UUID factory for this call alone.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -138,10 +133,8 @@ final class RecordFactory
 
     /**
      * A captured record carrying an artifact of the kind, of the canonical form
-     * and count given as they are, sealed under the test encrypter: a listing
-     * of invoices for a disclosure, an export of them for an export, and a bulk
-     * approval for a bulk operation, by a user, for an organisation, over HTTP,
-     * its descriptor at `properties._audit.manifest`.
+     * and count given, sealed under the test encrypter, its descriptor at
+     * `properties._audit.manifest`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind  $kind
      * @param  string  $canonical
@@ -269,12 +262,8 @@ final class RecordFactory
 
     /**
      * A record of the base's envelope, or a captured record's, with the fields
-     * given (under their stored, snake_case keys) in place of its own, built
-     * through the record's private constructor.
-     *
-     * It stands in for an imported record's fields set one by one, and for
-     * values neither capture nor import would ever produce, such as an
-     * upper-case id; tests use it for nothing else.
+     * given (by stored, snake_case key) in place of its own, for values neither
+     * capture nor import produces.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -299,10 +288,9 @@ final class RecordFactory
     }
 
     /**
-     * An imported record of an approved invoice, built as the importer builds
-     * it, through the record's named constructor for imports: by a user, on an
-     * invoice, for an organisation, with the properties, origin, occurrence
-     * time and source given, imported at the time given.
+     * An imported approval of an invoice, built as the importer builds it, with
+     * the properties, origin, occurrence time and source given, imported at the
+     * time given.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -356,12 +344,12 @@ final class RecordFactory
     }
 
     /**
-     * What the real minimiser leaves of the builder, as the entry of the id
-     * given or a fresh one, with nothing but an application key and a log id
-     * configured and no field encrypter, so a record built from it proves the
-     * permissive pipeline disturbs nothing. The builder stays usable, and needs
-     * no code: the default definition has its own, so that building its record
-     * is what refuses a builder with none.
+     * What the real minimiser leaves of the builder, with only an application
+     * key and a log id configured, so a record built from it proves the
+     * permissive pipeline disturbs nothing.
+     *
+     * The builder stays usable and needs no code, since the default definition
+     * has its own.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $pending
      * @param  ?\SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
@@ -417,9 +405,8 @@ final class RecordFactory
         $id     = Str::uuid7(self::instant($occurredAt))->toString();
         $record = AuditRecord::fromPending($builder, self::minimisedOf($builder, null, $id), $id, 1, 'finance', self::instant($occurredAt), 'app-eu-1', 'eu-west-2');
 
-        // An envelope among the properties stands for a field the record's own
-        // sealer sealed, which minimising removes from what a record is given,
-        // so such properties are set on the record as given
+        // Minimising strips envelopes from what a record is given, so
+        // properties holding one stand for a sealed field and are set as given
         return self::holdsAnEnvelope($properties) ? self::withFields(['properties' => $properties], $record) : $record;
     }
 

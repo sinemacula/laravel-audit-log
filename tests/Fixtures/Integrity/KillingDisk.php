@@ -7,13 +7,10 @@ namespace Tests\Fixtures\Integrity;
 use Illuminate\Contracts\Filesystem\Filesystem;
 
 /**
- * A disk that hands every call to another and ends the process by `SIGKILL`
- * straight after the number of writes it is made with have succeeded: the last
- * write is on the disk, and nothing the caller would have done next is. It
- * reaches the gap between two writes of one call, which a decorated anchor
- * cannot reach from outside, such as a disk anchor's marker and its object. A
- * write that fails is not counted. It is for the children of the crash tests
- * only.
+ * A disk that hands every call to another and dies by `SIGKILL` straight after
+ * a given number of successful writes, reaching the gap between two writes of
+ * one call, such as a disk anchor's marker and object; for the crash tests'
+ * children only.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

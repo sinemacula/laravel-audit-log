@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * A model that counts how many times it boots, which Eloquent does when the
- * first model of the class is built in an application, so a test can show that
- * watching it built none. It is kept in the plain lines' table.
+ * first model of the class is built, so a test can show that watching it built
+ * none.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

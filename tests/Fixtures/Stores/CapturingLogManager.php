@@ -12,10 +12,8 @@ use Monolog\Logger as Monolog;
 
 /**
  * A log manager that adds one capturing handler behind every channel's own, so
- * a channel whose handler fails captures nothing, as nothing was written, and a
- * stack, which takes its members' handlers, holds it once. A `NullHandler`
- * stops a record going further without writing it, so the capture goes ahead of
- * one.
+ * a failing channel captures nothing and a stack holds it once; it goes ahead
+ * of a `NullHandler`, which drops a record unwritten.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

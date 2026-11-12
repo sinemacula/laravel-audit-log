@@ -9,16 +9,9 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Makes the storage connection a read/write split whose read replica lags
- * behind the primary.
- *
- * The storage connection becomes `split`, which writes to one SQLite file (the
- * primary) and reads from another (the replica). The entries table is migrated
- * on both, and every row written through `split` lands on the primary only, so
- * a read served by the replica does not see it. A test therefore proves that a
- * read went to the writer by seeding the primary alone and showing the row is
- * found, and that a write went to the writer by finding it on the primary and
- * not on the replica.
+ * Makes the storage connection a read/write split whose replica lags: every
+ * write lands on the primary SQLite file only, so a read served by the replica
+ * does not see it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -8,10 +8,9 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Eloquent stub with an incrementing integer key whose `email` accessor, array
- * and JSON forms, string form and query builder all throw, so a test fails if
- * referring to it reads an attribute other than its key, serialises it or
- * queries it.
+ * A model whose `email` accessor, array, JSON and string forms and query
+ * builder all throw, so a test fails if referring to it reads more than its
+ * key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

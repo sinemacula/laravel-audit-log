@@ -6,29 +6,12 @@ namespace Tests\Fixtures\Export;
 
 /**
  * Builds the OCSF schema the export tests validate against from a checkout of
- * the upstream tag, as normalised files derived from it rather than copies.
+ * the upstream tag, as normalised files derived from it.
  *
- * Each class the validator names is resolved into one file: its `extends` chain
- * is followed, the attributes of each profile it includes are merged (tagged
- * with the profile, so they apply only to an event whose `metadata.profiles`
- * names it), each attribute is looked up in the dictionary, a class's enum is
- * merged over the dictionary's, `class_uid` and `category_uid` take the class's
- * own values, and every object type the class can reach is resolved,
- * recursively, into an `objects` map, beside the type each dictionary type
- * derives from.
- *
- * Only what validation reads is kept: attribute names, requirements, types,
- * whether each is an array, enum values with their captions, constraints, the
- * class's names and uids, and the version. Descriptions, examples, references
- * and every other free text are dropped. Every profile the tag has is kept but
- * one: no event the formatter writes applies it, and the upstream text for it
- * and for the objects only it reaches names third-party products, so it is left
- * out with every attribute it declares and every object only those reach.
- *
- * The licence and the notice are copied with a newline ensured at the end, the
- * version file is written in the house layout, and the provenance records the
- * tag, its commit, the checksum of every upstream file read and of every file
- * written.
+ * Each class is resolved into one file with its parents, profiles, dictionary
+ * attributes and reachable objects, keeping only what validation reads. One
+ * profile is left out: no exported event applies it, and its upstream text
+ * names third-party products.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,7 +54,7 @@ final class OcsfSchemaBuilder
         'cloud', 'container', 'data_classification', 'datetime', 'host', 'incident', 'load_balancer', 'network_proxy', 'osint', 'record_integrity', 'security_control', 'trace',
     ];
 
-    /** @var string How the files written differ from the upstream files they come from, as the licence asks of a modified file. */
+    /** @var string How the files differ from upstream, as the licence asks of a modified file. */
     public const string MODIFIED = 'Derived from the upstream files, not copied: only what validation reads is kept, one profile is left out, and LICENSE ends in a newline.';
 
     /** @var list<string> The upstream files copied, with a newline ensured at the end. */

@@ -8,10 +8,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Guard;
 
 /**
- * A guard that does not use Laravel's `GuardHelpers` and says it holds a user
- * or not, recording every method it is asked and failing the test on anything
- * but `hasUser()`, so a test can pin that a foreign guard is asked nothing
- * else.
+ * A guard without Laravel's `GuardHelpers` that records every method it is
+ * asked and fails the test on anything but `hasUser()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

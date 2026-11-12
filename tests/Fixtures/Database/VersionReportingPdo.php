@@ -5,10 +5,9 @@ declare(strict_types = 1);
 namespace Tests\Fixtures\Database;
 
 /**
- * An in-memory SQLite PDO that reports the server version it is given, as a
- * MySQL or MariaDB server's PDO would, so a connection of any driver built on
- * it reads the version through the framework's own code, which is where Laravel
- * strips MariaDB's markers on the `mysql` driver.
+ * An in-memory SQLite PDO that reports the server version it is given, so a
+ * connection reads it through the framework's own code, where Laravel strips
+ * MariaDB's markers on the `mysql` driver.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -8,12 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * An invoice that belongs to many tags through a plain pivot table, with no
- * `using()` model: attaching a tag inserts the pivot's row directly, so no
- * model event is dispatched for it and nothing watching either model hears it.
- *
- * Its table, the tags' and the pivot's are created and dropped by the tests
- * that use them.
+ * An invoice that belongs to many tags through a plain pivot table with no
+ * `using()` model, so attaching a tag dispatches no model event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

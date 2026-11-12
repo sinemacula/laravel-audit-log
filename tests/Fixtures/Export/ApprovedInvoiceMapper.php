@@ -8,10 +8,9 @@ use SineMacula\Laravel\AuditLog\Contracts\OcsfMapper;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 
 /**
- * Classifies an approved invoice as OCSF API Activity (class 6003, in
- * Application Activity), activity 3, Update: the actor as a user, the code as
- * the API operation, and the client's address as the source endpoint, or the
- * source the record was captured on when the record holds no address.
+ * Classifies an approved invoice as OCSF API Activity (class 6003), activity 3,
+ * Update, with the client's address, or the capture source when there is none,
+ * as the source endpoint.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

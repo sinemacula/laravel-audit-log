@@ -8,8 +8,8 @@ use Carbon\CarbonImmutable;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 
 /**
- * A clock stopped at one instant, which it gives in UTC on every call: the
- * clock a test finalises records with, so it chooses when they are recorded.
+ * A clock stopped at one instant, given in UTC, so a test chooses when the
+ * records it finalises are recorded.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

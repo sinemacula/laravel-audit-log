@@ -6,11 +6,8 @@ namespace Tests\Fixtures\Querying;
 
 /**
  * A stream wrapper over the local filesystem that, like a FAT volume or an
- * object-store mount, cannot hold a hard link: `nolink://<path>` opens, writes,
- * stats and unlinks the file at `<path>`, and PHP refuses `link()` on any
- * wrapped path.
- *
- * It wraps only what an export's target checks use.
+ * object-store mount, cannot hold a hard link; it wraps only what an export's
+ * target checks use.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

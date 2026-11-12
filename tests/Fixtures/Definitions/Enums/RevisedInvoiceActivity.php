@@ -8,12 +8,9 @@ use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 
 /**
- * A second enum defining invoice activity, which puts the approval in another
- * category than `InvoiceActivity` does, so the two conflict.
- *
- * Its new code is declared before the conflicting one, so a catalogue that
- * stored each case as it checked it would have stored the new code before
- * refusing the enum.
+ * A second invoice activity enum whose approval is in another category than
+ * `InvoiceActivity`'s; its new code comes first, so a catalogue storing cases
+ * as it checked them would store it before refusing the enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

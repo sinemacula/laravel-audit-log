@@ -32,15 +32,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
  * Makes owners' keys, envelopes and erasures as the package does, without the
- * encrypter or the eraser: a unit's key created through the container's key
- * creator, with the package's own key wrapper bound when none is; a key row
- * signed and wrapped by hand, at any generation, stored or not; an envelope
- * sealed under a data key at an entry and a path; and an owner erased or
- * reinstated by hand, its journal row signed and appended, its keys tombstoned
- * and its marker inserted, as an erasure and a reinstatement commit them.
- *
- * Everything is written on the storage connection, the maintenance connection
- * unless a test configures another, at the container's clock.
+ * encrypter or the eraser, on the storage connection at the container's clock.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

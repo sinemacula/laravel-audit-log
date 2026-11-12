@@ -14,15 +14,8 @@ use Tests\Fixtures\Stores\CapturingLogManager;
 
 /**
  * Captures every message any log channel writes, at a handler behind the
- * channel's own, so it sees what the package writes past Laravel's wrapper and
- * `MessageLogged` listeners never do, and a channel that fails captures
- * nothing.
- *
- * A test calls `captureLogLines()` before it logs, then reads every message, or
- * the spill lines and the log store's lines apart, each picked out by its
- * marker. A capture holds the level, the message and the context as a
- * `MessageLogged` would, but not the channel: a test that needs the channel
- * writes to a file.
+ * channel's own, so it sees what bypasses Laravel's wrapper and `MessageLogged`
+ * listeners; a channel that fails captures nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

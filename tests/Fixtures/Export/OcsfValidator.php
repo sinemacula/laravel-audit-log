@@ -5,19 +5,13 @@ declare(strict_types = 1);
 namespace Tests\Fixtures\Export;
 
 /**
- * Validates an OCSF event offline against the classes of the pinned schema,
- * each resolved by `OcsfSchemaBuilder` from the upstream tag into one file
- * beside the others.
+ * Validates an OCSF event offline against the pinned schema's classes, each
+ * resolved by `OcsfSchemaBuilder` into one file.
  *
- * Validating an event checks every required attribute is present, that no
- * attribute is undeclared (the contents of `unmapped`, or of any other `object`
- * or `json_t` value, excepted), each value's type by the dictionary (a derived
- * type through the type it derives from, an object by recursion, an array
- * member by member), enum membership, the `at_least_one` and `just_one`
- * constraints, that `type_uid` is `class_uid * 100 + activity_id`, and that
- * `class_uid` is the category's uid times 1000 plus the class's own. An
- * attribute of a profile applies only to an event whose `metadata.profiles`
- * names the profile.
+ * It checks requirements, undeclared attributes, types, enums, the
+ * `at_least_one` and `just_one` constraints, and the `type_uid` and `class_uid`
+ * arithmetic; a profile's attribute applies only when `metadata.profiles` names
+ * it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -122,10 +116,9 @@ final readonly class OcsfValidator
     }
 
     /**
-     * What is wrong with a map against its definition: a required attribute
-     * missing, an attribute not declared, each member's own errors, and the
-     * definition's constraints. An attribute of a profile the event does not
-     * apply is not declared.
+     * What is wrong with a map against its definition: a missing required
+     * attribute, an undeclared one, each member's own errors, and the
+     * constraints; a profile the event does not apply declares nothing.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

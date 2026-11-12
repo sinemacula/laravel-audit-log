@@ -21,15 +21,9 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 
 /**
- * Alters a sealed log as someone who can write to its database could, then asks
- * `audit-log:verify` what it finds: every edit is a raw `DB::table()` call on
- * the storage connection, below the package, so nothing the package does when
- * it writes can stand in the way or repair what is changed.
- *
- * An edit without the key can change any column, recompute a SHA-256 digest and
- * copy rows, but never produce a signature; `forgeSeal()` alone signs, with the
- * key ring's key, as a key holder could. The log is stored and sealed as the
- * package does it, through `SealsEntries`.
+ * Alters a sealed log through raw `DB::table()` calls below the package, as
+ * someone who can write to its database could, then asks `audit-log:verify`
+ * what it finds; only `forgeSeal()` signs, as a key holder could.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

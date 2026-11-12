@@ -7,13 +7,9 @@ namespace Tests\Fixtures\Stores;
 use Monolog\Formatter\LineFormatter;
 
 /**
- * The spill channel the documentation gives, with the path a test chooses: a
- * dedicated file, written at `critical` and above, whose `LineFormatter` writes
- * the message alone and one line per record, with inline line breaks off.
- *
- * The spill tests, the replay tests on every engine and the documentation test
- * all read it, so the channel tested and the channel documented cannot drift
- * apart.
+ * The spill channel the documentation gives, with a path a test chooses, shared
+ * by the spill, replay and documentation tests so the tested and documented
+ * channels cannot drift.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
