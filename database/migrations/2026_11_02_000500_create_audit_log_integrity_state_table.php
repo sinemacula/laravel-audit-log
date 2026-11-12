@@ -12,13 +12,9 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the integrity state table: the operational progress of sealing,
- * anchoring and verification, one named value per row, for monitoring and for
- * resuming a sweep. It is never evidence: verification reads none of it, and
- * any progress row may be lost or rewritten without hiding a change to the log.
- * The migration also seeds the installation id (see `InstallationIdentity`), a
- * new UUID version 7, with a plain insert that is never replaced, so
- * `audit-log:check` only ever reads it.
+ * Create the integrity state table: the progress of sealing, anchoring and
+ * verification, which is never evidence. It also seeds the installation id with
+ * a plain insert, never replaced, so `audit-log:check` only ever reads it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,7 +42,7 @@ return new class extends Migration {
             // `name`, not `key`, which MySQL reserves.
             $blueprint->string('name', 64)->primary();
 
-            // A JSON map of scalars, and when it was last written.
+            // A JSON map of scalars.
             $blueprint->text('value');
             $blueprint->dateTime('updated_at', 6);
 
@@ -54,8 +50,7 @@ return new class extends Migration {
                 return;
             }
 
-            // Binary and without padding (NO PAD), as the entries table, and
-            // InnoDB, as every table the package keeps.
+            // Binary NO PAD and InnoDB, as the entries table.
             $blueprint->charset('utf8mb4');
             $blueprint->collation('utf8mb4_0900_bin');
             $blueprint->engine('InnoDB');
@@ -77,8 +72,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * progress is beside the seals it describes.
+     * The storage connection, so progress is beside the seals it describes.
      *
      * @return ?string
      *

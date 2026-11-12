@@ -47,8 +47,6 @@ return new class extends Migration {
             $blueprint->integer('attempts')->default(0);
             $blueprint->dateTime('available_at', 6);
 
-            // The lease: until when the claim that owns the row holds it, and
-            // the token of that claim.
             $blueprint->dateTime('claimed_until', 6)->nullable();
             $blueprint->string('claimed_by', 64)->nullable();
 
@@ -67,8 +65,7 @@ return new class extends Migration {
             }
 
             // What a drain claims by: rows not failed, in the order they fall
-            // due. Named short, so it fits PostgreSQL's 63 characters at the
-            // longest table name.
+            // due.
             $blueprint->index(['failed_at', 'available_at'], $table . '_due_index');
 
             // What a monitor reads the backlog's age by: rows not failed, in
@@ -90,8 +87,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the outbox lives on (see `DeliveryTables`): the one
-     * `audit-log.delivery.outbox.connection` names, or the storage connection.
+     * The outbox connection, or the storage connection when none is set.
      *
      * @return ?string
      *

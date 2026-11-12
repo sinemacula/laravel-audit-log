@@ -3,12 +3,8 @@
 declare(strict_types = 1);
 
 /**
- * Autoload the package's own classes, and its tests', for phpstan in the qlty
- * sandbox, which installs the analysis stack but not the project.
- *
- * Scanning lets phpstan read these classes, but larastan builds a real
- * instance of a model to read its casts, and that needs the class loaded. The
- * namespaces mirror the `autoload` and `autoload-dev` maps in composer.json.
+ * Autoload the package and its tests for phpstan in the qlty sandbox, which
+ * installs only the analysis stack; larastan instantiates models to read casts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

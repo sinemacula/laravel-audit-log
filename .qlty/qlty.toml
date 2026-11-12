@@ -1,8 +1,6 @@
 # Reference: https://qlty.sh/d/qlty-toml
 #
-# Code-quality configuration for both the Qlty CLI and Qlty Cloud. Plugins, lint
-# and format rules come from the shared sinemacula/coding-standards source; this
-# file wires that source in and adds the settings specific to this repository.
+# Plugins and rules come from the shared sinemacula/coding-standards source.
 config_version = "0"
 
 exclude_patterns = [
@@ -46,18 +44,14 @@ name = "php-codesniffer"
 package_file = "composer.json"
 package_filters = ["slevomat", "dealerdirect", "sinemacula"]
 
-# The standards package comes from extra_packages, which is silently ignored
-# whenever package_file is set, so this plugin declares its packages here rather
-# than reading composer.json.
+# qlty silently ignores extra_packages whenever package_file is set, so this
+# plugin declares its packages instead of reading composer.json.
 [[plugin]]
 name = "php-cs-fixer"
 extra_packages = ["sinemacula/coding-standards@1.30.0"]
 
-# phpstan runs from a dedicated sandbox file that lists the analysis stack and
-# every dependency the analysed code references, so a package the code starts
-# to use is added there as well as to composer.json. With no package_filters,
-# qlty installs the whole file into the tool sandbox and phpstan resolves the
-# framework from there, with no project install or prepare step.
+# The sandbox file lists the analysis stack and every dependency the code
+# references: add a new dependency there as well as to composer.json.
 [[plugin]]
 name = "phpstan"
 package_file = ".qlty/configs/composer.json"

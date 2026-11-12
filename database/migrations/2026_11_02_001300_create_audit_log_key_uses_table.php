@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the key uses table: one row for each key and each entry with a field
- * it encrypted, inserted by the storage connection's writer with its entry, and
- * never updated or deleted, a prune included. It is an index derived from the
- * entries, which verification proves complete.
+ * Create the key uses table: which key encrypted a field of which entry,
+ * written with the entry and never changed or deleted, a prune included.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +35,6 @@ return new class extends Migration {
         $mysql = $schema->getConnection()->getDriverName() === 'mysql';
 
         $schema->create($table, static function (Blueprint $blueprint) use ($table, $mysql): void {
-            // The key, as an envelope names it, and the entry it encrypted a
-            // field of.
             $blueprint->uuid('key_id');
             $blueprint->uuid('entry_id');
 
@@ -50,9 +46,6 @@ return new class extends Migration {
                 $blueprint->engine('InnoDB');
             }
 
-            // A key's entries read in order, and an entry's keys found. Named
-            // short, so each fits PostgreSQL's 63 characters at the longest
-            // table name.
             $blueprint->primary(['key_id', 'entry_id'], $table . '_primary');
             $blueprint->index(['entry_id'], $table . '_entry_index');
         });
@@ -71,8 +64,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * a key use is beside the entry and the key it pairs.
+     * The storage connection, so a key use is beside its entry and key.
      *
      * @return ?string
      *

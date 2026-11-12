@@ -10,8 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the entries table: one row per audit record, the evidence the package
- * keeps, written once and never updated.
+ * Create the entries table: one row per audit record, written once and never
+ * updated.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,8 +39,6 @@ return new class extends Migration {
             // were captured; written lower-case, as PostgreSQL returns it.
             $blueprint->uuid('id')->primary();
 
-            // The envelope's format and the event code's version, both covered
-            // by the HMAC.
             $blueprint->smallInteger('record_version');
             $blueprint->string('event', 191);
             $blueprint->smallInteger('event_version');
@@ -63,8 +61,7 @@ return new class extends Migration {
             $blueprint->string('tenant_id', 191)->nullable();
 
             // The session id is an application's own reference, never Laravel's
-            // session cookie id. The credential and request ids are kept for
-            // reading, not looked up, so they are not indexed.
+            // session cookie id.
             $blueprint->string('credential_id', 191)->nullable();
             $blueprint->string('guard', 64)->nullable();
             $blueprint->string('session_id', 191)->nullable();
@@ -82,9 +79,7 @@ return new class extends Migration {
             $blueprint->uuid('import_batch_id')->nullable();
 
             // The keyed digest of an imported record's source assertion, which
-            // tells a repeated import from a conflicting one; null on every
-            // captured record. Not indexed: duplicates are found through the
-            // source's unique index.
+            // tells a repeated import from a conflicting one.
             $blueprint->string('source_digest', 64)->nullable();
 
             // 255 characters, so a truncated, hashed or encrypted address fits
@@ -104,15 +99,13 @@ return new class extends Migration {
 
             $blueprint->smallInteger('integrity_version');
 
-            // The id of the key that signed the row, and the HMAC-SHA256, in
-            // hex, over every other column.
+            // The HMAC-SHA256, in hex, covers every other column.
             $blueprint->string('key_id', 32);
             $blueprint->string('hmac', 64);
 
             if ($mysql) {
-                // Binary and without padding (NO PAD), so ids that differ only
-                // in case or by a trailing space never compare equal, and
-                // InnoDB, so writes are transactional.
+                // Binary NO PAD, so ids differing only in case or a trailing
+                // space never compare equal; InnoDB for transactional writes.
                 $blueprint->charset('utf8mb4');
                 $blueprint->collation('utf8mb4_0900_bin');
                 $blueprint->engine('InnoDB');
@@ -135,8 +128,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`),
-     * the one the model reads and the store writes the table on.
+     * The package's storage connection, which the model and the store use too.
      *
      * @return ?string
      *
@@ -149,16 +141,11 @@ return new class extends Migration {
     }
 
     /**
-     * Index each lookup the trail makes, by actor, subject, principal, tenant,
-     * event, category, correlation and time, index the order sealing pages the
-     * entries in, by the time each was recorded and then its id, and keep an
-     * imported record's source identity unique.
+     * Index the trail's lookups and sealing's order, and keep an imported
+     * record's source identity unique.
      *
-     * Each lookup index but the correlation's ends in the time an entry
-     * occurred and then its id, the order a page of the trail is read in, so a
-     * keyset page reads the index in order and is never sorted, entries of one
-     * microsecond included. No collation is applied to `id`: it compares in the
-     * type the table gives it, a native `uuid` on PostgreSQL.
+     * Lookups end in `occurred_at` then `id`, the trail's page order, so a
+     * keyset page reads the index in order and is never sorted.
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
      * @param  string  $table
@@ -177,8 +164,7 @@ return new class extends Migration {
         $blueprint->index(['correlation_id'], $table . '_correlate_index');
         $blueprint->index(['occurred_at', 'id'], $table . '_occurred_index');
 
-        // What sealing keyset-pages by: the time each entry was recorded, then
-        // its id, so entries recorded in the same microsecond keep an order.
+        // Sealing's keyset order; `id` orders entries of one microsecond.
         $blueprint->index(['recorded_at', 'id'], $table . '_recorded_index');
         $blueprint->unique(['source_id', 'source_record_id'], $table . '_source_unique');
     }

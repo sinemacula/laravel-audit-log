@@ -132,14 +132,9 @@ jobs:
                         data_dir: /var/lib/postgresql/data
                         health_cmd: pg_isready -h 127.0.0.1 -U postgres -d laravel_audit_log_test
 
-        # One service per leg. Declaring both starts both on every leg, so each
-        # was pulling and booting an engine it never connects to. Each image
-        # ignores the other's variables, so one block configures either. Both
-        # probes go over the loopback address rather than a socket, since an
-        # engine that initialises behind a temporary local server answers a
-        # socket probe before the server the tests will actually reach is up.
-        # The data directory is held in memory: the database is thrown away
-        # with the job, so syncing every write to disk only slows the tests.
+        # Each image ignores the other's variables, so one block configures
+        # either. Probes use loopback, since an engine initialising behind a
+        # temporary local server answers a socket probe before it is ready.
         services:
             database:
                 image: ${{ matrix.image }}
@@ -172,10 +167,8 @@ jobs:
                     php-version: 8.3
                     extensions: pdo_mysql, pdo_pgsql
 
-            # Tests create, empty and drop the same tables, so each paratest
-            # worker runs against a database of its own, which the test case
-            # creates from its TEST_TOKEN. The performance suite times its
-            # timeboxes, so it runs on its own, serially, as it does locally.
+            # Each paratest worker gets its own database, named from its
+            # TEST_TOKEN. The performance suite is timed, so it runs serially.
             -   name: Database Tests
                 env:
                     DB_CONNECTION: ${{ matrix.db_driver }}

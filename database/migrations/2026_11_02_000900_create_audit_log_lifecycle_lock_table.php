@@ -10,10 +10,8 @@ use SineMacula\Laravel\AuditLog\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 
 /**
- * Create the lifecycle lock: one row, locked by an update that is the first
- * statement of every lifecycle transaction, so two lifecycle operations never
- * interleave. The migration seeds the row; it is only ever updated, never
- * inserted again or deleted.
+ * Create the lifecycle lock: one row every lifecycle transaction updates first,
+ * so two lifecycle operations never interleave. Seeded here, then only updated.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,8 +38,7 @@ return new class extends Migration {
             // Always 1: the one row there is.
             $blueprint->smallInteger('id')->primary();
 
-            // The token of the operation that last took the lock, and when;
-            // each lock writes new values, so the update always changes the
+            // Each lock writes new values, so its update always changes the
             // row.
             $blueprint->string('token', 64)->nullable();
             $blueprint->dateTime('locked_at', 6)->nullable();
@@ -50,8 +47,8 @@ return new class extends Migration {
                 return;
             }
 
-            // Binary and without padding (NO PAD), as the entries table, and
-            // InnoDB, so the update takes a row lock held until the commit.
+            // Binary NO PAD, as the entries table, and InnoDB, so the update
+            // takes a row lock held until the commit.
             $blueprint->charset('utf8mb4');
             $blueprint->collation('utf8mb4_0900_bin');
             $blueprint->engine('InnoDB');
@@ -73,8 +70,7 @@ return new class extends Migration {
     }
 
     /**
-     * The connection the package's tables live on (see `StorageConnection`), so
-     * the lock is taken in the database the journal and the entries are in.
+     * The storage connection, the database the journal and the entries are in.
      *
      * @return ?string
      *
