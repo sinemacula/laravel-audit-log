@@ -39,18 +39,9 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Proofs, end to end through a capture under the package's encrypter, that a
- * value encrypted for its owner is stored nowhere in plaintext: every form an
- * owner takes (the actor, the subject, a property path, a note's owner and the
- * actor of an encrypted address) is sealed under that owner's key, at its own
- * path, with a key use for each key; the outbox and a spill line hold only the
- * envelope; a field whose owner is absent or erased is dropped and counted,
- * with no reason, the two alike; and a write that fails leaves the plaintext in
- * no spill line, log line or report.
+ * Proofs that a value encrypted for its owner is stored nowhere in plaintext.
  *
- * It claims no coverage: it pins what a capture leaves behind, across the
- * pipeline, the sealer, the encrypter, the delivery and the store, each of
- * which its own test pins.
+ * Claims no coverage: it pins the pipeline end to end; each part has a test.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,9 +63,7 @@ final class EncryptionProofsTest extends TestCase
     private const string ADDRESS = '203.0.113.7';
 
     /**
-     * Bind the package's key wrapper and its encrypter, as the provider will,
-     * fresh on every resolution, keep reports from the framework and log to
-     * nowhere.
+     * Bind the key services afresh, keep reports, and log to nowhere.
      *
      * @return void
      */
@@ -90,12 +79,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * Each form an owner takes is encrypted under that owner's key in the
-     * record's tenant and category: the actor's card, the subject's account, a
-     * payee's name keyed on the payee property, a customer's note and the
-     * actor's address, each sealed at its own path, opening there to its typed
-     * plaintext; the stored row holds no plaintext, and each distinct key has
-     * its one key use.
+     * Each owner form is sealed under its owner's key, one key use per key.
      *
      * @return void
      */
@@ -159,8 +143,7 @@ final class EncryptionProofsTest extends TestCase
 
         self::assertIsArray($reference);
 
-        // A JSON column on MySQL gives its keys back sorted, so the order is
-        // not what the record held
+        // MySQL's JSON column sorts its keys, losing the record's order
         ksort($reference);
 
         self::assertSame(['id' => '5', 'type' => 'App\Models\Payee'], $reference);
@@ -168,9 +151,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * A record whose write fails is spilled holding its envelopes and none of
-     * the plaintext: the store's failure to write the record's key uses rolls
-     * its entry back, and the spill line it leaves carries the envelope.
+     * A spilled record holds its envelopes and none of the plaintext.
      *
      * @return void
      */
@@ -191,9 +172,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * Under the outbox, a record is encrypted at capture: its outbox row, as
-     * stored and once its payload is decrypted, holds the envelope and none of
-     * the plaintext.
+     * An outbox row holds the envelope and none of the plaintext.
      *
      * @return void
      */
@@ -215,10 +194,8 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * A field whose owner the record lacks, and one whose owner is erased, are
-     * dropped alike: neither is stored in plaintext, each is counted as one
-     * omission at its path, and neither record says why, so the two cannot be
-     * told apart and no later record about the owner discloses the erasure.
+     * An absent or erased owner's field is dropped and counted alike, so no
+     * record discloses the erasure.
      *
      * @return void
      */
@@ -248,11 +225,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * A write that fails, at a store that quotes the whole record in its
-     * failure as a refused insert quotes its bindings, leaves the plaintext in
-     * nothing: the spill line holds the envelope, and the reported failure,
-     * passed through the framework's own handler, and every line logged hold
-     * none of it; what the store saw held the envelope and no plaintext.
+     * A failed write leaves no plaintext in the spill line, report or log.
      *
      * @return void
      */
@@ -293,8 +266,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * Capture a charge of a card the actor owns, encrypted under the actor's
-     * key, with an amount beside it.
+     * Capture a card charge encrypted under the actor's key, with an amount.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $actor
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
@@ -322,8 +294,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * The typed plaintext the envelope holds, opened under the key row's data
-     * key at the entry and path, in the configured log.
+     * The typed plaintext the envelope holds, opened at the entry and path.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -344,8 +315,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * The key uses the entry should have: one for each distinct key of its
-     * owners in the tenant and the category, sorted by key.
+     * The entry's expected key uses, one per distinct owner key, sorted by key.
      *
      * @param  string  $entryId
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
@@ -375,8 +345,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * The stored row of the entry, as the database holds it, which the test
-     * fails without.
+     * The entry's stored row as the database holds it.
      *
      * @param  string  $id
      * @return array<string, int|string|null>
@@ -424,8 +393,7 @@ final class EncryptionProofsTest extends TestCase
     }
 
     /**
-     * Make the definition the only one the facade's recorder and the container
-     * know, as an application registers it while it boots.
+     * Register the definition as the only one, as an application does at boot.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
      * @return void

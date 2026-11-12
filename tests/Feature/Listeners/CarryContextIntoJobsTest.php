@@ -32,10 +32,7 @@ use Tests\Unit\Stubs\StubForeignGuard;
 use Tests\Unit\Stubs\StubHeldActorReader;
 
 /**
- * Feature tests for what a queued job carries: everything goes on the copy of
- * Context the payload is made from, a request id is generated if none exists
- * yet, a left-behind actor is dropped outside a job and kept inside one, and no
- * failure ever stops the host's dispatch.
+ * Feature tests for the Context a queued job's payload carries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,8 +67,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * The actor goes on the repository given, and the scoped repository gains
-     * no actor key.
+     * The actor goes on the given copy, never on the scoped repository.
      *
      * @return void
      */
@@ -154,8 +150,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * The actor a bound reader reads goes into the job with its principal,
-     * tenant and session, and reads back as it went out.
+     * A reader's held actor travels with its principal, tenant and session.
      *
      * @return void
      */
@@ -207,8 +202,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * Inside a job with no ambient actor the actor it carried goes on, so a
-     * chained job keeps it.
+     * Inside a job with no ambient actor, the carried actor goes on.
      *
      * @return void
      */
@@ -224,8 +218,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * What goes on is the actor the job's frame kept, not what a sync job
-     * inside it left in Context.
+     * The frame's actor beats one a sync job left in Context.
      *
      * @return void
      */
@@ -240,8 +233,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A job that carried nobody sends nobody on, whatever a sync job inside it
-     * left in Context.
+     * A job that carried no actor sends none, whatever Context holds.
      *
      * @return void
      */
@@ -253,8 +245,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A user left on a guard by an earlier job is not stamped onto what this
-     * job dispatches.
+     * A user left on a guard by an earlier job is not carried.
      *
      * @return void
      */
@@ -287,8 +278,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A malformed setting is reported and goes no further: making a payload
-     * through the registered listener still succeeds.
+     * A malformed setting is reported and the payload is still made.
      *
      * @return void
      */
@@ -306,8 +296,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A failure part way through takes the copy's actor keys with it, so no
-     * stale snapshot goes out, and leaves the rest of the copy as it was.
+     * A failure drops the copy's actor keys and leaves the rest of it alone.
      *
      * @return void
      */
@@ -333,8 +322,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A user who cannot be referred to is no actor: the job is sent with its
-     * request id and no envelope, and nothing is reported.
+     * An unreferenceable user is no actor, and nothing is reported.
      *
      * @return void
      */
@@ -377,9 +365,8 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A handler that dispatches while it reports comes back through this
-     * listener, which fails again. The failure is reported once and not again
-     * from inside its own report, and the nested job still has a payload.
+     * A handler dispatching from its report is called once, and the nested
+     * dispatch still makes a payload.
      *
      * @return void
      */
@@ -406,8 +393,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * The nested dispatch's copy loses its actor keys too, though its failure
-     * is not reported.
+     * The nested dispatch's copy loses its actor keys too, unreported.
      *
      * @return void
      */
@@ -431,9 +417,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * What it reads comes from the current container on every event, not from
-     * the container the dispatcher was built with, which is what makes the
-     * listener safe under Octane.
+     * State is read from the current container on every event, for Octane.
      *
      * @return void
      */
@@ -459,8 +443,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A failure is reported to the current container's handler, not to the one
-     * of the container the dispatcher was built with.
+     * A failure is reported to the current container's handler.
      *
      * @return void
      */
@@ -493,8 +476,7 @@ final class CarryContextIntoJobsTest extends TestCase
     }
 
     /**
-     * A copy of Context still holding a snapshot, as one a sync job left behind
-     * or a job's own payload brought.
+     * A copy of Context holding a snapshot, as a sync job leaves behind.
      *
      * @return \Illuminate\Log\Context\Repository
      */

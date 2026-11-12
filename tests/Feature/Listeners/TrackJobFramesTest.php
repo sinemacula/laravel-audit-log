@@ -31,9 +31,7 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Feature tests for the frames jobs enter and leave: the name kept, each ending
- * event, a failed job's two events in either order, the container reached, and
- * that nothing but the package's own state changes.
+ * Feature tests for the frames jobs enter and leave.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,8 +42,7 @@ use Tests\Unit\Stubs\StubAuthUser;
 final class TrackJobFramesTest extends TestCase
 {
     /**
-     * Bind the frames as the provider binds them, which it leaves alone once it
-     * binds them itself.
+     * Bind the frames as the provider does, which keeps an existing binding.
      *
      * @return void
      */
@@ -91,8 +88,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A job's display name is kept over the handler that runs it, which is what
-     * a queued job's class or `displayName()` becomes in its payload.
+     * A job's display name is kept over the handler that runs it.
      *
      * @return void
      */
@@ -106,8 +102,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * Rows of `[display name]`: what a queued payload can hold that is not a
-     * string, which the framework hands back as it found it.
+     * Rows of `[display name]`: non-string names a queued payload can hold.
      *
      * @return iterable<string, array{0: int|list<string>|true}>
      */
@@ -121,9 +116,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A job whose display name is not a string still has its frame, so its
-     * records say they came from the queue, its end still finds the frame, and
-     * a job that can run is not failed by a type error here.
+     * A job with a non-string display name still enters and leaves its frame.
      *
      * @param  int|list<string>|true  $name
      * @return void
@@ -147,8 +140,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * The events that end a job read nothing of its payload, so one that cannot
-     * be read still leaves its frame.
+     * Ending a job reads nothing of its payload, so an unreadable one leaves.
      *
      * @return void
      */
@@ -187,8 +179,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * Each event that ends a job leaves its frame, and another job's leaves it
-     * in place.
+     * Each ending event leaves the frame; another job's leaves it in place.
      *
      * @formatter:off
      *
@@ -217,8 +208,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * Rows of `[first event, second event]`: a failed job's two events, in the
-     * order the sync queue fires them and the order a worker does.
+     * Rows of `[first, second]`: a failure's events in sync and worker order.
      *
      * @formatter:off
      *
@@ -239,8 +229,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A failed job's two events leave its frame once, in either order, and the
-     * frame of the command beneath it survives.
+     * A failed job's two events leave its frame once, in either order.
      *
      * @param  class-string<\Illuminate\Queue\Events\JobExceptionOccurred|\Illuminate\Queue\Events\JobFailed>  $first
      * @param  class-string<\Illuminate\Queue\Events\JobExceptionOccurred|\Illuminate\Queue\Events\JobFailed>  $second
@@ -266,8 +255,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * An inner sync job's failure restores the job that dispatched it, which
-     * keeps its frame when it goes on to catch the exception.
+     * An inner sync job's failure restores the outer job's frame.
      *
      * @return void
      */
@@ -285,9 +273,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * The frames are those of the current container on every event, not those
-     * of the container the dispatcher was built with, which is what makes the
-     * listener safe under Octane.
+     * The current container's frames are used on every event, for Octane.
      *
      * @return void
      */
@@ -308,8 +294,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * The frame keeps the actor the job carried, read from the Context Laravel
-     * has just hydrated, in a worker and on the sync queue alike.
+     * The frame keeps the actor the job carried in its hydrated Context.
      *
      * @return void
      */
@@ -335,8 +320,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A malformed envelope is no carried actor, and the job still has its
-     * frame.
+     * A malformed envelope carries no actor, and the job still has its frame.
      *
      * @return void
      */
@@ -351,8 +335,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A job on a worker notes the very users the guards hold as it starts, none
-     * of them its own.
+     * A job on a worker notes the users the guards hold as it starts.
      *
      * @return void
      */
@@ -368,8 +351,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A sync job runs inside its caller, so the guards' users are the caller's
-     * and none of them is a leftover.
+     * A sync job notes no user, since the guards' users are its caller's.
      *
      * @return void
      */
@@ -385,8 +367,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A setting or a guard that cannot be read must not stop a job that may
-     * record nothing, and the job still has its frame.
+     * An unreadable setting or guard stops no job, which keeps its frame.
      *
      * @return void
      */
@@ -400,8 +381,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * A job on a worker forgets the identifiers an earlier job left in the
-     * scoped identity, so one with no envelope gets a fresh id.
+     * A job on a worker forgets an earlier job's identifiers.
      *
      * @return void
      */
@@ -435,8 +415,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * Context is the same after a job's events as before them, since only the
-     * package's own state is ever reset.
+     * Context is unchanged by a job's events.
      *
      * @return void
      */
@@ -455,8 +434,7 @@ final class TrackJobFramesTest extends TestCase
     }
 
     /**
-     * Neither event reaches the auth manager, so no guard is read or reset, and
-     * a guard a job signed in stays signed in.
+     * Neither event reaches the auth manager, so a guard a job signed in stays.
      *
      * @return void
      */

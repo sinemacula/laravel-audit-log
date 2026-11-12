@@ -41,10 +41,7 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * End-to-end tests for a record made inside an HTTP request and read back from
- * the database: the actor before and after the auth middleware, the client and
- * its proxies, the request id, what a contributor fills and what an explicit
- * value beats, and that nothing but the context the package promises is stored.
+ * End-to-end tests for a record made inside an HTTP request.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -123,8 +120,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * An authenticated request records its actor, the guard that gave it, the
-     * client, the route's name, the method and a generated request id.
+     * A signed-in request records actor, guard, client, route, method and id.
      *
      * @return void
      */
@@ -152,8 +148,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * A request nobody authenticated records no actor and no guard, and the
-     * guard is never asked to find one.
+     * An unauthenticated request records no actor or guard and asks no guard.
      *
      * @return void
      */
@@ -173,8 +168,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * A record made before the auth middleware has no actor, because no guard
-     * holds a user yet and none is loaded; one made after it has the actor.
+     * A record before the auth middleware has no actor; one after it does.
      *
      * @return void
      */
@@ -198,8 +192,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * `by()` names the actor before the auth middleware has run, and fills no
-     * guard, since the guard gave no actor.
+     * `by()` names the actor before the auth middleware, with no guard.
      *
      * @return void
      */
@@ -258,8 +251,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * Nothing of the URL, its path or its query string is stored anywhere in
-     * the row.
+     * No part of the URL is stored in the row.
      *
      * @return void
      */
@@ -314,8 +306,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * A vendor's client address header is not a trusted proxy's, with or
-     * without one configured.
+     * A vendor's client address header is ignored, trusted proxy or not.
      *
      * @return void
      */
@@ -369,8 +360,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * A record in another global middleware has its request, since the HTTP
-     * frame is entered first, and no route, since none has been matched.
+     * A record in a global middleware has its request but no route.
      *
      * @return void
      */
@@ -390,9 +380,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * Rows of `[name, value]`: a method override a client can send on a POST
-     * before anything has refused it, long or malformed, in the body or a
-     * header.
+     * Rows of `[name, value]`: long or malformed method overrides.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -407,8 +395,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * A record made before routing stores no method the client chose, and a
-     * malformed one does not suppress the record.
+     * A method override never reaches the row; a malformed one stops nothing.
      *
      * @param  string  $name
      * @param  string  $value
@@ -436,8 +423,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * A deferred callback, added as Laravel's `defer()` adds one, runs after
-     * the response and keeps its request.
+     * A deferred callback runs after the response and keeps its request.
      *
      * @return void
      */
@@ -529,8 +515,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * With no contributor the package fills no principal, tenant or session,
-     * and a started session's id appears nowhere in the row.
+     * By default no principal, tenant, session or session id is stored.
      *
      * @return void
      */
@@ -558,8 +543,8 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * Rows of `[what the builder is told, actor type, actor id, tenant type,
-     * tenant id]`: an explicit value, `null` included, beats a contributor's.
+     * Rows of `[told, actor type, actor id, tenant type, tenant id]`; an
+     * explicit value, `null` included, beats a contributor's.
      *
      * @formatter:off
      *
@@ -609,8 +594,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * Whatever the builder was told explicitly stands, and a contributor fills
-     * only the gaps.
+     * An explicit value stands and a contributor fills only the gaps.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): \SineMacula\Laravel\AuditLog\Records\PendingRecord  $explicit
      * @param  ?string  $actorType
@@ -636,8 +620,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * Recording in a request whose session holds a user id loads nobody, so no
-     * `Authenticated` event is dispatched and there is no actor.
+     * Recording loads no user, so no `Authenticated` event is dispatched.
      *
      * @return void
      */
@@ -662,8 +645,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * In a request with an authenticated user, a record costs its one insert:
-     * nothing reads a user, and the guard's lookup is the auth middleware's.
+     * A record costs one insert and reads no user.
      *
      * @return void
      */
@@ -686,8 +668,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * A request with its middleware skipped never enters a frame, so its record
-     * is outside any frame: console, with no client.
+     * A request without middleware enters no frame, so its record is console.
      *
      * @return void
      */
@@ -738,8 +719,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * Register the actor and tenant contributors as a provider would, while
-     * booting.
+     * Register the actor and tenant contributors as a provider would.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -755,8 +735,7 @@ final class HttpContextTest extends TestCase
     }
 
     /**
-     * Bind a middleware that records what the closure builds, then passes the
-     * request on, and return the name it is bound under.
+     * Bind a middleware recording what the closure builds and return its name.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\PendingRecord  $builds
      * @return string

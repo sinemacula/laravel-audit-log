@@ -20,18 +20,10 @@ use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
 /**
- * Feature tests for what an envelope is bound to, read through the trail under
- * a scope that reveals the encrypted fields: an envelope reveals its value only
- * at the entry, the path, the list position and the column it was sealed for,
- * so one copied to another entry, moved to another path or column, swapped with
- * its neighbour in a list, or moved into or out of the IP address reads
- * `unreadable`; and a stored row edited to hold a copied envelope fails its
- * HMAC, so none of its fields reaches the reader.
+ * Feature tests that an envelope reveals its value only where it was sealed.
  *
- * The keys are made through the key creator and the envelopes sealed with the
- * field cipher, as the package's encrypter seals them; the entries are stored
- * through the database store, each signed as captured, so only the envelope's
- * own binding decides, but where the test edits the stored row.
+ * Entries are signed as captured, so only the envelope's binding decides,
+ * except where a test edits the stored row.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,8 +52,7 @@ final class CiphertextRelocationTest extends TestCase
     private string $keyId = '';
 
     /**
-     * Bind the read path with the package's reader, reveal every encrypted
-     * field, and make the owner's key.
+     * Bind the reader, reveal every encrypted field, and make the owner's key.
      *
      * @return void
      */
@@ -83,8 +74,7 @@ final class CiphertextRelocationTest extends TestCase
     }
 
     /**
-     * An envelope copied, as it is, to the same path of another entry reads
-     * `unreadable` there, while the entry it was sealed for still reveals it.
+     * An envelope copied to another entry reads `unreadable` there.
      *
      * @return void
      */
@@ -104,9 +94,7 @@ final class CiphertextRelocationTest extends TestCase
     }
 
     /**
-     * An envelope moved within its own entry, to another key, to a shallower
-     * path or into the context, reads `unreadable` there, while one left at its
-     * path reveals its value.
+     * An envelope moved to another path or into the context reads `unreadable`.
      *
      * @return void
      */
@@ -131,9 +119,7 @@ final class CiphertextRelocationTest extends TestCase
     }
 
     /**
-     * Envelopes are bound to the index their element is stored at: in the order
-     * they were sealed for each reveals its value, and swapped each reads
-     * `unreadable`.
+     * Envelopes swapped between list positions read `unreadable`.
      *
      * @return void
      */
@@ -157,9 +143,7 @@ final class CiphertextRelocationTest extends TestCase
     }
 
     /**
-     * An address sealed for the IP address reveals it there; a property's
-     * envelope moved into the IP address, and the address's envelope moved into
-     * a property, each read `unreadable`.
+     * An envelope moved into or out of the IP address reads `unreadable`.
      *
      * @return void
      */
@@ -182,10 +166,7 @@ final class CiphertextRelocationTest extends TestCase
     }
 
     /**
-     * A stored row edited to hold an envelope copied from another entry fails
-     * its HMAC: every envelope it holds, its own untouched one included, reads
-     * `unreadable` and never reaches the reader, while the entry the envelope
-     * was copied from still reveals it.
+     * A row holding a copied envelope fails its HMAC, hiding every field.
      *
      * @return void
      */
@@ -216,8 +197,7 @@ final class CiphertextRelocationTest extends TestCase
     }
 
     /**
-     * The value sealed under the owner's key as an envelope at the entry and
-     * the path.
+     * The value sealed under the owner's key at the entry and path.
      *
      * @param  string  $value
      * @param  string  $entryId

@@ -32,10 +32,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * End-to-end tests for what the fake does and does not model: it holds exactly
- * what the real store would have been given, a bulk record's attachment
- * included, after the same contributors and the same deferral, and it is no
- * transaction engine, so what a rollback undoes in a database stays held in it.
+ * End-to-end tests for what the fake does and does not model.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,9 +71,7 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * With the clock and the id pinned, the record the fake was given and the
-     * envelope the database store wrote in a second run are the same, every
-     * field and the signature included.
+     * The fake holds the record the database store writes, signature included.
      *
      * @return void
      */
@@ -103,11 +98,7 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * With the clock pinned, the bundle the fake was given and the bundle the
-     * database store kept in a second delivery of the same bulk record are the
-     * same: the entry's envelope, signature included, and the artifact, its
-     * sealed members included, which open to the canonical form its digest
-     * names.
+     * A bulk record's bundle reaches the fake as the database keeps it.
      *
      * @return void
      */
@@ -141,8 +132,7 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * Records reaching the fake have been through the contributors, the
-     * package's and the application's.
+     * Records reaching the fake have been through every contributor.
      *
      * @return void
      */
@@ -161,8 +151,7 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * Deferral stays in the real delivery: an after-commit record reaches the
-     * fake on the commit, and never on a rollback.
+     * An after-commit record reaches the fake on commit and never on rollback.
      *
      * @return void
      */
@@ -195,9 +184,7 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * The fake is no transaction engine: an immediate record it was given stays
-     * held after the host rolls back, where a shared database would have undone
-     * it. Rollback and atomicity are for tests against a real database.
+     * An immediate record stays in the fake after a host rollback.
      *
      * @return void
      */
@@ -216,8 +203,7 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * Under the `throw` mode what a failing fake throws comes through the
-     * recorder to the caller, sanitised, and it holds nothing.
+     * Under `throw`, a failing fake's sanitised exception reaches the caller.
      *
      * @return void
      */

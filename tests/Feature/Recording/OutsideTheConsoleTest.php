@@ -32,10 +32,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * End-to-end tests for the package booted as it is under PHP-FPM, where
- * `runningInConsole()` is false. Every other test runs in the console, so only
- * these fail if the HTTP frame or a listener is ever registered behind that
- * check.
+ * End-to-end tests with `runningInConsole()` false, as under PHP-FPM, so a
+ * frame or listener registered behind that check fails here.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,8 +59,7 @@ final class OutsideTheConsoleTest extends TestCase
     }
 
     /**
-     * A request has the HTTP origin and the client's address, which only an
-     * HTTP frame gives it.
+     * A request has the HTTP origin and the client's address.
      *
      * @return void
      */
@@ -80,8 +77,7 @@ final class OutsideTheConsoleTest extends TestCase
     }
 
     /**
-     * A job a request runs has the queue origin, its class and the request's
-     * actor, and the request comes back when it ends.
+     * A job a request runs has its frame, class and the request's actor.
      *
      * @return void
      */
@@ -153,8 +149,7 @@ final class OutsideTheConsoleTest extends TestCase
     }
 
     /**
-     * Make the application believe it is not in the console, as under PHP-FPM,
-     * before any provider asks it.
+     * Make the application report it is outside the console, before boot.
      *
      * @param  mixed  $app
      * @return void

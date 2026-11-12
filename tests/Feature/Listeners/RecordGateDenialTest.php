@@ -39,17 +39,7 @@ use Tests\Unit\Stubs\StubAuthUser;
 use Tests\Unit\Stubs\StubDocument;
 
 /**
- * Feature tests for the capture of the Gate's denials: off unless turned on; a
- * denial as the Gate itself reads one; the user the Gate checked as actor, or
- * explicitly no one, and never a guard; the ability cleaned and capped and the
- * arguments as references, class names or the marker; a reason code kept only
- * when allowlisted, and a response's message never read; the abilities
- * selected; every evaluation recorded; and a malformed setting contained, read
- * only for a denial.
- *
- * The provider registers the listener for the Gate's evaluations; most tests
- * invoke it directly with an evaluation of their own, and the rest check
- * through the Gate itself.
+ * Feature tests for capturing the Gate's denials.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,8 +65,7 @@ final class RecordGateDenialTest extends TestCase
     private array $failures = [];
 
     /**
-     * Fake the store, bind the reporter, turn Gate capture on, and hear each
-     * capture failure.
+     * Fake the store and reporter, enable Gate capture, and hear failures.
      *
      * @return void
      */
@@ -98,8 +87,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * With Gate capture off, as it is unless turned on, a denial records
-     * nothing, says nothing, and leaves its event for another source.
+     * With Gate capture off, a denial records nothing and is left unclaimed.
      *
      * @return void
      */
@@ -134,8 +122,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * A `false` result is a denial: recorded under the Gate code, denied, with
-     * no reason, in the security category.
+     * A `false` result is a denial in the security category, with no reason.
      *
      * @return void
      */
@@ -244,8 +231,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * A guest's denial has explicitly no actor, even while a guard holds a
-     * user.
+     * A guest's denial has no actor, even while a guard holds a user.
      *
      * @return void
      */
@@ -264,8 +250,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * The Gate names no guard, so none is recorded, whatever guard holds a user
-     * and whoever the actor is.
+     * No guard is recorded, since the Gate names none.
      *
      * @return void
      */
@@ -280,9 +265,8 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * The ability is cleaned of controls and cut to 191 bytes without splitting
-     * a character, while the abilities are selected on the ability exactly as
-     * the Gate gave it, so excepting its cleaned form excepts nothing.
+     * The ability is cleaned and capped at 191 bytes on a character boundary,
+     * while selection uses the raw ability.
      *
      * @return void
      */
@@ -304,8 +288,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * The arguments are kept as model references, class names or the marker, at
-     * most eight, with the count of every one.
+     * Arguments become references, classes or the marker, up to eight, counted.
      *
      * @return void
      */
@@ -329,9 +312,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * A denied response's code is the reason only when the reason codes list
-     * it, as a string or as an integer whose string form is listed; any other
-     * code, one that merely looks like a code included, gives no reason.
+     * A response code is the reason only when allowlisted, as string or int.
      *
      * @return void
      *
@@ -357,8 +338,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * A result that is not a response has no code, so no reason, whatever the
-     * reason codes list.
+     * A result that is not a response gives no reason.
      *
      * @return void
      */
@@ -373,8 +353,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * Neither the denied response's message nor its string form is ever read,
-     * since it is free text.
+     * The denied response's free-text message is never read.
      *
      * @return void
      *
@@ -428,8 +407,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * With only abilities listed, only their denials are recorded, compared
-     * exactly as the Gate gave them.
+     * Only abilities filter denials, compared exactly as the Gate gave them.
      *
      * @return void
      */
@@ -446,8 +424,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * An excepted ability's denials are never recorded, even when only
-     * abilities list it too.
+     * An excepted ability is never recorded, even when only abilities list it.
      *
      * @return void
      */
@@ -466,8 +443,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * Every denial the Gate evaluates is recorded, so the same denial twice
-     * gives two rows; one event object is still recorded once.
+     * Each evaluation is recorded, but one event object only once.
      *
      * @return void
      */
@@ -483,8 +459,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * Through the Gate itself, every denial is recorded and the check returns
-     * its result.
+     * Through the Gate itself, each denial is recorded and the result returned.
      *
      * @return void
      */
@@ -508,9 +483,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * A malformed setting is a contained failure, reported once and dispatched
-     * once naming the event, the listener and the refusal, and the Gate's check
-     * itself still returns its result.
+     * A malformed setting is contained, and the Gate's check still returns.
      *
      * @return void
      */
@@ -548,9 +521,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * A check whose result is truthy and not a response is left alone before
-     * any setting is read, so even malformed settings record nothing and say
-     * nothing.
+     * An allowed check reads no setting, so malformed settings stay silent.
      *
      * @return void
      *
@@ -568,9 +539,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * With Gate capture off, a response is never asked whether it denies, so
-     * one that throws when asked records nothing, says nothing, and the Gate's
-     * check returns its result.
+     * With capture off, a response is never asked whether it denies.
      *
      * @return void
      */
@@ -588,11 +557,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * With Gate capture on, a response that throws when asked whether it denies
-     * is asked inside the capture, so its failure is contained: nothing is
-     * recorded, one report and one `AuditCaptureFailed` name the event, the
-     * listener and the failure's class, and the Gate's check returns its
-     * result.
+     * A response that throws when asked if it denies is a contained failure.
      *
      * @return void
      */
@@ -613,9 +578,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * An ability that is not a string, such as the value of an integer-backed
-     * enum the Gate checks, cannot be selected, so its denial is a contained
-     * failure and the Gate's check returns its result.
+     * A non-string ability, such as an int-backed enum, is a contained failure.
      *
      * @return void
      */
@@ -632,8 +595,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * Bind the capture state as the provider does, a registry of the test's
-     * own, and define the package codes while the application boots.
+     * Bind the capture state as the provider does and define the package codes.
      *
      * @param  mixed  $app
      * @return void
@@ -677,8 +639,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * The Gate's evaluation of the ability for the user, with the arguments and
-     * the result.
+     * The Gate's evaluation of the ability for the user, arguments and result.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -694,8 +655,7 @@ final class RecordGateDenialTest extends TestCase
     }
 
     /**
-     * The evaluation a Gate of its own dispatches for a guest when the
-     * ability's callback gives the result, which the Gate passes on as it is.
+     * The evaluation a Gate of its own dispatches for a guest with the result.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

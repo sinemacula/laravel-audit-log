@@ -28,19 +28,10 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Proofs of a database restored from a backup taken before an erasure, on the
- * provider's own bindings, through the commands: with a disk anchor that holds
- * a seal the restored database does not, `audit-log:check` refuses, and a
- * restored key decrypts again, until `audit-log:erase --reapply` erases the
- * owners again and journals the restore as reconciled with the anchored head;
- * and a key table restored on its own brings back a key an erasure destroyed,
- * which `audit-log:verify` and `audit-log:check` each report until the erasure
- * is re-applied.
+ * Proofs of reconciling a database restored from before an erasure.
  *
- * A backup is every row of the package's tables, read as the database holds
- * them, and a restore deletes every row and puts the backup's back. It claims
- * no coverage: it pins what the check, the verification and the reapply do
- * together, each of which its own test pins.
+ * A backup is every row of the package's tables; a restore replaces them all.
+ * Claims no coverage: each command has its own test.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,8 +62,7 @@ final class RestoreReconciliationTest extends TestCase
     private array $files = [];
 
     /**
-     * Freeze the clock, report to a recording handler, and define the charge on
-     * a recorder of the test's own, behind the facade.
+     * Freeze the clock, record reports, and define the charge.
      *
      * @return void
      */
@@ -98,8 +88,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * Put the clock back, and remove the anchor disk and the files this test
-     * wrote.
+     * Put the clock back and remove the anchor disk and its files.
      *
      * @return void
      */
@@ -124,9 +113,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * A database restored from before an erasure, while its disk anchor holds
-     * the seal made after it, fails `audit-log:check` on the anchored head, and
-     * the erased owner's card decrypts again.
+     * A restore behind the anchor fails the check and the card decrypts again.
      *
      * @return void
      */
@@ -145,10 +132,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * Re-applying the erasures since the backup, from a file naming the erased
-     * owner, erases the owner again and journals the restore as reconciled at
-     * the anchored head, after which `audit-log:check` passes and the card
-     * reads `[ERASED]` again.
+     * Re-applying the erasures erases the owner again and lets the check pass.
      *
      * @return void
      */
@@ -172,10 +156,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * A key table restored on its own brings back the key an erasure destroyed:
-     * `audit-log:verify` reports it `key_restored` and fails, `audit-log:check`
-     * names it, and the card decrypts again, until the erasure is re-applied,
-     * after which both pass and the card reads `[ERASED]`.
+     * A restored key fails verify and check until the erasure is re-applied.
      *
      * @return void
      */
@@ -212,10 +193,8 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * Anchor seals on a disk of the test's own, charge the owner's card, seal
-     * and anchor it, back the database up, erase the owner, charge again, seal
-     * and anchor the second seal, then restore the backup; and return the first
-     * charge's id.
+     * Anchor two seals around an erasure, restore the earlier backup, and
+     * return the first charge's id.
      *
      * @return string
      */
@@ -248,8 +227,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * Capture a charge of the owner's card and return its id; the clock moves
-     * on a second after it.
+     * Capture a charge of the owner's card, return its id, and tick the clock.
      *
      * @return string
      */
@@ -303,8 +281,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * Run the command with the arguments given, and return its exit code and
-     * what it printed.
+     * Run the command and return its exit code and output.
      *
      * @param  string  $command
      * @param  array<string, bool|string>  $arguments
@@ -318,8 +295,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * Write the file of the erasures since the backup, naming the owner, and
-     * return its path.
+     * Write the erasures file naming the owner and return its path.
      *
      * @return string
      */
@@ -335,8 +311,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * The entry with the id, as a page of the trail shows it to the viewer,
-     * which the test fails without.
+     * The entry as a trail page shows it; the test fails without it.
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
@@ -353,8 +328,7 @@ final class RestoreReconciliationTest extends TestCase
     }
 
     /**
-     * Every package table on the storage connection, which a backup of the
-     * database holds.
+     * Every package table on the storage connection.
      *
      * @return list<string>
      */

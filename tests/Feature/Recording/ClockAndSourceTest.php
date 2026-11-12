@@ -17,9 +17,7 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * End-to-end tests for what a record takes from the bound clock and the source
- * settings, read back from the database: the time it occurred, the time its id
- * embeds, one UTC instant whatever zone the clock answers in, and its source.
+ * End-to-end tests for what a record takes from the clock and source settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +35,7 @@ final class ClockAndSourceTest extends TestCase
     private const string INSTANT = '2026-07-01T12:00:00.123456Z';
 
     /**
-     * The bound clock gives the time the activity occurred, to the microsecond,
-     * and the time it was recorded.
+     * The bound clock gives the occurred and recorded times to the microsecond.
      *
      * @return void
      */
@@ -102,8 +99,7 @@ final class ClockAndSourceTest extends TestCase
     }
 
     /**
-     * With no source configured, the source is a slug of the application's name
-     * and there is no region.
+     * With no source configured, the source is the app's slug, with no region.
      *
      * @return void
      */
@@ -140,8 +136,7 @@ final class ClockAndSourceTest extends TestCase
     }
 
     /**
-     * An application name that gives no slug, with no source configured, fails
-     * closed naming the setting, and nothing is written.
+     * An app name with no slug and no source fails closed and writes nothing.
      *
      * @return void
      */

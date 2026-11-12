@@ -31,11 +31,7 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * End-to-end tests for a job run on the sync queue, inside whatever dispatched
- * it: the job's own origin and name with its dispatcher's identity, the
- * caller's frame coming back on success and on failure, the `failed()` hook,
- * what an application's listeners on a job's end see, and a snapshot one job
- * leaves in Context not reaching the next.
+ * End-to-end tests for a job run on the sync queue inside its dispatcher.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,8 +74,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * A sync job's record has the queue origin and its class, with the request
-     * id and actor of the request that dispatched it, and no route of its own.
+     * A sync job records queue, its class, and the dispatcher's id and actor.
      *
      * @return void
      */
@@ -168,8 +163,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * A sync job inside a sync job gives the outer one back, and the stack is
-     * empty when the outer one ends.
+     * A nested sync job restores the outer one, and the stack ends empty.
      *
      * @return void
      */
@@ -203,8 +197,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * A route running a job running a job gets each frame back in turn, with
-     * one request id all the way down and up again.
+     * Each frame comes back in turn under one request id.
      *
      * @return void
      */
@@ -223,8 +216,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * Rows of `[inner job, code it records]`: an inner job that succeeds and
-     * one that throws.
+     * Rows of `[inner job, code]`: one that succeeds and one that throws.
      *
      * @return iterable<string, array{0: \Illuminate\Contracts\Queue\ShouldQueue, 1: string}>
      */
@@ -237,10 +229,8 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * Laravel hydrates an inner sync job's payload into the one Context, and
-     * that snapshot stays there when it ends. The outer job's records go on
-     * naming the actor it carried, and not whoever it signed in for the inner
-     * job, on success and on failure.
+     * Laravel leaves an inner sync job's snapshot in Context; the outer job
+     * still names its own actor.
      *
      * @param  \Illuminate\Contracts\Queue\ShouldQueue  $inner
      * @param  string  $code
@@ -260,8 +250,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * What the outer job sends on afterwards carries its own actor, and not the
-     * one the inner job's payload left in Context.
+     * What the outer job sends on carries its own actor.
      *
      * @return void
      */
@@ -275,8 +264,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * An outer job that carried nobody goes on having nobody once an inner job
-     * that had someone has ended.
+     * An outer job that carried no actor keeps none after an inner job ends.
      *
      * @return void
      */
@@ -290,9 +278,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * A listener on `JobProcessed` that a provider's `boot()` adds runs before
-     * the frame ends, so what it records is the job's, with the job's origin,
-     * name and dispatcher.
+     * A `JobProcessed` listener added in `boot()` runs inside the job frame.
      *
      * @return void
      */
@@ -316,10 +302,8 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * On the sync connection `JobExceptionOccurred` comes first, and its
-     * listeners run before the frame ends. `JobFailed` comes after that, so
-     * `Queue::failing()` runs in the caller's frame, as the `failed()` hook
-     * does: pinned, and documented.
+     * On sync, `JobExceptionOccurred` runs in the job frame and `JobFailed` in
+     * the caller's.
      *
      * @return void
      */
@@ -331,8 +315,7 @@ final class SyncJobContextTest extends TestCase
             try {
                 Bus::dispatchSync(new ThrowingJob);
             } catch (\RuntimeException) {
-                // The listeners have run by the time the exception reaches the
-                // caller
+                // The listeners have run before the exception reaches here
             }
         });
 
@@ -345,8 +328,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * Inside a request, a job's record has no client, method or route: the job
-     * is not the request.
+     * A job inside a request has no client, method or route.
      *
      * @return void
      */
@@ -364,8 +346,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * Dispatching before the request's first record still gives the job the
-     * request's id: it is generated at dispatch and kept.
+     * A job dispatched before the request's first record gets the request's id.
      *
      * @return void
      */
@@ -384,9 +365,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * On the sync connection a job's `failed()` hook runs in its caller's
-     * frame, because `JobExceptionOccurred` comes first there: pinned, and
-     * documented rather than worked around.
+     * On sync, a job's `failed()` hook runs in its caller's frame.
      *
      * @return void
      */
@@ -404,8 +383,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * A sync job leaves its snapshot in Context. A caller who has signed out
-     * since must not send it on: the next job has no actor.
+     * A caller who signed out after a sync job sends no actor on.
      *
      * @return void
      */
@@ -425,8 +403,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * A snapshot left in Context by a sync job is never the caller's own actor
-     * once its guard has signed out: only a job reads it.
+     * A sync job's leftover snapshot is never the signed-out caller's actor.
      *
      * @return void
      */
@@ -445,8 +422,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * A second user signed in on the caller replaces the snapshot a first job
-     * left behind.
+     * A second signed-in user replaces the snapshot a first job left.
      *
      * @return void
      */
@@ -464,8 +440,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * List the provider that audits a job's end, booted after the package's as
-     * an application's is.
+     * Add the provider that audits a job's end, after the package's.
      *
      * @param  mixed  $app
      * @return array<int, class-string<\Illuminate\Support\ServiceProvider>>
@@ -477,8 +452,7 @@ final class SyncJobContextTest extends TestCase
     }
 
     /**
-     * Serve a request whose route signs a user in, records, runs the work and
-     * records again.
+     * Serve a route that signs in, records, runs the work and records again.
      *
      * @param  \Closure(): void  $work
      * @param  ?string  $userAgent

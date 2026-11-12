@@ -51,25 +51,12 @@ use Tests\Unit\Stubs\StubUser;
 
 /**
  * A secret planted under every built-in key is searched for wherever a capture
- * can leave it: the returned record, the stored row, each event dispatched,
- * each log line, each report and an after-commit capture, and then the same
- * again under each failure a capture can be forced into, the thrown exception
- * and its chain among them.
+ * or a failed capture can leave it.
  *
- * The whole class turns `zend.exception_ignore_args` off, so a thrown exception
- * keeps every frame's arguments to search. Every test records through
- * `AuditLog::event()`, and a helper on the stack takes the key, never the
- * payload, or the search would find the test's own frame.
+ * Turns `zend.exception_ignore_args` off so frames keep their arguments.
+ * Helpers take the key, never the payload, lest the search find its own frame.
  *
- * A failed write is searched under the `throw` mode, so what is thrown can be
- * searched too, and a spill line is searched with the rest of the log.
- *
- * It claims no coverage because a fresh application for every key under every
- * search is the slowest class in the suite: a mutant whose covering tests
- * included it would be skipped as taking too long rather than run, so the
- * classes it passes through would go without a mutation check. It pins what a
- * capture leaves behind, end to end; each class's behaviour is pinned by its
- * own test.
+ * Claims no coverage, since mutants it covered would time out unchecked.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,8 +96,7 @@ final class NoSecretAnywhereTest extends TestCase
     private array $logged = [];
 
     /**
-     * Keep every frame's arguments, write no log file, and hold on to each line
-     * logged.
+     * Keep every frame's arguments, write no log file, and hold each log line.
      *
      * @return void
      */
@@ -144,8 +130,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[key]`: one per built-in unit, joined as a key writes it, so a
-     * new unit is covered without editing this test.
+     * Rows of `[key]`: one per built-in unit, joined as a key writes it.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -159,8 +144,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The record the capture returns holds the marker wherever the secret was
-     * planted, and holds the secret nowhere.
+     * The returned record holds the marker and never the secret.
      *
      * @param  string  $key
      * @return void
@@ -183,8 +167,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The row as the database holds it, before any codec or cast, holds the
-     * marker and never the secret.
+     * The raw stored row holds the marker and never the secret.
      *
      * @param  string  $key
      * @return void
@@ -201,9 +184,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Nothing dispatched while the record is captured and stored holds the
-     * secret: the record's own event, and the queries that wrote it with their
-     * bindings.
+     * No event dispatched by the capture, queries included, holds the secret.
      *
      * @param  string  $key
      * @return void
@@ -225,9 +206,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A store's failure quotes the record it was given, as a refused insert's
-     * does, and logging it through the framework's handler holds no secret,
-     * frames included. The marker shows the search reached what was minimised.
+     * A logged store failure quoting the record leaks no secret, in any frame.
      *
      * @param  string  $key
      * @return void
@@ -245,9 +224,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A listener's failure is reported, not thrown, and one that quotes the row
-     * it was told about holds no secret, frames included. The marker shows the
-     * search reached what was minimised.
+     * A reported listener failure quoting the row leaks no secret, any frame.
      *
      * @param  string  $key
      * @return void
@@ -267,8 +244,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A failing listener is reported through the framework's handler and does
-     * not fail the write.
+     * A failing listener is reported and does not fail the write.
      *
      * @return void
      */
@@ -283,10 +259,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * An after-commit capture waits in the transaction manager as a closure
-     * holding the record sealed, so a frame holding the transaction cannot
-     * reach it: the search reaches the record once unsealed, finds no secret
-     * there, and finds none in the row the commit writes.
+     * A deferred capture waits sealed, and its committed row holds no secret.
      *
      * @param  string  $key
      * @return void
@@ -329,9 +302,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[key, setting of configured units]`: a key written each way a
-     * tokeniser reads, one that only cleaning makes secret-shaped, and one the
-     * application configured.
+     * Rows of `[key, units]`: spellings, a cleaned key and a configured one.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */
@@ -351,8 +322,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A key spelt any way the tokeniser reads, or configured by the
-     * application, leaves no secret in the record or the row.
+     * A secret under any tokenised or configured key is in no record or row.
      *
      * @param  string  $key
      * @param  list<string>  $units
@@ -372,8 +342,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[whether the record is fail-closed]`: both ways a store's
-     * failure reaches the caller.
+     * Rows of `[fail-closed]`: both ways a store failure reaches the caller.
      *
      * @return iterable<string, array{0: bool}>
      */
@@ -386,8 +355,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A store that fails leaves no secret in what the caller catches, in a
-     * report or in a log, however the record was to be written.
+     * A failing store leaves no secret in the exception, report or log.
      *
      * @param  bool  $failClosed
      * @return void
@@ -410,9 +378,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A garbage address holding the secret, far past the column, is stored
-     * nowhere: the record and the row hold no address and no secret, and say
-     * only that an address was not kept.
+     * A garbage address holding the secret is stored nowhere.
      *
      * @return void
      */
@@ -429,8 +395,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A write that fails after a garbage address was filled holds the address
-     * in no exception, report or log line, any frame of the write included.
+     * A write failing after a garbage address holds it in no failure.
      *
      * @param  bool  $failClosed
      * @return void
@@ -449,9 +414,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The failing fake's exception was made before the capture, so it has no
-     * frame of it: one thrown from inside a store has every frame of the write,
-     * and those hold no secret either.
+     * A store throwing inside the write holds no secret in any frame.
      *
      * @param  bool  $failClosed
      * @return void
@@ -474,8 +437,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A write deferred to the commit fails at the commit, and what escapes from
-     * there holds no secret.
+     * A deferred write failing at commit holds no secret.
      *
      * @return void
      */
@@ -498,9 +460,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The database's own refusal of an insert quotes the query's bindings in
-     * its message and keeps them on the exception, so what is thrown is neither
-     * that exception nor chained to it, and holds no binding.
+     * A refused insert is neither thrown nor chained, so no binding escapes.
      *
      * @return void
      */
@@ -523,8 +483,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[whether it throws an error]`: an exception and an error, both
-     * of whose messages hold the plaintext.
+     * Rows of `[throws an error]`: an exception and an error with plaintext.
      *
      * @return iterable<string, array{0: bool}>
      */
@@ -537,9 +496,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * An encrypter that throws with the plaintext in its message is contained:
-     * the secret is in no record, report or log line, and the encrypter is not
-     * called again for the capture.
+     * A throwing encrypter is contained, called once, and leaks no secret.
      *
      * @param  bool  $throwsAnError
      * @return void
@@ -564,9 +521,8 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[what is wrong with it]`: an envelope that is not one, each
-     * holding the secret where a part of it should be. It is made in the test,
-     * since a row is an argument of the test's own frame.
+     * Rows of `[defect]`: malformed envelopes holding the secret, built in the
+     * test since a row is an argument of its frame.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -581,8 +537,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * An envelope that is malformed is never stored, so nothing it holds
-     * reaches the record, a report or a log line.
+     * A malformed envelope is never stored and leaks nothing it holds.
      *
      * @param  string  $fault
      * @return void
@@ -604,9 +559,8 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[setting, malformed value, whether it fails inside the walker]`:
-     * a malformed `redaction.key` is met only once a pseudonymised field asks
-     * for a hash, so it throws from the walker with raw values on the stack.
+     * Rows of `[setting, value, fails in walker]`; a bad `redaction.key` is met
+     * only when a pseudonymised field is hashed.
      *
      * @return iterable<string, array{0: string, 1: int|string, 2: bool}>
      */
@@ -623,9 +577,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A malformed setting fails the write, and nothing the failure carries
-     * holds what was being minimised, a pseudonymised field's raw value
-     * included.
+     * A malformed setting fails the write and leaks no value being minimised.
      *
      * @param  string  $setting
      * @param  int|string  $value
@@ -649,8 +601,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A malformed key met while hashing the identifier fails the write with no
-     * trace of the identifier.
+     * A malformed key met hashing the identifier leaves no trace of it.
      *
      * @return void
      */
@@ -670,8 +621,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[kind of payload, what the refusal says]`: a payload a builder
-     * refuses, each with the secret beside what it refuses.
+     * Rows of `[kind, refusal]`: refused payloads with the secret beside them.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -686,8 +636,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A refused payload holds the secret when it is thrown from, and no frame
-     * of the refusal shows it.
+     * A refused payload's frames do not show the secret.
      *
      * @param  string  $kind
      * @param  string  $message
@@ -707,8 +656,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[kind of payload, what the refusal says]`: a context a builder
-     * refuses, each with the secret beside what it refuses.
+     * Rows of `[kind, refusal]`: refused contexts with the secret beside them.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -721,8 +669,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A refused context holds the secret when it is thrown from, and no frame
-     * of the refusal shows it.
+     * A refused context's frames do not show the secret.
      *
      * @param  string  $kind
      * @param  string  $message
@@ -742,8 +689,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A contributor that throws has the builder on the stack by way of its
-     * contribution, and what escapes holds no secret, nor what it had filled.
+     * A throwing contributor leaks no secret, nor anything it filled.
      *
      * @return void
      */
@@ -778,8 +724,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A contributor whose own fill is refused has the values on the stack at
-     * the refusal, and no frame of it shows them.
+     * A contributor's refused fill shows its values in no frame.
      *
      * @return void
      */
@@ -813,8 +758,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A contained failure's report names the encrypter's class and nothing
-     * else.
+     * A contained failure's report names only the encrypter's class.
      *
      * @return void
      */
@@ -834,8 +778,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A contained failure's report has no previous exception, since the one the
-     * encrypter threw holds the plaintext in its message.
+     * A contained failure has no previous: its message would hold plaintext.
      *
      * @return void
      */
@@ -869,9 +812,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A note with an owner is sealed under the owner's key by the default
-     * encrypter, so the record and the row hold its envelope, and its text is
-     * in neither.
+     * An owned note's envelope is stored, and its text is in no record or row.
      *
      * @return void
      */
@@ -891,9 +832,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A secret held in a key, by an application that names a field after a
-     * value, reaches no diagnostic: a removed field and a collision are each
-     * masked, in the properties and in the context.
+     * A secret in a key is masked in every diagnostic.
      *
      * @return void
      */
@@ -911,9 +850,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A dynamic key under a wildcard rule is part of the concrete path on the
-     * walker's stack when an encrypter fails, and no frame of the report holds
-     * it, while the diagnostic holds only the rule's path.
+     * A dynamic key is in no frame of a reported encrypter failure.
      *
      * @return void
      */
@@ -933,9 +870,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A dynamic key under a wildcard rule is part of the concrete path on the
-     * walker's stack when a malformed key is met, and no frame of what is
-     * thrown holds it.
+     * A dynamic key is in no frame of a thrown malformed-key failure.
      *
      * @return void
      */
@@ -955,9 +890,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A key past the ceiling is removed with its value at every depth, even
-     * with room in the budgets, so the secret in it and under it is in no
-     * record, row, event or diagnostic.
+     * A key past the ceiling is removed with its value at every depth.
      *
      * @return void
      */
@@ -982,8 +915,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The class's set-up leaves the arguments in a frame for the search, or
-     * every search of a frame would pass by finding nothing.
+     * The set-up leaves frame arguments to search, or every search would pass.
      *
      * @return void
      */
@@ -994,8 +926,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Rows of `[what makes a haystack]`: each place the search must reach, or a
-     * search that finds nothing would prove nothing.
+     * Rows of `[haystack]`: each place the search must reach.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1043,8 +974,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The search reaches each place, and its failure names where it looked and
-     * never what it found.
+     * The search finds each place, naming where it looked, never what it found.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -1068,9 +998,8 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The search stops at a container and at what a marked parameter leaves in
-     * a frame, and it does not follow an object passed straight to a frame,
-     * since a trace writes that as its class alone.
+     * The search stops at a container, a marked parameter, and an object passed
+     * straight to a frame, which a trace writes as its class.
      *
      * @return void
      */
@@ -1115,11 +1044,8 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Run the capture with its reports recorded, pass what escaped it and what
-     * it reported through the framework's own handler, as an application would,
-     * so each is logged, then search the record, the thrown exception and its
-     * chain, the reports and the log, spill lines included, which alone are not
-     * logged reports.
+     * Run the capture, log what escaped and was reported through the framework,
+     * and search it all, spill lines included.
      *
      * @param  \Closure(): void  $capture
      * @return ?\Throwable
@@ -1154,8 +1080,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A builder for the code with the secret under the key at the top level, in
-     * a nested map and in a list of maps, in the properties and the context.
+     * A builder with the secret at each depth of properties and context.
      *
      * @param  string  $key
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
@@ -1170,8 +1095,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A builder for the code filled with an address that is no address, holding
-     * the secret and longer than the column.
+     * A builder filled with a garbage address that holds the secret.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
      */
@@ -1185,8 +1109,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * The secret under the key at the top level, in a nested map and in a list
-     * of maps.
+     * The secret under the key at the top level and nested.
      *
      * @param  string  $key
      * @return array<string, array<array-key, array<string, string>|string>|string>
@@ -1197,9 +1120,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * A builder holding the secret raw under a field no key rule matches, so
-     * only that field's rule protects it, beside a secret-shaped key and in a
-     * note that needs sealing.
+     * A builder holding the secret under a field only its own rule protects.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
      */
@@ -1270,8 +1191,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Make a definition that encrypts the planted field the facade's, with a
-     * fake store.
+     * Register a definition that encrypts the planted field, with a fake store.
      *
      * @return \SineMacula\Laravel\AuditLog\Testing\FakeAuditStore
      */
@@ -1329,8 +1249,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Make every listener of the record's event fail quoting the stored row, so
-     * a capture has a report that carries the payload to search.
+     * Make every listener fail quoting the stored row, so a report carries it.
      *
      * @return void
      */
@@ -1354,9 +1273,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Bind a store that fails quoting the record it was given, as the
-     * database's own refusal of an insert quotes its bindings, and let its
-     * failure throw.
+     * Bind a store that fails quoting its record, and let the failure throw.
      *
      * @return void
      */
@@ -1380,8 +1297,7 @@ final class NoSecretAnywhereTest extends TestCase
             }
 
             /**
-             * Say a return is durable, so a fail-closed record reaches the
-             * write.
+             * Durable, so a fail-closed record reaches the write.
              *
              * @return bool
              */
@@ -1406,8 +1322,7 @@ final class NoSecretAnywhereTest extends TestCase
     }
 
     /**
-     * Bind a store that throws from inside the write, so its exception has
-     * every frame of the capture.
+     * Bind a store that throws inside the write, under every capture frame.
      *
      * @return void
      */
@@ -1429,8 +1344,7 @@ final class NoSecretAnywhereTest extends TestCase
             }
 
             /**
-             * Say a return is durable, so a fail-closed record reaches the
-             * write.
+             * Durable, so a fail-closed record reaches the write.
              *
              * @return bool
              */

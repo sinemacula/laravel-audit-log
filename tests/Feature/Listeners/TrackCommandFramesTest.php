@@ -19,9 +19,7 @@ use Symfony\Component\Console\Output\NullOutput;
 use Tests\TestCase;
 
 /**
- * Feature tests for the frames commands enter and leave: the name kept, the
- * match on the command's input, the container reached, and that nothing but the
- * package's own state changes.
+ * Feature tests for the frames commands enter and leave.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +30,7 @@ use Tests\TestCase;
 final class TrackCommandFramesTest extends TestCase
 {
     /**
-     * Bind the frames as the provider binds them, which it leaves alone once it
-     * binds them itself.
+     * Bind the frames as the provider does, which keeps an existing binding.
      *
      * @return void
      */
@@ -78,8 +75,7 @@ final class TrackCommandFramesTest extends TestCase
     }
 
     /**
-     * The framework gives a command it could not name an empty name, which the
-     * frame keeps as none.
+     * A command the framework could not name has an empty name, kept as none.
      *
      * @return void
      */
@@ -124,8 +120,8 @@ final class TrackCommandFramesTest extends TestCase
     }
 
     /**
-     * Another command's finish leaves the frame in place, even one of the same
-     * name: the match is on the input, never the name.
+     * Another command's finish, even of the same name, leaves the frame: the
+     * match is on the input.
      *
      * @return void
      */
@@ -140,9 +136,7 @@ final class TrackCommandFramesTest extends TestCase
     }
 
     /**
-     * The frames are those of the current container on every event, not those
-     * of the container the dispatcher was built with, which is what makes the
-     * listener safe under Octane.
+     * The current container's frames are used on every event, for Octane.
      *
      * @return void
      */

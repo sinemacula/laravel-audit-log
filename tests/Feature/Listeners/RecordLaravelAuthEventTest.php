@@ -42,15 +42,7 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Feature tests for the capture of Laravel's own authentication events: each of
- * the ten recorded under its package code with the actor and the subject the
- * event names, or explicitly no one, never whoever a guard holds; the guard
- * from the event and the guards configured out skipped; the one credential key
- * the only one read, as a hash; a session restored only from the named session
- * guard's remember-me state; and a malformed setting contained.
- *
- * The provider registers the listener for Laravel's authentication events; here
- * the test invokes it directly with an event of its own.
+ * Feature tests for capturing Laravel's own authentication events.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,8 +71,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     private array $failures = [];
 
     /**
-     * Fake the store, bind the reporter, set the key identifiers are hashed
-     * under, add a second session guard, and hear each capture failure.
+     * Fake the store and reporter, set the hash key, add a session guard.
      *
      * @return void
      */
@@ -116,8 +107,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A sign-in names the user as actor and subject, the guard the event names,
-     * and whether it was remembered, under the sign-in code.
+     * A sign-in names the user, the event's guard, and the remember flag.
      *
      * @return void
      */
@@ -139,8 +129,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A sign-in its session guard made from the remember-me cookie is a session
-     * restored, with the same actor, subject and properties.
+     * A sign-in restored from the remember-me cookie is a session restore.
      *
      * @return void
      */
@@ -158,8 +147,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * Whether a sign-in was restored is read from the guard the event names,
-     * not from the default guard nor from another guard that restored one.
+     * A restore is read from the event's guard, never another guard.
      *
      * @return void
      */
@@ -178,9 +166,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A guard that is not a session guard is never a restore, even one that
-     * says it signed the user in from a remember-me cookie, as a macro makes
-     * the request guard say here.
+     * A guard that is not a session guard is never a restore.
      *
      * @return void
      */
@@ -214,11 +200,8 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A guard the application does not configure is never asked, so its sign-in
-     * is a sign-in, recorded under the name the event gives; a name the manager
-     * would read as the default guard's is not read as it either. A configured
-     * guard the manager fails to build, of a driver never registered or a
-     * session guard with no user provider, is a sign-in too, never a failure.
+     * An unconfigured guard is never asked, and one that fails to build is no
+     * failure: both give a sign-in.
      *
      * @return void
      */
@@ -246,8 +229,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A failed sign-in has explicitly no actor, the user the event found as
-     * subject, the guard, and the identifier only as its hash.
+     * A failed sign-in has no actor, the user as subject, a hashed identifier.
      *
      * @return void
      */
@@ -267,8 +249,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A failed sign-in of an identifier no user has is the same failure with no
-     * subject, and the identifier's hash is the one a known user's gives.
+     * An unknown user's failed sign-in has no subject and the same hash.
      *
      * @return void
      */
@@ -287,9 +268,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * Only the credential under the identifier key is read: a password, a
-     * one-time code and a PIN alongside it reach no record, and the hash is the
-     * one the identifier alone gives.
+     * Only the identifier credential is read; no other reaches a record.
      *
      * @return void
      */
@@ -308,8 +287,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A failed sign-in with no identifier, or one that is not a string, is
-     * still recorded, with no identifier hash.
+     * A failed sign-in with a missing or non-string identifier records no hash.
      *
      * @return void
      */
@@ -331,8 +309,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * The identifier key is configurable: the credential it names is hashed,
-     * and the default key's credential is then not read.
+     * A configured identifier key is hashed and the default key is not read.
      *
      * @return void
      */
@@ -352,9 +329,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A lockout is denied with no reason, has explicitly no actor and no
-     * subject and no guard, and keeps the client the request came from and the
-     * request's identifier as its hash.
+     * A lockout is denied, with no actor, subject or guard, but IP and hash.
      *
      * @return void
      */
@@ -379,9 +354,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A key with a dot is one name, for a lockout as for a failed sign-in: the
-     * request's input under that name is hashed as the credential under it is,
-     * and input nested under the key's first part is never read.
+     * A dotted key is one name for lockouts and failed sign-ins, never a path.
      *
      * @return void
      */
@@ -400,8 +373,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A lockout whose request has no identifier, or one that is not a string,
-     * is still recorded, with no identifier hash.
+     * A lockout with a missing or non-string identifier records no hash.
      *
      * @return void
      */
@@ -419,8 +391,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A sign-out, on this device or every device, names the user as actor and
-     * subject, and the guard.
+     * A sign-out, here or on every device, names the user and the guard.
      *
      * @return void
      */
@@ -440,9 +411,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A sign-out from a session guard no one is signed in to, on this device or
-     * every device, has explicitly no actor and no subject, even while another
-     * guard holds a user, and still names its guard.
+     * A sign-out with nobody signed in has no actor or subject but a guard.
      *
      * @return void
      */
@@ -466,8 +435,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A sign-out of the other devices has its own code, with the user as actor
-     * and subject.
+     * An other-device sign-out has its own code, the user as actor and subject.
      *
      * @return void
      */
@@ -483,8 +451,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A registration, a verified email address and a password reset each name
-     * the user as actor and subject, under their own codes, with no guard.
+     * Account events name the user as actor and subject, with no guard.
      *
      * @return void
      */
@@ -510,8 +477,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A reset link sent names the user as subject and explicitly no one as
-     * actor, since whoever asked for it is not known to be that user.
+     * A reset link names the user as subject but no actor, as anyone can ask.
      *
      * @return void
      */
@@ -527,10 +493,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A user signed in on the default guard never fills the actor of an event
-     * that names none: a failed sign-in, a lockout and a reset link still have
-     * no actor and no guard of the ambient user's, while an explicit record
-     * made beside them takes that user.
+     * An ambient user never fills the actor of an event that names none.
      *
      * @return void
      */
@@ -553,8 +516,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * The guard is the one the event names, never the default guard nor the
-     * guard that holds a user.
+     * The guard comes from the event, never the default or the user's guard.
      *
      * @return void
      */
@@ -570,9 +532,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * An event under a guard `except_guards` lists is not recorded and says
-     * nothing, and its event object is left for another source; one under any
-     * other guard, or with no guard, is recorded.
+     * An event under an `except_guards` guard is skipped and left unclaimed.
      *
      * @return void
      */
@@ -598,9 +558,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * An event with no guard is skipped only when every guard is: a list of
-     * names leaves the lockout and the account events recorded, and `['*']`
-     * skips all ten events.
+     * A guardless event is skipped only under `['*']`.
      *
      * @return void
      */
@@ -626,9 +584,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A malformed setting is a contained failure of the capture: nothing is
-     * recorded, and it is reported once and dispatched once naming the event,
-     * the listener and the refusal, whichever setting it is.
+     * A malformed setting is a contained failure, reported and dispatched once.
      *
      * @return void
      */
@@ -661,8 +617,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A guard name a record cannot hold is a contained failure, and the sign-in
-     * goes on.
+     * An unstorable guard name is a contained failure, and the sign-in goes on.
      *
      * @return void
      */
@@ -678,10 +633,8 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A guard that is not a string, which only an event a host builds against
-     * Laravel's declared types can carry, is no guard: the event is recorded
-     * with none, is skipped only when every guard is, and a sign-in under it is
-     * never read as the default guard's restore.
+     * A non-string guard is no guard, skipped only under the wildcard and never
+     * a restore.
      *
      * @return void
      */
@@ -700,9 +653,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * A user no reference can be made of, a model with no key or a user whose
-     * identifier is neither a string nor an integer, is no one: the event is
-     * still recorded, with no actor and no subject.
+     * An unreferenceable user is no one: no actor or subject is recorded.
      *
      * @return void
      */
@@ -736,10 +687,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * The listener takes exactly the events the provider registers it for, so
-     * any other event, Laravel's attempts and validations included, never
-     * reaches it, and static analysis checks the registration against what it
-     * handles.
+     * The listener handles exactly the events the provider registers it for.
      *
      * @return void
      */
@@ -766,8 +714,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * Bind the capture state as the provider does, a registry of the test's
-     * own, and define the package codes while the application boots.
+     * Bind the capture state as the provider does and define the package codes.
      *
      * @param  mixed  $app
      * @return void
@@ -871,8 +818,7 @@ final class RecordLaravelAuthEventTest extends TestCase
     }
 
     /**
-     * Make the session guard of the name say its user came from the remember-me
-     * cookie, as a recaller restore leaves it.
+     * Mark the session guard's user as restored from the remember-me cookie.
      *
      * @param  string  $name
      * @return void

@@ -36,13 +36,7 @@ use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
- * Feature tests for the package's field encrypter, on whichever engine the
- * suite runs against: every unit of a record looked up in one statement, a
- * unit's first key created through the key creator, an erased owner's and an
- * absent owner's fields dropped, the keys of one entry only, an envelope that
- * opens only at its own entry, path and log, a failure of the key store
- * contained and reported once naming the class alone, and no wrapping secret
- * held.
+ * Feature tests for the package's field encrypter, on the suite's engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,8 +58,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     private const string PLAINTEXT = '"' . self::SECRET . '-4242"';
 
     /**
-     * Bind the package's key wrapper and its encrypter, as the provider will,
-     * fresh on every resolution.
+     * Bind the key wrapper and encrypter fresh on every resolution.
      *
      * @return void
      */
@@ -80,11 +73,8 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * Every unit of the record is looked up in one statement, whatever the
-     * order its values come in: two owners of the record, a tenant and a
-     * category, three values, and one read of the key store, binding both
-     * units, then no creation; each value is sealed under its own owner's key
-     * in that tenant and category, never another tenant's.
+     * One statement looks up every unit of the record; each value is sealed
+     * under its owner's key.
      *
      * @return void
      */
@@ -122,10 +112,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * A unit with no key is given its first through the key creator, at
-     * generation one, live, in the record's tenant and category, and the value
-     * is sealed under it; a second value of the owner in the same entry uses
-     * the key made, creating no other.
+     * A unit's first key comes from the key creator and is reused in the entry.
      *
      * @return void
      */
@@ -152,10 +139,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * An owner whose latest marker records an erasure is given no key, so its
-     * value is dropped; the creator is asked once for the entry, not once per
-     * value, and nothing is stored. Through a capture, the field is dropped and
-     * counted as omitted, with no reason.
+     * An erased owner gets no key; the field is dropped and counted, no reason.
      *
      * @return void
      */
@@ -182,9 +166,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * A field whose owner the record does not have is dropped before the
-     * encrypter is asked: no key is looked up or made, and the field is counted
-     * as omitted, as an erased owner's is.
+     * An absent owner's field is dropped before the encrypter is asked.
      *
      * @return void
      */
@@ -202,10 +184,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * A value of another entry starts afresh: its keys are looked up again, so
-     * an erasure committed between two records is seen by the second, and by a
-     * later value of the first entry too, which is looked up again in turn;
-     * nothing of an earlier entry is kept.
+     * Each entry looks its keys up afresh, so a committed erasure is seen.
      *
      * @return void
      */
@@ -233,9 +212,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * The envelope opens under its key only at its own entry, path and log: the
-     * typed plaintext comes back there, and a copy read at another entry,
-     * another path or another log fails to authenticate.
+     * An envelope opens only at its own entry, path and log.
      *
      * @return void
      */
@@ -269,11 +246,8 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * A key the store cannot vouch for fails the encrypter, which the sealer
-     * contains: the record is stored with both its encrypted fields dropped,
-     * the failure is reported once, naming the encrypter's class alone and
-     * chaining nothing, and neither the plaintext nor the data key is in the
-     * report, its message, its trace or its frames' arguments.
+     * A key store failure is contained and reported once, naming the class and
+     * leaking no plaintext or key.
      *
      * @return void
      */
@@ -308,10 +282,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * The encrypter holds the data keys of its entry and nothing more: no
-     * wrapping key's secret, and no key derived from it, is anywhere it reaches
-     * once it has unwrapped a key, while the data key it unwrapped is, which
-     * shows the search reaches its state.
+     * The encrypter holds its entry's data keys and no wrapping secret.
      *
      * @return void
      */
@@ -347,8 +318,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * Capture a charge of a card the actor owns, encrypted under the actor's
-     * key, with an amount beside it.
+     * Capture a card charge encrypted under the actor's key, with an amount.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $actor
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
@@ -361,8 +331,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * The typed plaintext the envelope holds, opened under the key row's data
-     * key at the entry and path, in the configured log or the one given.
+     * The typed plaintext the envelope holds, at the entry, path and log.
      *
      * @param  array{v: int, k: string, c: string}  $envelope
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $key
@@ -381,8 +350,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * Each statement run on the subject keys table from here on, on any
-     * connection.
+     * Every statement on the subject keys table from here on, any connection.
      *
      * @return \ArrayObject<int, \Illuminate\Database\Events\QueryExecuted>
      */
@@ -452,8 +420,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * Make the definition the only one the facade's recorder and the container
-     * know, as an application registers it while it boots.
+     * Register the definition as the only one, as an application does at boot.
      *
      * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
      * @return void
@@ -473,8 +440,7 @@ final class SubjectKeyEncrypterTest extends TestCase
     }
 
     /**
-     * A context at the path, for the owners, in the configured log, the tenant
-     * given and the category every unit here is made in.
+     * A context at the path for the owners, in the tenant and test category.
      *
      * @param  string  $entryId
      * @param  non-empty-list<int|string>  $path

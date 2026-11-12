@@ -44,18 +44,7 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * End-to-end proofs of owners' keys and erasure on the provider's own bindings,
- * through the facade and the commands, with nothing of the package bound by
- * hand but the access policy: a field is sealed under its owner's key and
- * revealed only through the grant; erasing one owner of a record leaves the
- * other's fragment revealed, and the log still verifies; a hold and a
- * preservation refuse the whole erasure, and a partial one lets the owner's
- * unrelated unit go; a pending outbox refuses it until accepted, and the record
- * delivered after it reads erased; a reinstated owner is sealed for again in a
- * new generation; rewrap and rotation keep every field readable; binding
- * `NoFieldEncrypter` stops encryption and leaves erasure working; and
- * `holdingDataOf()` finds an owner's entries, refused under an encrypter of the
- * application's own.
+ * End-to-end proofs of owners' keys and erasure on the provider's own bindings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,7 +56,7 @@ final class PrivacyProofsTest extends TestCase
 {
     use MakesSubjectKeys, ReadsTheTrail, SearchesForSecrets;
 
-    /** @var string The code a card charge is captured under, sealing the card for the actor and the account for the subject. */
+    /** @var string The charge code, sealing the card for the actor and the account for the subject. */
     private const string CHARGE = 'billing.card_charged';
 
     /** @var string The code a support call is captured under, sealing its summary for the actor. */
@@ -79,7 +68,7 @@ final class PrivacyProofsTest extends TestCase
     /** @var string What a fragment shows once its owner's key was destroyed. */
     private const string ERASED = '[ERASED]';
 
-    /** @var string The card every charge is made with unless a test names another: the planted secret, which no hex, base64url or UUID holds by chance. */
+    /** @var string The default card: the planted secret, which no hex, base64url or UUID holds by chance. */
     private const string CARD = self::SECRET . '-4242';
 
     /** @var string What a fragment shows under a scope that does not reveal it. */
@@ -98,8 +87,7 @@ final class PrivacyProofsTest extends TestCase
     private const string SECOND_SECRET = 'second-wrapping-secret-of-32-byt';
 
     /**
-     * Freeze the clock, report to a recording handler, and define the charge
-     * and the call on a recorder of the test's own, behind the facade.
+     * Freeze the clock, record reports, and define the charge and the call.
      *
      * @return void
      */
@@ -140,9 +128,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * On the provider's bindings alone a charge's card and account are sealed
-     * under their owners' keys, stored nowhere in plaintext, shown as
-     * `[ENCRYPTED]` to a scope without the grant, and revealed through it.
+     * Sealed fields show `[ENCRYPTED]` and are revealed only through the grant.
      *
      * @return void
      */
@@ -166,9 +152,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * A member sealed in a map that minimisation leaves stored as a list, and
-     * in a list of properties the metadata turns into a map, opens where it is
-     * stored: both sides name it by its key, not by its container's shape.
+     * A member opens wherever it is stored, whatever its container's shape.
      *
      * @return void
      */
@@ -192,10 +176,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * Erasing the actor of a record about two owners, through the command,
-     * turns the actor's fragment to `[ERASED]` and leaves the subject's
-     * revealed; the erasure is recorded, and the log, sealed before and after
-     * it, verifies with its keys.
+     * Erasing one owner leaves the other's fragment, and the log verifies.
      *
      * @return void
      */
@@ -224,10 +205,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * A hold over the owner's charges refuses the whole erasure, writing
-     * nothing; a partial erasure destroys the owner's support unit, which
-     * nothing holds, and keeps the held billing unit, whose fragment stays
-     * revealed while the call's reads `[ERASED]`.
+     * A hold refuses the erasure; a partial one destroys only unheld units.
      *
      * @return void
      */
@@ -259,8 +237,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * A category preserved forever refuses an erasure of any key that sealed
-     * one of its entries, naming the category.
+     * A preserved category refuses erasure of any key that sealed its entries.
      *
      * @return void
      */
@@ -277,9 +254,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * A record still in the outbox refuses the erasure until it is accepted as
-     * pending; once accepted, the record the drain delivers afterwards reads
-     * `[ERASED]` for the erased owner and revealed for the other.
+     * A pending outbox refuses erasure until accepted; delivery reads erased.
      *
      * @return void
      */
@@ -306,10 +281,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * An erased owner's new card is dropped, with no key made for it; once the
-     * owner is reinstated through the command, the next card is sealed under a
-     * new generation above the erased one and revealed, while the erased
-     * fragment never comes back.
+     * A reinstated owner is sealed for in a new generation; erasure holds.
      *
      * @return void
      */
@@ -338,10 +310,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * Rewrapping onto a new wrapping key, through the command, moves every key
-     * onto it, so the old key can leave the ring and every field still reads;
-     * rotating supersedes the live keys, the next charge opens the unit's next
-     * generation, and both charges still read.
+     * Rewrap and rotation keep every field readable.
      *
      * @return void
      */
@@ -374,9 +343,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * Binding `NoFieldEncrypter` is the choice never to encrypt: a charge's
-     * card and account are dropped and diagnosed, never stored, and an erasure
-     * still destroys the keys made before the choice.
+     * `NoFieldEncrypter` drops and diagnoses fields, and erasure still works.
      *
      * @return void
      */
@@ -399,9 +366,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * `holdingDataOf()` finds the entries holding a fragment sealed under the
-     * owner's keys, and no other owner's; under a field encrypter of the
-     * application's own it is refused, naming the binding.
+     * `holdingDataOf()` finds owner entries, refused under a custom encrypter.
      *
      * @return void
      */
@@ -425,8 +390,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * Capture a charge of the card given, by the customer, on the account, and
-     * return its id; the clock moves on a second after it.
+     * Capture a charge and return its id; the clock moves on a second.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $customer
      * @param  string  $card
@@ -442,8 +406,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * The entry with the id, as a page of the trail shows it to the viewer,
-     * which the test fails without.
+     * The entry as a trail page shows it; the test fails without it.
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
@@ -497,8 +460,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * The card and the account number a charge shows, in that order, each a
-     * string, which the test fails without.
+     * The card and account number a charge shows; the test fails without them.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\TrailEntry  $entry
      * @return array{0: string, 1: string}

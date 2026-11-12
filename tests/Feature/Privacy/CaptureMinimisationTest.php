@@ -32,11 +32,7 @@ use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
 use Tests\TestCase;
 
 /**
- * End-to-end tests for the capture pipeline's minimising: the record a capture
- * returns is the record the store holds, on either way of writing it, and
- * nothing is stored when minimising fails. Hashes correlate within their own
- * domain and not across two, every handling of a definition reaches the row,
- * and the IP mode applies to the address of a real request.
+ * End-to-end tests for minimising in the capture pipeline.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -98,8 +94,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A record written after commit reads back from its row as the record the
-     * capture returned before the commit.
+     * An after-commit row reads back as the record the capture returned.
      *
      * @return void
      */
@@ -119,8 +114,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A record written immediately reads back from its row as the record the
-     * capture returned.
+     * An immediate row reads back as the record the capture returned.
      *
      * @return void
      */
@@ -130,8 +124,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A minimiser's failure stores no row and leaves nothing waiting on the
-     * transaction, so a commit writes nothing either.
+     * A minimiser's failure stores no row, immediately or on commit.
      *
      * @return void
      */
@@ -157,9 +150,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A pseudonymised field and an identifier of the same person share neither
-     * their fingerprint nor their hash, so a stored field cannot be joined to a
-     * sign-in.
+     * A pseudonymised field and an identifier hash do not correlate.
      *
      * @return void
      */
@@ -174,8 +165,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * Failed sign-ins for one identifier share one hash, whatever its case or
-     * padding, and another identifier has its own.
+     * One identifier's failed sign-ins share a hash despite case or padding.
      *
      * @return void
      */
@@ -197,11 +187,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A definition using every handling reaches the row as its table says: a
-     * retained value kept, a redacted one the marker, a pseudonymised one its
-     * hash, an encrypted one its envelope, a dropped one and an unlisted one
-     * removed and counted, and a secret-shaped key the marker though a rule
-     * retains it.
+     * A definition using every handling reaches the row as its table says.
      *
      * @return void
      */
@@ -250,9 +236,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * Rows of `[mode, client address, what the row's column holds]`: every
-     * mode, over an IPv4, an IPv6 and an IPv4-mapped address. An encrypted
-     * address is its envelope's canonical JSON.
+     * Rows of `[mode, address, column value]` over IPv4, IPv6 and mapped.
      *
      * @return iterable<string, array{0: string, 1: string, 2: ?string}>
      */
@@ -275,8 +259,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * The address of a real request reaches the row as its mode says, through
-     * the HTTP frame and the request's contributor.
+     * A real request's address reaches the row as its IP mode says.
      *
      * @param  string  $mode
      * @param  string  $address
@@ -300,8 +283,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * Rows of `[mode]`: every IP mode, since an invalid address is `null` in
-     * each of them, `full` included.
+     * Rows of `[mode]`: every IP mode.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -313,8 +295,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A request whose address is not valid stores none, in every mode: the
-     * request's contributor keeps it out, so nothing was lost to diagnose.
+     * An invalid request address is kept out by its contributor, undiagnosed.
      *
      * @param  string  $mode
      * @return void
@@ -335,8 +316,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * An invalid address a builder is filled with directly gets past no
-     * contributor, so it is removed and diagnosed, in every mode.
+     * An invalid address filled directly is removed and diagnosed, any mode.
      *
      * @param  string  $mode
      * @return void
@@ -360,8 +340,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * Rows of `[mode, address]`: every IP mode over each address that used to
-     * be too malformed for a builder to take.
+     * Rows of `[mode, address]`: malformed addresses in every IP mode.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -376,8 +355,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A garbage address loses nothing but itself: the record is stored, its
-     * address is `null`, and `$ip` says one was not kept, without its value.
+     * A garbage address is dropped and noted in `$ip`; the record is stored.
      *
      * @param  string  $mode
      * @param  string  $address
@@ -404,8 +382,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A contributor passing a garbage address fails no write either, and the
-     * first contributor to fill it still decides the field.
+     * A contributor's garbage address fails no write; the first fill decides.
      *
      * @return void
      */
@@ -426,8 +403,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * Rows of `[raw key, key as stored]`: spellings of a secret's key that hide
-     * nothing from the matcher, one repaired as every key is on its way in.
+     * Rows of `[raw key, key as stored]`: hostile spellings of a secret's key.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -446,8 +422,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A secret under a hostile spelling of its key reaches neither the
-     * properties nor the context, by whichever way the key arrives.
+     * A hostile key spelling hides no secret from properties or context.
      *
      * @param  string  $key
      * @param  string  $stored
@@ -469,10 +444,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * An owned note under the default encrypter is sealed under its owner's key
-     * at its fixed path: the record and the row hold the same envelope, naming
-     * the owner's key, nothing is counted as omitted, and its text reaches no
-     * row.
+     * An owned note is sealed under its owner's key at its fixed path.
      *
      * @return void
      */
@@ -495,9 +467,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * An application that binds `NoFieldEncrypter`, the choice never to
-     * encrypt, has an owned note dropped and counted under its fixed path, and
-     * its text reaches no row.
+     * Under `NoFieldEncrypter` an owned note is dropped and counted.
      *
      * @return void
      */
@@ -515,8 +485,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A plaintext note, which has no owner, is stored as given and sits after
-     * the caller's own keys, as does the hash of its identifier.
+     * A plaintext note and its identifier hash sit after the caller's own keys.
      *
      * @return void
      */
@@ -532,8 +501,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A context a contributor filled after the builder was described is
-     * redacted as any other, on the record and in its row.
+     * A context a contributor fills late is still redacted.
      *
      * @return void
      */
@@ -554,9 +522,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A context over its budget loses its application's keys and keeps the
-     * package's own, and the loss is diagnosed in the properties, since the
-     * context holds no diagnostics.
+     * A context over budget keeps the package's keys, diagnosed in properties.
      *
      * @return void
      */
@@ -608,9 +574,7 @@ final class CaptureMinimisationTest extends TestCase
     }
 
     /**
-     * A builder with values each step of minimising changes: a secret-shaped
-     * key, its context, a client address the mode keeps, and a hashed
-     * identifier.
+     * A builder with a value for each minimising step to change.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\PendingRecord
      */
