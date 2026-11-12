@@ -19,7 +19,6 @@ use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
-use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\MakesSubjectKeys;
@@ -308,23 +307,6 @@ final class RestoreReconciliationTest extends TestCase
         $this->files[] = $path;
 
         return $path;
-    }
-
-    /**
-     * The entry as a trail page shows it; the test fails without it.
-     *
-     * @param  string  $id
-     * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
-     */
-    private function shown(string $id): TrailEntry
-    {
-        foreach (AuditLog::trail()->visibleTo($this->viewer())->cursorPaginate(100)->entries as $entry) {
-            if ($entry->id === $id) {
-                return $entry;
-            }
-        }
-
-        self::fail("The page does not show {$id}.");
     }
 
     /**

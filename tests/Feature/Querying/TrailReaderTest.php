@@ -7,7 +7,6 @@ namespace Tests\Feature\Querying;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\QueryException;
@@ -28,12 +27,12 @@ use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\InvalidCursorException;
 use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
-use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Querying\TrailReader;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Runtime\ReadGuard;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use Tests\Concerns\FailsEntryReads;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\SeedsArtifacts;
@@ -52,7 +51,7 @@ use Tests\TestCase;
 #[CoversClass(TrailReader::class)]
 final class TrailReaderTest extends TestCase
 {
-    use InteractsWithAuditStore, ReadsTheTrail, SeedsArtifacts;
+    use FailsEntryReads, InteractsWithAuditStore, ReadsTheTrail, SeedsArtifacts;
 
     /** @var string A second connection, on an in-memory SQLite database, configured as the storage connection. */
     private const string READING = 'audit_reading';
@@ -71,9 +70,6 @@ final class TrailReaderTest extends TestCase
 
     /** @var string A value only a binding of the failed statement holds. */
     private const string SECRET = 'app:kept-out-of-every-refusal';
-
-    /** @var bool Whether a read of the entries table on the storage connection fails. */
-    private bool $failEntryReads = false;
 
     /** @var ?\Tests\Fixtures\Privacy\RecordingExceptionHandler What each failure is reported to. */
     private ?RecordingExceptionHandler $reporter = null;
@@ -122,7 +118,7 @@ final class TrailReaderTest extends TestCase
 
         $this->captureQueries();
 
-        $page    = $this->trail()->cursorPaginate();
+        $page    = $this->financeTrail()->cursorPaginate();
         $selects = array_values(array_filter($this->capturedQueries(), static fn (QueryExecuted $query): bool => str_starts_with($query->sql, 'select')));
 
         self::assertSame([$id], self::idsOf($page));
@@ -145,7 +141,7 @@ final class TrailReaderTest extends TestCase
 
         $this->captureQueries();
 
-        $page = $this->trail()->cursorPaginate(50);
+        $page = $this->financeTrail()->cursorPaginate(50);
 
         self::assertCount(1, $this->entryReads());
         self::assertSame(array_slice(array_reverse($ids), 0, 50), self::idsOf($page));
@@ -184,8 +180,8 @@ final class TrailReaderTest extends TestCase
             return AccessScope::all();
         });
 
-        $this->trail()->cursorPaginate();
-        $this->trail()->count();
+        $this->financeTrail()->cursorPaginate();
+        $this->financeTrail()->count();
 
         self::assertSame([true, true], $inside);
         self::assertFalse(app(ReadGuard::class)->isActive());
@@ -204,7 +200,7 @@ final class TrailReaderTest extends TestCase
 
         $refusal = app(ReadGuard::class)->during(function (): ?AuditReadRefusedException {
             try {
-                $this->trail()->count();
+                $this->financeTrail()->count();
             } catch (AuditReadRefusedException $refusal) {
                 return $refusal;
             }
@@ -243,7 +239,7 @@ final class TrailReaderTest extends TestCase
         $this->seedEntries(2);
         $this->captureQueries();
 
-        self::assertSame($empty, $terminal($this->trail()));
+        self::assertSame($empty, $terminal($this->financeTrail()));
         self::assertSame([], $this->entryReads());
     }
 
@@ -261,7 +257,7 @@ final class TrailReaderTest extends TestCase
         $this->seedEntries(2);
         $this->captureQueries();
 
-        self::assertSame($empty, $terminal($this->trail()->forTenant(Reference::of('organisation', 'org_02'))));
+        self::assertSame($empty, $terminal($this->financeTrail()->forTenant(Reference::of('organisation', 'org_02'))));
         self::assertSame([], $this->entryReads());
     }
 
@@ -279,7 +275,7 @@ final class TrailReaderTest extends TestCase
         $this->seedEntries(2);
         $this->captureQueries();
 
-        self::assertSame($empty, $terminal($this->trail()->inCategory('hr')));
+        self::assertSame($empty, $terminal($this->financeTrail()->inCategory('hr')));
         self::assertSame([], $this->entryReads());
     }
 
@@ -292,10 +288,10 @@ final class TrailReaderTest extends TestCase
     {
         $this->seedEntries(2);
 
-        $page = $this->trail()->cursorPaginate(10);
+        $page = $this->financeTrail()->cursorPaginate(10);
 
         self::assertSame([[], null, 10], [$page->entries, $page->nextCursor, $page->perPage]);
-        self::assertSame(0, $this->trail()->count());
+        self::assertSame(0, $this->financeTrail()->count());
 
         $records = $this->readRecords();
 
@@ -318,7 +314,7 @@ final class TrailReaderTest extends TestCase
         $this->allowTenants(Reference::of('organisation', 'org_01'));
         $this->seedEntries(2);
 
-        $page = $this->trail()->forTenant(Reference::of('organisation', 'org_02'))->cursorPaginate();
+        $page = $this->financeTrail()->forTenant(Reference::of('organisation', 'org_02'))->cursorPaginate();
 
         self::assertSame([], $page->entries);
 
@@ -341,7 +337,7 @@ final class TrailReaderTest extends TestCase
 
         $this->usePolicy(static fn (): never => throw $thrown);
 
-        foreach ([fn () => $this->trail()->cursorPaginate(), fn () => $this->trail()->count()] as $terminal) {
+        foreach ([fn () => $this->financeTrail()->cursorPaginate(), fn () => $this->financeTrail()->count()] as $terminal) {
             try {
                 $terminal();
 
@@ -377,7 +373,7 @@ final class TrailReaderTest extends TestCase
         $this->pointAtProbeTable();
 
         try {
-            $this->trail()->count();
+            $this->financeTrail()->count();
 
             self::fail('Expected the policy\'s exception.');
         } catch (\RuntimeException $caught) {
@@ -402,7 +398,7 @@ final class TrailReaderTest extends TestCase
 
         $this->expectExceptionObject(AuditReadRefusedException::unrecorded());
 
-        $this->trail()->cursorPaginate();
+        $this->financeTrail()->cursorPaginate();
     }
 
     /**
@@ -416,7 +412,7 @@ final class TrailReaderTest extends TestCase
         $this->seedEntries(2);
         $this->failEntryReads();
 
-        foreach ([fn () => $this->trail()->cursorPaginate(), fn () => $this->trail()->count()] as $terminal) {
+        foreach ([fn () => $this->financeTrail()->cursorPaginate(), fn () => $this->financeTrail()->count()] as $terminal) {
             try {
                 $terminal();
 
@@ -452,7 +448,7 @@ final class TrailReaderTest extends TestCase
         $this->corrupt($ids[1]);
 
         try {
-            $this->trail()->cursorPaginate();
+            $this->financeTrail()->cursorPaginate();
 
             self::fail('Expected the read to be refused.');
         } catch (AuditReadRefusedException $refusal) {
@@ -480,7 +476,7 @@ final class TrailReaderTest extends TestCase
         $this->expectExceptionObject(InvalidCursorException::refused());
 
         try {
-            $this->trail()->cursorPaginate(10, 'v1.bm90.YQ.YQ');
+            $this->financeTrail()->cursorPaginate(10, 'v1.bm90.YQ.YQ');
         } finally {
             self::assertSame([], $this->entryReads());
 
@@ -502,13 +498,13 @@ final class TrailReaderTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor = $this->trail()->cursorPaginate(2)->nextCursor;
+        $cursor = $this->financeTrail()->cursorPaginate(2)->nextCursor;
 
         self::assertIsString($cursor);
 
         $this->expectExceptionObject(InvalidCursorException::refused());
 
-        $this->trail()->cursorPaginate(3, $cursor);
+        $this->financeTrail()->cursorPaginate(3, $cursor);
     }
 
     /**
@@ -533,7 +529,7 @@ final class TrailReaderTest extends TestCase
 
         DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $tampered)->update(['reason' => 'edited']);
 
-        $page       = $this->trail()->cursorPaginate(10);
+        $page       = $this->financeTrail()->cursorPaginate(10);
         $properties = self::propertiesOf($this->readRecords('audit_log.trail_read')[0]);
 
         $shown = [$page->entries[0]->properties['card'], $page->entries[1]->properties['pin'], $page->entries[2]->properties['card']];
@@ -544,13 +540,13 @@ final class TrailReaderTest extends TestCase
         self::assertTrue($properties['reveal']);
         self::assertSameProperties(['encrypted' => 0, 'erased' => 1, 'revealed' => 1, 'unreadable' => 1], $properties['fields']);
 
-        self::assertSame(3, $this->trail()->count());
+        self::assertSame(3, $this->financeTrail()->count());
         self::assertSame(1, $reader->calls());
         self::assertArrayNotHasKey('reveal', self::propertiesOf($this->readRecords('audit_log.trail_counted')[0]));
 
         $this->allowEverything();
 
-        $sealed = $this->trail()->cursorPaginate(10);
+        $sealed = $this->financeTrail()->cursorPaginate(10);
         $record = self::propertiesOf($this->readRecords('audit_log.trail_read')[1]);
 
         self::assertSame('[ENCRYPTED]', $sealed->entries[0]->properties['card']);
@@ -569,13 +565,13 @@ final class TrailReaderTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $plain = $this->trail()->cursorPaginate(2)->nextCursor;
+        $plain = $this->financeTrail()->cursorPaginate(2)->nextCursor;
 
         self::assertIsString($plain);
 
         $this->revealEverything();
 
-        $revealing = $this->trail()->cursorPaginate(2)->nextCursor;
+        $revealing = $this->financeTrail()->cursorPaginate(2)->nextCursor;
 
         self::assertIsString($revealing);
         self::assertNotSame($plain, $revealing);
@@ -584,7 +580,7 @@ final class TrailReaderTest extends TestCase
             $this->usePolicy(static fn (): AccessScope => $grant ? AccessScope::all()->revealingEncryptedFields() : AccessScope::all());
 
             try {
-                $this->trail()->cursorPaginate(2, $cursor);
+                $this->financeTrail()->cursorPaginate(2, $cursor);
                 self::fail('Expected the cursor to be refused.');
             } catch (InvalidCursorException $refusal) {
                 self::assertEquals(InvalidCursorException::refused(), $refusal);
@@ -608,17 +604,17 @@ final class TrailReaderTest extends TestCase
         $this->allowTenants(Reference::of('organisation', 'org_01'));
 
         $ids   = $this->seedEntries(5);
-        $first = $this->trail()->cursorPaginate(2);
+        $first = $this->financeTrail()->cursorPaginate(2);
 
         self::assertIsString($first->nextCursor);
 
-        $second = $this->trail()->cursorPaginate(2, $first->nextCursor);
+        $second = $this->financeTrail()->cursorPaginate(2, $first->nextCursor);
 
         self::assertSame([$ids[4], $ids[3]], self::idsOf($first));
         self::assertSame([$ids[2], $ids[1]], self::idsOf($second));
         self::assertIsString($second->nextCursor);
 
-        $third = $this->trail()->cursorPaginate(2, $second->nextCursor);
+        $third = $this->financeTrail()->cursorPaginate(2, $second->nextCursor);
 
         self::assertSame([$ids[0]], self::idsOf($third));
         self::assertNull($third->nextCursor);
@@ -642,11 +638,11 @@ final class TrailReaderTest extends TestCase
         $this->allowEverything();
 
         $ids   = $this->seedEntries(3);
-        $first = $this->trail()->cursorPaginate(2);
+        $first = $this->financeTrail()->cursorPaginate(2);
 
         self::assertIsString($first->nextCursor);
 
-        $this->trail()->cursorPaginate(2, $first->nextCursor);
+        $this->financeTrail()->cursorPaginate(2, $first->nextCursor);
 
         $record = $this->readRecords('audit_log.trail_read')[1];
 
@@ -670,7 +666,7 @@ final class TrailReaderTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor = $this->trail()->cursorPaginate(2)->nextCursor;
+        $cursor = $this->financeTrail()->cursorPaginate(2)->nextCursor;
 
         self::assertIsString($cursor);
 
@@ -678,7 +674,7 @@ final class TrailReaderTest extends TestCase
 
         $this->captureQueries();
 
-        $page = $this->trail()->cursorPaginate(2, $cursor);
+        $page = $this->financeTrail()->cursorPaginate(2, $cursor);
 
         self::assertSame([[], null, 2], [$page->entries, $page->nextCursor, $page->perPage]);
         self::assertSame([], $this->entryReads());
@@ -703,18 +699,18 @@ final class TrailReaderTest extends TestCase
 
         app(ConfigRepository::class)->set('audit-log.read.max_per_page', 20);
 
-        $page = $this->trail()->cursorPaginate();
+        $page = $this->financeTrail()->cursorPaginate();
 
         self::assertSame([20, 20], [$page->perPage, count($page->entries)]);
         self::assertIsString($page->nextCursor);
 
-        $next = $this->trail()->cursorPaginate(null, $page->nextCursor);
+        $next = $this->financeTrail()->cursorPaginate(null, $page->nextCursor);
 
         self::assertSame([20, 5, null], [$next->perPage, count($next->entries), $next->nextCursor]);
 
         app(ConfigRepository::class)->set('audit-log.read.max_per_page', 100);
 
-        self::assertSame(TrailReader::DEFAULT_PER_PAGE, $this->trail()->cursorPaginate()->perPage);
+        self::assertSame(TrailReader::DEFAULT_PER_PAGE, $this->financeTrail()->cursorPaginate()->perPage);
         self::assertSame(50, TrailReader::DEFAULT_PER_PAGE);
     }
 
@@ -728,7 +724,7 @@ final class TrailReaderTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $page = $this->trail()->cursorPaginate(3);
+        $page = $this->financeTrail()->cursorPaginate(3);
 
         self::assertCount(3, $page->entries);
         self::assertNull($page->nextCursor);
@@ -748,7 +744,7 @@ final class TrailReaderTest extends TestCase
 
         $this->corrupt($ids[0]);
 
-        $page   = $this->trail()->cursorPaginate(2);
+        $page   = $this->financeTrail()->cursorPaginate(2);
         $record = $this->readRecords('audit_log.trail_read')[0];
         $shown  = array_map(static fn (TrailEntry $entry): array => [$entry->id, $entry->hmac], $page->entries);
 
@@ -770,7 +766,7 @@ final class TrailReaderTest extends TestCase
         $this->seedEntries(3);
         $this->captureQueries();
 
-        self::assertSame(3, $this->trail()->count());
+        self::assertSame(3, $this->financeTrail()->count());
 
         $reads = $this->entryReads();
 
@@ -798,7 +794,7 @@ final class TrailReaderTest extends TestCase
 
         $this->captureQueries();
 
-        $page      = $this->trail()->cursorPaginate();
+        $page      = $this->financeTrail()->cursorPaginate();
         $artifacts = array_filter(
             $this->capturedQueries(),
             static fn (QueryExecuted $query): bool => str_starts_with($query->sql, 'select') && str_contains($query->sql, EntrySettings::artifactsTable()),
@@ -820,7 +816,7 @@ final class TrailReaderTest extends TestCase
         $this->failEntryReads();
 
         try {
-            $this->trail()->correlatedWith(self::SECRET)->cursorPaginate();
+            $this->financeTrail()->correlatedWith(self::SECRET)->cursorPaginate();
 
             self::fail('Expected the read to be refused.');
         } catch (AuditReadRefusedException $refusal) {
@@ -847,14 +843,14 @@ final class TrailReaderTest extends TestCase
 
         $this->captureQueries();
 
-        $page  = $this->trail()->holdingDataOf($owner)->cursorPaginate();
+        $page  = $this->financeTrail()->holdingDataOf($owner)->cursorPaginate();
         $reads = $this->entryReads();
 
         self::assertCount(1, $reads);
         self::assertStringContainsString('exists', $reads[0]);
         self::assertStringContainsString(KeyTables::keyUsesTable(), $reads[0]);
         self::assertSame([$ids[2], $ids[0]], self::idsOf($page));
-        self::assertSame(2, $this->trail()->holdingDataOf($owner)->count());
+        self::assertSame(2, $this->financeTrail()->holdingDataOf($owner)->count());
 
         $filters = TrailFilters::none()->withCategories(['finance'])->withHoldingDataOf($owner)->normalised();
 
@@ -879,13 +875,13 @@ final class TrailReaderTest extends TestCase
         self::holdData($owner, self::OWNER_KEY, $ids);
         self::holdData($other, self::OTHER_OWNER_KEY, $ids);
 
-        $cursor = $this->trail()->holdingDataOf($owner)->cursorPaginate(2)->nextCursor;
+        $cursor = $this->financeTrail()->holdingDataOf($owner)->cursorPaginate(2)->nextCursor;
 
         self::assertIsString($cursor);
-        self::assertCount(1, $this->trail()->holdingDataOf($owner)->cursorPaginate(2, $cursor)->entries);
+        self::assertCount(1, $this->financeTrail()->holdingDataOf($owner)->cursorPaginate(2, $cursor)->entries);
 
         try {
-            $this->trail()->holdingDataOf($other)->cursorPaginate(2, $cursor);
+            $this->financeTrail()->holdingDataOf($other)->cursorPaginate(2, $cursor);
 
             self::fail('Expected the cursor to be refused.');
         } catch (InvalidCursorException $refusal) {
@@ -893,27 +889,6 @@ final class TrailReaderTest extends TestCase
         }
 
         self::assertSame('denied', $this->readRecords('audit_log.trail_read')[2]['outcome']);
-    }
-
-    /**
-     * The viewer's `finance` trail.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
-    }
-
-    /**
-     * The ids of the entries the page shows, in order.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
-     * @return list<string>
-     */
-    private static function idsOf(TrailPage $page): array
-    {
-        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
     }
 
     /**
@@ -947,24 +922,6 @@ final class TrailReaderTest extends TestCase
         ]);
 
         $connection->table(KeyTables::keyUsesTable())->insert(array_map(static fn (string $entryId): array => ['key_id' => $keyId, 'entry_id' => $entryId], $entryIds));
-    }
-
-    /**
-     * Make every storage read of the entries table fail until the flag clears.
-     *
-     * @return void
-     */
-    private function failEntryReads(): void
-    {
-        $this->failEntryReads = true;
-
-        DB::connection(StorageConnection::name())->beforeExecuting(function (string $query, array $bindings, Connection $connection): void {
-            if (!$this->failEntryReads || !str_starts_with($query, 'select') || !str_contains($query, EntrySettings::table())) {
-                return;
-            }
-
-            throw new QueryException((string) $connection->getName(), $query, $bindings, new \PDOException('SQLSTATE[HY000]: General error: the read failed'));
-        });
     }
 
     /**

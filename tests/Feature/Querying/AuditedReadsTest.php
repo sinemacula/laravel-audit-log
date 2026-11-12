@@ -20,7 +20,6 @@ use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
-use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Querying\TrailReader;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
@@ -79,7 +78,7 @@ final class AuditedReadsTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $page = $this->trail()->cursorPaginate();
+        $page = $this->financeTrail()->cursorPaginate();
 
         $records = $this->readRecords();
 
@@ -99,8 +98,8 @@ final class AuditedReadsTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(2);
 
-        $this->trail()->cursorPaginate();
-        $this->trail()->cursorPaginate();
+        $this->financeTrail()->cursorPaginate();
+        $this->financeTrail()->cursorPaginate();
 
         self::assertCount(2, $this->readRecords('audit_log.trail_read'));
     }
@@ -114,7 +113,7 @@ final class AuditedReadsTest extends TestCase
     {
         $this->seedEntries(3);
 
-        $page    = $this->trail()->cursorPaginate(10);
+        $page    = $this->financeTrail()->cursorPaginate(10);
         $records = $this->readRecords();
 
         self::assertSame([[], null, false], [$page->entries, $page->nextCursor, $page->hasMore()]);
@@ -133,7 +132,7 @@ final class AuditedReadsTest extends TestCase
     {
         $this->allowEverything();
         $this->seedEntries(2);
-        $this->trail()->cursorPaginate();
+        $this->financeTrail()->cursorPaginate();
 
         $first   = $this->readRecords('audit_log.trail_read')[0]['id'];
         $reads   = app(AuditTrail::class)->visibleTo($this->viewer())->forEvent('audit_log.trail_read');
@@ -160,7 +159,7 @@ final class AuditedReadsTest extends TestCase
         $this->usePolicy(static fn (): AccessScope => $scope);
         $this->seedEntries(3);
 
-        $this->trail()->cursorPaginate(2);
+        $this->financeTrail()->cursorPaginate(2);
 
         $properties = self::propertiesOf($this->readRecords('audit_log.trail_read')[0]);
         $audit      = $properties['_audit'] ?? null;
@@ -202,7 +201,7 @@ final class AuditedReadsTest extends TestCase
 
         $this->usePolicy(static fn (): AccessScope => $scope);
         $this->seedEntry();
-        $this->trail()->forTenant($tenant)->cursorPaginate();
+        $this->financeTrail()->forTenant($tenant)->cursorPaginate();
 
         $record = $this->readRecords('audit_log.trail_read')[0];
         $id     = $record['id'];
@@ -252,8 +251,8 @@ final class AuditedReadsTest extends TestCase
 
         $this->allowEverything();
         $this->seedEntry();
-        $this->trail()->holdingDataOf($owner)->cursorPaginate();
-        $this->trail()->cursorPaginate();
+        $this->financeTrail()->holdingDataOf($owner)->cursorPaginate();
+        $this->financeTrail()->cursorPaginate();
 
         [$record, $without] = $this->readRecords('audit_log.trail_read');
 
@@ -284,7 +283,7 @@ final class AuditedReadsTest extends TestCase
         $this->allowEverything();
 
         $ids  = $this->seedEntries(3);
-        $page = $this->trail()->cursorPaginate(2);
+        $page = $this->financeTrail()->cursorPaginate(2);
 
         $disclosure = $this->disclosureOf(self::idOf($this->readRecords('audit_log.trail_read')[0]));
 
@@ -305,7 +304,7 @@ final class AuditedReadsTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        self::assertSame(3, $this->trail()->count());
+        self::assertSame(3, $this->financeTrail()->count());
 
         $record     = $this->readRecords('audit_log.trail_counted')[0];
         $properties = self::propertiesOf($record);
@@ -336,7 +335,7 @@ final class AuditedReadsTest extends TestCase
 
         $this->expectExceptionObject(AuditReadRefusedException::unrecorded());
 
-        $this->trail()->cursorPaginate();
+        $this->financeTrail()->cursorPaginate();
     }
 
     /**
@@ -351,8 +350,8 @@ final class AuditedReadsTest extends TestCase
 
         AuditLog::fake();
 
-        self::assertCount(2, $this->trail()->cursorPaginate()->entries);
-        self::assertSame(2, $this->trail()->count());
+        self::assertCount(2, $this->financeTrail()->cursorPaginate()->entries);
+        self::assertSame(2, $this->financeTrail()->count());
 
         $this->assertAuditedTimes('audit_log.trail_read', 1)
             ->assertAuditedTimes('audit_log.trail_counted', 1)
@@ -370,7 +369,7 @@ final class AuditedReadsTest extends TestCase
         $this->allowEverything();
         $this->actingAs(new GenericUser(['id' => 'signed-in-99']));
 
-        $this->trail()->cursorPaginate();
+        $this->financeTrail()->cursorPaginate();
 
         $record = $this->readRecords('audit_log.trail_read')[0];
 
@@ -385,11 +384,11 @@ final class AuditedReadsTest extends TestCase
      */
     public function testTheReadRecordsCategoryIsAudit(): void
     {
-        $this->trail()->cursorPaginate();
-        $this->trail()->count();
+        $this->financeTrail()->cursorPaginate();
+        $this->financeTrail()->count();
         $this->allowEverything();
-        $this->trail()->cursorPaginate();
-        $this->trail()->count();
+        $this->financeTrail()->cursorPaginate();
+        $this->financeTrail()->count();
 
         $records = $this->readRecords();
 
@@ -403,16 +402,6 @@ final class AuditedReadsTest extends TestCase
     }
 
     /**
-     * The viewer's `finance` trail, which never holds the reads' own records.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
-    }
-
-    /**
      * How many rows the entries table holds, of every code.
      *
      * @return int
@@ -420,16 +409,5 @@ final class AuditedReadsTest extends TestCase
     private function entryTotal(): int
     {
         return DB::connection(StorageConnection::name())->table(EntrySettings::table())->count();
-    }
-
-    /**
-     * The ids of the entries the page shows, in order.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
-     * @return list<string>
-     */
-    private static function idsOf(TrailPage $page): array
-    {
-        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
     }
 }

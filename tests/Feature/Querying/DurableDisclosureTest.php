@@ -112,7 +112,7 @@ final class DurableDisclosureTest extends TestCase
 
         $this->captureQueries();
 
-        $refusal = $this->refusalOf(fn () => $this->trail()->cursorPaginate());
+        $refusal = $this->readRefusalOf(fn () => $this->financeTrail()->cursorPaginate());
 
         self::assertInstanceOf(AuditReadRefusedException::class, $refusal);
         self::assertSame(AuditReadRefusedException::unrecorded()->getMessage(), $refusal->getMessage());
@@ -134,7 +134,7 @@ final class DurableDisclosureTest extends TestCase
 
         $this->expectExceptionObject(AuditReadRefusedException::unrecorded());
 
-        $this->trail()->count();
+        $this->financeTrail()->count();
     }
 
     /**
@@ -242,7 +242,7 @@ final class DurableDisclosureTest extends TestCase
 
         FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
-        $refusal = $this->refusalOf(fn () => $this->trail()->cursorPaginate());
+        $refusal = $this->readRefusalOf(fn () => $this->financeTrail()->cursorPaginate());
         $lines   = $this->spillLines();
         $reports = $this->reporter?->reports() ?? [];
 
@@ -270,25 +270,15 @@ final class DurableDisclosureTest extends TestCase
 
         $path = $this->exportPath();
 
-        $this->trail()->export($path);
+        $this->financeTrail()->export($path);
 
-        self::assertTrue($this->trail()->verifyExport($path)->isVerified());
+        self::assertTrue($this->financeTrail()->verifyExport($path)->isVerified());
 
         FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
         $this->expectExceptionObject(AuditReadRefusedException::unrecorded());
 
-        $this->trail()->verifyExport($path);
-    }
-
-    /**
-     * The viewer's `finance` trail.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
+        $this->financeTrail()->verifyExport($path);
     }
 
     /**
@@ -318,23 +308,6 @@ final class DurableDisclosureTest extends TestCase
     }
 
     /**
-     * The refusal the read is refused with, or `null` when it is not.
-     *
-     * @param  \Closure(): (int|\SineMacula\Laravel\AuditLog\Querying\TrailPage)  $read
-     * @return ?\SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException
-     */
-    private function refusalOf(\Closure $read): ?AuditReadRefusedException
-    {
-        try {
-            $read();
-        } catch (AuditReadRefusedException $refusal) {
-            return $refusal;
-        }
-
-        return null;
-    }
-
-    /**
      * Assert the terminal call is refused before any query, report or record.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException  $expected
@@ -346,7 +319,7 @@ final class DurableDisclosureTest extends TestCase
     {
         $this->captureQueries();
 
-        $refusal = $this->refusalOf(fn (): int|TrailPage => $terminal($this->trail()));
+        $refusal = $this->readRefusalOf(fn (): int|TrailPage => $terminal($this->financeTrail()));
 
         self::assertInstanceOf(AuditReadRefusedException::class, $refusal);
         self::assertSame($expected->getMessage(), $refusal->getMessage());

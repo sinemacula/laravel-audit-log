@@ -16,7 +16,6 @@ use Illuminate\Database\Events\TransactionCommitting;
 use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\QueryException;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -30,6 +29,7 @@ use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Lifecycle\LifecycleContentionException;
 use SineMacula\Laravel\AuditLog\Lifecycle\LifecycleLockException;
 use SineMacula\Laravel\AuditLog\Lifecycle\MaintenanceTransaction;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\TestCase;
 
 /**
@@ -49,11 +49,7 @@ use Tests\TestCase;
 #[CoversClass(MaintenanceTransaction::class)]
 final class MaintenanceTransactionTest extends TestCase
 {
-    /** @var string A second connection to the worker's database. */
-    private const string MAINTENANCE = 'audit_maintenance';
-
-    /** @var string A connection that reaches another installation's state table. */
-    private const string OTHER = 'audit_other';
+    use ConnectsSecondDatabases;
 
     /** @var string The operation every test runs, unless it names another. */
     private const string OPERATION = '01932b4e-9000-7000-8000-0000000000a1';
@@ -251,6 +247,12 @@ final class MaintenanceTransactionTest extends TestCase
     public function testAMismatchedInstallationRefusesBeforeTheLock(): void
     {
         $this->otherDatabase();
+
+        DB::connection(self::OTHER)->table(IntegrityTables::stateTable())->insert([
+            'name'       => InstallationIdentity::NAME,
+            'value'      => json_encode(['id' => '01932b4e-9000-7000-8000-00000000abcd']),
+            'updated_at' => '2026-10-01 00:00:00.000000',
+        ]);
 
         app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
 
@@ -926,58 +928,6 @@ final class MaintenanceTransactionTest extends TestCase
     private function driver(): string
     {
         return DB::connection(self::CONNECTION)->getDriverName();
-    }
-
-    /**
-     * Configure `MAINTENANCE` as a second connection to the worker's database.
-     *
-     * @return void
-     */
-    private function sameDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
-
-        $root = DB::connection(self::CONNECTION);
-
-        if ($root->getDriverName() !== 'sqlite') {
-            return;
-        }
-
-        $same = DB::connection(self::MAINTENANCE);
-
-        $same->setPdo($root->getPdo());
-        $same->setReadPdo($root->getPdo());
-    }
-
-    /**
-     * Configure `OTHER`, a connection to another installation's state table.
-     *
-     * @return void
-     */
-    private function otherDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
-
-        $connection = DB::connection(self::OTHER);
-        $schema     = $connection->getSchemaBuilder();
-
-        $schema->dropIfExists(IntegrityTables::stateTable());
-        $schema->create(IntegrityTables::stateTable(), static function (Blueprint $table): void {
-            $table->string('name', 64)->primary();
-            $table->text('value');
-            $table->dateTime('updated_at', 6);
-        });
-
-        $connection->table(IntegrityTables::stateTable())->insert([
-            'name'       => InstallationIdentity::NAME,
-            'value'      => json_encode(['id' => '01932b4e-9000-7000-8000-00000000abcd']),
-            'updated_at' => '2026-10-01 00:00:00.000000',
-        ]);
     }
 
     /**

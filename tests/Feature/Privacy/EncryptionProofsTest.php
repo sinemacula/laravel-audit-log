@@ -11,12 +11,10 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
-use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
-use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
@@ -25,12 +23,12 @@ use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
 use SineMacula\Laravel\AuditLog\Keys\KeyUnit;
 use SineMacula\Laravel\AuditLog\Privacy\FieldCipher;
 use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
-use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use Tests\Concerns\CapturesLogLines;
+use Tests\Concerns\DefinesEvents;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\SearchesForSecrets;
@@ -51,7 +49,7 @@ use Tests\TestCase;
 #[CoversNothing]
 final class EncryptionProofsTest extends TestCase
 {
-    use CapturesLogLines, InteractsWithAuditStore, MakesSubjectKeys, SearchesForSecrets;
+    use CapturesLogLines, DefinesEvents, InteractsWithAuditStore, MakesSubjectKeys, SearchesForSecrets;
 
     /** @var string The code every record here is captured under. */
     private const string CODE = 'billing.card_charged';
@@ -390,25 +388,5 @@ final class EncryptionProofsTest extends TestCase
         self::assertIsInt($envelope['v'] ?? null);
 
         return ['v' => $envelope['v'], 'k' => $envelope['k'], 'c' => $envelope['c']];
-    }
-
-    /**
-     * Register the definition as the only one, as an application does at boot.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
-     * @return void
-     */
-    private static function define(EventDefinition $definition): void
-    {
-        $catalogue = new EventCatalogue;
-
-        $catalogue->define($definition);
-
-        $recorder = new Recorder($catalogue, new ContributorRegistry);
-
-        app()->instance(EventCatalogue::class, $catalogue);
-        app()->instance(Recorder::class, $recorder);
-
-        AuditLog::swap($recorder);
     }
 }

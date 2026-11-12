@@ -15,11 +15,16 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Privacy\SealedFieldReader;
+use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
+use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\ReadTerms;
+use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
+use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -331,6 +336,61 @@ trait ReadsTheTrail
     protected function viewer(): Reference
     {
         return Reference::of('App\Models\User', '7');
+    }
+
+    /**
+     * The viewer's `finance` trail, which never holds the reads' own records.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
+     */
+    protected function financeTrail(): AuditTrail
+    {
+        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
+    }
+
+    /**
+     * The ids of the entries the page shows, in order.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
+     * @return list<string>
+     */
+    protected static function idsOf(TrailPage $page): array
+    {
+        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
+    }
+
+    /**
+     * The entry as a trail page shows it; the test fails without it.
+     *
+     * @param  string  $id
+     * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
+     */
+    protected function shown(string $id): TrailEntry
+    {
+        foreach (AuditLog::trail()->visibleTo($this->viewer())->cursorPaginate(100)->entries as $entry) {
+            if ($entry->id === $id) {
+                return $entry;
+            }
+        }
+
+        self::fail("The page does not show {$id}.");
+    }
+
+    /**
+     * The refusal the read is refused with, or `null` when it is not.
+     *
+     * @param  \Closure(): (int|\SineMacula\Laravel\AuditLog\Querying\TrailPage)  $read
+     * @return ?\SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException
+     */
+    protected function readRefusalOf(\Closure $read): ?AuditReadRefusedException
+    {
+        try {
+            $read();
+        } catch (AuditReadRefusedException $refusal) {
+            return $refusal;
+        }
+
+        return null;
     }
 
     /**

@@ -9,7 +9,6 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -63,6 +62,7 @@ use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Fixtures\Privacy\RecordingFieldEncrypter;
@@ -80,7 +80,7 @@ use Tests\TestCase;
 #[CoversClass(Eraser::class)]
 final class EraserTest extends TestCase
 {
-    use MakesSubjectKeys, ReadsTheTrail;
+    use ConnectsSecondDatabases, MakesSubjectKeys, ReadsTheTrail;
 
     /** @var string When every capture and erasure runs, unless a test moves the clock. */
     private const string NOW = '2026-11-04 10:00:00.000000';
@@ -99,9 +99,6 @@ final class EraserTest extends TestCase
 
     /** @var string What a fragment shows once its owner's key was destroyed. */
     private const string ERASED = '[ERASED]';
-
-    /** @var string The connection a test points the maintenance connection at when it must reach another database. */
-    private const string OTHER = 'audit_other';
 
     /** @var string How MySQL reports a deadlock, which a lifecycle transaction retries. */
     private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction';
@@ -1234,32 +1231,6 @@ final class EraserTest extends TestCase
         self::assertIsObject($held);
 
         return (int) ($held->held ?? 1) === 0;
-    }
-
-    /**
-     * Configure `OTHER`, a connection to a database whose state table holds no
-     * installation id.
-     *
-     * @return void
-     */
-    private function otherDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        DB::purge(self::OTHER);
-
-        $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
-
-        $schema = DB::connection(self::OTHER)->getSchemaBuilder();
-
-        $schema->dropIfExists(IntegrityTables::stateTable());
-        $schema->create(IntegrityTables::stateTable(), static function (Blueprint $table): void {
-            $table->string('name', 64)->primary();
-            $table->text('value');
-            $table->dateTime('updated_at', 6);
-        });
-
-        $this->beforeApplicationDestroyed(static fn () => DB::connection(self::OTHER)->getSchemaBuilder()->dropIfExists(IntegrityTables::stateTable()));
     }
 
     /**

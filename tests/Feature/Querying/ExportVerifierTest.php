@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Feature\Querying;
 
 use Illuminate\Contracts\Encryption\StringEncrypter;
-use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Encryption\Encrypter;
@@ -30,6 +29,7 @@ use SineMacula\Laravel\AuditLog\Querying\ExportResult;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerification;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerifier;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\FailsEntryReads;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\SeedsArtifacts;
@@ -46,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(ExportVerifier::class)]
 final class ExportVerifierTest extends TestCase
 {
-    use InteractsWithAuditStore, ReadsTheTrail, SeedsArtifacts;
+    use FailsEntryReads, InteractsWithAuditStore, ReadsTheTrail, SeedsArtifacts;
 
     /** @var string The code of a verification's record. */
     private const string EXPORT_VERIFIED = 'audit_log.export_verified';
@@ -56,9 +56,6 @@ final class ExportVerifierTest extends TestCase
 
     /** @var string The directory every test exports to, made for it alone. */
     private string $directory = '';
-
-    /** @var bool Whether a read of the entries table on the storage connection fails. */
-    private bool $failEntryReads = false;
 
     /**
      * Bind the read path, allow every viewer and make the directory.
@@ -906,23 +903,5 @@ final class ExportVerifierTest extends TestCase
         }
 
         return $reads;
-    }
-
-    /**
-     * Make every storage read of the entries table fail until the flag clears.
-     *
-     * @return void
-     */
-    private function failEntryReads(): void
-    {
-        $this->failEntryReads = true;
-
-        DB::connection(StorageConnection::name())->beforeExecuting(function (string $query, array $bindings, Connection $connection): void {
-            if (!$this->failEntryReads || !str_starts_with($query, 'select') || !str_contains($query, EntrySettings::table())) {
-                return;
-            }
-
-            throw new QueryException((string) $connection->getName(), $query, $bindings, new \PDOException('SQLSTATE[HY000]: General error: the read failed'));
-        });
     }
 }

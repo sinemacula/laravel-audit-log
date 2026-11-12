@@ -30,6 +30,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSummary;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use Tests\Concerns\RecordsStorageStatements;
 use Tests\Concerns\SealsEntries;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -47,7 +48,7 @@ use Tests\TestCase;
 #[CoversClass(Anchorer::class)]
 final class AnchorerTest extends TestCase
 {
-    use SealsEntries;
+    use RecordsStorageStatements, SealsEntries;
 
     /** @var string When each sealer runs. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -1145,24 +1146,6 @@ final class AnchorerTest extends TestCase
     private function progress(string $name): ?array
     {
         return app(IntegrityProgress::class)->get($name);
-    }
-
-    /**
-     * Record each statement run on the storage connection from now on, with its
-     * bindings.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function recordStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::connection(StorageConnection::name())->beforeExecuting(static function (string $query) use ($statements): void {
-            $statements->append($query);
-        });
-
-        return $statements;
     }
 
     /**

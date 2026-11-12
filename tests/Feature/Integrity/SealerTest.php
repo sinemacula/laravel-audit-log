@@ -29,6 +29,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Sealer;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Integrity\SealSigner;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use Tests\Concerns\RecordsStorageStatements;
 use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
@@ -43,7 +44,7 @@ use Tests\TestCase;
 #[CoversClass(Sealer::class)]
 final class SealerTest extends TestCase
 {
-    use SealsEntries;
+    use RecordsStorageStatements, SealsEntries;
 
     /** @var string When each sealer runs, unless a test freezes it elsewhere. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -1194,23 +1195,6 @@ final class SealerTest extends TestCase
         });
 
         return $selects;
-    }
-
-    /**
-     * Record every statement from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function recordStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::connection(StorageConnection::name())->beforeExecuting(static function (string $query) use ($statements): void {
-            $statements->append($query);
-        });
-
-        return $statements;
     }
 
     /**

@@ -48,6 +48,7 @@ use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\MakesSubjectKeys;
+use Tests\Concerns\RecordsStorageStatements;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Concerns\WritesTheJournal;
@@ -69,7 +70,7 @@ use Tests\TestCase;
 #[CoversClass(Verifier::class)]
 final class VerifierTest extends TestCase
 {
-    use MakesSubjectKeys, SealsEntries, SeedsArtifacts, WritesTheJournal;
+    use MakesSubjectKeys, RecordsStorageStatements, SealsEntries, SeedsArtifacts, WritesTheJournal;
 
     /** @var string When every seal of a test is made. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -1360,7 +1361,7 @@ final class VerifierTest extends TestCase
         $this->storeSeals(2);
         $this->keyConnection()->table(KeyTables::keyUsesTable())->insert(['key_id' => self::OTHER_ID, 'entry_id' => self::OTHER_ID]);
 
-        $statements = $this->recordStatements();
+        $statements = $this->recordExecutedStatements();
         $summary    = $this->verifyLog(new VerificationRange(1, 2));
 
         self::assertNull($summary->keys);
@@ -1535,23 +1536,6 @@ final class VerifierTest extends TestCase
         $encrypter ??= new NoFieldEncrypter;
 
         return new Verifier($segments, $anchor, $settings, app(IntegrityProgress::class), $clock, $database, app(JournalVerifier::class), $keys, $encrypter);
-    }
-
-    /**
-     * Record every statement the storage connection runs from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function recordStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::connection(StorageConnection::name())->listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements->append(strtolower($query->sql));
-        });
-
-        return $statements;
     }
 
     /**

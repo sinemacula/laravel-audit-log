@@ -17,7 +17,6 @@ use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\CursorCodec;
 use SineMacula\Laravel\AuditLog\Querying\InvalidCursorException;
-use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Querying\TrailReader;
 use SineMacula\Laravel\AuditLog\Records\Reference;
@@ -70,11 +69,11 @@ final class AccessControlTest extends TestCase
         $this->seedEntries(3);
         $this->captureQueries();
 
-        $page = $this->trail()->cursorPaginate();
+        $page = $this->financeTrail()->cursorPaginate();
 
         self::assertInstanceOf(DenyAllPolicy::class, app(AuditAccessPolicy::class));
         self::assertSame([[], null], [$page->entries, $page->nextCursor]);
-        self::assertSame(0, $this->trail()->count());
+        self::assertSame(0, $this->financeTrail()->count());
         self::assertSame([], $this->entryReads());
 
         foreach ($this->readRecords() as $record) {
@@ -97,9 +96,9 @@ final class AccessControlTest extends TestCase
 
         $this->seedEntry(['tenant_id' => 'org_02']);
 
-        self::assertSame([$mine], self::idsOf($this->trail()->cursorPaginate()));
-        self::assertSame([$mine], self::idsOf($this->trail()->cursorPaginate()));
-        self::assertSame(1, $this->trail()->count());
+        self::assertSame([$mine], self::idsOf($this->financeTrail()->cursorPaginate()));
+        self::assertSame([$mine], self::idsOf($this->financeTrail()->cursorPaginate()));
+        self::assertSame(1, $this->financeTrail()->count());
         self::assertSame([ReadPurpose::READ, ReadPurpose::READ, ReadPurpose::COUNT], array_column($policy->asked(), 1));
 
         foreach ($this->readRecords() as $record) {
@@ -119,7 +118,7 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['tenant_id' => 'org_02']);
         $this->captureQueries();
 
-        $trail = $this->trail()->forTenant(self::tenant('org_02'));
+        $trail = $this->financeTrail()->forTenant(self::tenant('org_02'));
 
         self::assertSame([], $trail->cursorPaginate()->entries);
         self::assertSame(0, $trail->count());
@@ -141,8 +140,8 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['tenant_id' => 'org_02']);
         $this->captureQueries();
 
-        $guessed = $this->trail()->forTenant(self::tenant('org_02'));
-        $unknown = $this->trail()->forTenant(self::tenant('org_99'));
+        $guessed = $this->financeTrail()->forTenant(self::tenant('org_02'));
+        $unknown = $this->financeTrail()->forTenant(self::tenant('org_99'));
 
         self::assertEquals($unknown->cursorPaginate(10), $guessed->cursorPaginate(10));
         self::assertSame($unknown->count(), $guessed->count());
@@ -168,8 +167,8 @@ final class AccessControlTest extends TestCase
         $this->allowTenants(self::tenant('org_01'));
         $this->seedEntry(['tenant_id' => 'org_02', 'subject_id' => 'inv_0099']);
 
-        $guessed = $this->trail()->forSubject(Reference::of('invoice', 'inv_0099'));
-        $unknown = $this->trail()->forSubject(Reference::of('invoice', 'inv_none'));
+        $guessed = $this->financeTrail()->forSubject(Reference::of('invoice', 'inv_0099'));
+        $unknown = $this->financeTrail()->forSubject(Reference::of('invoice', 'inv_none'));
 
         self::assertSame(1, DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('subject_id', 'inv_0099')->count());
         self::assertEquals($unknown->cursorPaginate(), $guessed->cursorPaginate());
@@ -210,7 +209,7 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(self::inTenant('org_03', ['actor_id' => '7']), self::at(2));
         $this->seedEntry(self::inTenant(null, ['actor_id' => '7']), self::at(3));
 
-        $trail = $narrow($this->trail());
+        $trail = $narrow($this->financeTrail());
 
         self::assertSame(array_reverse($inScope), self::idsOf($trail->cursorPaginate()));
         self::assertSame(array_reverse($inScope), array_merge(...array_map(self::idsOf(...), $this->walk($trail, 1))));
@@ -227,7 +226,7 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
         $other  = app(AuditTrail::class)->visibleTo(Reference::of('App\Models\User', '8'))->inCategory('finance');
 
         $this->captureQueries();
@@ -251,10 +250,10 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['tenant_id' => 'org_01'], self::at(0));
         $this->seedEntry(['tenant_id' => 'org_02'], self::at(1));
 
-        $cursor = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
 
         $this->allowTenants(self::tenant('org_01'));
-        $this->assertCursorRefused(fn () => $this->trail()->cursorPaginate(1, $cursor));
+        $this->assertCursorRefused(fn () => $this->financeTrail()->cursorPaginate(1, $cursor));
     }
 
     /**
@@ -283,9 +282,9 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
 
-        $this->assertCursorRefused(fn () => $narrow($this->trail())->cursorPaginate(1, $cursor));
+        $this->assertCursorRefused(fn () => $narrow($this->financeTrail())->cursorPaginate(1, $cursor));
     }
 
     /**
@@ -298,7 +297,7 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
         $this->seedEntries(3);
 
-        $cursor   = $this->nextCursorOf($this->trail()->cursorPaginate(1));
+        $cursor   = $this->nextCursorOf($this->financeTrail()->cursorPaginate(1));
         $tampered = ['version' => 'v2' . substr($cursor, 2)];
 
         foreach (self::CURSOR_PARTS as $name => $index) {
@@ -310,7 +309,7 @@ final class AccessControlTest extends TestCase
         foreach ($tampered as $name => $changed) {
             self::assertNotSame($cursor, $changed, "The {$name} was not changed.");
 
-            $this->assertCursorRefused(fn () => $this->trail()->cursorPaginate(1, $changed));
+            $this->assertCursorRefused(fn () => $this->financeTrail()->cursorPaginate(1, $changed));
         }
 
         self::assertSame([], $this->entryReads());
@@ -330,11 +329,11 @@ final class AccessControlTest extends TestCase
         $this->allowEverything();
 
         $ids   = $this->seedEntries(4);
-        $first = $this->trail()->cursorPaginate(2);
+        $first = $this->financeTrail()->cursorPaginate(2);
 
         DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $ids[2])->delete();
 
-        $second = $this->trail()->cursorPaginate(2, $this->nextCursorOf($first));
+        $second = $this->financeTrail()->cursorPaginate(2, $this->nextCursorOf($first));
 
         self::assertSame([$ids[3], $ids[2]], self::idsOf($first));
         self::assertSame([$ids[1], $ids[0]], self::idsOf($second));
@@ -353,7 +352,7 @@ final class AccessControlTest extends TestCase
             $this->seedEntry(self::inTenant($tenant));
         }
 
-        self::assertSame(2, $this->trail()->count());
+        self::assertSame(2, $this->financeTrail()->count());
         self::assertSame(4, DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('category', 'finance')->count());
     }
 
@@ -424,8 +423,8 @@ final class AccessControlTest extends TestCase
         $this->seedEntry(['actor_type' => 'customer', 'actor_id' => '7'], self::at(3));
         $this->seedEntry([], self::at(4));
 
-        self::assertSame([$bySubject, $byActor], self::idsOf($this->trail()->cursorPaginate()));
-        self::assertSame(2, $this->trail()->count());
+        self::assertSame([$bySubject, $byActor], self::idsOf($this->financeTrail()->cursorPaginate()));
+        self::assertSame(2, $this->financeTrail()->count());
     }
 
     /**
@@ -440,11 +439,11 @@ final class AccessControlTest extends TestCase
 
         $this->allowTenants(self::tenant('org_01'));
 
-        self::assertSame([$tenanted], self::idsOf($this->trail()->cursorPaginate()));
+        self::assertSame([$tenanted], self::idsOf($this->financeTrail()->cursorPaginate()));
 
         $this->usePolicy(static fn (): AccessScope => AccessScope::tenants(self::tenant('org_01'))->withTenantless());
 
-        self::assertSame([$tenantless, $tenanted], self::idsOf($this->trail()->cursorPaginate()));
+        self::assertSame([$tenantless, $tenanted], self::idsOf($this->financeTrail()->cursorPaginate()));
     }
 
     /**
@@ -469,16 +468,6 @@ final class AccessControlTest extends TestCase
 
         self::assertSame([$sales, $finance], self::idsOf($trail->cursorPaginate()));
         self::assertSame([$finance], self::idsOf($trail->inCategory('finance', 'hr')->cursorPaginate()));
-    }
-
-    /**
-     * The viewer's `finance` trail, which never holds the reads' own records.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
     }
 
     /**
@@ -602,16 +591,5 @@ final class AccessControlTest extends TestCase
     private static function at(int $microseconds): string
     {
         return sprintf('2026-11-01T12:00:00.%06dZ', $microseconds);
-    }
-
-    /**
-     * The ids of the entries the page shows, in order.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
-     * @return list<string>
-     */
-    private static function idsOf(TrailPage $page): array
-    {
-        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
     }
 }

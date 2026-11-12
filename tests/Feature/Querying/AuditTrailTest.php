@@ -23,7 +23,6 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Querying\ExportResult;
 use SineMacula\Laravel\AuditLog\Querying\ExportVerification;
 use SineMacula\Laravel\AuditLog\Querying\InvalidCursorException;
-use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use SineMacula\Laravel\AuditLog\Querying\TrailPage;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
@@ -780,17 +779,6 @@ final class AuditTrailTest extends TestCase
         }
 
         return $this->seedEntry(['properties' => $properties], id: $id);
-    }
-
-    /**
-     * The ids of the entries the page shows, in order.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
-     * @return list<string>
-     */
-    private static function idsOf(TrailPage $page): array
-    {
-        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
     }
 
     /**

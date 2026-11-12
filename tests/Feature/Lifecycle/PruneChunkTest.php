@@ -38,6 +38,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SealsEntries;
 use Tests\Fixtures\Records\RecordFactory;
@@ -55,7 +56,7 @@ use Tests\TestCase;
 #[CoversClass(PruneChunk::class)]
 final class PruneChunkTest extends TestCase
 {
-    use InteractsWithOutbox, SealsEntries;
+    use ConnectsSecondDatabases, InteractsWithOutbox, SealsEntries;
 
     /** @var string When every chunk runs. */
     private const string NOW = '2026-11-04 15:00:00';
@@ -77,9 +78,6 @@ final class PruneChunkTest extends TestCase
 
     /** @var string When every chunk's record says it pruned. */
     private const string PRUNED_AT = '2026-11-04T15:00:00.000000Z';
-
-    /** @var string A maintenance connection of its own, to the worker's database. */
-    private const string MAINTENANCE = 'audit_maintenance';
 
     /**
      * Stop the clock, keep every category thirty days, and bind the configured
@@ -527,31 +525,6 @@ final class PruneChunkTest extends TestCase
         });
 
         return $log;
-    }
-
-    /**
-     * Configure a second connection to the worker's database as the maintenance
-     * connection.
-     *
-     * @return void
-     */
-    private function sameDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
-
-        $root = DB::connection(self::CONNECTION);
-
-        if ($root->getDriverName() !== 'sqlite') {
-            return;
-        }
-
-        $same = DB::connection(self::MAINTENANCE);
-
-        $same->setPdo($root->getPdo());
-        $same->setReadPdo($root->getPdo());
     }
 
     /**

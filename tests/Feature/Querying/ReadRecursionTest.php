@@ -27,7 +27,6 @@ use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Events\AuditWriteFailed;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
-use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Querying\ReadGate;
 use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailPage;
@@ -124,7 +123,7 @@ final class ReadRecursionTest extends TestCase
 
         $this->captureQueries();
 
-        $page = $this->trail()->cursorPaginate();
+        $page = $this->financeTrail()->cursorPaginate();
 
         self::assertCount(2, $page->entries);
         self::assertCount(1, $this->entryReads());
@@ -154,7 +153,7 @@ final class ReadRecursionTest extends TestCase
 
         Event::listen(AuditRecorded::class, $listener(...));
 
-        self::assertCount(2, $this->trail()->cursorPaginate()->entries);
+        self::assertCount(2, $this->financeTrail()->cursorPaginate()->entries);
         self::assertSame([], $listener->heard());
         self::assertSame(1, $this->outboxCount());
 
@@ -181,7 +180,7 @@ final class ReadRecursionTest extends TestCase
         FakeAuditStore::failing(new \RuntimeException('The store is down.'));
 
         try {
-            $this->trail()->cursorPaginate();
+            $this->financeTrail()->cursorPaginate();
 
             self::fail('Expected the unrecorded read to be refused.');
         } catch (AuditReadRefusedException $refusal) {
@@ -219,7 +218,7 @@ final class ReadRecursionTest extends TestCase
         app()->instance(AuditStore::class, new CallbackStore(function () use (&$refusal, &$reads): void {
             $this->captureQueries();
 
-            $refusal = $this->refusalOf(fn () => $this->trail()->count());
+            $refusal = $this->readRefusalOf(fn () => $this->financeTrail()->count());
             $reads   = $this->entryReads();
         }));
 
@@ -249,7 +248,7 @@ final class ReadRecursionTest extends TestCase
         Event::listen(AuditWriteFailed::class, function () use (&$refusal, &$reads): void {
             $this->captureQueries();
 
-            $refusal = $this->refusalOf(fn () => $this->trail()->cursorPaginate());
+            $refusal = $this->readRefusalOf(fn () => $this->financeTrail()->cursorPaginate());
             $reads   = $this->entryReads();
         });
 
@@ -276,7 +275,7 @@ final class ReadRecursionTest extends TestCase
         app()->instance(PortalMapper::class, self::mapperRunning(function () use (&$refusal, &$reads): void {
             $this->captureQueries();
 
-            $refusal = $this->refusalOf(fn () => $this->trail()->count());
+            $refusal = $this->readRefusalOf(fn () => $this->financeTrail()->count());
             $reads   = $this->entryReads();
         }));
 
@@ -363,7 +362,7 @@ final class ReadRecursionTest extends TestCase
             $inner = AuditLog::record(self::INNER_CODE);
         }));
 
-        self::assertCount(2, $this->trail()->cursorPaginate()->entries);
+        self::assertCount(2, $this->financeTrail()->cursorPaginate()->entries);
         self::assertSame(self::INNER_CODE, $inner?->event);
         self::assertCount(1, $this->readRecords('audit_log.trail_read'));
         self::assertSame(0, $this->entryCountOf(self::INNER_CODE));
@@ -381,33 +380,6 @@ final class ReadRecursionTest extends TestCase
         $app->booting(static function (): void {
             AuditLog::map(PortalEvent::class, PortalMapper::class);
         });
-    }
-
-    /**
-     * The viewer's `finance` trail.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
-    }
-
-    /**
-     * The refusal the read is refused with, or `null` when it is not.
-     *
-     * @param  \Closure(): (int|\SineMacula\Laravel\AuditLog\Querying\TrailPage)  $read
-     * @return ?\SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException
-     */
-    private function refusalOf(\Closure $read): ?AuditReadRefusedException
-    {
-        try {
-            $read();
-        } catch (AuditReadRefusedException $refusal) {
-            return $refusal;
-        }
-
-        return null;
     }
 
     /**

@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Feature\Lifecycle;
 
 use Carbon\CarbonImmutable;
-use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Query\Builder;
@@ -27,6 +26,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalBrokenException;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay;
 use SineMacula\Laravel\AuditLog\Lifecycle\MaintenanceTransaction;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
@@ -41,7 +41,7 @@ use Tests\TestCase;
 #[CoversClass(Journal::class)]
 final class JournalTest extends TestCase
 {
-    use WritesTheJournal;
+    use ConnectsSecondDatabases, WritesTheJournal;
 
     /** @var string The operation every test runs. */
     private const string OPERATION = '01932b4e-9000-7000-8000-0000000000a1';
@@ -51,9 +51,6 @@ final class JournalTest extends TestCase
 
     /** @var string A hold id. */
     private const string HOLD = '01932b4e-d000-7000-8000-000000000001';
-
-    /** @var string A second connection to the worker's database. */
-    private const string MAINTENANCE = 'audit_maintenance';
 
     /**
      * Freeze the clock.
@@ -532,29 +529,5 @@ final class JournalTest extends TestCase
     private static function holdPayload(): array
     {
         return ['hold_id' => self::HOLD, 'scope' => HoldScope::all()->toArray(), 'basis' => 'legal_claim', 'review_by' => null];
-    }
-
-    /**
-     * Configure `MAINTENANCE` as a second connection to the worker's database.
-     *
-     * @return void
-     */
-    private function sameDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
-
-        $root = DB::connection(self::CONNECTION);
-
-        if ($root->getDriverName() !== 'sqlite') {
-            return;
-        }
-
-        $same = DB::connection(self::MAINTENANCE);
-
-        $same->setPdo($root->getPdo());
-        $same->setReadPdo($root->getPdo());
     }
 }

@@ -77,7 +77,7 @@ final class TrailOrderingTest extends TestCase
 
         $descending = array_reverse(self::IDS);
 
-        self::assertSame($descending, self::idsOf($this->trail()->cursorPaginate(8)));
+        self::assertSame($descending, self::idsOf($this->financeTrail()->cursorPaginate(8)));
         self::assertSame(array_chunk($descending, 2), array_map(self::idsOf(...), $this->walk(2)));
     }
 
@@ -120,7 +120,7 @@ final class TrailOrderingTest extends TestCase
         self::assertCount(5, $pages);
         self::assertSame([...array_reverse(self::IDS), ...array_reverse(array_slice($ids, 0, 20))], $shown);
         self::assertNull($pages[4]->nextCursor);
-        self::assertSame(count($ids), $this->trail()->count());
+        self::assertSame(count($ids), $this->financeTrail()->count());
     }
 
     /**
@@ -134,7 +134,7 @@ final class TrailOrderingTest extends TestCase
         $this->seedRecorded(self::IDS[1], '2026-11-01T12:00:02.000000Z', '2026-11-01T12:00:02.000000Z');
         $this->seedRecorded(self::IDS[2], '2026-11-01T12:00:01.000000Z', '2026-11-01T12:10:00.000000Z');
 
-        $page = $this->trail()->cursorPaginate();
+        $page = $this->financeTrail()->cursorPaginate();
 
         self::assertSame([self::IDS[1], self::IDS[2], self::IDS[0]], self::idsOf($page));
         self::assertSame(
@@ -180,19 +180,9 @@ final class TrailOrderingTest extends TestCase
             $this->seedEntry(['tenant_id' => $index % 2 === 0 ? 'org_01' : 'org_02'], self::SHARED_AT, $id);
         }
 
-        $pages = $this->walk(1, $this->trail()->forTenant(Reference::of('organisation', 'org_02')));
+        $pages = $this->walk(1, $this->financeTrail()->forTenant(Reference::of('organisation', 'org_02')));
 
         self::assertSame([self::IDS[7], self::IDS[5], self::IDS[3], self::IDS[1]], array_merge(...array_map(self::idsOf(...), $pages)));
-    }
-
-    /**
-     * The viewer's `finance` trail, which never holds the reads' own records.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Querying\AuditTrail
-     */
-    private function trail(): AuditTrail
-    {
-        return app(AuditTrail::class)->visibleTo($this->viewer())->inCategory('finance');
     }
 
     /**
@@ -204,7 +194,7 @@ final class TrailOrderingTest extends TestCase
      */
     private function walk(int $perPage, ?AuditTrail $trail = null): array
     {
-        $trail ??= $this->trail();
+        $trail ??= $this->financeTrail();
         $pages = [$trail->cursorPaginate($perPage)];
 
         while (($cursor = end($pages)->nextCursor) !== null) {
@@ -229,16 +219,5 @@ final class TrailOrderingTest extends TestCase
         $record = RecordFactory::captured(id: $id, occurredAt: $occurredAt);
 
         app(DatabaseAuditStore::class)->store((new RecordFinaliser(FrozenClock::at($recordedAt), app(RecordSigner::class)))->finalise($record));
-    }
-
-    /**
-     * The ids of the entries the page shows, in order.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailPage  $page
-     * @return list<string>
-     */
-    private static function idsOf(TrailPage $page): array
-    {
-        return array_map(static fn (TrailEntry $entry): string => $entry->id, $page->entries);
     }
 }

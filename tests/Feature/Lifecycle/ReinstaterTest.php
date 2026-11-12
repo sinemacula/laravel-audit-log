@@ -7,13 +7,11 @@ namespace Tests\Feature\Lifecycle;
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Query\Builder;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
-use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
@@ -32,6 +30,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalBrokenException;
 use SineMacula\Laravel\AuditLog\Lifecycle\ReinstatementRefusedException;
 use SineMacula\Laravel\AuditLog\Lifecycle\Reinstater;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\TestCase;
 
@@ -49,16 +48,13 @@ use Tests\TestCase;
 #[CoversClass(Reinstater::class)]
 final class ReinstaterTest extends TestCase
 {
-    use MakesSubjectKeys;
+    use ConnectsSecondDatabases, MakesSubjectKeys;
 
     /** @var string When every operation runs. */
     private const string NOW = '2026-11-04 10:00:00.123456';
 
     /** @var string The operation every reinstatement runs under. */
     private const string OPERATION = '01932b4e-9000-7000-8000-0000000000a1';
-
-    /** @var string The connection a test points the maintenance connection at when it must reach another database. */
-    private const string OTHER = 'audit_other';
 
     /**
      * Freeze the clock.
@@ -416,32 +412,6 @@ final class ReinstaterTest extends TestCase
         $this->keyConnection()->table(KeyTables::ownerErasuresTable())->where('id', $row->id)->delete();
 
         return $row;
-    }
-
-    /**
-     * Configure `OTHER`, a connection to a database whose state table holds no
-     * installation id.
-     *
-     * @return void
-     */
-    private function otherDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-
-        DB::purge(self::OTHER);
-
-        $config->set('database.connections.' . self::OTHER, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'other_']);
-
-        $schema = DB::connection(self::OTHER)->getSchemaBuilder();
-
-        $schema->dropIfExists(IntegrityTables::stateTable());
-        $schema->create(IntegrityTables::stateTable(), static function (Blueprint $table): void {
-            $table->string('name', 64)->primary();
-            $table->text('value');
-            $table->dateTime('updated_at', 6);
-        });
-
-        $this->beforeApplicationDestroyed(static fn () => DB::connection(self::OTHER)->getSchemaBuilder()->dropIfExists(IntegrityTables::stateTable()));
     }
 
     /**

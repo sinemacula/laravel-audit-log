@@ -406,23 +406,6 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * The entry as a trail page shows it; the test fails without it.
-     *
-     * @param  string  $id
-     * @return \SineMacula\Laravel\AuditLog\Querying\TrailEntry
-     */
-    private function shown(string $id): TrailEntry
-    {
-        foreach (AuditLog::trail()->visibleTo($this->viewer())->cursorPaginate(100)->entries as $entry) {
-            if ($entry->id === $id) {
-                return $entry;
-            }
-        }
-
-        self::fail("The page does not show {$id}.");
-    }
-
-    /**
      * The stored keys of the unit, by generation.
      *
      * @param  \SineMacula\Laravel\AuditLog\Keys\KeyUnit  $unit

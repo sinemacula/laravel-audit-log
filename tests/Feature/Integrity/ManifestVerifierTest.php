@@ -21,6 +21,7 @@ use SineMacula\Laravel\AuditLog\Records\DisclosureManifest;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\RecordsStorageStatements;
 use Tests\Concerns\SeedsArtifacts;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
@@ -37,7 +38,7 @@ use Tests\TestCase;
 #[CoversClass(ManifestVerifier::class)]
 final class ManifestVerifierTest extends TestCase
 {
-    use SeedsArtifacts;
+    use RecordsStorageStatements, SeedsArtifacts;
 
     /** @var string An artifact id no bundle has. */
     private const string OTHER_ID = '01932b4e-9000-7000-8000-00000000ffff';
@@ -105,7 +106,7 @@ final class ManifestVerifierTest extends TestCase
         $this->artifactsTable()->whereIn('entry_id', [$pruned, $kept])->delete();
         DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $pruned)->delete();
 
-        $statements = $this->recordStatements();
+        $statements = $this->recordExecutedStatements();
 
         self::assertSame([[Finding::MANIFEST_MISSING, $kept]], $this->verifier()->findings($descriptors));
         self::assertCount(2, $statements);
@@ -911,24 +912,6 @@ final class ManifestVerifierTest extends TestCase
                 return;
             }
 
-            $statements->append(strtolower($query->sql));
-        });
-
-        return $statements;
-    }
-
-    /**
-     * Record, from now on, every statement the storage connection runs, in
-     * lower case.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function recordStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::connection(StorageConnection::name())->listen(static function (QueryExecuted $query) use ($statements): void {
             $statements->append(strtolower($query->sql));
         });
 

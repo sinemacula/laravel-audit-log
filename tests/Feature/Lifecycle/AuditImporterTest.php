@@ -43,6 +43,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay;
 use SineMacula\Laravel\AuditLog\Lifecycle\SourceDigest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -59,7 +60,7 @@ use Tests\TestCase;
 #[CoversClass(AuditImporter::class)]
 final class AuditImporterTest extends TestCase
 {
-    use SealsEntries, WritesTheJournal;
+    use ConnectsSecondDatabases, SealsEntries, WritesTheJournal;
 
     /** @var string When every import runs. */
     private const string NOW = '2026-11-02 09:00:00.000000';
@@ -72,9 +73,6 @@ final class AuditImporterTest extends TestCase
 
     /** @var string The refusal of a batch that cannot be closed. */
     private const string NOT_CLOSABLE = 'Only a running import batch, or a final one whose finish was never journalled, is closed.';
-
-    /** @var string A second connection name to the same database, for the maintenance connection. */
-    private const string MAINTENANCE = 'audit_maintenance';
 
     /** @var list<string> The files this test wrote. */
     private array $files = [];
@@ -1043,32 +1041,6 @@ final class AuditImporterTest extends TestCase
         self::assertSame([$storage], array_keys($writes['batches'] ?? []));
         self::assertSame([self::MAINTENANCE], array_keys($writes['journal'] ?? []));
         self::assertSame([self::MAINTENANCE], array_keys($writes['holds'] ?? []));
-    }
-
-    /**
-     * Configure the maintenance connection as a second name for the storage
-     * database.
-     *
-     * @return void
-     */
-    private function sameDatabase(): void
-    {
-        $config = app(ConfigRepository::class);
-        $root   = $config->string('database.default');
-
-        $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . $root));
-        $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
-
-        $connection = DB::connection($root);
-
-        if ($connection->getDriverName() !== 'sqlite') {
-            return;
-        }
-
-        $same = DB::connection(self::MAINTENANCE);
-
-        $same->setPdo($connection->getPdo());
-        $same->setReadPdo($connection->getPdo());
     }
 
     /**
