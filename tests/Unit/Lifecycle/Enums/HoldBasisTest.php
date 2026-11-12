@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 
 /**
- * Unit tests for the basis a hold is placed on: its cases and the values the
- * journal and the holds projection store.
+ * Unit tests for the basis a hold is placed on.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 final class HoldBasisTest extends TestCase
 {
     /**
-     * The cases, in order, with their values, so a renamed, reordered or added
-     * case fails.
+     * The cases and their values are pinned, in order.
      *
      * @return void
      */
@@ -37,8 +35,7 @@ final class HoldBasisTest extends TestCase
     }
 
     /**
-     * Every value fits the holds table's `basis` column of 32 characters and
-     * reads back as its case.
+     * Every value fits the 32-character `basis` column and reads back.
      *
      * @return void
      */

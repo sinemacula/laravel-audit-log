@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
 
 /**
- * Unit tests for the import format enum: its cases and the versioned names an
- * import line and a batch row hold.
+ * Unit tests for the import format enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportFormat;
 final class ImportFormatTest extends TestCase
 {
     /**
-     * The cases, in order, with their values, so a renamed, reordered or added
-     * case fails.
+     * The cases and their values are pinned, in order.
      *
      * @return void
      */
@@ -35,8 +33,7 @@ final class ImportFormatTest extends TestCase
     }
 
     /**
-     * Every format's name is versioned and fits the batches table's
-     * `input_format` column of 32 characters.
+     * Every format is versioned and fits the 32-character column.
      *
      * @return void
      */

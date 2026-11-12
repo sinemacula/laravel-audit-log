@@ -19,21 +19,8 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Holds the lifecycle to the rule that keeps what it handles out of a stack
- * trace: with `zend.exception_ignore_args` off every frame keeps its arguments,
- * so a parameter that holds a row, a record, a payload, a line of an import
- * file, a record's properties, a data key, a wrapped key, an owner's key row, a
- * hold scope or one of its references, or a closure is marked
- * `#[\SensitiveParameter]` on every method it passes through, and a closure's
- * own parameters too, which reflection of a class cannot reach and so are read
- * from the source. Ids, codes, counts, digests, sequences, class names and a
- * decision's tenant are not payload.
- *
- * Every class under `src/Lifecycle` is held, whatever it holds when the test
- * runs, and the retention policy contract beside them. The scan must read each
- * class of the namespace, so it cannot pass by reading nothing, and a class
- * written for the test with a parameter of each kind shows it flags exactly
- * what it should.
+ * Holds `src/Lifecycle` and the retention contract to marking each payload
+ * parameter `#[\SensitiveParameter]`, so stack traces keep no payload.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,7 +36,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     /** @var string The setting that turns a frame's arguments off. */
     private const string IGNORE_ARGS = 'zend.exception_ignore_args';
 
-    /** @var list<string> The folders under `src` the rule holds, whatever is added to them. */
+    /** @var list<string> The folders under `src` the rule holds. */
     private const array FOLDERS = ['Lifecycle'];
 
     /** @var list<string> The further files under `src` the rule holds. */
@@ -60,7 +47,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
         'row', 'rows', 'record', 'records', 'payload', 'line', 'lines', 'envelope', 'plaintext', 'ciphertext', 'members', 'properties', 'dataKey', 'wrapped',
     ];
 
-    /** @var list<string> The types a parameter holding a payload goes by: a closure, a record, an owner's key row, a hold scope and a parsed import line. */
+    /** @var list<string> The types a payload parameter goes by. */
     private const array PAYLOAD_TYPES = [
         \Closure::class,
         AuditRecord::class,
@@ -71,16 +58,16 @@ final class LifecycleSensitiveParametersTest extends TestCase
         self::NAMESPACE . 'Lifecycle\ImportLine',
     ];
 
-    /** @var string The hold scope, whose every reference parameter holds one of the scope's references. */
+    /** @var string The hold scope, whose reference parameters are all payload. */
     private const string HOLD_SCOPE = self::NAMESPACE . 'Lifecycle\HoldScope';
 
-    /** @var string The hold scope's file, relative to `src`, whose closures' references are payload too. */
+    /** @var string The hold scope's file, relative to `src`. */
     private const string HOLD_SCOPE_FILE = 'Lifecycle/HoldScope.php';
 
-    /** @var string What a closure's parameter holding a payload is typed as, read from the source, where no type can be resolved. */
+    /** @var string Matches a closure payload parameter's type in source, where none resolves. */
     private const string PAYLOAD_TYPE_IN_SOURCE = '/\b(?:AuditRecord|FinalisedRecord|PendingRecord|SubjectKeyRow|HoldScope|ImportLine|Closure)\b/';
 
-    /** @var string What a closure's parameter holding a reference is typed as, read from the source. */
+    /** @var string Matches a closure reference parameter's type in source, where none resolves. */
     private const string REFERENCE_TYPE_IN_SOURCE = '/\bReference\b/';
 
     /** @var list<class-string> The classes the scan must read, from those this suite already holds. */
@@ -124,9 +111,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Every method of every class the rule holds, private ones included, marks
-     * a parameter that goes by a payload's name or type, and the hold scope
-     * marks every reference it takes.
+     * Every method marks each payload parameter, the hold scope references.
      *
      * @return void
      */
@@ -148,9 +133,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan reads every class of the folders the rule holds, the enums
-     * included, and the contract beside them, each once, and every file it
-     * reads names a class, an interface or an enum that exists.
+     * The scan reads every class of the namespace once, each a real type.
      *
      * @return void
      */
@@ -165,11 +148,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * A class written with a parameter of each kind, and of each kind that is
-     * not payload, is flagged by name or by type exactly where it should be, a
-     * reference only in a hold scope, and a closure in it is read from its
-     * source: protects against a scan that passes by flagging nothing, or by
-     * flagging everything.
+     * A fixture class is flagged exactly where it should be.
      *
      * @return void
      */
@@ -250,10 +229,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * A closure's parameters are out of a scan of methods, so they are read
-     * from the source: every one that goes by a payload's name or type is
-     * marked, a reference too in the hold scope, and the files whose closures
-     * the scan must read have some.
+     * Every payload parameter of a closure, read from source, is marked.
      *
      * @return void
      */
@@ -277,8 +253,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[source, the closures' parameters]`: each form of closure the
-     * source scan must read, and what it must leave alone.
+     * Rows of `[source, the closures' parameters]`: each closure form to read.
      *
      * @return iterable<string, array{0: string, 1: list<list<string>>}>
      */
@@ -300,8 +275,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The source scan finds the parameters of every form of closure and of no
-     * method, which reflection reads already.
+     * The source scan finds every closure's parameters and no method's.
      *
      * @param  string  $source
      * @param  list<list<string>>  $parameters
@@ -314,10 +288,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[a closure's parameters, whether it is the hold scope's, the
-     * names the scan must flag]`: a payload is flagged by its name or its type
-     * unless it is marked, a reference only in the hold scope, and anything
-     * else is left alone.
+     * Rows of `[parameters, in the hold scope, flagged names]`.
      *
      * @return iterable<string, array{0: list<string>, 1: bool, 2: list<string>}>
      */
@@ -346,8 +317,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The closure scan flags a payload that is unmarked, by its name or its
-     * type, and reads each parameter's marking apart.
+     * The closure scan flags an unmarked payload by name or type.
      *
      * @param  list<string>  $parameters
      * @param  bool  $inHoldScope
@@ -361,8 +331,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * What the marking hides is really in the frame's reach: an unmarked frame
-     * keeps the value a marked one replaces, so the rule has something to hide.
+     * An unmarked frame keeps the value a marked one hides.
      *
      * @return void
      */
@@ -402,10 +371,8 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of the class's own methods that hold a payload; none for a
-     * method PHP or a framework trait declares, since neither can be marked,
-     * unless the class is not the package's own. In the class that holds a hold
-     * scope's references, every reference parameter is one.
+     * The class's own payload parameters, skipping PHP and framework methods;
+     * in the hold scope, every reference.
      *
      * @param  class-string  $class
      * @param  bool  $ownMethodsOnly
@@ -444,8 +411,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Whether the parameter's type, or a member of its union, is one of the
-     * types named.
+     * Whether the parameter's type, or one of its union, is among those named.
      *
      * @param  \ReflectionParameter  $parameter
      * @param  list<string>  $names
@@ -480,8 +446,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The names of a closure's parameters that hold a payload and are not
-     * marked, by their name or their type, and in the hold scope a reference.
+     * A closure's unmarked payload parameters, in the hold scope references.
      *
      * @param  list<string>  $parameters
      * @param  bool  $inHoldScope
@@ -511,9 +476,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of each closure in the source that takes any, in order,
-     * read from its tokens: a `function` or `fn` followed straight by a
-     * bracket, which a named method never is.
+     * Each closure's parameters: `function` or `fn` straight before a bracket.
      *
      * @param  string  $source
      * @return list<list<string>>
@@ -563,9 +526,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The arguments of the bracket that opens at the index, split at its
-     * top-level commas, each as its text with its spaces trimmed; a trailing
-     * comma adds none.
+     * The trimmed arguments of the bracket at the index, split at its commas.
      *
      * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  int  $open
@@ -614,8 +575,7 @@ final class LifecycleSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The source's tokens with its comments gone and each run of whitespace one
-     * space, so a list of parameters over many lines reads as one over one.
+     * The source's tokens without comments, each whitespace run one space.
      *
      * @param  string  $source
      * @return array<int, array{0: int, 1: string, 2: int}|string>

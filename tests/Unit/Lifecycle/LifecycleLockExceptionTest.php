@@ -9,10 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\LifecycleLockException;
 
 /**
- * Unit tests for the exception a lifecycle operation is refused with when the
- * lock cannot be taken as the protocol needs it: a missing lock row, and an
- * isolation level other than `read committed`, each with its message and no
- * previous exception.
+ * Unit tests for the exceptions a lifecycle lock is refused with.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,8 +43,7 @@ final class LifecycleLockExceptionTest extends TestCase
     }
 
     /**
-     * Neither carries a previous exception, so no statement reaches whoever
-     * reads it, nor a code.
+     * Neither carries a previous exception or a code, so no statement leaks.
      *
      * @return void
      */

@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\LifecycleContentionException;
 
 /**
- * Unit tests for the exception a lifecycle operation is abandoned with once
- * every attempt was lost to concurrent operations: its message names the
- * attempts alone, and it carries no other exception.
+ * Unit tests for the exception thrown once every attempt lost to contention.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,8 +38,7 @@ final class LifecycleContentionExceptionTest extends TestCase
     }
 
     /**
-     * The exception carries no previous exception, so nothing a failed
-     * statement held reaches whoever reads it, and no code.
+     * It carries no previous exception or code, so no failed statement leaks.
      *
      * @return void
      */

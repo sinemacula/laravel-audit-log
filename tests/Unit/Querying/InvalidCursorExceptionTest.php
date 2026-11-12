@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Querying\InvalidCursorException;
 
 /**
- * Unit tests for the exception a refused cursor is thrown as: one message
- * whatever the cause, no exception it carries, and the class it specialises.
+ * Unit tests for the exception a refused cursor is thrown as.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Querying\InvalidCursorException;
 final class InvalidCursorExceptionTest extends TestCase
 {
     /**
-     * Every refusal says the same, and the constructor takes nothing that could
-     * make one differ, so a refusal tells nothing of its cause.
+     * Every refusal has one message, so it reveals nothing of its cause.
      *
      * @return void
      */
@@ -38,8 +36,7 @@ final class InvalidCursorExceptionTest extends TestCase
     }
 
     /**
-     * The refusal carries no other exception, and is a final invalid argument:
-     * the cursor is the caller's.
+     * It carries no previous exception and is a final invalid argument.
      *
      * @return void
      */

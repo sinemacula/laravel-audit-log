@@ -13,11 +13,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ImportTally;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 
 /**
- * Unit tests for an import's tally: every count starts at nothing and only
- * grows, rejections are counted by reason, a plan counts its new lines,
- * duplicates and conflicts, the conflict list stops at a hundred, a copy with a
- * plan leaves the tally as it is, and the counts are written as the batch row
- * holds them.
+ * Unit tests for an import's tally.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,8 +45,7 @@ final class ImportTallyTest extends TestCase
     }
 
     /**
-     * Lines read, rejections by reason in the order each was first met, dropped
-     * values and lines past retention are counted.
+     * Each count grows, rejections by reason in the order first met.
      *
      * @return void
      */
@@ -78,9 +73,7 @@ final class ImportTallyTest extends TestCase
     }
 
     /**
-     * A plan counts its new lines as imported, its duplicates and its
-     * conflicts, which list their ids in file order; a conflict makes the tally
-     * incomplete.
+     * A plan counts new lines, duplicates and conflicts, which are incomplete.
      *
      * @return void
      */
@@ -101,8 +94,7 @@ final class ImportTallyTest extends TestCase
     }
 
     /**
-     * The conflict list keeps the first hundred ids in file order, across
-     * plans, while every conflict is still counted.
+     * The conflict list names the first hundred ids; every one is counted.
      *
      * @return void
      */
@@ -122,10 +114,7 @@ final class ImportTallyTest extends TestCase
     }
 
     /**
-     * The conflict list stops short of a hundred once its canonical list would
-     * pass its bytes: a hundred ids of 191 four-byte characters would encode to
-     * over 76,000 bytes, more than MySQL's `text` holds, so the list stops,
-     * keeps file order, and still fits, while every conflict is counted.
+     * The conflict list stops early before it outgrows MySQL's `text` type.
      *
      * @return void
      */
@@ -155,8 +144,7 @@ final class ImportTallyTest extends TestCase
     }
 
     /**
-     * The count of lines past retention, once given up, reads as `null` and
-     * counts nothing more.
+     * The past-retention count, once given up, reads `null` and counts no more.
      *
      * @return void
      */
@@ -196,8 +184,7 @@ final class ImportTallyTest extends TestCase
     }
 
     /**
-     * The batch row holds the counts and the conflicting ids as a canonical
-     * JSON list.
+     * The batch row holds the counts and the conflicting ids as canonical JSON.
      *
      * @return void
      */
@@ -234,8 +221,7 @@ final class ImportTallyTest extends TestCase
     }
 
     /**
-     * Conflicts of the count given from the line number given, each under
-     * `rec-<number>`.
+     * Conflicts of the count given from the line given, each id `rec-<number>`.
      *
      * @param  int  $from
      * @param  int  $count

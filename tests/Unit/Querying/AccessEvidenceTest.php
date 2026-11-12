@@ -26,13 +26,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the evidence the record of a read must keep: the properties of
- * each read code, keys and order pinned; the keyed fingerprints; the page, a
- * position shown only under a scope of one tenant; the disclosure of the
- * filters, the scope, the position and the returned pairs, empty for a denied
- * or failed read; an export's manifest; the verdict of a verification; the
- * policy name's limit; and the canonical exact-or-refused check of a record
- * against it.
+ * Unit tests for the evidence the record of a read must keep.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,8 +55,7 @@ final class AccessEvidenceTest extends TestCase
     private const string ALTERED = 'The record of the read of the audit trail would not keep its evidence exactly, so the read was refused.';
 
     /**
-     * Rows of `[evidence, the properties' keys in order, the manifest's kind or
-     * `null`]`: one per named constructor.
+     * Rows of `[evidence, property keys, manifest kind]`, one per constructor.
      *
      * @formatter:off
      *
@@ -106,8 +99,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * Each read code's evidence holds exactly its properties, in its order, and
-     * carries the artifact of its kind, or none.
+     * Each read code's evidence holds exactly its properties, in order.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Querying\AccessEvidence  $evidence
      * @param  list<string>  $keys
@@ -124,9 +116,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * The values of each read code's properties, as they are kept: the purpose
-     * of the read, the policy, the outcome repeated, and each read's own
-     * values.
+     * The values each read code's properties keep.
      *
      * @return void
      */
@@ -166,9 +156,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * The fingerprints are the read's keyed fingerprints and the id of their
-     * key, never a plain digest of the canonical forms anyone could compute,
-     * and the scope's is `null` when no scope was answered.
+     * The fingerprints are the keyed ones; the scope's is `null` if unanswered.
      *
      * @return void
      */
@@ -190,10 +178,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * Rows of `[the scope, whether a cursor was presented, the position, the
-     * page the record shows]`: the first page; a cursor that gave no position;
-     * a position under a scope of one tenant; and a position under every
-     * tenant, and under one tenant with the tenantless, both shown as `next`.
+     * Rows of `[scope, cursor presented, position, page shown]`.
      *
      * @formatter:off
      *
@@ -219,12 +204,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A page that started at the newest entry is `first`; one whose cursor gave
-     * no position, refused or never opened, is `cursor`; and one after a
-     * position is that position, as its occurrence time and id, only under a
-     * scope of exactly one tenant, whose record is that tenant's, and `next`
-     * under any other, whose record is tenantless. The disclosure keeps the
-     * position whatever the scope, and `null` without one.
+     * A page is `first`, `cursor`, its position under one tenant, or `next`.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  bool  $cursor
@@ -244,8 +224,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A page's disclosure is its normalised filters, its scope and each
-     * returned entry's id and HMAC, in the order returned, counted by them.
+     * A page discloses its filters, scope and each returned id and HMAC.
      *
      * @return void
      */
@@ -274,8 +253,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A count's disclosure, and a failed export's, holds the filters and the
-     * scope, `null` when none was answered, and no entry.
+     * A count, or a failed export, discloses filters and scope, no entry.
      *
      * @return void
      */
@@ -294,9 +272,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * Rows of `[evidence of a read that did not succeed]`: a denied and a
-     * failed page given pairs, a denied and a failed count given a number, and
-     * a failed verification given the export entry.
+     * Rows of `[evidence]`: denied and failed reads, each given members anyway.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Querying\AccessEvidence}>
      */
@@ -316,8 +292,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A read that was denied or failed showed nothing: its disclosure names no
-     * entry, and a page or count it counts none, whatever it was given.
+     * A denied or failed read discloses and counts nothing.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Querying\AccessEvidence  $evidence
      * @return void
@@ -334,9 +309,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A page keeps whether its scope revealed the encrypted fields, and how
-     * many fragments it showed in each state, after what it returned and before
-     * its outcome; its disclosure is the same with the grant or without it.
+     * A page records its reveal grant and field counts outside its disclosure.
      *
      * @return void
      */
@@ -365,9 +338,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A page that was denied or failed showed nothing, so it counts no fragment
-     * of any state, whatever it was given, and still records the grant its
-     * scope held.
+     * A denied or failed page counts no fragment but records its grant.
      *
      * @return void
      */
@@ -385,8 +356,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A successful verification that found the export entry discloses its id
-     * and HMAC; one that did not find it discloses nothing and names no entry.
+     * A verification discloses the export entry only when it found it.
      *
      * @return void
      */
@@ -405,8 +375,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * An export that succeeded or was denied carries its export manifest,
-     * exactly as given.
+     * A successful or denied export carries its manifest as given.
      *
      * @return void
      */
@@ -432,8 +401,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * An export that succeeded without its export manifest is a programming
-     * error.
+     * A successful export without its manifest is a programming error.
      *
      * @param  \Closure(): ?\SineMacula\Laravel\AuditLog\Records\Manifest  $manifest
      * @return void
@@ -448,8 +416,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * Rows of `[evidence made with the policy name]`: one per constructor that
-     * names a policy.
+     * Rows of `[evidence made with the policy name]`, one per constructor.
      *
      * @return iterable<string, array{0: \Closure(string): \SineMacula\Laravel\AuditLog\Querying\AccessEvidence}>
      */
@@ -467,8 +434,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A policy name of 191 bytes is kept, and one of 192 refuses the read: the
-     * evidence would not be kept exactly.
+     * A 191-byte policy name is kept; 192 bytes refuses the read.
      *
      * @param  \Closure(string): \SineMacula\Laravel\AuditLog\Querying\AccessEvidence  $evidence
      * @return void
@@ -488,9 +454,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * A record keeps the evidence when its properties, less the package's
-     * metadata, are the evidence's in any key order, and its metadata is
-     * exactly the descriptor of the evidence's manifest, or absent without one.
+     * A record keeps the evidence in any key order, with its descriptor.
      *
      * @return void
      */
@@ -508,10 +472,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * Rows of `[the properties a record keeps of the page's evidence]`: a value
-     * redacted, a key dropped, a key added, a value of another type, a float,
-     * the order of the returned entries' list changed, `_audit.omitted` added,
-     * another descriptor, the descriptor dropped, and no properties.
+     * Rows of `[properties a record keeps of the page's evidence]`.
      *
      * @formatter:off
      *
@@ -570,8 +531,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * Evidence without a manifest refuses a record that carries any metadata, a
-     * descriptor included.
+     * Evidence without a manifest refuses a record carrying any metadata.
      *
      * @return void
      */
@@ -627,8 +587,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * The terms of a read under the scope and the filters given, or the reads'
-     * own, fingerprinted under the fixed key.
+     * Read terms under the scope and filters given, under the fixed key.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  ?\SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
@@ -640,8 +599,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * The evidence of a page under the scope that did not succeed, given an
-     * entry and fragments of each state all the same.
+     * Evidence of an unsuccessful page, given members all the same.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
@@ -654,8 +612,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * The evidence of a verification under the scope that did not succeed,
-     * given the export entry all the same.
+     * Evidence of an unsuccessful verification, given the export entry anyway.
      *
      * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
@@ -677,8 +634,7 @@ final class AccessEvidenceTest extends TestCase
     }
 
     /**
-     * The terms of a verification under the scope: no filters, fingerprinted
-     * under the fixed key.
+     * Verification terms under the scope, with no filters, under the fixed key.
      *
      * @param  ?\SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
      * @return \SineMacula\Laravel\AuditLog\Querying\ReadTerms

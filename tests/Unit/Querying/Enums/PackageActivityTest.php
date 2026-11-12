@@ -15,10 +15,7 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 
 /**
- * Unit tests for the codes the package records of its own activity: the stored
- * values, each under the reserved prefix, every definition version 1 in the
- * `audit` category keeping exactly its evidence and dropping the rest, which of
- * them is a read, and which retention never prunes.
+ * Unit tests for the codes the package records of its own activity.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,8 +26,7 @@ use SineMacula\Laravel\AuditLog\Records\EventCode;
 final class PackageActivityTest extends TestCase
 {
     /**
-     * The stored values, in order, so a renamed, reordered, added or removed
-     * code fails here.
+     * The stored values are pinned, in order.
      *
      * @return void
      */
@@ -65,8 +61,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Each code is under the reserved prefix, is minted as itself, defines
-     * events, and is refused to a caller.
+     * Each code is under the reserved prefix and refused to a caller.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
      * @return void
@@ -85,8 +80,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Rows of `[case, the properties its record keeps, in the order it gives
-     * them]`.
+     * Rows of `[case, the properties its record keeps, in order]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
      */
@@ -119,9 +113,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Each definition is for its own code, version 1, in the `audit` category,
-     * maps to no OCSF class, retains exactly its evidence and drops every other
-     * field, and is the same on every call.
+     * Each definition is version 1 in `audit` and keeps only its evidence.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
      * @param  list<string>  $retained
@@ -145,8 +137,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * A property the definition keeps is kept whole, a map beneath it included,
-     * so a page's position survives as given.
+     * A kept property is kept whole, so a page's position survives as given.
      *
      * @return void
      */
@@ -160,9 +151,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Each definition is the one a permissive definition of the minted code
-     * becomes through the same chain, so no definition method beyond those a
-     * caller sees makes it.
+     * Each definition matches a permissive one through the same chain.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
      * @param  list<string>  $retained
@@ -177,8 +166,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Rows of `[case, the properties its record keeps, in the order it gives
-     * them]`: the lifecycle's prunes, holds, releases and imports.
+     * Rows of `[case, the properties its record keeps, in order]`.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
      */
@@ -188,9 +176,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Each lifecycle definition keeps exactly its properties, in the order its
-     * record gives them, and drops everything else: a property of another code,
-     * a tenant's identity and a hold's scope included.
+     * Each lifecycle definition keeps exactly its properties, in order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
      * @param  list<string>  $retained
@@ -217,8 +203,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * A map the prune record keeps, its categories, is kept whole, so a
-     * category's count survives as given.
+     * The prune record's categories map is kept whole.
      *
      * @return void
      */
@@ -231,9 +216,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Rows of `[case, the properties its record keeps, in the order it gives
-     * them]`: an owner's erasure, the keys' rewrap and an owner's
-     * reinstatement.
+     * Rows of `[case, the properties its record keeps, in order]` for privacy.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
      */
@@ -243,9 +226,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Each code of the owners' keys keeps exactly its properties, in the order
-     * its record gives them, and drops everything else: the owner's type and
-     * id, a key's id, an entry's id and the hold a block names included.
+     * Each privacy code keeps exactly its properties, in order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $case
      * @param  list<string>  $retained
@@ -273,8 +254,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * A map the erasure record keeps, its blocks, is kept whole, so each
-     * reason's count survives as given.
+     * The erasure record's blocks map is kept whole.
      *
      * @return void
      */
@@ -287,8 +267,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * No code of the owners' keys is a read, since none discloses an entry, and
-     * none is protected, so each follows its category's retention.
+     * No privacy code is a read or protected from retention.
      *
      * @return void
      */
@@ -301,9 +280,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * The record of a page keeps whether its scope revealed the encrypted
-     * fields and how many of each state it showed, after what it returned and
-     * before its outcome, the counts kept whole.
+     * A page's record keeps its reveal grant and field counts whole.
      *
      * @return void
      *
@@ -330,8 +307,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * A read path's code is not the code of an operation, so asking for its
-     * operation's properties is a programming error, named by its code.
+     * Asking a read code for an operation's properties is an error naming it.
      *
      * @return void
      *
@@ -346,8 +322,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * The trail's reads, counts, exports and their verification are reads; a
-     * failed publication is not.
+     * Reads, counts, exports and verifications are reads; publication is not.
      *
      * @return void
      */
@@ -365,8 +340,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * No lifecycle code is a read: a prune, a hold, a release and an import
-     * each change what the trail keeps, and none discloses an entry.
+     * No lifecycle code is a read.
      *
      * @return void
      */
@@ -378,9 +352,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Only the export is protected from retention, so its journal outlives
-     * every policy; every other code, the other package codes included, follows
-     * its category's policy.
+     * Only the export is protected, so its journal outlives every policy.
      *
      * @return void
      */
@@ -392,8 +364,7 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * Rows of the codes of the owners' keys and the properties each keeps, in
-     * order.
+     * The privacy codes and the properties each keeps, in order.
      *
      * @return array<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity, 1: list<string>}>
      */

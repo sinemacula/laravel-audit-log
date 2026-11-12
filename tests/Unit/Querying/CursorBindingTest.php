@@ -15,10 +15,7 @@ use SineMacula\Laravel\AuditLog\Querying\Viewer;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for what a page cursor is bound to: the canonical MAC input, its
- * keys sorted, over the version, the log, the viewer, the purpose, the order,
- * the normalised filters, the scope's fingerprint, the page size, the key id
- * and the payload part exactly as sent; and each of them changing the input.
+ * Unit tests for what a page cursor is bound to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,11 +32,7 @@ final class CursorBindingTest extends TestCase
     private const string PAYLOAD = 'eyJwb3MiOltdfQ';
 
     /**
-     * The input is the canonical encoding of exactly the bound fields, keys
-     * sorted: the normalised filters, the key id, the log as the connection and
-     * the table, the order, the payload part as given, the page size, the
-     * purpose, the scope's fingerprint, the version and the viewer's type and
-     * id.
+     * The MAC input is the canonical encoding of the bound fields, keys sorted.
      *
      * @return void
      */
@@ -55,8 +48,7 @@ final class CursorBindingTest extends TestCase
     }
 
     /**
-     * The payload part is bound exactly as sent, never decoded, so a part that
-     * is no payload at all still gives an input.
+     * The payload part is bound as sent, never decoded.
      *
      * @return void
      */
@@ -81,8 +73,7 @@ final class CursorBindingTest extends TestCase
     }
 
     /**
-     * Rows of `[the binding, the key id and the payload part]` that differ from
-     * the base in exactly one bound field.
+     * Rows of `[binding, key id, payload part]`, each one bound field apart.
      *
      * @return iterable<string, array{0: \Closure(): array{0: \SineMacula\Laravel\AuditLog\Querying\CursorBinding, 1: string, 2: string}}>
      */

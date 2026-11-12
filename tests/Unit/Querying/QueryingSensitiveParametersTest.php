@@ -17,21 +17,8 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 
 /**
- * Holds the read path and access control to the rule that keeps what a read
- * holds out of a stack trace: with `zend.exception_ignore_args` off every frame
- * keeps its arguments, so a parameter that holds a row, an envelope, a stored
- * or shown entry, a record, a plaintext, a ciphertext, a members string, a
- * viewer or a closure is marked `#[\SensitiveParameter]` on every method it
- * passes through, and a closure's own parameters too, which reflection of a
- * class cannot reach and so are read from the source. Codes, fingerprints,
- * class names, ids, positions and cursor strings are not payload.
- *
- * Every class under `src/Querying` and `src/Access` is held, whatever is added
- * to them, and the access policy contract beside them. Each scan must find what
- * it expects, so it cannot pass by finding nothing, and a class written for the
- * test with a parameter of each kind shows it flags exactly what it should. A
- * real throw through a viewer's reference then shows what the marking leaves in
- * a frame.
+ * Holds `src/Querying`, `src/Access` and the policy contract to marking each
+ * payload parameter `#[\SensitiveParameter]`, keeping it out of stack traces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,7 +36,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     /** @var string The setting that turns a frame's arguments off. */
     private const string IGNORE_ARGS = 'zend.exception_ignore_args';
 
-    /** @var list<string> The folders under `src` the rule holds, whatever is added to them. */
+    /** @var list<string> The folders under `src` the rule holds. */
     private const array FOLDERS = ['Querying', 'Access'];
 
     /** @var list<string> The further files under `src` the rule holds. */
@@ -58,7 +45,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     /** @var list<string> The names a parameter holding a payload goes by. */
     private const array PAYLOAD_NAMES = ['row', 'rows', 'envelope', 'payload', 'plaintext', 'ciphertext', 'members', 'viewer'];
 
-    /** @var list<string> The types a parameter holding a payload goes by, the stored and the shown entry among them; any authenticatable user, a viewer's union included, is one too. */
+    /** @var list<string> The types a payload parameter goes by, any authenticatable user included. */
     private const array PAYLOAD_TYPES = [
         \Closure::class,
         AuditRecord::class,
@@ -69,13 +56,13 @@ final class QueryingSensitiveParametersTest extends TestCase
         self::NAMESPACE . 'Querying\TrailEntry',
     ];
 
-    /** @var string What a closure's parameter holding a payload is typed as, read from the source, where no type can be resolved. */
+    /** @var string Matches a closure payload parameter's type in source, where none resolves. */
     private const string PAYLOAD_TYPE_IN_SOURCE = '/\b(?:StoredEntry|TrailEntry|AuditRecord|FinalisedRecord|PendingRecord|Viewer|Closure|Authenticatable)\b/';
 
     /** @var list<class-string> The classes the scan must find a payload parameter in. */
     private const array MUST_HOLD_ONE = [AuditAccessPolicy::class, DenyAllPolicy::class, Viewer::class];
 
-    /** @var list<string> The parameters the scan must find, as `class::method.parameter`: a viewer by its union and the viewer as given. */
+    /** @var list<string> The parameters the scan must find, as `class::method.parameter`. */
     private const array MUST_FIND = [
         AuditAccessPolicy::class . '::scope.viewer',
         DenyAllPolicy::class . '::scope.viewer',
@@ -121,8 +108,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Every method of every class the rule holds, private ones included, marks
-     * a parameter that goes by a payload's name or type.
+     * Every method, private ones included, marks each payload parameter.
      *
      * @return void
      */
@@ -144,9 +130,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The scan finds a payload parameter in each class that must hold one, and
-     * each parameter it must find, and reads every class of the folders the
-     * rule holds, the enums included, each once.
+     * The scan finds each expected parameter and reads every class once.
      *
      * @return void
      */
@@ -176,10 +160,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * A class written with a parameter of each kind, and of each kind that is
-     * not payload, is flagged by name or by type exactly where it should be,
-     * and a closure in it is read from its source: protects against a scan that
-     * passes by flagging nothing, or by flagging everything.
+     * A fixture class is flagged exactly where it should be.
      *
      * @return void
      */
@@ -248,9 +229,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * A closure's parameters are out of a scan of methods, so they are read
-     * from the source: every one that goes by a payload's name or type is
-     * marked, and the files whose closures the scan must read have some.
+     * Every payload parameter of a closure, read from source, is marked.
      *
      * @return void
      */
@@ -274,8 +253,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[source, the closures' parameters]`: each form of closure the
-     * source scan must read, and what it must leave alone.
+     * Rows of `[source, the closures' parameters]`: each closure form to read.
      *
      * @return iterable<string, array{0: string, 1: list<list<string>>}>
      */
@@ -296,8 +274,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The source scan finds the parameters of every form of closure and of no
-     * method, which reflection reads already.
+     * The source scan finds every closure's parameters and no method's.
      *
      * @param  string  $source
      * @param  list<list<string>>  $parameters
@@ -310,9 +287,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * Rows of `[a closure's parameters, the names the scan must flag]`: a
-     * payload is flagged by its name or its type unless it is marked, and
-     * anything else is left alone.
+     * Rows of `[a closure's parameters, the names the scan must flag]`.
      *
      * @return iterable<string, array{0: list<string>, 1: list<string>}>
      */
@@ -335,8 +310,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The closure scan flags a payload that is unmarked, by its name or its
-     * type, and reads each parameter's marking apart.
+     * The closure scan flags an unmarked payload by name or type.
      *
      * @param  list<string>  $parameters
      * @param  list<string>  $flagged
@@ -349,9 +323,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * A viewer whose identifier cannot be read throws through its reference,
-     * and the viewer's own frame shows the value PHP leaves for a marked
-     * parameter, in its arguments and in its trace as a string.
+     * A viewer's own frame hides it behind PHP's sensitive placeholder.
      *
      * @return void
      */
@@ -377,9 +349,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * What the marking hides is really in the frame's reach: an unmarked frame
-     * of the same call keeps the value, so the test above cannot pass by there
-     * being nothing to hide.
+     * An unmarked frame of the same call keeps the value a marked one hides.
      *
      * @return void
      */
@@ -419,9 +389,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of the class's own methods that hold a payload; none for a
-     * method PHP or a framework trait declares, since neither can be marked,
-     * unless the class is not the package's own.
+     * The class's own payload parameters, skipping PHP and framework methods.
      *
      * @param  class-string  $class
      * @param  bool  $ownMethodsOnly
@@ -483,8 +451,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The names of a closure's parameters that hold a payload and are not
-     * marked, by their name or their type.
+     * A closure's unmarked payload parameters, by name or type.
      *
      * @param  list<string>  $parameters
      * @return list<string>
@@ -509,9 +476,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The parameters of each closure in the source that takes any, in order,
-     * read from its tokens: a `function` or `fn` followed straight by a
-     * bracket, which a named method never is.
+     * Each closure's parameters: `function` or `fn` straight before a bracket.
      *
      * @param  string  $source
      * @return list<list<string>>
@@ -561,9 +526,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The arguments of the bracket that opens at the index, split at its
-     * top-level commas, each as its text with its spaces trimmed; a trailing
-     * comma adds none.
+     * The trimmed arguments of the bracket at the index, split at its commas.
      *
      * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
      * @param  int  $open
@@ -612,8 +575,7 @@ final class QueryingSensitiveParametersTest extends TestCase
     }
 
     /**
-     * The source's tokens with its comments gone and each run of whitespace one
-     * space, so a list of parameters over many lines reads as one over one.
+     * The source's tokens without comments, each whitespace run one space.
      *
      * @param  string  $source
      * @return array<int, array{0: int, 1: string, 2: int}|string>

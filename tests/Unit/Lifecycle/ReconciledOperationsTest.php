@@ -15,11 +15,7 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 
 /**
- * Unit tests for the records the reconciler writes from verified journal rows:
- * each kind's operation, a hold, a release, a prune run, an import, an erasure,
- * a reinstatement and a rewrap run, with exactly the properties its code
- * retains, its actor, outcome and reason; and `null` for a row that does not
- * describe its operation, so nothing is ever recorded from it.
+ * Unit tests for the records the reconciler writes from verified journal rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,8 +38,7 @@ final class ReconciledOperationsTest extends TestCase
     private const array OPERATOR = ['App\Models\User', '7'];
 
     /**
-     * A hold row is recorded as the hold it places, by its operator, with its
-     * scope's digest.
+     * A hold row records the hold by its operator, with its scope's digest.
      *
      * @return void
      */
@@ -104,8 +99,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A release row is recorded as its release, and one naming another hold in
-     * its payload records nothing.
+     * A release row records its release, unless it names another hold.
      *
      * @return void
      */
@@ -123,8 +117,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * Rows of `[status, failure, outcome, reason]`: a prune run's finish and
-     * how its record ends.
+     * Rows of `[status, failure, outcome, reason]` for a prune run's finish.
      *
      * @return iterable<string, array{0: string, 1: ?string, 2: \SineMacula\Laravel\AuditLog\Records\Enums\Outcome, 3: ?string}>
      */
@@ -140,8 +133,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A prune run is recorded by no one from its finish and start, a failure
-     * keeping only a reason a prune gives.
+     * A prune run is recorded by no one; a failure keeps only a prune reason.
      *
      * @param  string  $status
      * @param  ?string  $failure
@@ -170,8 +162,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A prune run without its start, of no run id, or of an unknown status
-     * records nothing.
+     * A prune run without its start, run id or a known status records nothing.
      *
      * @return void
      */
@@ -183,8 +174,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * Rows of `[status, outcome, reason]`: an import's finish and how its
-     * record ends.
+     * Rows of `[status, outcome, reason]` for an import's finish.
      *
      * @return iterable<string, array{0: string, 1: \SineMacula\Laravel\AuditLog\Records\Enums\Outcome, 2: ?string}>
      */
@@ -199,8 +189,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * An import is recorded by the operator of its finish, with its start's
-     * source, format and hold and its finish's counts.
+     * An import is recorded by its finish's operator from its start and finish.
      *
      * @param  string  $status
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Outcome  $outcome
@@ -219,8 +208,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * An import without its start, of no batch, or of an unknown status records
-     * nothing.
+     * An import without its start, batch or a known status records nothing.
      *
      * @return void
      */
@@ -234,9 +222,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * An erasure is recorded by its operator: its row's id, the owner's
-     * fingerprint, `complete` with no block when it kept nothing, and `partial`
-     * with each kept key's reasons, once each, when it kept any.
+     * An erasure is `complete` when it kept nothing, else `partial`.
      *
      * @return void
      */
@@ -268,8 +254,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * Rows of `[key, value]`: a payload member that keeps an erasure row from
-     * describing an erasure.
+     * Rows of `[key, value]`: a payload member that describes no erasure.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -292,8 +277,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * An erasure row whose payload does not describe an erasure records
-     * nothing.
+     * An erasure row whose payload describes no erasure records nothing.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -310,8 +294,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A reinstatement is recorded by its operator with its row's id, the
-     * owner's fingerprint and the floor; one without a floor records nothing.
+     * A reinstatement records its floor; one without a floor records nothing.
      *
      * @return void
      */
@@ -341,11 +324,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A rewrap run is recorded once from all its batches, in the order its
-     * first batch was journalled: each key whose wrapping key changed counted
-     * rewrapped, each whose state changed rotated, every skipped key counted,
-     * and the wrapping key its keys are under; rows of other kinds are passed
-     * over.
+     * A rewrap run is summed once over its batches, in journal order.
      *
      * @return void
      */
@@ -395,8 +374,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A batch's keys skipped without being named are counted with the named
-     * ones.
+     * Keys a batch skipped without naming are counted with the named ones.
      *
      * @return void
      */
@@ -410,8 +388,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * Rows of `[payload]`: a rewrap batch's payload that describes no batch of
-     * its run.
+     * Rows of `[payload]`: a rewrap batch payload that describes no batch.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -435,9 +412,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A run any of whose batches does not describe a batch of it is `null`, so
-     * it is counted unverifiable and never recorded, whatever its other batches
-     * say.
+     * A run with any batch that describes no batch is `null`.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -455,8 +430,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * An operation is by no one when its row names no operator, and by the
-     * row's operator otherwise.
+     * An operation is by the row's operator, or by no one when it names none.
      *
      * @return void
      */
@@ -483,9 +457,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * `ReconciledOperations` is a utility container, not to be instantiated:
-     * its constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it for coverage.
      *
      * @return void
      *
@@ -506,8 +478,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * An erasure row that destroyed two keys and kept those given, over five
-     * entries, accepting the outbox.
+     * An erasure row over five entries, two keys destroyed, those given kept.
      *
      * @param  list<array{key_id: string, reasons: list<string>}>  $kept
      * @return \SineMacula\Laravel\AuditLog\Integrity\JournalRow
@@ -528,8 +499,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * A rewrap batch of the run, listing the changes and the skipped keys, with
-     * its payload.
+     * A rewrap batch of the run listing its changes and skipped keys.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -544,8 +514,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * What a batch lists of a key it changed, from its wrapping key and state
-     * before to those after.
+     * A batch's entry for a key whose wrapping key or state changed.
      *
      * @formatter:off
      *
@@ -584,8 +553,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * An unsigned row of the kind, with the payload, by the operator when the
-     * kind carries an authority.
+     * An unsigned row of the kind, by the operator when it has an authority.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -617,8 +585,7 @@ final class ReconciledOperationsTest extends TestCase
     }
 
     /**
-     * The operation as its code, its actor as a pair, its properties, its
-     * outcome and its reason; the test fails when there is none.
+     * The operation's code, actor pair, properties, outcome and reason.
      *
      * @formatter:off
      *

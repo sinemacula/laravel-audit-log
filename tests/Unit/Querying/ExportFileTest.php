@@ -13,15 +13,7 @@ use SineMacula\Laravel\AuditLog\Querying\MembershipDigest;
 use Tests\Fixtures\Querying\NoLinkStreamWrapper;
 
 /**
- * Unit tests for the file an export is written to: its temporary files, created
- * exclusively and private to their owner under a umask that is put back, the
- * targets it refuses, the digests and positions its lines keep, and its
- * publication, the bundle first, then the file, never replacing what is there
- * without `force`, refusing a filesystem that cannot hold the hard link that
- * needs, and leaving nothing behind, and a previous export as it was, when it
- * fails.
- *
- * Each test works in a directory of its own.
+ * Unit tests for the file an export is written to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -94,12 +86,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Preparing creates a hidden temporary file beside the target, named after
-     * it with a UUID, empty and readable and writable by its owner alone, even
-     * under a umask that would let everyone read it; the bundle's temporary
-     * file is created the same way. Creation is exclusive: a file already at
-     * the temporary name is never opened, and the export fails rather than
-     * write into it.
+     * Temporary files are created exclusively with mode 0600 under any umask.
      *
      * @return void
      */
@@ -141,8 +128,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * The umask is put back once the temporary file is open, and also when the
-     * open fails.
+     * The umask is restored after the open, and when the open fails.
      *
      * @return void
      */
@@ -167,8 +153,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Without `force` a target that exists, or a bundle beside it, refuses the
-     * export before any file is created.
+     * Without `force` an existing target or bundle is refused before any file.
      *
      * @return void
      */
@@ -192,8 +177,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * The target's checks can be made alone, before anything else, creating
-     * nothing, and refuse what preparing refuses.
+     * The target checks create nothing and refuse what preparing refuses.
      *
      * @return void
      */
@@ -212,10 +196,8 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * A directory whose filesystem cannot hold a hard link, as a FAT volume or
-     * an object-store mount cannot, is refused without `force` before anything
-     * is made, since such an export could never be published, and the probe
-     * leaves nothing behind; with `force`, which renames, it is let through.
+     * A filesystem without hard links is refused unless `force`, since
+     * publishing without `force` needs a hard link.
      *
      * @return void
      */
@@ -239,8 +221,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * A link that points nowhere still takes the target's place, so it is
-     * refused as an existing target.
+     * A dangling link counts as an existing target.
      *
      * @return void
      */
@@ -255,8 +236,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * With `force` an existing file and bundle are replaced by the export's,
-     * and no temporary file is left.
+     * With `force` the export replaces an existing file and bundle.
      *
      * @return void
      */
@@ -277,9 +257,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Each line is written with one line feed; the count, the file's digest,
-     * the membership digest and the first and last positions follow the lines
-     * written, and the file's digest may be read part way without ending it.
+     * The count, digests and positions follow the lines written.
      *
      * @return void
      */
@@ -310,8 +288,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Once the membership digest is taken no line is written, since its id
-     * could never be part of it, and the file is left as it was.
+     * No line is written once the membership is digested.
      *
      * @return void
      */
@@ -350,8 +327,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * An export of no line publishes an empty file, whose digest and membership
-     * digest are each the SHA-256 of no bytes, with no first or last position.
+     * A zero-line export is an empty file with the empty-set digests.
      *
      * @return void
      */
@@ -371,11 +347,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Publication puts the bundle at `<target>.manifest.json` and the file at
-     * the target, each still private to its owner, and leaves no temporary
-     * file. The bundle goes first: when the file's place is taken, the step
-     * that fails is the file's, and the bundle this publication placed is
-     * removed again.
+     * The bundle is published first and removed again if the file's step fails.
      *
      * @return void
      */
@@ -406,8 +378,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * A publication that fails at its first step removes both temporary files
-     * and publishes nothing, leaving what took the bundle's place as it was.
+     * A failed first step removes both temporary files and publishes nothing.
      *
      * @return void
      */
@@ -431,10 +402,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * A target that appears after the export was prepared is never replaced
-     * without `force`: the file's step fails, the target keeps what it holds,
-     * the bundle this publication placed is removed, and so are both temporary
-     * files.
+     * A target appearing after preparation is never replaced without `force`.
      *
      * @return void
      */
@@ -457,9 +425,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * With `force`, a step that fails, here the file's, whose place became a
-     * directory, removes the bundle this publication placed and both temporary
-     * files.
+     * A failed forced publication removes the bundle it placed and both temps.
      *
      * @return void
      */
@@ -483,10 +449,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * With `force`, a step that fails over a previous export, here the file's,
-     * whose place became a directory after the old file was removed, puts the
-     * previous bundle back as it was, so the export it describes still
-     * verifies, and leaves no temporary or set-aside file.
+     * A failed forced publication puts the previous bundle back as it was.
      *
      * @return void
      */
@@ -513,8 +476,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * With `force`, a bundle step that fails over a previous export leaves the
-     * previous file and bundle exactly as they were.
+     * A failed forced bundle step leaves the previous export as it was.
      *
      * @return void
      */
@@ -538,8 +500,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Discarding removes both temporary files and publishes nothing; it is
-     * idempotent, and the export takes no line, bundle or publication after it.
+     * Discarding removes both temporary files and is idempotent.
      *
      * @return void
      */
@@ -562,8 +523,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Discarding before any bundle is written removes the file's temporary file
-     * alone.
+     * Discarding before the bundle removes only the file's temporary file.
      *
      * @return void
      */
@@ -575,8 +535,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Once published, discarding removes nothing, so a published export is
-     * never taken back, and nothing is written or published again.
+     * A published export is finished: discarding removes nothing.
      *
      * @return void
      */
@@ -596,8 +555,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * An export is published only once its bundle is written, and its bundle is
-     * written once.
+     * An export publishes only after writing its bundle, which is written once.
      *
      * @return void
      */
@@ -614,8 +572,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * A target whose directory does not exist is refused before anything is
-     * created.
+     * A target in a missing directory is refused before anything is created.
      *
      * @return void
      */
@@ -628,9 +585,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * A target whose directory cannot be written to is refused, with or without
-     * `force`. A process that writes into a read-only directory (one running as
-     * root) cannot show it, so the test is skipped there.
+     * An unwritable directory is refused; skipped when running as root.
      *
      * @return void
      */
@@ -733,9 +688,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * The names of every hidden file in the test's directory, sorted: the
-     * temporary files, the files a forced publication set aside and the
-     * hard-link probe's.
+     * The sorted hidden files in the test's directory.
      *
      * @return list<string>
      */
@@ -763,8 +716,7 @@ final class ExportFileTest extends TestCase
     }
 
     /**
-     * Remove the directory and everything in it, making each directory writable
-     * first.
+     * Remove the directory recursively, making each directory writable first.
      *
      * @param  string  $directory
      * @return void

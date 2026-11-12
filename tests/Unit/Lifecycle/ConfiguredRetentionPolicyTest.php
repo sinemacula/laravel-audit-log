@@ -13,11 +13,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the retention policy the package binds: a category's own days
- * over the default, 0 as forever for a retention and a preservation, a tenant
- * that changes nothing, an unkeyed version that follows the settings and
- * nothing else, the canonical settings it is the digest of, and a malformed
- * setting that refuses every answer.
+ * Unit tests for the retention policy the package binds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,19 +23,18 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 #[CoversClass(ConfiguredRetentionPolicy::class)]
 final class ConfiguredRetentionPolicyTest extends TestCase
 {
-    /** @var array<string, array<string, int>|int> A retention section with a default, two categories of their own and a preservation. */
+    /** @var array<string, array<string, int>|int> A retention section with a default, two categories and a preservation. */
     private const array RETENTION = [
         'after_days' => 30,
         'categories' => ['security' => 2555, 'general' => 365],
         'preserve'   => ['security' => 2555],
     ];
 
-    /** @var string The version of the default settings, pinned so a change of the encoding or the digest fails. */
+    /** @var string The pinned version of the default settings. */
     private const string DEFAULT_VERSION = 'config:4b814b1a348c39cf';
 
     /**
-     * A category's own days override the default, and a category with none
-     * takes the default.
+     * A category's own days override the default, which applies otherwise.
      *
      * @return void
      */
@@ -53,8 +48,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * Zero days is forever, whether it is the default or a category's own, and
-     * a category kept forever stays so beside a finite default.
+     * Zero days is forever, as the default or as a category's own.
      *
      * @return void
      */
@@ -68,8 +62,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * The tenant changes no answer: a tenant, another tenant and none get the
-     * same retention and preservation.
+     * The tenant changes no answer.
      *
      * @return void
      */
@@ -87,8 +80,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * A preservation of zero days is forever, which the contract answers as
-     * `PHP_INT_MAX`.
+     * A preservation of zero days is forever, answered as `PHP_INT_MAX`.
      *
      * @return void
      */
@@ -101,8 +93,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * A category with no preservation has no obligation, which is `null`,
-     * whatever its retention, and the default retention never preserves.
+     * No preservation answers `null`, and the default never preserves.
      *
      * @return void
      */
@@ -114,10 +105,8 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * The version is `config:` and 16 hexadecimal characters, the same for the
-     * same settings however the maps are ordered or the numbers written, and
-     * another for any change of a setting the answers read; the batch, the time
-     * budget and the schedule change no answer and no version.
+     * The version is `config:` and 16 hex characters, and changes only with a
+     * setting the answers read.
      *
      * @return void
      */
@@ -146,9 +135,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * The version is not keyed: whatever the integrity ring or the application
-     * key, the same settings give the same version, so a rotation never
-     * journals a policy that is not new.
+     * The version is unkeyed, so rotating the ring never journals a new policy.
      *
      * @return void
      */
@@ -169,9 +156,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * The settings are the canonical map of the default days and each map of
-     * days sorted bytewise, and the version is the first 16 characters of the
-     * unkeyed SHA-256 of their canonical encoding, pinned for the defaults.
+     * The settings are canonical, and the version is pinned for the defaults.
      *
      * @return void
      */
@@ -192,9 +177,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * A malformed setting, or a category kept for less than it is preserved,
-     * refuses every answer, so it can never prune anything; a malformed setting
-     * no answer reads, the schedule, refuses them too.
+     * A malformed or conflicting setting refuses every answer.
      *
      * @return void
      */
@@ -230,8 +213,7 @@ final class ConfiguredRetentionPolicyTest extends TestCase
     }
 
     /**
-     * The configured policy over configuration holding the retention section
-     * given.
+     * The configured policy over the retention section given.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *

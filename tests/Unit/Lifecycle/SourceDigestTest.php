@@ -20,10 +20,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the keyed source digest: HMAC-SHA256 of the canonical
- * assertion under a key derived with an info string of its own, equal for one
- * assertion under one key, changed by any field and by the key, taken over the
- * assertion as given, and refused under a key the ring does not hold.
+ * Unit tests for the keyed source digest.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,9 +37,7 @@ final class SourceDigestTest extends TestCase
     private const string RETIRED_SECRET = 'source digest retired key 012345';
 
     /**
-     * The digest is HMAC-SHA256, as lower-case hex, of the canonical assertion
-     * under HKDF-SHA256 of the key's secret with the digest's own info and an
-     * empty salt: never the journal's or the seal's key.
+     * The digest is HMAC-SHA256 under a key of its own HKDF info.
      *
      * @return void
      */
@@ -61,8 +56,7 @@ final class SourceDigestTest extends TestCase
     }
 
     /**
-     * One assertion under one key gives one digest, every time and from every
-     * digest made over the same ring.
+     * One assertion under one key always gives one digest.
      *
      * @return void
      */
@@ -73,8 +67,7 @@ final class SourceDigestTest extends TestCase
     }
 
     /**
-     * The key changes the digest: a retired key's differs from the current
-     * key's.
+     * The key changes the digest.
      *
      * @return void
      */
@@ -129,10 +122,7 @@ final class SourceDigestTest extends TestCase
     }
 
     /**
-     * The digest is of the assertion exactly as the line gives it, its secret-
-     * named property and its full IP address included, so what minimisation
-     * would redact, hash or drop never changes it, and nor does the category,
-     * which a definition decides.
+     * Minimisation and the category never change the digest.
      *
      * @return void
      */

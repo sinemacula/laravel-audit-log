@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Querying\Enums\Acknowledgement;
 
 /**
- * Unit tests for the acknowledgement enum: its cases and the values an export's
- * result names.
+ * Unit tests for the acknowledgement enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\Acknowledgement;
 final class AcknowledgementTest extends TestCase
 {
     /**
-     * The cases, in order, with their values, so a renamed, reordered or added
-     * case fails.
+     * The cases and their values are pinned, in order.
      *
      * @return void
      */

@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\KeyUseRebuildResult;
 
 /**
- * Unit tests for what a rebuild of the key uses returns: its counts, whether it
- * was a dry run, and its array form.
+ * Unit tests for what a rebuild of the key uses returns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

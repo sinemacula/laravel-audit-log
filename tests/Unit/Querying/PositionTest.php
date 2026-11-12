@@ -10,8 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Querying\Position;
 
 /**
- * Unit tests for a place in the trail's order: the instant and the id it keeps,
- * and every malformed part it refuses without naming it.
+ * Unit tests for a place in the trail's order.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

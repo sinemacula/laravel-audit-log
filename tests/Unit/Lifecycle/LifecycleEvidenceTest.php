@@ -12,10 +12,7 @@ use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the evidence a lifecycle record must keep: the properties and
- * the operation they name, the evidence a record keeps whatever the order of
- * its keys, and every way a record can fail to keep it, the package's metadata
- * included.
+ * Unit tests for the evidence a lifecycle record must keep.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +29,7 @@ final class LifecycleEvidenceTest extends TestCase
     private const string ALTERED = 'A lifecycle record must keep its evidence exactly.';
 
     /**
-     * The evidence keeps its properties as given, and names the operation they
-     * name.
+     * The evidence keeps its properties and names their operation.
      *
      * @return void
      */
@@ -47,8 +43,7 @@ final class LifecycleEvidenceTest extends TestCase
     }
 
     /**
-     * Rows of `[properties]`: evidence that names no operation, or names one by
-     * something other than a string.
+     * Rows of `[properties]`: no operation id, or one that is not a string.
      *
      * @return iterable<string, array{0: array<string, int|string|null>}>
      */
@@ -63,8 +58,7 @@ final class LifecycleEvidenceTest extends TestCase
     }
 
     /**
-     * Evidence that names no operation by its id is refused, since
-     * reconciliation finds a recorded operation by it.
+     * Evidence without an operation id is refused; reconciliation finds by it.
      *
      * @param  array<string, int|string|null>  $properties
      * @return void
@@ -79,8 +73,7 @@ final class LifecycleEvidenceTest extends TestCase
     }
 
     /**
-     * A record whose properties are exactly the evidence's is accepted,
-     * whatever the order of their keys, since both are compared canonically.
+     * A record holding exactly the evidence is accepted in any key order.
      *
      * @return void
      */
@@ -95,8 +88,7 @@ final class LifecycleEvidenceTest extends TestCase
     }
 
     /**
-     * Rows of `[properties the record keeps]`: every way of not keeping the
-     * evidence exactly.
+     * Rows of `[properties the record keeps]`: the evidence altered.
      *
      * @return iterable<string, array{0: ?array<string, array<string, int|string>|int|string|null>}>
      */
@@ -120,8 +112,7 @@ final class LifecycleEvidenceTest extends TestCase
     }
 
     /**
-     * A record that does not keep the evidence exactly, or carries the
-     * package's metadata at all, is refused.
+     * A record that alters the evidence or carries package metadata is refused.
      *
      * @param  ?array<string, array<string, int|string>|int|string|null>  $kept
      * @return void
@@ -136,9 +127,7 @@ final class LifecycleEvidenceTest extends TestCase
     }
 
     /**
-     * Evidence holding a value with no canonical form is never kept, even by a
-     * record holding the very same value, so it is refused rather than thrown
-     * as the encoder's failure.
+     * A value with no canonical form is refused, not thrown by the encoder.
      *
      * @return void
      */

@@ -11,9 +11,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ImportPlan;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 
 /**
- * Unit tests for a chunk's import plan: the new lines it keeps with their
- * digests, its duplicates, its conflicts listed in file order, and the plan
- * left once its new lines are conflicts instead.
+ * Unit tests for a chunk's import plan.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,8 +28,7 @@ final class ImportPlanTest extends TestCase
     private const string OTHER_DIGEST = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
     /**
-     * The plan keeps its new lines in order, each line's digest by its number,
-     * its duplicates and its conflicts.
+     * The plan keeps its new lines with digests, duplicates and conflicts.
      *
      * @return void
      */
@@ -50,8 +47,7 @@ final class ImportPlanTest extends TestCase
     }
 
     /**
-     * The conflicts are listed in file order, whatever order they were found
-     * in.
+     * Conflicts are listed in file order, whatever order they were found in.
      *
      * @return void
      */
@@ -64,9 +60,7 @@ final class ImportPlanTest extends TestCase
     }
 
     /**
-     * Once its new lines are conflicts, the plan inserts nothing, keeps its
-     * duplicates, and lists every conflict in file order, the former new lines
-     * among them.
+     * Once its new lines are conflicts, the plan inserts nothing.
      *
      * @return void
      */

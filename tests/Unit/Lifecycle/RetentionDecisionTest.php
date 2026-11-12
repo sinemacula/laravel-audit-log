@@ -10,9 +10,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecision;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for one decision of a prune: what it keeps, the entries it admits
- * by their instant against its cut-off, none without a cut-off, and the list
- * the journal records it as.
+ * Unit tests for one decision of a prune.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,8 +41,7 @@ final class RetentionDecisionTest extends TestCase
     }
 
     /**
-     * An instant strictly before the cut-off is admitted, compared byte by
-     * byte, and the cut-off itself and anything after it are not.
+     * Only an instant strictly before the cut-off is admitted, bytewise.
      *
      * @return void
      */
@@ -60,8 +57,7 @@ final class RetentionDecisionTest extends TestCase
     }
 
     /**
-     * A decision with no cut-off, a pair kept forever, admits nothing, not even
-     * the empty instant that sorts before every other.
+     * A decision with no cut-off admits nothing, not even the empty instant.
      *
      * @return void
      */
@@ -74,9 +70,7 @@ final class RetentionDecisionTest extends TestCase
     }
 
     /**
-     * The journal records a decision as six items: the category, the tenant's
-     * type and id, the days kept and preserved, and the cut-off, with `null`
-     * for a tenantless pair, a pair kept forever and no obligation.
+     * The journal list is the pair, the days kept and preserved, the cut-off.
      *
      * @return void
      */

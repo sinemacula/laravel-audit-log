@@ -10,9 +10,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\Finding;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalBrokenException;
 
 /**
- * Unit tests for the exception a lifecycle operation fails closed with when the
- * journal it decides from fails verification: its message names the finding, it
- * carries the finding and the row id, and no previous exception.
+ * Unit tests for the exception a lifecycle operation throws on a bad journal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,8 +37,7 @@ final class JournalBrokenExceptionTest extends TestCase
     }
 
     /**
-     * The finding and the row id are carried as they were given, `null` when
-     * there is no row.
+     * The finding and the row id are carried, the row `null` when none.
      *
      * @return void
      */

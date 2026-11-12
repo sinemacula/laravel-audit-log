@@ -16,11 +16,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\RetentionDecisions;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for the decisions of one prune: the policy asked once per pair and
- * the same decision kept for the run, the cut-off at the run's UTC midnight
- * less the days kept, an entry exactly at the cut-off kept, a pair kept forever
- * admitting nothing, the answers and versions refused, naming the policy and
- * never the pair, and the decisions listed in the order made.
+ * Unit tests for the decisions of one prune.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,13 +34,11 @@ final class RetentionDecisionsTest extends TestCase
     /** @var string The run's midnight. */
     private const string MIDNIGHT = '2026-11-04T00:00:00.000000Z';
 
-    /** @var string The refusal of a malformed answer, by the policy's class, the method and what the answer must be. */
+    /** @var string The refusal of a malformed answer. */
     private const string MALFORMED = 'The retention policy `%s` answered `%s()` with %s; pruning refuses it.';
 
     /**
-     * The policy is asked once for each distinct category and tenant pair,
-     * however often the pair is asked for, and an equal tenant built again is
-     * the same pair; a tenant of another type or id, or none, is another.
+     * The policy is asked once per distinct category and tenant pair.
      *
      * @return void
      */
@@ -82,8 +76,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * A tenant whose type and id would run together if joined is still its own
-     * pair: protects against a memo key built by joining the parts.
+     * A tenant's type and id are keyed apart, never joined into one memo key.
      *
      * @return void
      */
@@ -103,9 +96,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * The cut-off is the UTC midnight that starts the run's day, whatever the
-     * time zone or the hour of the instant given, less the days kept, as an
-     * instant in the package's form.
+     * The cut-off is the run's UTC midnight less the days kept.
      *
      * @return void
      */
@@ -133,8 +124,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * An entry one microsecond before the cut-off is past its retention, and
-     * one at the cut-off or a microsecond after it is not.
+     * A microsecond before the cut-off is past retention; at it is not.
      *
      * @return void
      */
@@ -219,8 +209,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * An answer outside its range is refused, naming the policy's class and the
-     * method, and makes no decision.
+     * An out-of-range answer is refused, naming the policy and the method.
      *
      * @param  'preserveFor'|'retainFor'  $method
      * @param  int  $answer
@@ -246,9 +235,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * A finite retention shorter than its preservation, a preservation forever
-     * among them, is refused with a conflict and makes no decision; one as long
-     * as its preservation is kept.
+     * A finite retention shorter than its preservation is a conflict.
      *
      * @return void
      */
@@ -273,8 +260,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * Neither a conflict nor a malformed answer names the category or the
-     * tenant it was asked for.
+     * No refusal names the category or the tenant asked for.
      *
      * @return void
      */
@@ -297,9 +283,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * A version is asked once and kept, and one at the length bounds passes;
-     * an empty one, one longer than 64 characters, one that is not clean text
-     * and one that is not valid UTF-8 are refused, naming the policy.
+     * The version is asked once and kept, and a malformed one is refused.
      *
      * @return void
      */
@@ -332,8 +316,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * Every decision is listed once, in the order its pair was first asked for,
-     * and none before any is made.
+     * Every decision is listed once, in the order its pair was first asked.
      *
      * @return void
      */
@@ -365,8 +348,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * What the policy throws reaches the caller as it was, and the pair is
-     * asked again the next time, since no decision was made.
+     * What the policy throws propagates, and the pair is asked again next time.
      *
      * @return void
      */
@@ -407,8 +389,7 @@ final class RetentionDecisionsTest extends TestCase
     }
 
     /**
-     * A policy that answers every pair with the retention and preservation
-     * given.
+     * A policy answering every pair with the retention and preservation given.
      *
      * @param  ?int  $retainDays
      * @param  ?int  $preserveDays

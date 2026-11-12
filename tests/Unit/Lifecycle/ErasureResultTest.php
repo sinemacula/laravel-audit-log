@@ -10,10 +10,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\ErasureResult;
 
 /**
- * Unit tests for what an erasure did: every field as given, the blocked reasons
- * each once and sorted bytewise, always committed and not yet recorded, the
- * result of an owner already erased, the result once its record is written, and
- * the map it gives under snake-case keys.
+ * Unit tests for what an erasure did.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,9 +30,7 @@ final class ErasureResultTest extends TestCase
     private const string FINGERPRINT = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
 
     /**
-     * Every field is kept as given, the blocked reasons each once and sorted
-     * bytewise; a result is always committed and, until its record is written,
-     * not recorded.
+     * Every field is kept, reasons sorted once each; committed, unrecorded.
      *
      * @return void
      */
@@ -55,8 +50,7 @@ final class ErasureResultTest extends TestCase
     }
 
     /**
-     * An owner already erased that holds no key gives a result that names no
-     * erasure row and counts nothing.
+     * An owner already erased with no key names no row and counts nothing.
      *
      * @return void
      */

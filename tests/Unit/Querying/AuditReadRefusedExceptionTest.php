@@ -11,10 +11,7 @@ use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
 use SineMacula\Laravel\AuditLog\Querying\Enums\ReadRefusal;
 
 /**
- * Unit tests for the exception a refused or unrecorded read of the trail is
- * thrown as: each named constructor's fixed message, naming a class or a
- * connection and never a value, its typed cause, the absence of any exception
- * it carries, and the class it specialises.
+ * Unit tests for the exception a refused or unrecorded read is thrown as.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,8 +22,7 @@ use SineMacula\Laravel\AuditLog\Querying\Enums\ReadRefusal;
 final class AuditReadRefusedExceptionTest extends TestCase
 {
     /**
-     * Rows of `[the exception, its message]`: each named constructor, given a
-     * class or a connection where it takes one.
+     * Rows of `[the exception, its message]`, one per named constructor.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException, 1: string}>
      */
@@ -72,9 +68,7 @@ final class AuditReadRefusedExceptionTest extends TestCase
     }
 
     /**
-     * Each message is a fixed sentence that names only the class or the
-     * connection it was given, and no value: the constructors take nothing
-     * else, so no value can reach one.
+     * Each message names only the class or connection given, never a value.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException  $exception
      * @param  string  $message
@@ -88,8 +82,7 @@ final class AuditReadRefusedExceptionTest extends TestCase
     }
 
     /**
-     * Rows of `[the exception, its reason, its class, its connection]`: each
-     * named constructor's typed cause.
+     * Rows of `[exception, reason, class, connection]`, one per constructor.
      *
      * @formatter:off
      *
@@ -116,9 +109,7 @@ final class AuditReadRefusedExceptionTest extends TestCase
     }
 
     /**
-     * Each refusal carries its cause as typed properties, the reason and the
-     * class or connection it names, so a caller tells the causes apart without
-     * reading the message.
+     * Each refusal types its cause, so callers need not parse the message.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException  $exception
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\ReadRefusal  $reason
@@ -135,8 +126,7 @@ final class AuditReadRefusedExceptionTest extends TestCase
     }
 
     /**
-     * Every reason has a named constructor, and the constructor itself is
-     * private, so a refusal is only ever made with its cause.
+     * Every reason has a named constructor; the constructor is private.
      *
      * @return void
      */
@@ -149,8 +139,7 @@ final class AuditReadRefusedExceptionTest extends TestCase
     }
 
     /**
-     * Every named constructor takes nothing but a class or a connection name,
-     * so a caller has no way to hand one a value.
+     * Each named constructor takes only a class or connection name.
      *
      * @return void
      */
@@ -177,8 +166,7 @@ final class AuditReadRefusedExceptionTest extends TestCase
     }
 
     /**
-     * No exception it is made as carries another, so no failure's message or
-     * bindings reach a report through it.
+     * None carries a previous exception, so no message or bindings leak.
      *
      * @return void
      */
@@ -194,8 +182,7 @@ final class AuditReadRefusedExceptionTest extends TestCase
     }
 
     /**
-     * The exception is a final runtime exception: what refused the read is the
-     * state the read ran in, not the caller's arguments.
+     * It is a final runtime exception: the read's state refused it.
      *
      * @return void
      */

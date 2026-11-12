@@ -9,9 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\ReinstatementRefusedException;
 
 /**
- * Unit tests for the exception a reinstatement of an owner that is not erased
- * is refused with: its reason, its message, which names no owner, and that it
- * carries no previous exception.
+ * Unit tests for refusing to reinstate an owner that is not erased.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

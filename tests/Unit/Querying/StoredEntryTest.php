@@ -15,11 +15,7 @@ use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for a stored entry: the row codec's envelope kept whole, its JSON
- * objects, numeric keys and integrity columns included; its line, which is the
- * NDJSON formatter's line of the same record; its positions and its signed
- * descriptor as stored; and the finalised record it rebuilds for a projection,
- * whose attachment is described from the descriptor and carries no members.
+ * Unit tests for a stored entry.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,9 +35,7 @@ final class StoredEntryTest extends TestCase
     private const string HMAC = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
     /**
-     * The envelope is the row codec's, whole and in table order: an empty
-     * object stays an object beside an empty list, a map with numeric keys
-     * stays a map, and the integrity version, key id and HMAC are kept.
+     * The envelope is the row codec's, whole and in table order.
      *
      * @return void
      */
@@ -65,8 +59,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * Rows of `[finalised record]`: a plain record and a record with each kind
-     * of artifact.
+     * Rows of `[finalised record]`: plain, and one per kind of artifact.
      *
      * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Records\FinalisedRecord}>
      */
@@ -81,8 +74,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * The line of a stored record is byte for byte the NDJSON formatter's line
-     * of the record that was stored, and of the record it rebuilds.
+     * The line is byte for byte the NDJSON formatter's line of the record.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @return void
@@ -100,9 +92,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * The entry's id, HMAC, key id and times are read as stored, and its
-     * positions are when it occurred and when it was recorded, each with its
-     * id.
+     * The id, HMAC, key id, times and positions are read as stored.
      *
      * @return void
      */
@@ -120,8 +110,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * The descriptor is the one the entry signed, as stored, with no key added,
-     * dropped or reordered; an entry without one has none.
+     * The descriptor is read exactly as stored; without one there is none.
      *
      * @return void
      */
@@ -137,8 +126,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * Rows of `[properties, descriptor]`: properties that hold no descriptor,
-     * and descriptors that are not maps, which are read as empty.
+     * Rows of `[properties, descriptor]`: no descriptor, or one that is no map.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -158,9 +146,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * A descriptor is only ever under `_audit.manifest` of a map of
-     * properties; one there that is not a map reads as an empty array, which
-     * no check accepts, and nested maps read as arrays.
+     * A descriptor is read only from `_audit.manifest`; a non-map reads empty.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -177,9 +163,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * The finalised record of an entry with an artifact carries an attachment
-     * described from its descriptor, with no members, so it can never be
-     * stored; the record's envelope is the entry's.
+     * An artifact entry's finalised record has a memberless attachment.
      *
      * @return void
      */
@@ -210,8 +194,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * The finalised record of a plain entry carries no attachment, keeps its
-     * decoded objects as objects and leaves the entry's own untouched.
+     * A plain entry's finalised record has no attachment and keeps its objects.
      *
      * @return void
      */
@@ -236,8 +219,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * Rows of `[properties, context, exception, message]`: entries whose
-     * finalised record cannot be rebuilt.
+     * Rows of `[properties, context, exception, message]` that cannot finalise.
      *
      * @return iterable<string, array{0: string, 1: string, 2: class-string<\Throwable>, 3: string}>
      */
@@ -254,8 +236,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * A JSON column a record cannot hold, or a descriptor that is not exactly
-     * one, is refused, naming the column or the rule and never the value.
+     * A column or descriptor a record cannot hold is refused without values.
      *
      * @param  string  $properties
      * @param  string  $context
@@ -310,8 +291,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * The line of an entry whose JSON holds a float is refused, since a float
-     * has no canonical form; only a tampered row holds one.
+     * A line holding a float is refused, as a float has no canonical form.
      *
      * @return void
      */
@@ -326,8 +306,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * A plain captured record finalised at `RECORDED_AT` under the fixed key id
-     * and HMAC.
+     * A plain captured record finalised at `RECORDED_AT` under the fixed HMAC.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
      */
@@ -357,9 +336,7 @@ final class StoredEntryTest extends TestCase
     }
 
     /**
-     * A stored row of a captured record of an approved invoice, with the JSON
-     * columns given as they were decoded, finalised at `RECORDED_AT` under the
-     * fixed key id and HMAC.
+     * A stored row of an approved invoice, with the JSON columns given.
      *
      * @param  ?\stdClass  $properties
      * @param  ?\stdClass  $context

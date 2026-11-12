@@ -9,10 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\ReapplyResult;
 
 /**
- * Unit tests for what erasing again after a restore reports: it is reconciled
- * exactly when it names the reconciliation's journal row, and its map gives
- * every count, the file's digest and the anchor's head under snake-case keys,
- * naming no owner.
+ * Unit tests for what erasing again after a restore reports.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,8 +23,7 @@ final class ReapplyResultTest extends TestCase
     private const string OPERATION = '01932b4e-9000-7000-8000-0000000000a1';
 
     /**
-     * A result naming its reconciliation is reconciled, and its map gives
-     * everything it holds.
+     * A result naming its reconciliation is reconciled.
      *
      * @return void
      */
@@ -54,8 +50,7 @@ final class ReapplyResultTest extends TestCase
     }
 
     /**
-     * A result naming no reconciliation is not reconciled, and names no
-     * anchored head, whatever its counts.
+     * A result naming no reconciliation is not reconciled and has no head.
      *
      * @return void
      */

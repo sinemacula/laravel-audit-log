@@ -10,9 +10,7 @@ use SineMacula\Laravel\AuditLog\Integrity\SealEnvelope;
 use SineMacula\Laravel\AuditLog\Lifecycle\PruneSeal;
 
 /**
- * Unit tests for an authenticated seal as a prune reads it: its members sorted
- * bytewise, each member's position in that order and the HMAC it was sealed
- * with, and the refusal of an entry the seal does not hold.
+ * Unit tests for an authenticated seal as a prune reads it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,8 +32,7 @@ final class PruneSealTest extends TestCase
     private const string STRANGER = '01932b4e-9000-7000-8000-0000000000ff';
 
     /**
-     * The members are sorted bytewise by entry id, and each member's position
-     * is its place in that order, from 0, whatever order they were given in.
+     * Members are sorted bytewise by entry id, each position its index from 0.
      *
      * @return void
      */
@@ -61,8 +58,7 @@ final class PruneSealTest extends TestCase
     }
 
     /**
-     * Each member gives the HMAC it was sealed with, and the seal keeps the
-     * envelope and the digest it was built with.
+     * Each member gives its sealed HMAC, and the seal its envelope and digest.
      *
      * @return void
      */
@@ -80,8 +76,7 @@ final class PruneSealTest extends TestCase
     }
 
     /**
-     * An entry the seal does not hold is no member, and has neither a position
-     * nor an HMAC.
+     * An entry the seal does not hold has neither a position nor an HMAC.
      *
      * @return void
      */

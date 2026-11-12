@@ -9,8 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 
 /**
- * Unit tests for the import batch status enum: its cases and their stored
- * values, and the one status that is not final.
+ * Unit tests for the import batch status enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,8 +20,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 final class ImportStatusTest extends TestCase
 {
     /**
-     * The cases, in order, with their values, so a renamed, reordered or added
-     * case fails.
+     * The cases and their values are pinned, in order.
      *
      * @return void
      */
@@ -38,8 +36,7 @@ final class ImportStatusTest extends TestCase
     }
 
     /**
-     * Every status but `running` is final, so a batch that has finished, in
-     * whichever way, never moves again.
+     * Every status but `running` is final.
      *
      * @return void
      */
@@ -58,8 +55,7 @@ final class ImportStatusTest extends TestCase
     }
 
     /**
-     * Each stored value reads back as its case, and a value the batches table
-     * never holds reads as none.
+     * Each stored value reads back as its case, and an unknown value as none.
      *
      * @return void
      */

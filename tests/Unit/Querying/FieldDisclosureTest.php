@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Querying\FieldDisclosure;
 
 /**
- * Unit tests for what a page disclosed of its encrypted fragments: the grant
- * and the count of each state it keeps, the disclosure of a page that showed
- * none, the counts as a map sorted by state, and the counts it refuses.
+ * Unit tests for what a page disclosed of its encrypted fragments.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,8 +21,7 @@ use SineMacula\Laravel\AuditLog\Querying\FieldDisclosure;
 final class FieldDisclosureTest extends TestCase
 {
     /**
-     * The grant and each state's count are kept as given, and the counts are
-     * shown by state, sorted, without the grant.
+     * The grant and counts are kept, the counts shown by state.
      *
      * @return void
      */
@@ -38,8 +35,7 @@ final class FieldDisclosureTest extends TestCase
     }
 
     /**
-     * A page that showed no fragment counts none of any state, under a scope
-     * that revealed them or not.
+     * A page that showed no fragment counts none, whatever its grant.
      *
      * @return void
      */
@@ -54,8 +50,7 @@ final class FieldDisclosureTest extends TestCase
     }
 
     /**
-     * Rows of `[encrypted, erased, revealed, unreadable]`: counts with one
-     * state below none.
+     * Rows of `[encrypted, erased, revealed, unreadable]`, one negative.
      *
      * @return iterable<string, array{0: int, 1: int, 2: int, 3: int}>
      */

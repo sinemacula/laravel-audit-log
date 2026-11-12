@@ -11,9 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Querying\ReadSettings;
 
 /**
- * Unit tests for the read and export settings: the default each missing key
- * takes, the bounds and forms each accepts, everything they fail closed on, the
- * message each refusal gives, and the values no message ever shows.
+ * Unit tests for the read and export settings.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,8 +31,7 @@ final class ReadSettingsTest extends TestCase
     private const string SENTINEL = 'sentinel-7f3a9c';
 
     /**
-     * With nothing set a page may ask for at most 100 entries and an export
-     * reads 1000 per statement, whether the sections are missing or empty.
+     * With nothing set, pages hold at most 100 entries and exports read 1000.
      *
      * @return void
      */
@@ -49,8 +46,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * Each setting is accepted at either end of its range, and one inside it is
-     * read as it is.
+     * Each setting accepts either end of its range and any value inside it.
      *
      * @return void
      */
@@ -73,8 +69,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * The digit string an environment line gives is read as its integer, at
-     * either end of each range as well as inside it.
+     * An environment digit string is read as its integer.
      *
      * @return void
      */
@@ -97,8 +92,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[the page size]`: one past either end of the range, a word, a
-     * negative, a fraction, and the forms `env()` never gives for an integer.
+     * Rows of `[the page size]`: out of range or no integer `env()` gives.
      *
      * @return iterable<string, array{0: array<int, int>|bool|float|int|string|null}>
      */
@@ -126,8 +120,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * A page size outside 1 to 500, or that is not an integer, fails closed,
-     * naming the setting and the range and never the value.
+     * A page size outside 1 to 500 fails closed, never naming the value.
      *
      * @param  array<int, int>|bool|float|int|string|null  $value
      * @return void
@@ -142,8 +135,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[the chunk]`: one past either end of the range, an exponent, a
-     * negative, a fraction, and the forms `env()` never gives for an integer.
+     * Rows of `[the chunk]`: out of range or no integer `env()` gives.
      *
      * @return iterable<string, array{0: array<int, int>|bool|float|int|string|null}>
      */
@@ -167,8 +159,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * A chunk outside 100 to 10000, or that is not an integer, fails closed,
-     * naming the setting and the range and never the value.
+     * A chunk outside 100 to 10000 fails closed, never naming the value.
      *
      * @param  array<int, int>|bool|float|int|string|null  $value
      * @return void
@@ -183,9 +174,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * Validation passes on the defaults and on good values, and reads every
-     * setting, so a malformed one anywhere fails it with that setting's
-     * message, the page size first.
+     * Validation reads every setting, the page size first.
      *
      * @return void
      */
@@ -207,8 +196,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * Each setting is read on every call, so a change takes effect at once and
-     * a value changed to a malformed one fails at once.
+     * Each setting is read on every call.
      *
      * @return void
      */
@@ -232,8 +220,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * Assert the read fails closed with exactly the message, which never holds
-     * the sentinel a bad value may carry.
+     * Assert the read fails with exactly the message, which omits the sentinel.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -256,8 +243,7 @@ final class ReadSettingsTest extends TestCase
     }
 
     /**
-     * The read settings over a configuration holding the read and export
-     * sections.
+     * Read settings over a configuration of the read and export sections.
      *
      * @param  array<string, array<string, array<int, int>|bool|float|int|string|null>>  $sections
      * @return \SineMacula\Laravel\AuditLog\Querying\ReadSettings

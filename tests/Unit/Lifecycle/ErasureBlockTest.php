@@ -9,10 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Lifecycle\ErasureBlock;
 
 /**
- * Unit tests for why an erasure keeps a key: the key, its unit and generation
- * as given, its reasons each once and sorted bytewise, at least one of them,
- * the prefixes every reason is built from, and the entry an erasure row lists
- * of a kept key.
+ * Unit tests for why an erasure keeps a key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,8 +38,7 @@ final class ErasureBlockTest extends TestCase
     }
 
     /**
-     * The reasons are kept each once and sorted bytewise, whatever order and
-     * repeats they are given in.
+     * The reasons are kept once each and sorted bytewise, whatever the input.
      *
      * @return void
      */
@@ -77,8 +73,7 @@ final class ErasureBlockTest extends TestCase
     }
 
     /**
-     * The entry an erasure row lists of the kept key: its id, unit, generation
-     * and reasons, in that order.
+     * The kept entry lists the key's id, unit, generation and reasons.
      *
      * @return void
      */

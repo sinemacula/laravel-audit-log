@@ -13,8 +13,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 
 /**
- * Unit tests for what placing a hold returns: the operation, that it committed,
- * whether it was recorded, the hold itself, and its array form.
+ * Unit tests for what placing a hold returns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,8 +30,7 @@ final class HoldResultTest extends TestCase
     private const string HOLD_ID = '01932b4e-d000-7000-8000-000000000001';
 
     /**
-     * A result keeps the operation, whether it was recorded and the hold, and
-     * says it committed, since a hold that did not commit throws instead.
+     * A result keeps what it is given and is always committed.
      *
      * @return void
      */
@@ -48,8 +46,7 @@ final class HoldResultTest extends TestCase
     }
 
     /**
-     * The array form names the operation, that it committed, whether it was
-     * recorded, and the hold as a listing shows it.
+     * The array form holds the operation, both flags and the hold as listed.
      *
      * @return void
      */
