@@ -32,13 +32,8 @@ use Tests\Fixtures\Capture\Models\SigningInUser;
 use Tests\TestCase;
 
 /**
- * Integration tests for the capture of Laravel's authentication events on
- * whichever engine the suite runs against, through the provider's wiring and
- * real guards: each core event written as one row the engine reads back, the
- * identifier hash of a failure correlating an identifier whose user is known
- * with the same identifier once no user has it, and fifty bearer-style requests
- * that each announce their user writing nothing, while a mapping makes the
- * routing bridge hear every one.
+ * Integration tests for the capture of Laravel's authentication events through
+ * the provider's wiring and real guards on each engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,9 +74,8 @@ final class AuthCaptureEnginesTest extends TestCase
     }
 
     /**
-     * Each of the ten core events, fired by a real guard where Laravel fires
-     * it, writes one row the engine reads back with its code, outcome, actor,
-     * subject and guard.
+     * Each core event fired by a real guard writes one row with its code,
+     * outcome, actor, subject and guard.
      *
      * @return void
      *
@@ -130,9 +124,8 @@ final class AuthCaptureEnginesTest extends TestCase
     }
 
     /**
-     * A failure's identifier hash correlates an identifier whose user is known
-     * with the same identifier once no user has it, and tells it from another
-     * identifier, as the engine stores and returns it.
+     * A failure's identifier hash matches the same identifier whether or not a
+     * user has it, and differs from another identifier.
      *
      * @return void
      */
@@ -156,9 +149,8 @@ final class AuthCaptureEnginesTest extends TestCase
     }
 
     /**
-     * Fifty bearer-style requests, each finding its user by its token and
-     * announcing it as `Authenticated`, write nothing, though a mapping makes
-     * the routing bridge hear every one of them.
+     * Fifty bearer-style `Authenticated` requests write nothing, though the
+     * routing bridge hears each one.
      *
      * @return void
      */
@@ -198,10 +190,8 @@ final class AuthCaptureEnginesTest extends TestCase
     }
 
     /**
-     * Sign users in from the test's users' table without waiting and with a
-     * cheap hash, add a token guard that finds them by their remember token,
-     * set the key identifiers are hashed under, and map the portal events while
-     * the application boots, so the routing bridge listens.
+     * Use quick sign-ins and a token guard, set the identifier hash key, and
+     * map the portal events at boot so the routing bridge listens.
      *
      * @param  mixed  $app
      * @return void

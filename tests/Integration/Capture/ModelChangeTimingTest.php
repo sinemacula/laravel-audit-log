@@ -34,16 +34,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * Integration tests for when a watched model's change is written, on every
- * engine the suite runs on: only once the transaction it happened in commits on
- * the model's own connection, never when it rolls back, a nested rollback
- * taking only its own changes; each save with the snapshot and the actor of its
- * moment, built when the event fired; in outbox mode inside the transaction
- * when the outbox shares its connection; and a deferred write's failure said
- * once, at the commit, which stands.
- *
- * The test binds the watcher and the capture state as the provider does, and
- * watches its own models while the application boots.
+ * Integration tests for when a watched model's change is written: once its own
+ * connection commits, never on rollback, as it was when the event fired.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -305,13 +297,9 @@ final class ModelChangeTimingTest extends TestCase
     }
 
     /**
-     * In outbox mode every change on the outbox's connection is inserted inside
-     * its transaction, each in a savepoint of its own, which on PostgreSQL is a
-     * subtransaction held until the transaction ends. More than 64 of them in
-     * one transaction, past the point where PostgreSQL's snapshots overflow,
-     * still give one outbox row each, leave the host at its own level, and
-     * commit with it; the cost is the overflow the guides warn of, never a lost
-     * or a failed record.
+     * More than 64 outbox savepoints in one transaction, past PostgreSQL's
+     * subtransaction overflow, still give one row each and commit with the
+     * host.
      *
      * @return void
      */
@@ -368,12 +356,8 @@ final class ModelChangeTimingTest extends TestCase
     }
 
     /**
-     * A change committed on its own connection while a transaction is still
-     * open on the storage connection is written at that commit, inside the
-     * storage transaction. A deadlock of that write has ended the storage
-     * transaction, yet the change it records has committed, so the record is
-     * spilled once for replay, the sanitised deadlock reported once and said
-     * once, and nothing leaves the commit.
+     * A deferred write's deadlock in a storage transaction, its change already
+     * committed, is spilled and reported once, and the commit stands.
      *
      * @return void
      */

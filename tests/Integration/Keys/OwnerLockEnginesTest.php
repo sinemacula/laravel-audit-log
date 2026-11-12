@@ -21,17 +21,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for an owner's lock between real processes, on whichever
- * engine the suite runs against: on MySQL and PostgreSQL a second holder waits
- * for the first's commit and then reads what it committed, a wait past the
- * limit is refused, and a release after several takings frees every level; on
- * SQLite, which takes no lock, the database's write lock serialises the
- * holders.
- *
- * SQLite runs on a file in WAL mode, as the operations guidance advises. The
- * processes meet on file gates rather than on timing; a pause inside a held
- * lock only makes an overtaking likely should the lock fail, and no assertion
- * measures time.
+ * Integration tests for an owner's lock between real processes; SQLite takes
+ * none and relies on its write lock. No assertion measures time.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,9 +63,8 @@ final class OwnerLockEnginesTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL a holder asking for an owner's lock while another
-     * holds it waits for that one's commit, and its first read after the lock
-     * sees the marker the other committed while it waited.
+     * On MySQL and PostgreSQL a second holder waits for the first's commit,
+     * then reads the marker it committed.
      *
      * @return void
      */
@@ -111,9 +101,8 @@ final class OwnerLockEnginesTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL a bounded wait for a lock another holds past the
-     * limit is refused, naming the wait alone, and the waiter's transaction is
-     * left to roll back.
+     * On MySQL and PostgreSQL a bounded wait past the limit is refused, naming
+     * the wait alone, and the transaction is left to roll back.
      *
      * @return void
      *
@@ -155,9 +144,8 @@ final class OwnerLockEnginesTest extends TestCase
     }
 
     /**
-     * On SQLite no lock is taken, and the database's write lock serialises the
-     * holders: while one holds a transaction that has written, no other
-     * connection can begin a write, and once it commits one can.
+     * On SQLite the write lock serialises holders: no other write begins until
+     * the first commits.
      *
      * @return void
      */
@@ -185,11 +173,8 @@ final class OwnerLockEnginesTest extends TestCase
     }
 
     /**
-     * A release after the lock was taken several times on one session, as a
-     * retried transaction takes it, frees every level: MySQL's named lock is
-     * free to another session at once, and on PostgreSQL, whose lock the
-     * transaction's end released, and SQLite, which took none, another holder
-     * takes the owner's lock at once.
+     * A release after several takings on one session frees every level for
+     * another session.
      *
      * @return void
      */
@@ -272,10 +257,9 @@ final class OwnerLockEnginesTest extends TestCase
     }
 
     /**
-     * Run the work holding the owner's lock, as a key creation holds it: on
-     * MySQL taken before the transaction and released after it, elsewhere taken
-     * inside it, its wait bounded; on the connection given or a session of the
-     * storage connection's own.
+     * Run the work holding the owner's lock as key creation does: on MySQL
+     * around the transaction, elsewhere inside it, on the connection given or a
+     * session of its own.
      *
      * @template TResult
      *
@@ -313,9 +297,8 @@ final class OwnerLockEnginesTest extends TestCase
     }
 
     /**
-     * Open the release gate just before this process's lock statement runs on
-     * the connection, so the holder goes on to commit while this process waits
-     * for the lock.
+     * Open the release gate just before this process's lock statement runs, so
+     * the holder commits while it waits.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -336,9 +319,8 @@ final class OwnerLockEnginesTest extends TestCase
     }
 
     /**
-     * Whether another session takes the owner's lock at once: MySQL's named
-     * lock is free, or PostgreSQL's advisory lock is taken and given back, and
-     * on SQLite, which takes none, whether another writer can begin.
+     * Whether another session takes the owner's lock at once, or on SQLite can
+     * begin a write.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
      * @return bool

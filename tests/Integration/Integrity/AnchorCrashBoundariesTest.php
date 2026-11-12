@@ -44,19 +44,8 @@ use Tests\TestCase;
 
 /**
  * Integration tests for an anchorer killed by `SIGKILL` at every boundary of an
- * anchoring, on a disk anchor every process shares and on whichever engine the
- * suite runs against: before the anchor is written to, between the disk
- * anchor's marker and its object, after the anchor has kept a summary and
- * before its receipt is returned, and after the receipt is recorded. Anchoring
- * is idempotent, so the next run of `audit-log:seal` anchors every seal left
- * unanchored, completes an object a marker waits for, records for a kept
- * summary the receipt it would have had, and never meets a conflict of its own
- * making; a strict verification then finds every seal anchored and the anchor's
- * head the last seal. A marker left without its object still refuses another
- * digest for its sequence, so a seal rewritten meanwhile by someone holding the
- * key is caught at its next anchoring.
- *
- * Every test starts from three seals, the first anchored and the others not.
+ * anchoring, recovered by the next seal run; each starts from three seals, the
+ * first anchored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -151,9 +140,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * An anchorer killed before the second seal reaches the anchor leaves it
-     * and the third unanchored, with nothing written for either and no failure
-     * recorded, and the next run anchors both.
+     * A kill before the anchor is written to leaves the second and third seals
+     * unanchored, and the next run anchors both.
      *
      * @return void
      */
@@ -169,10 +157,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * An anchorer killed once the anchor has kept the second seal's summary,
-     * before its receipt is returned, leaves the seal unanchored locally with
-     * its marker and object on the disk; the next run anchors it again, writing
-     * nothing, and records exactly the receipt that object proves.
+     * A kill once the anchor kept the summary, before the receipt returned, is
+     * recovered by a next run that records the receipt the object proves.
      *
      * @return void
      */
@@ -194,9 +180,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * An anchorer killed between the second seal's marker and its object leaves
-     * the marker alone; the next run finds it holding the seal's own digest,
-     * writes the object, and anchors the seal and the third.
+     * A kill between the marker and its object is recovered by a next run that
+     * writes the object and anchors the rest.
      *
      * @return void
      */
@@ -216,13 +201,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A marker left without its object by a killed anchorer still refuses
-     * another digest for its sequence. The second seal rewritten meanwhile by
-     * someone holding the key, and the third chained onto it again, verify
-     * locally, and the marker is invisible to discovery, so a verification that
-     * is not strict passes; the next anchoring conflicts at the second seal,
-     * records the conflict on it, writes nothing, anchors nothing after it, and
-     * alarms, and a strict verification fails.
+     * A marker left without its object still refuses another digest, so a seal
+     * rewritten meanwhile conflicts at the next anchoring and alarms.
      *
      * @return void
      */
@@ -259,10 +239,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * An anchorer killed once it has recorded the second seal's receipt keeps
-     * that seal anchored, its progress still naming the first; the next run
-     * leaves the receipt as it was, anchors the third, and moves its progress
-     * to it.
+     * A kill after the second receipt is recorded keeps it, and the next run
+     * anchors the third and moves the progress to it.
      *
      * @return void
      */
@@ -284,13 +262,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Anchorers killed one after another at every boundary, with no run between
-     * them to recover, leave nothing the next run takes for a conflict: before
-     * the anchor is written to, between the second seal's marker and its
-     * object, once its object is written and before its receipt is returned,
-     * once its receipt is recorded, and once the third seal's object is
-     * written. The next run anchors every seal, no failure is recorded on any,
-     * and each sequence has one marker and one object.
+     * Anchorers killed at every boundary in turn leave no false conflict, and
+     * the next run anchors every seal with one marker and one object each.
      *
      * @return void
      */
@@ -314,11 +287,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A marker a killed anchorer left without its object is never the anchor's
-     * head: a verification before the next run reports the first seal as the
-     * head, matching the local seal there, and every segment `valid`; it
-     * passes, and a strict one fails on the seals left unanchored past their
-     * grace.
+     * A marker left without its object is never the anchor's head, so a
+     * verification passes and a strict one fails on the unanchored seals.
      *
      * @return void
      */
@@ -351,9 +321,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Anchor the pending seals in a child, on the anchor it makes, and assert
-     * the child was killed, by the anchor or at the statement the pattern
-     * matches once it has run.
+     * Anchor the pending seals in a child and assert it was killed, by the
+     * anchor or after the statement the pattern matches.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor  $anchor
      * @param  ?string  $killAfter
@@ -368,10 +337,8 @@ final class AnchorCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Run `audit-log:seal` and assert it succeeds and leaves every seal
-     * anchored: the sequences contiguous from 1, and on verification, strict,
-     * every segment `valid` and anchored, the anchor's head the last seal, and
-     * nothing recorded as a failure.
+     * Run `audit-log:seal` and assert every seal is anchored and verifies
+     * strictly, the anchor's head the last seal.
      *
      * @return void
      */

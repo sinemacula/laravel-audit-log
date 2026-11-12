@@ -15,14 +15,8 @@ use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use Tests\TestCase;
 
 /**
- * Integration tests for a code prefix on whichever engine the suite runs
- * against: the prefix is matched with an explicit `like` and its own escape
- * character, so a literal underscore matches only an underscore, a prefix
- * matches only the codes beneath it, and SQLite reads it as `like`, never as
- * the case-sensitive `glob` the framework's own `like` becomes there.
- *
- * Rows are seeded with literal inserts, so the statements read what the engine
- * stored.
+ * Integration tests for code prefixes matched by an escaped `like`, never the
+ * case-sensitive `glob` the framework's `like` becomes on SQLite.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

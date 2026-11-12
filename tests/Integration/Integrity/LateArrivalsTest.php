@@ -33,17 +33,8 @@ use Tests\Concerns\SealsEntries;
 use Tests\TestCase;
 
 /**
- * Integration tests for entries that reach the table after a later entry has
- * been sealed, on whichever engine the suite runs against, each written by
- * another process as another server would: a row that commits after a seal with
- * an earlier time joins the next seal; a row older than the lookback is left by
- * the recent pass, pending and then overdue to verification, until a sweep
- * seals it, and a sweep that already passed its place finds it on its next
- * pass; a record queued in the outbox and drained late joins a later seal; and
- * an id that sorts before every sealed id is still sealed, at the head's very
- * instant included.
- *
- * SQLite runs in WAL mode, as the operations guidance advises.
+ * Integration tests for entries other processes write after a later entry is
+ * sealed: each still joins a later seal. SQLite runs in WAL mode.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -124,11 +115,8 @@ final class LateArrivalsTest extends TestCase
     }
 
     /**
-     * A row recorded before the first seal's latest entry whose transaction, in
-     * another process, commits only after that seal is not in it, and joins the
-     * next one. On MySQL and PostgreSQL the transaction is open while the seal
-     * is written; SQLite has one writer, so there the row is inserted once the
-     * seal has committed.
+     * A row recorded before a seal's latest entry but committed after the seal
+     * joins the next one; on SQLite it is inserted once the seal commits.
      *
      * @return void
      */
@@ -173,11 +161,8 @@ final class LateArrivalsTest extends TestCase
     }
 
     /**
-     * A row recorded further before the first seal's latest entry than the
-     * lookback is never read by the recent pass. Verification calls it pending
-     * up to the allowed age after it, the run still passing, and overdue a
-     * microsecond later, naming it, so the run fails; the sweep seals it, and
-     * verification passes again.
+     * A row older than the lookback is pending, then overdue and failing, until
+     * the sweep seals it.
      *
      * @return void
      */
@@ -214,10 +199,8 @@ final class LateArrivalsTest extends TestCase
     }
 
     /**
-     * A sweep resumes from its saved cursor, so a row that arrives behind the
-     * cursor, older than everything it has read, is left by the rest of that
-     * pass, which still completes; the next pass starts again at the beginning
-     * of the table and seals it.
+     * A row arriving behind a sweep's cursor is left by that pass and sealed by
+     * the next.
      *
      * @return void
      */
@@ -251,9 +234,8 @@ final class LateArrivalsTest extends TestCase
     }
 
     /**
-     * A record queued in the outbox reaches the table only when a worker in
-     * another process drains it, after a later entry has been sealed, with the
-     * time it was recorded at, before that entry's; the next seal holds it.
+     * An outbox record drained after a later seal, with its earlier recording
+     * time, joins the next seal.
      *
      * @return void
      */
@@ -285,9 +267,8 @@ final class LateArrivalsTest extends TestCase
     }
 
     /**
-     * A row stored by another process after a seal, recorded later than every
-     * sealed entry, under an id that sorts before every sealed id, is still
-     * sealed: the id order is never a high-water mark.
+     * A late row whose id sorts before every sealed id is still sealed: id
+     * order is never a high-water mark.
      *
      * @return void
      */
@@ -305,9 +286,8 @@ final class LateArrivalsTest extends TestCase
     }
 
     /**
-     * With no lookback at all, the recent pass starts at the very instant of
-     * the last seal's latest entry, so a row stored late at that instant, under
-     * an id that sorts before the sealed one, is still read and sealed.
+     * With no lookback, a late row at the last seal's latest instant with a
+     * lower id is still sealed.
      *
      * @return void
      */

@@ -13,22 +13,9 @@ use Tests\Concerns\RunsDocumentedSql;
 use Tests\TestCase;
 
 /**
- * Integration tests for the triggers the storage note documents for the owners'
- * key tables, run exactly as written on whichever engine the suite runs
- * against: they install; a key use and an owner marker are never updated or
- * deleted, by anyone; a subject key is never deleted, its immutable columns
- * never change, and it moves only from live to superseded, from live or
- * superseded to erased, or is rewrapped, while an erased key is never changed
- * again; on MySQL and PostgreSQL only the maintenance user changes a key, and
- * on SQLite, which has no users, the transitions hold for whoever runs them;
- * and on PostgreSQL none of the three is truncated.
- *
- * On MySQL and PostgreSQL the documented grants, the key block's included, are
- * run for the logins this worker creates, `audit_writer_<token>`,
- * `audit_maintenance_<token>` and `audit_verifier_<token>`, which are dropped
- * when the test ends, as the key triggers are. A test that proves a trigger
- * refuses what the grants would refuse first grants the privilege beyond the
- * documentation. The tests cover documented SQL, not a class of the package.
+ * Integration tests for the documented key table triggers and grants, run
+ * exactly as written on each engine; a refusal test grants beyond the
+ * documented privileges first.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,9 +64,8 @@ final class KeyTablesTriggersTest extends TestCase
     private array $names = [];
 
     /**
-     * Run the documented grants, the key block's after the others, for this
-     * worker's logins, where the engine has users, then the documented key
-     * triggers.
+     * Run the documented grants, the key block last, for this worker's logins,
+     * then the key triggers.
      *
      * @return void
      */
@@ -139,9 +125,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * Every documented key trigger is installed on the three key tables, and no
-     * other: an update and a delete trigger on each, and on PostgreSQL a
-     * truncate trigger too.
+     * Exactly the documented key triggers are installed: update and delete on
+     * each table, and truncate on PostgreSQL.
      *
      * @return void
      */
@@ -157,10 +142,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * A key use is never updated or deleted, by the tables' owner nor, on MySQL
-     * and PostgreSQL, by the writer or the maintenance user granted both beyond
-     * the documented grants: the triggers have no exception, and the row is
-     * left as it was.
+     * A key use is never updated or deleted, even by a user granted both beyond
+     * the documented grants.
      *
      * @return void
      */
@@ -180,10 +163,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * An owner marker is never updated or deleted, by the tables' owner nor, on
-     * MySQL and PostgreSQL, by the writer or the maintenance user granted both
-     * beyond the documented grants, so an owner's history of erasures and
-     * reinstatements only grows.
+     * An owner marker is never updated or deleted, so an owner's erasure
+     * history only grows.
      *
      * @return void
      */
@@ -205,10 +186,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * A subject key is never deleted, in any state, by the tables' owner nor,
-     * on MySQL and PostgreSQL, by any user granted `DELETE` beyond the
-     * documented grants, the maintenance user included: an erasure destroys a
-     * key by updating its row.
+     * A subject key is never deleted in any state: an erasure destroys a key by
+     * updating its row.
      *
      * @return void
      */
@@ -247,10 +226,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * A change to any immutable column of a live key is refused, even by the
-     * user who may change a key, granted the column beyond the documented
-     * grants on MySQL and PostgreSQL, alone or with an allowed transition, and
-     * the key is left as it was.
+     * A change to an immutable column of a live key is refused, alone or with
+     * an allowed transition.
      *
      * @param  string  $column
      * @param  int|string|null  $value
@@ -273,9 +250,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * Rows of `[state, wrapped key, wrapping key id, erasure]`: what an erased
-     * key could be reopened to, a live or a superseded key with a wrapped key,
-     * its erasure kept or cleared.
+     * Rows of `[state, wrapped key, wrapping key id, erasure]` an erased key
+     * could be reopened to.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string, 3: ?string}>
      */
@@ -290,9 +266,7 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * An erased key never holds a key again, whatever it would be reopened to,
-     * even by the user who may change a key: its generation stays destroyed,
-     * and a reinstated owner gets a new one.
+     * An erased key never holds a key again, whatever it would be reopened to.
      *
      * @param  string  $state
      * @param  string  $wrapped
@@ -316,10 +290,7 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * An erased key is refused every update, by the user who may change a key
-     * too: its erasure moved or cleared, its wrapping key's id changed or
-     * cleared, a wrapped key given back while it stays erased, and even an
-     * update that writes back what it holds.
+     * An erased key refuses every update, even one writing back what it holds.
      *
      * @return void
      */
@@ -348,9 +319,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * Rows of `[columns the key starts with, changes, whether the trigger
-     * allows them]`: the three transitions, from each state they start from,
-     * and every near miss of them.
+     * Rows of `[starting columns, changes, allowed]`: the three transitions
+     * from each state and their near misses.
      *
      * @return iterable<string, array{0: array<string, string>, 1: array<string, ?string>, 2: bool}>
      */
@@ -382,10 +352,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * Only the three transitions pass, made by the user who may change a key:
-     * live to superseded, live or superseded to erased with no wrapped key, the
-     * wrapping key's id kept and an erasure named, and a rewrap that keeps the
-     * state; every near miss is refused and leaves the key as it was.
+     * Only the three key transitions pass, and every near miss leaves the key
+     * as it was.
      *
      * @param  array<string, string>  $from
      * @param  array<string, ?string>  $changes
@@ -414,9 +382,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * A rotation may supersede a live key and rewrap it under another wrapping
-     * key in the same statement, and the superseded key may then be rewrapped
-     * again and erased.
+     * A rotation may supersede and rewrap a live key in one statement, then
+     * rewrap and erase it.
      *
      * @return void
      */
@@ -437,10 +404,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * On MySQL and PostgreSQL only the maintenance user changes a key: the
-     * tables' owner, and the writer and the verifier granted `UPDATE` beyond
-     * the documented grants, are refused each transition by the trigger, while
-     * the maintenance user makes it.
+     * On MySQL and PostgreSQL only the maintenance user changes a key; others
+     * granted `UPDATE` are refused by the trigger.
      *
      * @return void
      */
@@ -476,9 +441,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * On SQLite, which has no users, whoever changes a key makes the allowed
-     * transitions, and is refused every other change exactly as the maintenance
-     * user is elsewhere.
+     * On SQLite whoever changes a key makes the allowed transitions and is
+     * refused every other change.
      *
      * @return void
      */
@@ -501,9 +465,7 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * The triggers never refuse an insert: on MySQL and PostgreSQL the writer
-     * inserts a key and a key use and the maintenance user a marker, under the
-     * documented grants, and on SQLite whoever does inserts all three.
+     * The triggers never refuse an insert of a key, a key use or a marker.
      *
      * @return void
      */
@@ -642,10 +604,8 @@ final class KeyTablesTriggersTest extends TestCase
     }
 
     /**
-     * Every connection a refusal is proven for: the tables' owner's, and on
-     * MySQL and PostgreSQL the writer's and the maintenance user's, each
-     * granted the privileges on the table beyond the documented grants, so a
-     * refusal there is the trigger's.
+     * Every connection a refusal is proven for, each granted the privileges
+     * beyond the documented grants so the refusal is the trigger's.
      *
      * @param  string  $privileges
      * @param  string  $table

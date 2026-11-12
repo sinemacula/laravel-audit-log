@@ -40,21 +40,8 @@ use Tests\Fixtures\Integrity\TableBackedPruneLedger;
 use Tests\TestCase;
 
 /**
- * Integration tests for verification racing the work that changes the log in
- * another process, on whichever engine the suite runs against: a seal committed
- * once the run has read the head is never read; a prune that deletes a
- * segment's entries and writes its signed record in one transaction is seen
- * whole or not at all, and one that commits after the members are read is found
- * by the ledger and the reread that follow, so the segment is `valid` or
- * `pruned` and never `incomplete`, neither `missing_entry` nor `resurrected`;
- * anchoring meanwhile never fails a run; and a strict run beside a seal run
- * that has sealed and not yet anchored passes, its new seal awaiting its first
- * anchoring.
- *
- * Each run streams its reports and keeps none; these tests keep them to
- * compare. SQLite runs in WAL mode, as the operations guidance advises, so a
- * reader never blocks another process's commit. The processes meet on file
- * gates rather than on timing.
+ * Integration tests for verification racing seals, prunes and anchoring in
+ * other processes; SQLite runs in WAL mode, so a reader never blocks a commit.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -142,9 +129,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * A seal committed by another process once the run has read the head is
-     * never read: the run checks the seals up to the head it read, all of them
-     * `valid`, and the next run checks the new seal too.
+     * A seal committed after the run read the head is checked only by the next
+     * run.
      *
      * @return void
      */
@@ -177,9 +163,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * Rows of `[whether the run is held after the segment's members and
-     * entries are read rather than before, the segment's integrity]`: the
-     * prune commits on either side of the one statement that reads them.
+     * Rows of `[run held after the segment's read, integrity]`: the prune
+     * commits before or after the read.
      *
      * @return iterable<string, array{0: bool, 1: \SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus}>
      */
@@ -192,13 +177,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * A prune in another process deletes a segment's entries and writes its
-     * signed record in one transaction, committing while the run is held at the
-     * segment: committed before its members and entries are read, the segment
-     * is `pruned`; committed after, its members were read present, the ledger
-     * asked after them gives the record, and the members it covers, read again,
-     * are gone, so it is `pruned` too. It is never `incomplete`, and every
-     * other segment stays `valid`.
+     * A prune committing on either side of the segment's read leaves it
+     * `pruned`, never `incomplete`.
      *
      * @param  bool  $afterTheRead
      * @param  \SineMacula\Laravel\AuditLog\Integrity\Enums\IntegrityStatus  $expected
@@ -239,12 +219,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * A prune held open in another process, its entries deleted and its record
-     * not yet written, is invisible to a run over every seal, which finds the
-     * segment `valid`; once it commits, the next run finds it `pruned`. On
-     * MySQL and PostgreSQL that run is a whole one. SQLite has one writer, and
-     * a whole run records its completion, which would wait for the prune's, so
-     * there the run is the range of every seal, which writes nothing.
+     * A prune held open is invisible until it commits; on SQLite the run covers
+     * a range, since a whole run's completion write would wait on the prune.
      *
      * @return void
      */
@@ -280,12 +256,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * Runs made one after another while a prune in another process commits
-     * whenever it does each find the segment `valid` or `pruned`, never
-     * `incomplete`, and the run made once it has committed finds it `pruned`.
-     * The prune is released from inside the first run, once it has read the
-     * head, so at least that run is in flight when the prune starts, and the
-     * loop makes more than one run.
+     * Runs repeated while a prune commits each find the segment `valid` or
+     * `pruned`, never `incomplete`.
      *
      * @return void
      */
@@ -333,10 +305,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * Rows of `[whether the run is held once its first segment is verified
-     * rather than once it has read the head, the anchoring of each segment]`:
-     * anchoring in another process records each receipt before the run reads
-     * the seals, or after.
+     * Rows of `[run held after its first segment, each segment's anchoring]`:
+     * anchoring before or after the seals are read.
      *
      * @return iterable<string, array{0: bool, 1: list<string>}>
      */
@@ -349,13 +319,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * A disk anchor, which every process shares, anchors the seals another
-     * process left unanchored while the run is held. The anchor's head, asked
-     * for first, settles the run's anchoring as it was then, so the seals
-     * anchored meanwhile are `unanchored` in this run, wherever it is held; the
-     * head still matches the local seal at its sequence; no segment is
-     * contradicted, unavailable or short of `valid`; the run passes, and a
-     * strict one would fail; and the next run, strict, finds every seal
+     * Seals anchored by another process mid-run stay `unanchored` in that run,
+     * since the head settles anchoring, and the next strict run finds all
      * anchored.
      *
      * @param  bool  $afterTheFirst
@@ -405,11 +370,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * A seal run in another process seals and is held before it anchors while a
-     * strict run, under an anchor whose holdings the processes share through a
-     * file, reads the head: the new seal is `unanchored`, awaiting its first
-     * anchoring within the grace, so the strict run passes. Once the seal run
-     * has anchored it, the strict run finds every seal anchored.
+     * A strict run beside a seal run that has sealed but not anchored passes,
+     * the new seal awaiting its first anchoring.
      *
      * @return void
      */
@@ -492,9 +454,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * In another process's prune: delete every entry of the seal and write the
-     * signed prune record of all of them in one transaction on the maintenance
-     * connection, running the hold, when given, between the two.
+     * In another process: delete the seal's entries and write their prune
+     * record in one transaction, running the hold between the two.
      *
      * @param  array<string, scalar|null>  $seal
      * @param  \Tests\Fixtures\Integrity\TableBackedPruneLedger  $ledger
@@ -593,9 +554,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * Bind a disk anchor on a local disk of this test's own, beside the files
-     * its processes share, which a child writes to and this process reads, as
-     * every server reads one bucket.
+     * Bind a disk anchor on a local disk every process shares, as servers share
+     * one bucket.
      *
      * @return void
      */
@@ -663,10 +623,8 @@ final class VerifyConcurrencyTest extends TestCase
     }
 
     /**
-     * The recording anchor, handed each receipt with its keys in the order it
-     * gave them and any other key after: MySQL keeps a JSON document with its
-     * keys reordered, and the recording anchor compares a receipt whole, its
-     * order included.
+     * The recording anchor, given each receipt with its keys back in order:
+     * MySQL reorders JSON keys, and the anchor compares a receipt whole.
      *
      * @param  \Tests\Fixtures\Integrity\RecordingAnchor  $anchor
      * @return \SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor

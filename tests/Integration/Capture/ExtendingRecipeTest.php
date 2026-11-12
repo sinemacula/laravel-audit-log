@@ -26,20 +26,8 @@ use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
 /**
- * The extending guide's recipe for recording another package's sign-ins, on
- * every engine the suite runs on: its three blocks are in the guide as this
- * test holds them, and run as written, with nothing evaluated, they record one
- * row per sign-in.
- *
- * The other package is played by fixtures: its event is
- * `Tests\Fixtures\Capture\Recipe\UserSignedIn`, aliased to the recipe's
- * `Acme\Identity\Events\UserSignedIn`; the mapper block's class is the fixture
- * `IdentitySignInMapper`, whose text from its class declaration on is the
- * block's; and its guard is the fixture `IdentityGuard`, a session guard
- * configured as `identity` whose sign-in fires both Laravel's `Login` and the
- * package's own event. The boot block's call runs while the application boots,
- * with the fixtures imported under the recipe's names, and the config block's
- * value is set.
+ * The extending guide's sign-in recipe, run as written against fixtures that
+ * play the other package, records one row per sign-in on each engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -174,11 +162,7 @@ final class ExtendingRecipeTest extends TestCase
     }
 
     /**
-     * Each block is in the guide exactly as this test holds it, and the blocks
-     * are the ones this test runs: the mapper block imports the other package's
-     * event by the name the fixture is aliased to, the boot block makes the
-     * call this test makes, and the config block excludes the fixture guard's
-     * name.
+     * Each block is in the guide exactly as this test holds it and runs it.
      *
      * @return void
      */
@@ -197,9 +181,8 @@ final class ExtendingRecipeTest extends TestCase
     }
 
     /**
-     * The mapper fixture's text from its class declaration to its end is the
-     * mapper block's from the same line, and the other package's event the
-     * recipe names is the fixture event, so what runs here is the recipe.
+     * The mapper fixture from its class declaration on is the mapper block, and
+     * its event is the one the recipe names.
      *
      * @return void
      */
@@ -210,9 +193,8 @@ final class ExtendingRecipeTest extends TestCase
     }
 
     /**
-     * Two sign-ins on the other package's guard fire Laravel's `Login` and the
-     * package's own event each, and record one row each, both the recipe's
-     * code, by the user and on them: Laravel's event is left to the mapper.
+     * Two sign-ins on the other package's guard record one row each under the
+     * recipe's code, Laravel's `Login` left to the mapper.
      *
      * @return void
      */
@@ -231,9 +213,8 @@ final class ExtendingRecipeTest extends TestCase
     }
 
     /**
-     * Without the config block, each sign-in on the other package's guard is
-     * recorded twice, once from Laravel's `Login` and once by the mapper, which
-     * is what the block is there to prevent.
+     * Without the config block each sign-in is recorded twice, from Laravel's
+     * `Login` and by the mapper.
      *
      * @return void
      */
@@ -266,9 +247,8 @@ final class ExtendingRecipeTest extends TestCase
     }
 
     /**
-     * The correlation id the recipe's mapper records is the documented format:
-     * the guide names it, and each id stored is a lower-case namespace, a colon
-     * and the attempt.
+     * Each correlation id the mapper records is the documented lower-case
+     * namespace, a colon and the attempt.
      *
      * @return void
      */
@@ -285,9 +265,8 @@ final class ExtendingRecipeTest extends TestCase
     }
 
     /**
-     * Alias the fixture event to the recipe's name, keep the session in memory,
-     * configure the other package's guard, set the config block's value and
-     * make the boot block's call while the application boots.
+     * Alias the fixture event, configure the guard and the config block's
+     * value, and make the boot block's call while the application boots.
      *
      * @param  mixed  $app
      * @return void

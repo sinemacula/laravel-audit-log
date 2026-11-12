@@ -16,16 +16,8 @@ use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
- * Integration tests for the session a key is created on, on whichever engine
- * the suite runs against: a key created inside a host transaction survives that
- * transaction's rollback on MySQL and PostgreSQL, where the session is a
- * connection of its own, and rolls back with it on SQLite, where the storage
- * connection itself is the session, as the privacy guide documents; and the
- * session writes through the storage connection's writer, never asking its
- * replica for anything.
- *
- * SQLite runs on a file, so a second connection to its database could exist and
- * the session is chosen for the transaction, not for an in-memory database.
+ * Integration tests for the key session: it outlives a host rollback on MySQL
+ * and PostgreSQL, rolls back with it on SQLite, and uses the writer alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,11 +53,8 @@ final class KeySessionEnginesTest extends TestCase
     }
 
     /**
-     * A key created inside a host transaction that then rolls back survives it
-     * on MySQL and PostgreSQL, committed on a session of its own, so no
-     * ciphertext already written under it is left without its key; on SQLite,
-     * whose storage connection is the session inside any transaction, it rolls
-     * back with the host.
+     * A key created in a host transaction survives its rollback on MySQL and
+     * PostgreSQL, and rolls back with it on SQLite.
      *
      * @return void
      */
@@ -97,12 +86,8 @@ final class KeySessionEnginesTest extends TestCase
     }
 
     /**
-     * Over a storage connection configured with persistent PDO connections, a
-     * key created inside a host transaction that then rolls back still survives
-     * it on MySQL and PostgreSQL: the session opens a handle of its own, never
-     * the persistent one the host's transaction runs on, so neither commits nor
-     * rolls back the other, and the host's connection still works once the
-     * session is purged.
+     * Over persistent PDO connections the session still opens a handle of its
+     * own, so a key survives the host's rollback.
      *
      * @return void
      */
@@ -135,10 +120,8 @@ final class KeySessionEnginesTest extends TestCase
     }
 
     /**
-     * Over a storage connection split between a writer and a reader, the
-     * session is the writer's configuration alone: a key is created and read on
-     * the writer, and the storage connection's reader, which cannot be reached,
-     * is never asked for.
+     * Over a split writer and reader the session uses the writer alone and
+     * never asks for the unreachable reader.
      *
      * @return void
      */

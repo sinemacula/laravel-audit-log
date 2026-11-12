@@ -56,24 +56,9 @@ use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
 
 /**
- * Integration tests for the real pruner killed by `SIGKILL` at every boundary
- * of a chunk and of its run, on whichever engine the suite runs against. A
- * chunk deletes its entries and journals the signed record of exactly them in
- * one transaction on the maintenance connection, keeping the checkpoint and its
- * members, so a kill before that transaction commits leaves the segment
- * `valid`, and a kill after it leaves the segment `pruned`: it is never half
- * pruned. A run killed before its start commits journals nothing; one killed
- * after its start row is passed over by the next, which resumes from the last
- * finished run's cursor; and one killed after its finish row has journalled the
- * whole run. What only something other than the pruner leaves is caught too:
- * entries deleted without their record are `incomplete`, and a record whose
- * entries were put back covers entries still there, which are `resurrected`.
- * After every kill a run of `audit-log:seal` and a verification find every seal
- * anchored, whatever its integrity.
- *
- * Every test starts from three anchored seals of two entries each, of the
- * categories `finance`, `security` and `audit` in that order, so a test prunes
- * one seal by keeping its category a day.
+ * Integration tests for the pruner killed by `SIGKILL` at every boundary of a
+ * chunk and its run; each starts from three anchored seals of `finance`,
+ * `security` and `audit` entries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -143,9 +128,8 @@ final class PruneBoundariesTest extends TestCase
     private ?string $anchorRoot = null;
 
     /**
-     * Register the command, stop the clock, bind a disk anchor every process
-     * shares, the journal's ledger and the configured policy, and make three
-     * seals of two entries each, anchoring every one.
+     * Bind a shared disk anchor, the journal's ledger and the policy, and make
+     * three anchored seals of two entries each.
      *
      * @return void
      */
@@ -215,10 +199,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A prune killed at any boundary of its start before the start commits
-     * journals nothing, neither the policy nor the start, and deletes nothing,
-     * so every segment is `valid` and anchored; the next run starts afresh and
-     * prunes the segment, which is then `pruned`.
+     * A prune killed before its start commits journals and deletes nothing, and
+     * the next run prunes the segment.
      *
      * @param  string  $boundary
      * @return void
@@ -245,10 +227,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A prune killed once its finish row has committed, before its progress is
-     * written, has journalled the whole run: the segment is `pruned`, still
-     * anchored, the run passes, strict, and the next run starts again from the
-     * first seal.
+     * A prune killed after its finish row commits has journalled the whole run,
+     * and the next run starts again from the first seal.
      *
      * @return void
      */
@@ -276,9 +256,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A segment pruned by two prunes, the first kept from one of its entries by
-     * a hold and the second run after its release, is `pruned` after each: its
-     * two records are disjoint, and it keeps its checkpoint and members.
+     * A segment pruned by two runs around a hold is `pruned` after each, with
+     * disjoint records.
      *
      * @return void
      */
@@ -318,10 +297,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A prune killed at any boundary of its chunk before the chunk commits
-     * leaves the segment's entries and no prune row, so every segment is
-     * `valid` and anchored; the next run, passing over the killed run's start,
-     * prunes the segment, which is then `pruned`.
+     * A prune killed before its chunk commits leaves the segment `valid`, and
+     * the next run passes over the killed start and prunes it.
      *
      * @param  string  $boundary
      * @return void
@@ -348,10 +325,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A prune killed once its chunk has committed, before its finish row,
-     * leaves the segment's entries deleted, its prune row written, and its
-     * checkpoint and members kept, so the segment is `pruned`, still anchored,
-     * and the run passes, strict.
+     * A prune killed after its chunk commits, before its finish row, leaves the
+     * segment `pruned` and anchored, and the run passes.
      *
      * @return void
      */
@@ -375,10 +350,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A run killed after its start row and a committed chunk leaves a start
-     * with no finish, which the next run passes over: it resumes after the
-     * cursor of the last run that finished, never reads the killed run's pruned
-     * members as present, and prunes what is left.
+     * The next run passes over a killed run's start, resumes after the last
+     * finished run's cursor and prunes what is left.
      *
      * @return void
      */
@@ -416,10 +389,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A segment whose pruned entries were put back, as a restore would, holds a
-     * record covering entries still there: it is `resurrected`, at its first
-     * member, and the run fails; an entry of it changed after is still
-     * `tampered`, found at that entry, since a worse finding wins.
+     * A segment whose pruned entries were put back is `resurrected`, and a
+     * later change to one is `tampered`, the worse finding.
      *
      * @return void
      */
@@ -448,9 +419,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * A prune of the last seal that commits before its process is killed keeps
-     * the checkpoint, so the next seal still chains onto it and is anchored:
-     * the pruned segment is `pruned` and every other `valid`.
+     * A prune of the last seal keeps its checkpoint, so the next seal still
+     * chains onto it.
      *
      * @return void
      */
@@ -476,10 +446,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * Entries deleted with no record to account for them, as only the test's
-     * own raw delete leaves them, are `incomplete`, found missing at the
-     * segment's first member, and still anchored, since integrity and anchoring
-     * are separate, and the run fails.
+     * Entries deleted without a record are `incomplete` yet still anchored, and
+     * the run fails.
      *
      * @return void
      */
@@ -513,10 +481,9 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * Kill this process at the occurrence given of the statement the pattern
-     * matches, before it runs or after; or, for `prune row`, after the insert
-     * of a chunk's prune row; for `committing`, as the transaction that wrote a
-     * prune row commits; and for `committed`, once it has committed.
+     * Kill this process before or after the given occurrence of the matching
+     * statement; `prune row`, `committing` and `committed` name a chunk's prune
+     * row insert and its commit.
      *
      * @param  string  $pattern
      * @param  int  $occurrence
@@ -572,9 +539,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * Kill this process as the occurrence given of a top-level transaction
-     * commits, or once it has committed: a run's start is its first, each
-     * chunk's the next, and its finish its last.
+     * Kill this process as the given top-level transaction commits, or once it
+     * has: the start first, then each chunk, then the finish.
      *
      * @param  bool  $committing
      * @param  int  $occurrence
@@ -675,10 +641,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * Run `audit-log:seal`, which succeeds, then verify the whole log, and
-     * assert each segment has the integrity given, in order, and is anchored,
-     * the anchor's head the last seal, and the run fails exactly when it is not
-     * meant to pass, strict.
+     * Seal, verify, and assert each segment's integrity in order, every seal
+     * anchored, and whether the strict run passes.
      *
      * @param  list<string>  $integrity
      * @param  bool  $passes
@@ -714,9 +678,8 @@ final class PruneBoundariesTest extends TestCase
     }
 
     /**
-     * Store the number of captured records of the category, the first recorded
-     * and happening at the time given, in UTC, and each next one a microsecond
-     * later.
+     * Store the number of captured records of the category from the given UTC
+     * time, a microsecond apart.
      *
      * @param  string  $category
      * @param  int  $count

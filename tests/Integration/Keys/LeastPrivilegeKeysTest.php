@@ -12,22 +12,9 @@ use Tests\Concerns\RunsDocumentedSql;
 use Tests\TestCase;
 
 /**
- * Integration tests for the owners' key tables under the grants the storage
- * note documents, run exactly as written by the tables' owner, the key block
- * after the others, on MySQL and PostgreSQL: the writer inserts and reads keys
- * and key uses, reads the owner markers, and updates, deletes or marks nothing;
- * the maintenance user tombstones, supersedes and rewraps a key through its
- * four mutable columns alone, inserts markers, reads the key uses, and deletes
- * nothing; the verifier reads all three and writes none; and each takes the
- * advisory lock key creation and erasure exclude each other with, which needs
- * no grant.
- *
- * Each worker creates logins of its own, `audit_writer_<token>`,
- * `audit_maintenance_<token>` and `audit_verifier_<token>`, which the
- * documented grants name and which are dropped when the test ends. A refusal is
- * the engine's privilege error, never a trigger's, since no trigger is
- * installed. SQLite has no privileges, so these tests are skipped there. The
- * tests cover documented SQL, not a class of the package.
+ * Integration tests for the owners' key tables under the documented grants
+ * alone on MySQL and PostgreSQL; with no trigger installed, a refusal is the
+ * engine's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,9 +54,8 @@ final class LeastPrivilegeKeysTest extends TestCase
     private array $names = [];
 
     /**
-     * Create this worker's logins and run the documented grants for them as the
-     * tables' owner, the key block after the others, on MySQL and PostgreSQL
-     * only.
+     * Create this worker's logins and run the documented grants, the key block
+     * last.
      *
      * @return void
      */
@@ -123,10 +109,8 @@ final class LeastPrivilegeKeysTest extends TestCase
     }
 
     /**
-     * The writer inserts a key and a key use and reads both back, as key
-     * creation and the store do, and is refused by the grants any update of a
-     * key, of each of its columns included, any update of a key use, and the
-     * delete of either.
+     * The writer inserts and reads keys and key uses, and is refused any update
+     * or delete of either.
      *
      * @return void
      */
@@ -154,9 +138,7 @@ final class LeastPrivilegeKeysTest extends TestCase
     }
 
     /**
-     * The writer reads the owner's markers, as key creation does before it
-     * creates a key, and is refused by the grants the insert, the update and
-     * the delete of one.
+     * The writer reads an owner's markers and is refused any write to them.
      *
      * @return void
      */
@@ -175,11 +157,9 @@ final class LeastPrivilegeKeysTest extends TestCase
     }
 
     /**
-     * The maintenance user supersedes a key and rewraps it in one statement,
-     * rewraps it again and tombstones it, through the four mutable columns
-     * alone, and reads the key uses an erasure finds the entries through; it is
-     * refused by the grants an update of any other column, the insert of a key
-     * or a key use, and the delete of a key, a key use or a marker.
+     * The maintenance user changes a key through its four mutable columns alone
+     * and reads key uses; other columns, inserts of keys and key uses, and
+     * every delete are refused.
      *
      * @return void
      */
@@ -234,9 +214,8 @@ final class LeastPrivilegeKeysTest extends TestCase
     }
 
     /**
-     * The maintenance user inserts an owner's markers, an erasure and then its
-     * reinstatement, inside a transaction as an erasure writes one with its
-     * journal row, and reads the latest back.
+     * The maintenance user inserts an erasure and a reinstatement marker in a
+     * transaction and reads the latest back.
      *
      * @return void
      */
@@ -254,9 +233,8 @@ final class LeastPrivilegeKeysTest extends TestCase
     }
 
     /**
-     * The verifier reads the keys, the markers and the key uses, as the key
-     * store's verification does, and is refused by the grants every write of
-     * each.
+     * The verifier reads the keys, markers and key uses, and is refused every
+     * write.
      *
      * @return void
      */
@@ -284,10 +262,8 @@ final class LeastPrivilegeKeysTest extends TestCase
     }
 
     /**
-     * Each user takes and releases the owner lock with no grant beyond the
-     * documented ones: on PostgreSQL a transaction-scoped advisory lock under a
-     * bounded wait, released when the transaction ends, and on MySQL a named
-     * lock, released by name.
+     * Each user takes and releases the owner lock with no extra grant: a
+     * PostgreSQL advisory lock or a MySQL named lock.
      *
      * @return void
      */

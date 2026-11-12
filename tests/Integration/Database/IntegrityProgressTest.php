@@ -17,12 +17,8 @@ use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\TestCase;
 
 /**
- * Integration tests for the operational progress of sealing, anchoring and
- * verification, on whichever engine the suite runs against: what a name reads
- * as when it is missing or malformed, what a write stores and replaces, the
- * time it keeps, the names it refuses, and that every statement reaches the
- * writer. The installation id the migrations seed shares the state table but is
- * never progress, so the rows a test reads leave it out.
+ * Integration tests for the progress of sealing, anchoring and verification;
+ * the installation id shares the state table and is left out of the rows read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,9 +61,8 @@ final class IntegrityProgressTest extends TestCase
     }
 
     /**
-     * A map of scalars written under a name reads back as written, stored as a
-     * JSON object with its slashes and its Unicode unescaped, with the time it
-     * was written.
+     * A map of scalars reads back as written, stored as a JSON object with
+     * slashes and Unicode unescaped, with the time it was written.
      *
      * @return void
      */
@@ -330,9 +325,8 @@ final class IntegrityProgressTest extends TestCase
     }
 
     /**
-     * On a read/write split storage connection whose replica lags, a read finds
-     * a row on the primary alone and ignores one on the replica alone, and a
-     * write or a removal reaches the primary and never the replica.
+     * On a read/write split connection whose replica lags, reads, writes and
+     * removals all reach the primary alone.
      *
      * @return void
      */
