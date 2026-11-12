@@ -155,7 +155,10 @@ final class RequestIdentityTest extends TestCase
         $requestId = $identity->requestId();
 
         self::assertSame($requestId, $identity->requestId());
-        self::assertSame($requestId, $this->newIdentity()->requestId());
+
+        $this->app?->forgetInstance(RequestIdentity::class);
+
+        self::assertSame($requestId, $this->identity()->requestId());
     }
 
     /**
@@ -1002,18 +1005,6 @@ final class RequestIdentityTest extends TestCase
      */
     private function identity(): RequestIdentity
     {
-        return app(RequestIdentity::class);
-    }
-
-    /**
-     * A new identity, sharing only what the container holds.
-     *
-     * @return \SineMacula\Laravel\AuditLog\Runtime\RequestIdentity
-     */
-    private function newIdentity(): RequestIdentity
-    {
-        $this->app?->forgetInstance(RequestIdentity::class);
-
         return app(RequestIdentity::class);
     }
 

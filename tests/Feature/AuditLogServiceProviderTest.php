@@ -166,22 +166,24 @@ final class AuditLogServiceProviderTest extends TestCase
         '2026_11_02_001300_create_audit_log_key_uses_table.php',
     ];
 
-    /** @var array<string, class-string> Each lifecycle command the provider registers, by name, with its class. */
-    private const array LIFECYCLE_COMMANDS = [
+    /** @var array<string, class-string> Each command the provider registers, by name, with its class. */
+    private const array COMMANDS = [
+        'audit-log:check'     => CheckCommand::class,
+        'audit-log:drain'     => DrainCommand::class,
+        'audit-log:erase'     => EraseCommand::class,
+        'audit-log:export'    => ExportCommand::class,
         'audit-log:hold'      => HoldCommand::class,
         'audit-log:holds'     => HoldsCommand::class,
         'audit-log:import'    => ImportCommand::class,
+        'audit-log:keys'      => KeysCommand::class,
         'audit-log:prune'     => PruneCommand::class,
         'audit-log:reconcile' => ReconcileCommand::class,
-        'audit-log:release'   => ReleaseCommand::class,
-    ];
-
-    /** @var array<string, class-string> Each privacy command the provider registers, by name, with its class. */
-    private const array PRIVACY_COMMANDS = [
-        'audit-log:erase'     => EraseCommand::class,
-        'audit-log:keys'      => KeysCommand::class,
         'audit-log:reinstate' => ReinstateCommand::class,
+        'audit-log:release'   => ReleaseCommand::class,
+        'audit-log:replay'    => ReplayCommand::class,
         'audit-log:rewrap'    => RewrapCommand::class,
+        'audit-log:seal'      => SealCommand::class,
+        'audit-log:verify'    => VerifyCommand::class,
     ];
 
     /**
@@ -304,118 +306,26 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * The check command is registered in the console.
-     *
-     * @return void
-     */
-    public function testTheCheckCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:check', Artisan::all());
-        self::assertInstanceOf(CheckCommand::class, Artisan::all()['audit-log:check']);
-    }
-
-    /**
-     * The drain command is registered in the console.
-     *
-     * @return void
-     */
-    public function testTheDrainCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:drain', Artisan::all());
-        self::assertInstanceOf(DrainCommand::class, Artisan::all()['audit-log:drain']);
-    }
-
-    /**
-     * The replay command is registered in the console.
-     *
-     * @return void
-     */
-    public function testTheReplayCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:replay', Artisan::all());
-        self::assertInstanceOf(ReplayCommand::class, Artisan::all()['audit-log:replay']);
-    }
-
-    /**
-     * The seal command is registered in the console.
-     *
-     * @return void
-     */
-    public function testTheSealCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:seal', Artisan::all());
-        self::assertInstanceOf(SealCommand::class, Artisan::all()['audit-log:seal']);
-    }
-
-    /**
-     * The verify command is registered in the console.
-     *
-     * @return void
-     */
-    public function testTheVerifyCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:verify', Artisan::all());
-        self::assertInstanceOf(VerifyCommand::class, Artisan::all()['audit-log:verify']);
-    }
-
-    /**
-     * The export command is registered in the console.
-     *
-     * @return void
-     */
-    public function testTheExportCommandIsRegistered(): void
-    {
-        self::assertArrayHasKey('audit-log:export', Artisan::all());
-        self::assertInstanceOf(ExportCommand::class, Artisan::all()['audit-log:export']);
-    }
-
-    /**
-     * Rows of `[name, class]`: each lifecycle command the provider registers.
+     * Rows of `[name, class]`: each command the provider registers.
      *
      * @return iterable<string, array{0: string, 1: class-string}>
      */
-    public static function provideLifecycleCommands(): iterable
+    public static function provideCommands(): iterable
     {
-        foreach (self::LIFECYCLE_COMMANDS as $name => $class) {
+        foreach (self::COMMANDS as $name => $class) {
             yield $name => [$name, $class];
         }
     }
 
     /**
-     * Each lifecycle command is registered in the console as its own class.
+     * Each command is registered in the console as its own class.
      *
      * @param  string  $name
      * @param  class-string  $class
      * @return void
      */
-    #[DataProvider('provideLifecycleCommands')]
-    public function testTheLifecycleCommandsAreRegistered(string $name, string $class): void
-    {
-        self::assertArrayHasKey($name, Artisan::all());
-        self::assertInstanceOf($class, Artisan::all()[$name]);
-    }
-
-    /**
-     * Rows of `[name, class]`: each privacy command the provider registers.
-     *
-     * @return iterable<string, array{0: string, 1: class-string}>
-     */
-    public static function providePrivacyCommands(): iterable
-    {
-        foreach (self::PRIVACY_COMMANDS as $name => $class) {
-            yield $name => [$name, $class];
-        }
-    }
-
-    /**
-     * Each privacy command is registered in the console as its own class.
-     *
-     * @param  string  $name
-     * @param  class-string  $class
-     * @return void
-     */
-    #[DataProvider('providePrivacyCommands')]
-    public function testThePrivacyCommandsAreRegistered(string $name, string $class): void
+    #[DataProvider('provideCommands')]
+    public function testEachCommandIsRegistered(string $name, string $class): void
     {
         self::assertArrayHasKey($name, Artisan::all());
         self::assertInstanceOf($class, Artisan::all()[$name]);

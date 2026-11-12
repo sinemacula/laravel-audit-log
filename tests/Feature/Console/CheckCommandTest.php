@@ -408,13 +408,13 @@ final class CheckCommandTest extends TestCase
         $config->set(self::CUSTOM_LIFECYCLE_TABLES);
         $config->set(self::CUSTOM_KEY_TABLES);
 
-        $this->migrate();
+        $this->runMigrations(self::MIGRATION_PATHS);
 
         [, $before] = $this->check();
 
-        $this->migrateIntegrityTables();
-        $this->migrateLifecycleTables();
-        $this->migrateKeyTables();
+        $this->runMigrations(self::INTEGRITY_MIGRATION_PATHS);
+        $this->runMigrations(self::LIFECYCLE_MIGRATION_PATHS);
+        $this->runMigrations(self::KEY_MIGRATION_PATHS);
 
         [$code, $output] = $this->check();
 
@@ -2508,7 +2508,7 @@ final class CheckCommandTest extends TestCase
             'audit-log.entries.artifacts_table'        => self::LONGEST_ARTIFACTS_TABLE,
         ]);
 
-        $this->migrateArtifactsTable();
+        $this->runMigrations([self::MIGRATION_PATHS[1]]);
 
         self::assertSame([0, self::EVERY_SUBJECT_OK], $this->check());
 
@@ -2798,106 +2798,22 @@ final class CheckCommandTest extends TestCase
     }
 
     /**
-     * Run the shipped entries and artifacts migrations.
+     * Run the shipped migrations at the paths given.
      *
+     * @param  list<string>  $paths
      * @return void
      *
      * @SuppressWarnings("php:S4833")
      * @SuppressWarnings("php:S2003")
      */
-    private function migrate(): void
+    private function runMigrations(array $paths): void
     {
-        foreach (self::MIGRATION_PATHS as $path) {
+        foreach ($paths as $path) {
 
             $migration = include $path;
 
             if (!$migration instanceof Migration) {
-                self::fail('An entries or artifacts migration file did not return a Migration instance.');
-            }
-
-            $migration->up(); // @phpstan-ignore method.notFound
-        }
-    }
-
-    /**
-     * Run the shipped artifacts migration.
-     *
-     * @return void
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function migrateArtifactsTable(): void
-    {
-        $migration = include self::MIGRATION_PATHS[1];
-
-        if (!$migration instanceof Migration) {
-            self::fail('The artifacts migration file did not return a Migration instance.');
-        }
-
-        $migration->up(); // @phpstan-ignore method.notFound
-    }
-
-    /**
-     * Run the shipped integrity migrations.
-     *
-     * @return void
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function migrateIntegrityTables(): void
-    {
-        foreach (self::INTEGRITY_MIGRATION_PATHS as $path) {
-
-            $migration = include $path;
-
-            if (!$migration instanceof Migration) {
-                self::fail('An integrity migration file did not return a Migration instance.');
-            }
-
-            $migration->up(); // @phpstan-ignore method.notFound
-        }
-    }
-
-    /**
-     * Run the shipped lifecycle migrations.
-     *
-     * @return void
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function migrateLifecycleTables(): void
-    {
-        foreach (self::LIFECYCLE_MIGRATION_PATHS as $path) {
-
-            $migration = include $path;
-
-            if (!$migration instanceof Migration) {
-                self::fail('A lifecycle migration file did not return a Migration instance.');
-            }
-
-            $migration->up(); // @phpstan-ignore method.notFound
-        }
-    }
-
-    /**
-     * Run the shipped owners' key migrations.
-     *
-     * @return void
-     *
-     * @SuppressWarnings("php:S4833")
-     * @SuppressWarnings("php:S2003")
-     */
-    private function migrateKeyTables(): void
-    {
-        foreach (self::KEY_MIGRATION_PATHS as $path) {
-
-            $migration = include $path;
-
-            if (!$migration instanceof Migration) {
-                self::fail('An owners\' key migration file did not return a Migration instance.');
+                self::fail("{$path} did not return a Migration instance.");
             }
 
             $migration->up(); // @phpstan-ignore method.notFound

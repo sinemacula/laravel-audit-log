@@ -8,7 +8,6 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -23,6 +22,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\WritesTheJournal;
@@ -42,7 +42,7 @@ use Tests\TestCase;
 #[CoversClass(PruneCommand::class)]
 final class PruneCommandTest extends TestCase
 {
-    use ReadsTheTrail, SealsEntries, WritesTheJournal;
+    use CountsStatements, ReadsTheTrail, SealsEntries, WritesTheJournal;
 
     /** @var string When every run starts. */
     private const string NOW = '2026-12-15 15:00:00';
@@ -386,23 +386,6 @@ final class PruneCommandTest extends TestCase
     private function entries(): int
     {
         return DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('event', 'invoice.approved')->count();
-    }
-
-    /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
     }
 
     /**

@@ -258,7 +258,9 @@ final class AuditEntryTest extends TestCase
     #[DataProvider('provideRefusedWrites')]
     public function testRefusesEveryWriteThroughTheModel(\Closure $write, string $method): void
     {
-        self::skipUnlessAModelMethod($method);
+        if (!self::isAModelMethod($method)) {
+            self::markTestSkipped('On Laravel 12, `incrementEach()` on an entry is a query-builder write, not a model method.');
+        }
 
         $entry = $this->seedEntry();
 
@@ -597,20 +599,5 @@ final class AuditEntryTest extends TestCase
     private static function isAModelMethod(string $method): bool
     {
         return $method !== 'incrementOrDecrementEach' || (new \ReflectionClass(Model::class))->hasMethod($method);
-    }
-
-    /**
-     * Skip a row whose method the installed model lacks.
-     *
-     * @param  string  $method
-     * @return void
-     */
-    private static function skipUnlessAModelMethod(string $method): void
-    {
-        if (self::isAModelMethod($method)) {
-            return;
-        }
-
-        self::markTestSkipped('On Laravel 12, `incrementEach()` on an entry is a query-builder write, not a model method.');
     }
 }

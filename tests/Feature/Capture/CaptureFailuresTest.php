@@ -9,12 +9,10 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 use SineMacula\Laravel\AuditLog\Capture\CaptureFailedException;
@@ -30,6 +28,7 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Tests\Concerns\CapturesLogLines;
+use Tests\Concerns\CreatesSigningInUsers;
 use Tests\Concerns\CreatesWatchedModels;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Capture\Events\ExcludedPortalEvent;
@@ -59,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(RecordModelChange::class)]
 final class CaptureFailuresTest extends TestCase
 {
-    use CapturesLogLines, CreatesWatchedModels, SearchesForSecrets;
+    use CapturesLogLines, CreatesSigningInUsers, CreatesWatchedModels, SearchesForSecrets;
 
     /** @var string The ability the Gate denies. */
     private const string ABILITY = 'approve-invoice';
@@ -353,40 +352,5 @@ final class CaptureFailuresTest extends TestCase
     private static function classesOf(AuditCaptureFailed $failure): array
     {
         return [$failure->eventClass, $failure->mapperClass, $failure->exceptionClass];
-    }
-
-    /**
-     * Create the users' table, dropped before the application is destroyed.
-     *
-     * @return void
-     */
-    private function createUsersTable(): void
-    {
-        $schema = Schema::connection(self::CONNECTION);
-
-        $schema->dropIfExists(SigningInUser::TABLE);
-        $schema->create(SigningInUser::TABLE, static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('email', 191)->unique();
-            $table->string('password', 191);
-            $table->rememberToken();
-        });
-
-        $this->beforeApplicationDestroyed(static function (): void {
-            Schema::connection(self::CONNECTION)->dropIfExists(SigningInUser::TABLE);
-        });
-    }
-
-    /**
-     * A saved user of the email, with the shared password and the remember
-     * token.
-     *
-     * @param  string  $email
-     * @param  ?string  $rememberToken
-     * @return \Tests\Fixtures\Capture\Models\SigningInUser
-     */
-    private static function newUser(string $email, #[\SensitiveParameter] ?string $rememberToken = null): SigningInUser
-    {
-        return SigningInUser::query()->create(['email' => $email, 'password' => SigningInUser::PASSWORD, 'remember_token' => $rememberToken]);
     }
 }

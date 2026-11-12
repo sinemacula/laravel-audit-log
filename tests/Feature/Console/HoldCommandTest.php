@@ -8,9 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\HoldCommand;
@@ -18,6 +16,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -34,7 +33,7 @@ use Tests\TestCase;
 #[CoversClass(HoldCommand::class)]
 final class HoldCommandTest extends TestCase
 {
-    use ReadsTheTrail, WritesTheJournal;
+    use CountsStatements, ReadsTheTrail, WritesTheJournal;
 
     /** @var array<string, string> The options of the authority every hold is placed on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.review'];
@@ -248,23 +247,6 @@ final class HoldCommandTest extends TestCase
     private function holds(): array
     {
         return app(AuditLifecycle::class)->holds();
-    }
-
-    /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
     }
 
     /**

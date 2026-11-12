@@ -8,15 +8,14 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\ReinstateCommand;
 use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
 use SineMacula\Laravel\AuditLog\Lifecycle\Reinstater;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -33,7 +32,7 @@ use Tests\TestCase;
 #[CoversClass(ReinstateCommand::class)]
 final class ReinstateCommandTest extends TestCase
 {
-    use MakesSubjectKeys, ReadsTheTrail;
+    use CountsStatements, MakesSubjectKeys, ReadsTheTrail;
 
     /** @var array<string, string> The options of the authority every reinstatement is asked for on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.reinstate'];
@@ -202,23 +201,6 @@ final class ReinstateCommandTest extends TestCase
     {
         self::assertStringNotContainsString(self::OWNER['id'], $this->printed);
         self::assertStringNotContainsString('Patient', $this->printed);
-    }
-
-    /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
     }
 
     /**

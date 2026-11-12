@@ -618,9 +618,12 @@ final class FailureSpillTest extends TestCase
         self::assertSame(CanonicalEncoder::encode($record->toArray()), CanonicalEncoder::encode($decoded));
         self::assertTrue(app(RecordSigner::class)->verifies($decoded));
 
+        $with      = DocumentedSpillChannel::config('unused')['formatter_with'];
+        $formatter = new LineFormatter($with['format'], allowInlineLineBreaks: $with['allowInlineLineBreaks']);
         $unescaped = 'before ' . $token . ' after';
+        $formatted = $formatter->format(new LogRecord(new \DateTimeImmutable, 'testing', Level::Critical, $unescaped));
 
-        self::assertSame($rewritten, $unescaped . "\n" !== self::documentedFormatter()->format(self::logRecord($unescaped)));
+        self::assertSame($rewritten, $unescaped . "\n" !== $formatted);
     }
 
     /**
@@ -755,28 +758,5 @@ final class FailureSpillTest extends TestCase
 
         /** @var array<string, array<string, string>|bool|int|string|null> */
         return json_decode(substr($line, strlen(FailureSpill::MARKER)), true, 512, JSON_THROW_ON_ERROR);
-    }
-
-    /**
-     * The documented channel's formatter, built as the channel builds it.
-     *
-     * @return \Monolog\Formatter\LineFormatter
-     */
-    private static function documentedFormatter(): LineFormatter
-    {
-        $with = DocumentedSpillChannel::config('unused')['formatter_with'];
-
-        return new LineFormatter($with['format'], allowInlineLineBreaks: $with['allowInlineLineBreaks']);
-    }
-
-    /**
-     * A record of the message at `critical`, as a channel hands its formatter.
-     *
-     * @param  string  $message
-     * @return \Monolog\LogRecord
-     */
-    private static function logRecord(string $message): LogRecord
-    {
-        return new LogRecord(new \DateTimeImmutable, 'testing', Level::Critical, $message);
     }
 }

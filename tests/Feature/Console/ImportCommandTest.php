@@ -22,6 +22,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -38,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(ImportCommand::class)]
 final class ImportCommandTest extends TestCase
 {
-    use ReadsTheTrail, WritesTheJournal;
+    use CountsStatements, ReadsTheTrail, WritesTheJournal;
 
     /** @var array<string, string> The options of the authority every import is made on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.review'];
@@ -495,23 +496,6 @@ final class ImportCommandTest extends TestCase
         $this->files[] = $path;
 
         return $path;
-    }
-
-    /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
     }
 
     /**

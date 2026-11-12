@@ -8,9 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\RewrapCommand;
@@ -18,6 +16,7 @@ use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Lifecycle\Rewrapper;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\CountsStatements;
 use Tests\Concerns\MakesSubjectKeys;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -34,7 +33,7 @@ use Tests\TestCase;
 #[CoversClass(RewrapCommand::class)]
 final class RewrapCommandTest extends TestCase
 {
-    use MakesSubjectKeys, ReadsTheTrail;
+    use CountsStatements, MakesSubjectKeys, ReadsTheTrail;
 
     /** @var array<string, string> The options of the authority every rewrap is asked for on, unless a test gives others. */
     private const array AUTHORITY = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'keys.rotate'];
@@ -220,23 +219,6 @@ final class RewrapCommandTest extends TestCase
         self::assertSame(2, $this->rewrap($given));
         self::assertStringContainsString($message, $this->printed);
         self::assertCount(0, $statements);
-    }
-
-    /**
-     * Count every statement run from now on.
-     *
-     * @return \ArrayObject<int, string>
-     */
-    private function countStatements(): \ArrayObject
-    {
-        /** @var \ArrayObject<int, string> $statements */
-        $statements = new \ArrayObject;
-
-        DB::listen(static function (QueryExecuted $query) use ($statements): void {
-            $statements[] = $query->sql;
-        });
-
-        return $statements;
     }
 
     /**
