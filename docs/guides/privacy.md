@@ -9,11 +9,10 @@ custom encrypters, SQLite's key session and the commands. How each part works, w
 privacy note](../design/privacy.md); reading sealed fields and the subject access procedure are in [the reading
 guide](reading.md); holds and preservation are in [the retention guide](retention.md).
 
-Two guarantees are stated apart here, as everywhere in the package. Database credentials can still destroy keys, key
-uses and markers; the package's cryptographic evidence makes unauthorised destruction, substitution or restoration
-detectable, never impossible. An erasure revokes an owner's fields in the live store when it commits; whoever holds the
-database credentials, or a backup, can still delete or bring back rows and keys, and `audit-log:verify` and
-`audit-log:check` report what they did.
+Database credentials can still destroy keys, key uses and markers; the package's cryptographic evidence makes
+unauthorised destruction, substitution or restoration detectable, never impossible. An erasure revokes an owner's
+fields in the live store when it commits; whoever holds the database credentials, or a backup, can still delete or
+bring back rows and keys, and `audit-log:verify` and `audit-log:check` report what they did.
 
 ## Defaults and their trade-offs
 

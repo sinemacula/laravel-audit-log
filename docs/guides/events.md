@@ -173,15 +173,15 @@ it nor sees it fail.
 
 ## What a listener may do
 
-- **Fail.** A synchronous listener's exception is reported and goes no further, so it never fails the write or reaches
-  the code that recorded. Laravel stops a dispatch at the first listener that throws, though, so the ones behind it do
-  not run for that record. A queued listener avoids that.
-- **Use the database, with care.** A deadlock or a lost connection in a listener, on a connection with a transaction
-  open, has ended that transaction, so it propagates, sanitised, to the host. That holds for any connection the
-  application uses, not only the audit log's own. On a connection with none open it is reported like any other failure.
-- **Record another code from `AuditRecorded`.** That is a normal pattern, and the record goes through the whole
-  pipeline. A listener that records unconditionally, its own code included, recurses until the process stops, and the
-  package does not catch that:
+- A synchronous listener's exception is reported and goes no further, so it never fails the write or reaches the code
+  that recorded. Laravel stops a dispatch at the first listener that throws, though, so the ones behind it do not run
+  for that record. A queued listener avoids that.
+- A deadlock or a lost connection in a listener, on a connection with a transaction open, has ended that transaction,
+  so it propagates, sanitised, to the host. That holds for any connection the application uses, the audit log's own
+  included. On a connection with none open it is reported like any other failure.
+- A listener of `AuditRecorded` may record another code, and the record goes through the whole pipeline. One that
+  records unconditionally, its own code included, recurses until the process stops, and the package does not catch
+  that:
 
   ```php
   Event::listen(static function (AuditRecorded $event): void {
@@ -191,11 +191,11 @@ it nor sees it fail.
   });
   ```
 
-- **Not record from `AuditWriteFailed` or `AuditCaptureFailed`.** The same goes for a store, a reporter or a spill
-  channel. An ordinary record made there comes back unwritten and one report of a `\LogicException` says so, and a
-  `failClosed()` or `transactional()` record throws it.
-- **Not assume a request.** A drain and a replay run on the command line, so read nothing from the request or the
-  authenticated user in a listener that has to work in `outbox` mode.
+- Do not record from `AuditWriteFailed`, `AuditCaptureFailed`, a store, a reporter or a spill channel. An ordinary
+  record made there comes back unwritten and one report of a `\LogicException` says so, and a `failClosed()` or
+  `transactional()` record throws it.
+- A drain and a replay run on the command line, so a listener that has to work in `outbox` mode reads nothing from the
+  request or the authenticated user.
 
 In a test, fake only the event you mean to assert on, as `Event::fake([AuditRecorded::class])`, because a fake with no
 list also replaces the dispatcher the package's frame listeners are on.
