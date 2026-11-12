@@ -33,19 +33,9 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
- * Integration tests for replaying a spill on the engine the suite runs against:
- * what a real failed write left in the documented channel's real file gives one
- * row equal to what was spilled, which verifies, and a second replay adds
- * nothing. A hostile record comes back unchanged through the file and the
- * engine's own column types, a line that was altered or cut is skipped and left
- * in the file, and a line at the full size of the bound round-trips; on SQLite,
- * MySQL and PostgreSQL alike.
- *
- * It claims no coverage because its line at the bound is among the slowest
- * things in the suite: a mutant whose covering tests included it would be
- * skipped as taking too long rather than run, so the classes it passes through
- * would go without a mutation check. Their behaviour is pinned by their own
- * tests.
+ * Integration tests for replaying the documented channel's real spill file on
+ * SQLite, MySQL and PostgreSQL. Claims no coverage: its line at the bound is
+ * too slow for mutation testing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,7 +59,7 @@ final class SpillReplayEnginesTest extends TestCase
     /** @var string The import batch an imported record came in. */
     private const string IMPORT_BATCH_ID = '019a4b2e-7c10-7000-8000-00000000abcd';
 
-    /** @var array<string, ?string> The columns of an imported record in place of the captured record's. */
+    /** @var array<string, ?string> An imported record's columns in place of the captured record's. */
     private const array IMPORTED = [
         'provenance'       => 'imported',
         'source_record_id' => 'legacy-0042',
@@ -87,7 +77,7 @@ final class SpillReplayEnginesTest extends TestCase
     /** @var int The columns of a row, the signature included. */
     private const int COLUMN_COUNT = 37;
 
-    /** @var int The depth a stored row is decoded to, and an envelope with its own object. */
+    /** @var int The depth a stored row, and an envelope with its own object, is decoded to. */
     private const int JSON_DEPTH = 513;
 
     /** @var string The documented channel's file. */
@@ -97,8 +87,8 @@ final class SpillReplayEnginesTest extends TestCase
     private ?string $memoryLimit = null;
 
     /**
-     * Stop the clock, keep what a report would say out of the output, and spill
-     * to the documented channel, in a file of the test's own.
+     * Stop the clock, keep report output quiet, and spill to the documented
+     * channel in the test's own file.
      *
      * @return void
      */
@@ -124,8 +114,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * Undo what the test changed, then remove the file and put the clock and
-     * the memory limit back.
+     * Undo the test's changes, remove the file, and restore the clock and the
+     * memory limit.
      *
      * @return void
      */
@@ -146,8 +136,7 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A write the engine really refused leaves one line, which replays to one
-     * row under the record's id.
+     * A write the engine refused leaves one line, which replays to one row.
      *
      * @return void
      */
@@ -168,8 +157,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A second replay finds its record stored, says so, and adds and changes
-     * nothing, through the engine's own duplicate check.
+     * A second replay finds the record stored and changes nothing, through the
+     * engine's duplicate check.
      *
      * @return void
      */
@@ -188,8 +177,7 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * One line written twice, as a rotated or copied file can hold it, is one
-     * row.
+     * One line held twice in a file is one row.
      *
      * @return void
      */
@@ -204,8 +192,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * Every column of the row holds what the spilled line holds, to the
-     * microsecond and the signature, read back through the engine's own types.
+     * Every column of the row equals the spilled line, to the microsecond and
+     * the signature.
      *
      * @return void
      */
@@ -231,8 +219,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * The replayed row verifies under the signer, and changing a value in the
-     * table stops it verifying, so the check is one that can fail.
+     * The replayed row verifies, and changing a value in the table stops it
+     * verifying.
      *
      * @return void
      */
@@ -252,14 +240,9 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * Rows of `[columns in place of the captured record's]`: what the formatter
-     * would rewrite, what the engines might change, and what a reader might
-     * misread: `%` tokens in a value, a key and a string column; 4-byte
-     * Unicode; CR and LF and the Unicode line separators; numeric-key maps;
-     * JSON's own punctuation and a literal escape; a forged marker; empty
-     * containers and an empty key; a NUL; the largest integers; a column's
-     * trailing spaces; an imported record's fields; and nothing at all in
-     * either JSON column.
+     * Rows of `[columns in place of the captured record's]`: values the
+     * formatter might rewrite, an engine might change or a reader might
+     * misread.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -291,9 +274,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A hostile record stays on one physical line with no `%`, through the
-     * documented channel's real file, and its row encodes to the bytes it was
-     * signed over, and verifies, whatever the engine's column types do with it.
+     * A hostile record stays on one line with no `%`, and its row encodes to
+     * the signed bytes and verifies.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -323,9 +305,7 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * Rows of `[what is altered, what it becomes, the failure counted]`: a
-     * value and a column are mismatches, a version is one this release does not
-     * read, and a column added is malformed.
+     * Rows of `[what is altered, what it becomes, the failure counted]`.
      *
      * @return iterable<string, array{0: string, 1: string, 2: string}>
      */
@@ -340,8 +320,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A line altered in the file is skipped and counted, writes no row and is
-     * left where it is, and the good line beside it still replays.
+     * An altered line is skipped, counted and left in the file, and the good
+     * line beside it replays.
      *
      * @param  string  $search
      * @param  string  $replacement
@@ -371,9 +351,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A file cut part way through its last line, as a full disk or a crash
-     * leaves it, gives the lines before it and counts the last as truncated,
-     * never repairing it.
+     * A file cut through its last line replays the lines before it and counts
+     * the last as truncated.
      *
      * @return void
      */
@@ -389,8 +368,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * An unsigned spill is counted and left: it writes no row, since signing
-     * editable bytes could not establish where they came from.
+     * An unsigned spill writes no row, since signing editable bytes proves
+     * nothing of their origin.
      *
      * @return void
      */
@@ -403,9 +382,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A signed record under an id whose row holds other captured content is the
-     * engine's duplicate and the store's conflict: it is counted by the class
-     * of the failure, and the row stays as it was.
+     * A signed record under an id whose row holds other content is counted as a
+     * conflict, and the row is kept.
      *
      * @return void
      */
@@ -427,8 +405,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A line signed under a key since removed from the ring is quarantined and
-     * never re-signed, and replays once the key is back.
+     * A line under a key removed from the ring is quarantined, never re-signed,
+     * and replays once the key is back.
      *
      * @return void
      */
@@ -454,9 +432,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * A file written by the documented channel replays its spills in order,
-     * with every line of the file counted in its number, and another line on
-     * the channel is passed over without being counted as skipped.
+     * A documented channel file replays its spills in order, counting every
+     * line and passing over other lines.
      *
      * @return void
      */
@@ -479,10 +456,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * An envelope at the bound, made only of the character a line writes in six
-     * bytes, gives the longest line a replay accepts: it goes through the
-     * documented channel's real file and comes back to a row of the same bytes.
-     * Compared by hash, because a failure must not try to print it.
+     * A line at the bound, of six-byte characters, round-trips through the
+     * documented channel, compared by hash.
      *
      * @return void
      */
@@ -518,8 +493,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * Make a write the engine refuses, by pointing the store at the probe
-     * table, and give back the record, whose spill is then in the file.
+     * Make the engine refuse a write by pointing the store at the probe table,
+     * and return the record now spilled.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\AuditRecord
      */
@@ -564,8 +539,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * The record finalised once, its properties one string of the length given,
-     * all of it the character a spill line writes in six bytes.
+     * The record finalised once, its properties one string of the given length
+     * of six-byte spill characters.
      *
      * @param  int  $length
      * @return \SineMacula\Laravel\AuditLog\Records\FinalisedRecord
@@ -587,8 +562,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * Raise the memory limit, so a line at the bound fails its assertions
-     * rather than the engine's limit.
+     * Raise the memory limit, so a line at the bound fails its assertions and
+     * not the engine's limit.
      *
      * @return void
      */
@@ -600,9 +575,8 @@ final class SpillReplayEnginesTest extends TestCase
     }
 
     /**
-     * Restore the memory limit, as far as what the process still holds allows:
-     * the pages a line scattered may not all go back at once, and a limit below
-     * them is refused with a warning. An unlimited process stays so.
+     * Restore the memory limit as far as the process allows; a limit below what
+     * it holds is refused.
      *
      * @return void
      */

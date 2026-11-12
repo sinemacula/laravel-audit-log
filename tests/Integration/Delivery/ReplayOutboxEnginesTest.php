@@ -33,12 +33,7 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Integration tests for replaying the outbox on the engine the suite runs
- * against: a row that really failed reaches the store once it can, as it was
- * signed; a destination that has the record keeps its receipt and is not called
- * again; and a row whose application key was removed stays failed and is saved
- * by putting the key back in the previous keys; on SQLite, MySQL and PostgreSQL
- * alike.
+ * Integration tests for replaying the outbox on SQLite, MySQL and PostgreSQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,7 +73,7 @@ final class ReplayOutboxEnginesTest extends TestCase
     private int $siemCalls = 0;
 
     /**
-     * Stop the clock and keep what a report would say out of the output.
+     * Stop the clock and keep report output quiet.
      *
      * @return void
      */
@@ -109,9 +104,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A record captured in outbox mode, whose row fails for good because the
-     * engine refuses its write, replays to one entry once the table is back: as
-     * it was signed, its receipt delivered and its row gone.
+     * A row failed for good by an engine refusal replays to one entry once the
+     * table is back, as signed.
      *
      * @return void
      */
@@ -159,9 +153,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A row whose entry is already stored, as a crash between the store and the
-     * row's delete leaves it, gives no second entry, through the engine's own
-     * duplicate check.
+     * A row whose entry is already stored gives no second entry, through the
+     * engine's duplicate check.
      *
      * @return void
      */
@@ -180,9 +173,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A database destination that has the record keeps its receipt to the
-     * microsecond and sees no second insert, while the destination that failed
-     * starts again and delivers it.
+     * A destination that has the record keeps its receipt and is not called
+     * again, while the failed one delivers.
      *
      * @return void
      */
@@ -230,9 +222,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A row under an application key that was removed fails as undecryptable
-     * and is kept, payload and all, and with the key restored among the
-     * previous keys a replay delivers it.
+     * A row under a removed application key fails and is kept, and replays once
+     * the key is a previous key.
      *
      * @return void
      */
@@ -258,8 +249,7 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A replay while the key is still missing fails again and keeps the row and
-     * its payload, so restoring the key later can still save it.
+     * A replay with the key still missing keeps the row and its payload.
      *
      * @return void
      */
@@ -282,8 +272,7 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A row whose envelope was altered fails again and writes no entry: a
-     * replay gives it no way past its signature.
+     * A row with an altered envelope stays failed and writes no entry.
      *
      * @return void
      */
@@ -301,8 +290,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A replay reaches every failed row and a row due, and leaves a row whose
-     * retry is not yet due, comparing times as each engine stores them.
+     * A replay leaves a row whose retry is not yet due, comparing times as each
+     * engine stores them.
      *
      * @return void
      */
@@ -320,8 +309,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A failed row on an outbox of its own connection replays to one entry on
-     * the storage connection, its receipt there too.
+     * A failed row on its own outbox connection replays to one entry, with its
+     * receipt on the storage connection.
      *
      * @return void
      */
@@ -338,8 +327,7 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * A dry run lists the failed row and changes nothing: not its row, its
-     * receipt or the entries.
+     * A dry run lists the failed row and changes nothing.
      *
      * @return void
      */
@@ -362,9 +350,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * Capture a record in outbox mode and drain it with one attempt allowed
-     * while the store's table refuses it, so its row is failed for good, then
-     * put the table back, and give back its id.
+     * Capture a record in outbox mode and fail it for good in a one-attempt
+     * drain against a refusing table, then restore the table; return its id.
      *
      * @return string
      */
@@ -412,8 +399,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * The canonical encoding of what the outbox row under the id holds, read
-     * back through its encryption, before a replay.
+     * The canonical encoding of the decrypted outbox row under the id, before a
+     * replay.
      *
      * @param  string  $id
      * @return string
@@ -453,8 +440,8 @@ final class ReplayOutboxEnginesTest extends TestCase
     }
 
     /**
-     * Replace the application key with another, keeping the previous keys
-     * given, and rebuild the encrypter.
+     * Replace the application key, keeping the given previous keys, and rebuild
+     * the encrypter.
      *
      * @param  list<string>  $previous
      * @return void

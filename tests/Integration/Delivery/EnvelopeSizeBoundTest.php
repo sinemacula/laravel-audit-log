@@ -43,24 +43,10 @@ use Tests\Fixtures\Stores\DocumentedSpillChannel;
 use Tests\TestCase;
 
 /**
- * The largest envelope the package configures, through encryption, on the
- * engine the suite runs against: with both byte budgets at their ceiling a
- * record captured through the real path is encrypted, inserted, read back,
- * decrypted, decoded and stored whole; an envelope at the bound fits the
- * outbox's column and MySQL's packet, and so does a bundle at the bound, its
- * attachment counted; the bound holds every column at its longest; and one past
- * it follows the failure policy rather than reaching the outbox; on SQLite,
- * MySQL and PostgreSQL alike. Everything of this size is compared by length and
- * hash, because a failure must not try to print it.
- *
- * The memory limit is raised for the test, because it is often less than one of
- * these records needs, and the assertions should be what fails rather than the
- * engine's limit.
- *
- * It claims no coverage because its payloads are among the slowest things in
- * the suite: a mutant whose covering tests included them would be skipped as
- * taking too long rather than run, so the classes they pass through would go
- * without a mutation check. Their behaviour is pinned by their own tests.
+ * The largest configured envelope through encryption and the engine, on SQLite,
+ * MySQL and PostgreSQL. Payloads are compared by length and hash so a failure
+ * never prints them. Claims no coverage: its payloads are too slow for mutation
+ * testing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -99,7 +85,7 @@ final class EnvelopeSizeBoundTest extends TestCase
     /** @var string The one secret of the ring whose key id is the longest. */
     private const string SECRET = 'a-first-secret-of-32-bytes-long!';
 
-    /** @var array<string, int> Each column of the entries table that holds free text, by the characters it holds at its longest; both UUID columns, the source digest, the two times and the integers are of fixed length. */
+    /** @var array<string, int> Each free-text column of the entries table, by its longest length in characters. */
     private const array WIDTHS = [
         'event'            => 191,
         'category'         => 64,
@@ -131,7 +117,7 @@ final class EnvelopeSizeBoundTest extends TestCase
     /** @var list<string> The columns the integrity fields fill, each of a length the signer fixes. */
     private const array SIGNED_COLUMNS = ['key_id', 'hmac'];
 
-    /** @var list<string> The columns of fixed length: both UUIDs, the source digest's 64 hexadecimal characters, both times, and the three versions. */
+    /** @var list<string> The fixed-length columns. */
     private const array FIXED_COLUMNS = ['id', 'import_batch_id', 'source_digest', 'occurred_at', 'recorded_at', 'record_version', 'event_version', 'integrity_version'];
 
     /** @var list<string> The JSON columns, each with a budget of its own. */
@@ -147,9 +133,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     private string $file = '';
 
     /**
-     * Raise the memory limit, stop the clock, keep what a report would say out
-     * of the output, and spill to the documented channel, in a file of the
-     * test's own.
+     * Raise the memory limit, stop the clock, keep report output quiet, and
+     * spill to the documented channel in the test's own file.
      *
      * @return void
      */
@@ -181,10 +166,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * Put the clock back, remove the file, and restore the memory limit, as far
-     * as what the process still holds allows: the pages a payload scattered may
-     * not all go back at once, and a limit below them is refused with a
-     * warning. An unlimited process stays so.
+     * Reset the clock, remove the file, and restore the memory limit as far as
+     * the process allows; a limit below what it holds is refused.
      *
      * @return void
      */
@@ -207,10 +190,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * With both budgets at their ceiling, a record that fills each exactly and
-     * is captured through the outbox path is encrypted, inserted, read back,
-     * decrypted and decoded whole, then stored by a drain, and its row verifies
-     * and holds the same bytes.
+     * A record filling both budgets at their ceiling survives capture,
+     * encryption, the outbox and a drain, and its row verifies.
      *
      * @return void
      */
@@ -265,9 +246,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * An envelope of exactly the bound, encrypted, fits the outbox's column:
-     * the engine returns the same bytes, which decrypt and decode to the
-     * record.
+     * An encrypted envelope at the bound fits the outbox's column and decodes
+     * back to the record.
      *
      * @return void
      */
@@ -302,9 +282,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * The encrypted form of an envelope at the bound fits MySQL's default
-     * packet, with the rest of the statement beside it, whichever bytes the
-     * envelope holds, and the server configured here takes it both ways.
+     * An encrypted envelope at the bound fits MySQL's default packet with the
+     * rest of the statement.
      *
      * @return void
      */
@@ -332,12 +311,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * A bundle of exactly the bound, its attachment included, is encrypted,
-     * inserted in the outbox, read back with the same bytes, and decrypts and
-     * decodes to the same record and attachment; one byte more is refused as
-     * oversize, naming its record, though its record's columns alone are within
-     * the bound by the attachment's length, because the bound is the whole
-     * bundle's.
+     * A bundle at the bound, attachment included, survives encryption and the
+     * engine; one byte more is refused as oversize.
      *
      * @return void
      */
@@ -394,9 +369,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * Rows of `[failure mode, asked to fail closed, timing, whether a line is
-     * spilled, whether it throws, how many reports]`: each rule a record can
-     * follow.
+     * Rows of `[failure mode, fail closed, timing, spilled, throws, reports]`,
+     * one per failure rule.
      *
      * @return iterable<string, array{0: string, 1: bool, 2: \SineMacula\Laravel\AuditLog\Records\Enums\Timing, 3: bool, 4: bool, 5: int}>
      */
@@ -411,9 +385,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * An envelope one byte past the bound never reaches the outbox: the record
-     * follows its failure rule, naming the refusal by its class alone, and a
-     * transaction it was recorded in stays usable.
+     * An envelope one byte past the bound follows its failure rule and never
+     * reaches the outbox, leaving the transaction usable.
      *
      * @param  string  $mode
      * @param  bool  $failClosed
@@ -453,9 +426,7 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * What an envelope past the bound spilled is still a signed record, and
-     * replays to one row, because a spill line has room for it where the outbox
-     * has not.
+     * A spilled envelope past the bound replays to one row.
      *
      * @return void
      */
@@ -479,12 +450,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * Every column at its longest, of the character JSON writes in the most
-     * bytes, beside both JSON columns at their budget, stays within the bound,
-     * with what is not JSON within what the bound keeps for it, and comes back
-     * whole through the outbox and the engine. Each width is the engine's where
-     * the engine keeps one, so a column widened in the table fails this before
-     * it can outgrow the bound, and every column of the table is named here.
+     * Every column at its longest, beside both JSON columns at budget, stays
+     * within the bound and round-trips through the outbox.
      *
      * @return void
      */
@@ -520,8 +487,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * Each column the table holds is named here, and each width stated is the
-     * one the engine reports where it reports one; SQLite keeps no width.
+     * Assert every table column is named here with the width the engine
+     * reports; SQLite keeps no width.
      *
      * @return void
      */
@@ -553,9 +520,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * Deliver the record, inside a transaction on the outbox connection when it
-     * is transactional, and give back what was thrown, or `null`. The
-     * transaction must still be usable.
+     * Deliver the record, inside an outbox transaction when transactional, and
+     * return what was thrown or `null`; the transaction must stay usable.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
@@ -656,8 +622,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * The bulk record with its own attachment and descriptor, and a property of
-     * the length given beside them.
+     * The bulk record with its attachment and descriptor, beside a property of
+     * the given length.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $base
      * @param  int  $length
@@ -671,9 +637,8 @@ final class EnvelopeSizeBoundTest extends TestCase
     }
 
     /**
-     * A map of top-level keys whose encoding is exactly the bytes given, each
-     * value within what the minimiser keeps of a string, so capture leaves it
-     * as it is.
+     * A map of top-level keys whose encoding is exactly the given bytes, each
+     * value short enough for capture to keep whole.
      *
      * @param  int  $bytes
      * @param  string  $prefix

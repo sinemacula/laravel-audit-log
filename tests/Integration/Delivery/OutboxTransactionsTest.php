@@ -30,16 +30,10 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the outbox write path inside real transactions, on the
- * engine the suite runs against: a row that commits and rolls back with its
- * host at every nesting, a failed insert that leaves a healthy host committing,
- * PostgreSQL's aborted state included, a dedicated outbox connection, and the
- * same behaviour under the manager Laravel's `DatabaseTransactions` testing
- * trait installs as under Laravel's own.
- *
- * Another session reads what has committed on MySQL and PostgreSQL; an
- * in-memory SQLite database belongs to its one connection, so there the test
- * relies on what the rollback leaves.
+ * Integration tests for the outbox write path inside real transactions, under
+ * Laravel's own transaction manager and the one `DatabaseTransactions`
+ * installs. In-memory SQLite has no second session, so there the tests rely on
+ * what the rollback leaves.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,15 +53,14 @@ final class OutboxTransactionsTest extends TestCase
     /** @var string A second session on the worker's database. */
     private const string READER = 'audit_reader';
 
-    /** @var string The spill channel, which writes nowhere; the lines are captured as they are logged. */
+    /** @var string The spill channel, which writes nowhere; lines are captured as logged. */
     private const string SPILL_CHANNEL = 'audit-spill';
 
-    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter is asked to report. */
+    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler The application's reporter. */
     private RecordingExceptionHandler $reporter;
 
     /**
-     * Create the table the host writes to, bind the reporter and capture the
-     * spill lines.
+     * Create the host's table, bind the reporter and capture spill lines.
      *
      * @return void
      */
@@ -91,8 +84,7 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a failed test left open, then drop what the
-     * test added.
+     * Roll back any open transaction, then drop what the test added.
      *
      * @return void
      */
@@ -160,8 +152,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A rollback of the transaction that holds the row takes the row, and the
-     * outer transaction commits without it.
+     * Rolling back the transaction holding the row takes it, and the outer
+     * transaction commits without it.
      *
      * @return void
      */
@@ -208,8 +200,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A row inserted in an inner transaction that commits still waits for the
-     * outer: other sessions do not see it, and the outer's rollback takes it.
+     * A row from a committed inner transaction waits for the outer: unseen by
+     * other sessions and taken by its rollback.
      *
      * @return void
      */
@@ -244,8 +236,7 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A failed insert runs in a savepoint, so the host writes again and
-     * commits, and on PostgreSQL its transaction is not left aborted. The spill
+     * A failed insert runs in a savepoint, so the host commits and its spill
      * waits for that commit.
      *
      * @return void
@@ -274,8 +265,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A failed insert drops no callback the host registered, before it or after
-     * it, and a rule that throws leaves the host just as able to commit.
+     * A failed insert drops none of the host's callbacks, and a throwing rule
+     * leaves the host able to commit.
      *
      * @return void
      */
@@ -312,8 +303,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * An immediate row is inserted at once but still rolls back with a
-     * transaction enclosing it on the outbox connection.
+     * An immediate row rolls back with an enclosing transaction on the outbox
+     * connection.
      *
      * @return void
      */
@@ -333,8 +324,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * On a dedicated outbox connection an immediate row commits by itself, so
-     * the rollback of a host on another connection leaves it.
+     * On a dedicated outbox connection an immediate row survives a host
+     * rollback on another connection.
      *
      * @return void
      */
@@ -354,8 +345,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * On a dedicated outbox connection an after-commit record follows the
-     * host's transaction: the rollback drops it, and the commit inserts it.
+     * On a dedicated outbox connection an after-commit record is dropped by the
+     * host's rollback and inserted on its commit.
      *
      * @return void
      */
@@ -385,9 +376,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * Two connections transacting at once: the innermost decides each record,
-     * and each row follows the transaction that decided it, whatever becomes of
-     * the other.
+     * With two connections transacting at once, each row follows the innermost
+     * transaction that decided it.
      *
      * @return void
      */
@@ -398,7 +388,7 @@ final class OutboxTransactionsTest extends TestCase
         $host   = DB::connection(self::CONNECTION);
         $outbox = $this->outboxConnection();
 
-        // The outbox's transaction is the innermost, so it holds the row, and
+        // The outbox's transaction is the innermost, so it holds the row and
         // the host's commit does not save it
         $host->beginTransaction();
         $outbox->beginTransaction();
@@ -413,7 +403,7 @@ final class OutboxTransactionsTest extends TestCase
 
         self::assertSame(0, $this->outboxCount());
 
-        // The host's transaction is the innermost, so the row waits for it, and
+        // The host's transaction is the innermost, so the row waits for it and
         // the outbox's rollback does not touch it
         $outbox->beginTransaction();
         $host->beginTransaction();
@@ -430,9 +420,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A host PostgreSQL has already aborted refuses even the savepoint: the
-     * diagnostics go out, and the spill is discarded, because PostgreSQL ends
-     * such a transaction with a rollback while reporting a success.
+     * A host PostgreSQL has aborted refuses the savepoint, and the spill is
+     * discarded because its commit is really a rollback.
      *
      * @return void
      */
@@ -459,9 +448,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * With only the wrapper open there is no transaction to select, by default
-     * or by naming its connection, so the row is inserted now, in a savepoint
-     * of the wrapper, and the wrapper's rollback takes it.
+     * Inside only the testing wrapper no transaction is selected, so the row is
+     * inserted now and the wrapper's rollback takes it.
      *
      * @return void
      */
@@ -481,8 +469,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A failed insert inside only the wrapper binds nothing, since the wrapper
-     * is never selected and never commits, so the spill is written at once.
+     * A failed insert inside only the wrapper binds nothing, so the spill is
+     * written at once.
      *
      * @return void
      */
@@ -498,8 +486,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A transaction opened inside the wrapper is selected and holds the row:
-     * its commit leaves the row in the wrapper, whose rollback takes it.
+     * A transaction inside the wrapper holds the row: its commit leaves it in
+     * the wrapper, whose rollback takes it.
      *
      * @return void
      */
@@ -522,7 +510,7 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A rollback of the transaction inside the wrapper takes the row, and the
+     * Rolling back a transaction inside the wrapper takes the row, and the
      * wrapper stays open.
      *
      * @return void
@@ -542,9 +530,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A spill bound to a transaction inside the wrapper is written at that
-     * transaction's commit, though the wrapper never commits, because that
-     * manager runs callbacks at level 1.
+     * A spill bound inside the wrapper is written at the nested commit, since
+     * that manager runs callbacks at level 1.
      *
      * @return void
      */
@@ -567,8 +554,7 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * A spill bound to a transaction inside the wrapper goes when that
-     * transaction rolls back.
+     * A spill bound inside the wrapper goes with the nested rollback.
      *
      * @return void
      */
@@ -588,8 +574,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * Under Laravel's own manager a single transaction is selected and nothing
-     * is left out: the row and the spill follow its commit and its rollback.
+     * Under Laravel's own manager the row and the spill follow a single
+     * transaction's commit and rollback.
      *
      * @return void
      */
@@ -675,8 +661,8 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * Assert another session reads that many outbox rows, which on an in-memory
-     * SQLite database no other session can.
+     * Assert another session reads that many outbox rows; no other session can
+     * see in-memory SQLite.
      *
      * @param  int  $rows
      * @return void
@@ -691,9 +677,9 @@ final class OutboxTransactionsTest extends TestCase
     }
 
     /**
-     * Install the testing manager on the outbox connection, open its wrapping
-     * transaction as `DatabaseTransactions` does, run the test inside it, and
-     * roll the wrapper back however the test ends.
+     * Install the testing manager, open its wrapping transaction as
+     * `DatabaseTransactions` does, run the test inside it, then roll the
+     * wrapper back.
      *
      * @param  \Closure(\Illuminate\Database\Connection, \Illuminate\Foundation\Testing\DatabaseTransactionsManager): void  $test
      * @return void

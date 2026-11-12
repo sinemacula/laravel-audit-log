@@ -50,24 +50,8 @@ use Tests\TestCase;
 
 /**
  * Integration tests for failures that end a host's transaction, through
- * Laravel's own transaction handling on the framework version the suite runs
- * on. A store raises inside `$connection->transaction()`, so
- * `handleTransactionException()` runs as it does for a real insert, and on
- * MySQL and PostgreSQL the engine raises real lock wait timeouts, real
- * deadlocks and real lost connections between processes.
- *
- * Inside a host a concurrency error propagates as the sanitised
- * `DeadlockException`, whatever the failure mode, and a lost connection as the
- * sanitised `AuditWriteFailedException`. Neither is spilled or reported by the
- * package, and each says `AuditWriteFailed`. Laravel still recognises the
- * deadlock, so a host's `transaction()` retries it, at the outermost level
- * only. With no host open the same failures follow the failure rule.
- *
- * A captured record follows the `REPORT` rule whatever the mode, and a host's
- * failure is still the one thing it lets out: thrown sanitised from a
- * synchronous capture inside a host, and signalled as fatal, while one outside
- * a host, or met by a write deferred to the commit, is spilled, reported and
- * signalled, and the capture returns.
+ * Laravel's own transaction handling, with real lock waits, deadlocks and lost
+ * connections on MySQL and PostgreSQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -97,7 +81,7 @@ final class HostFatalFailuresTest extends TestCase
     /** @var string A second session on the worker's database. */
     private const string READER = 'audit_reader';
 
-    /** @var string The spill channel, which writes nowhere; the lines are captured as they are logged. */
+    /** @var string The spill channel, which writes nowhere; lines are captured as logged. */
     private const string SPILL_CHANNEL = 'audit-spill';
 
     /** @var string The id the two sides of a real race contend for. */
@@ -106,16 +90,16 @@ final class HostFatalFailuresTest extends TestCase
     /** @var string The file a child leaves what happened to it in. */
     private const string OUTCOME = 'outcome';
 
-    /** @var int How many rows the parent writes before a real deadlock, so MySQL takes the child, the smaller transaction, as its victim. */
+    /** @var int Rows the parent writes before a real deadlock, so MySQL picks the smaller child as its victim. */
     private const int PARENT_WEIGHT_ROWS = 20;
 
-    /** @var int How long a look for another session's lock wait goes on before it is a failure, in seconds. */
+    /** @var int How long to look for another session's lock wait before failing, in seconds. */
     private const int LOCK_WAIT_TIMEOUT_SECONDS = 60;
 
-    /** @var int How long a look for another session's lock wait sleeps between looks, in microseconds: more than the 0.1 seconds without a read that InnoDB waits before it refreshes `innodb_trx`. */
+    /** @var int Pause between looks for a lock wait, in microseconds; InnoDB refreshes `innodb_trx` only after 0.1 seconds without a read. */
     private const int LOCK_WAIT_POLL_MICROSECONDS = 150000;
 
-    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler What the application's reporter is asked to report. */
+    /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler The application's reporter. */
     private RecordingExceptionHandler $reporter;
 
     /** @var list<\SineMacula\Laravel\AuditLog\Events\AuditWriteFailed> Every `AuditWriteFailed` heard. */
@@ -125,8 +109,8 @@ final class HostFatalFailuresTest extends TestCase
     private array $signalled = [];
 
     /**
-     * Create the table the host writes to, bind the reporter, capture the spill
-     * lines and hear each `AuditWriteFailed`.
+     * Create the host's table, bind the reporter, capture spill lines and hear
+     * each `AuditWriteFailed`.
      *
      * @return void
      */
@@ -154,9 +138,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a failed test left open, then drop what the
-     * test added, and remove what the children shared once the migrations have
-     * rolled back.
+     * Roll back any open transaction, drop what the test added, and remove the
+     * children's shared files after the migrations roll back.
      *
      * @return void
      */
@@ -181,9 +164,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * In report mode a deadlock inside a host still propagates, as the fixed
-     * sanitised exception: nothing is spilled or reported, and the event says
-     * it.
+     * In report mode a deadlock inside a host propagates sanitised, unspilled
+     * and unreported, and the event says it.
      *
      * @return void
      */
@@ -205,8 +187,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Rows of `[what the record asks for, failure mode]`: every rule a record
-     * can have, each of which a deadlock inside a host overrides.
+     * Rows of `[what the record asks for, failure mode]`: every rule, each
+     * overridden by a deadlock inside a host.
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): \SineMacula\Laravel\AuditLog\Records\PendingRecord, 1: string}>
      */
@@ -222,7 +204,7 @@ final class HostFatalFailuresTest extends TestCase
 
     /**
      * Whatever the rule, a deadlock inside a host is the same sanitised
-     * exception, with no spill and no report.
+     * exception, unspilled and unreported.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Records\PendingRecord): \SineMacula\Laravel\AuditLog\Records\PendingRecord  $asks
      * @param  string  $mode
@@ -246,9 +228,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A host's `transaction()` with attempts to spare recognises the sanitised
-     * deadlock, rolls back and runs its closure again: one business change and
-     * one entry commit, and the abandoned attempt leaves only its event.
+     * A host's `transaction()` retries the sanitised deadlock, and one business
+     * change and one entry commit.
      *
      * @return void
      */
@@ -277,8 +258,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A host whose attempts run out gets the sanitised deadlock itself, with
-     * nothing of the abandoned work kept.
+     * A host whose retries run out gets the sanitised deadlock, with the
+     * abandoned work discarded.
      *
      * @return void
      */
@@ -307,10 +288,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * The exception that reaches the host holds nothing of the failure it
-     * replaced, with every frame's arguments kept: not its message, its SQL,
-     * its bindings or the record, and what it replaced would have held them, so
-     * the search is one that can fail.
+     * The sanitised exception holds no message, SQL, binding or record of the
+     * failure it replaced, even with frame arguments kept.
      *
      * @return void
      */
@@ -339,9 +318,7 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * The level a deadlock leaves is the host's own: Laravel gives up only the
-     * store's nested transaction, at every depth, and the host decides what
-     * happens next.
+     * A deadlock leaves the host's own transaction level, at every depth.
      *
      * @return void
      */
@@ -369,9 +346,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * In report mode a lost connection inside a host propagates as the
-     * sanitised exception, since the transaction is gone: nothing is spilled or
-     * reported, and the event says it.
+     * In report mode a lost connection inside a host propagates sanitised,
+     * unspilled and unreported.
      *
      * @return void
      */
@@ -396,9 +372,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A deadlock inside a nested host transaction is not retried at that level,
-     * however many attempts it has, since the engine ended the whole
-     * transaction: the outermost `transaction()` runs everything again.
+     * A deadlock in a nested host transaction is retried only by the outermost
+     * `transaction()`.
      *
      * @return void
      */
@@ -430,9 +405,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A stack whose database destination deadlocks has tried its other
-     * destination by the time it throws, and the stack's flag makes the failure
-     * the sanitised deadlock.
+     * A stack whose database destination deadlocks tries its other destination,
+     * then throws the sanitised deadlock.
      *
      * @return void
      */
@@ -458,7 +432,7 @@ final class HostFatalFailuresTest extends TestCase
 
     /**
      * A stack whose database destination loses its connection propagates the
-     * sanitised exception by the stack's flag.
+     * sanitised exception.
      *
      * @return void
      */
@@ -480,9 +454,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * An outbox insert that deadlocks inside its savepoint goes through
-     * Laravel's handling too, and reaches the host sanitised whatever the
-     * record's timing; there is no spill to bind.
+     * An outbox insert deadlock reaches the host sanitised whatever the
+     * record's timing, with no spill.
      *
      * @return void
      */
@@ -511,8 +484,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A host's `transaction()` retries an outbox insert's deadlock too: the
-     * second attempt's row is the one that commits.
+     * A host's `transaction()` retries an outbox insert's deadlock, and the
+     * second attempt's row commits.
      *
      * @return void
      */
@@ -539,8 +512,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * An outbox insert that loses its connection inside a host propagates as
-     * the sanitised exception, naming the outbox.
+     * An outbox insert that loses its connection inside a host propagates
+     * sanitised, naming the outbox.
      *
      * @return void
      */
@@ -575,9 +548,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * With no host transaction open there is nothing to end, so either failure
-     * follows the rule: in report mode it is spilled and reported, and the
-     * caller goes on.
+     * With no host transaction open, either failure follows the rule: in report
+     * mode it is spilled and reported.
      *
      * @param  \Closure(): \Illuminate\Database\QueryException  $failure
      * @return void
@@ -596,8 +568,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * An after-commit write runs once the host has gone, so either failure
-     * follows the rule there too: the commit stands, and the record is spilled.
+     * An after-commit write runs after the host, so either failure follows the
+     * rule and the commit stands.
      *
      * @param  \Closure(): \Illuminate\Database\QueryException  $failure
      * @return void
@@ -624,10 +596,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A capture's deadlock inside a host transaction is the one failure that
-     * reaches the dispatching flow: the same sanitised exception as for any
-     * record, under the `throw` mode too, which a capture never reads, with
-     * nothing spilled or reported, and the signal told once that it was fatal.
+     * A capture's deadlock inside a host propagates sanitised even under the
+     * `throw` mode, and the signal is told once that it was fatal.
      *
      * @return void
      */
@@ -653,9 +623,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A capture's lost connection inside a host transaction propagates as the
-     * sanitised failed write, holding nothing of the failure, and the signal is
-     * told once that it was fatal.
+     * A capture's lost connection inside a host propagates sanitised, and the
+     * signal is told once that it was fatal.
      *
      * @return void
      */
@@ -681,10 +650,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A capture's outbox insert inside the host's transaction on the outbox
-     * connection is not deferred, so its deadlock reaches the dispatching flow
-     * sanitised, whatever the record's timing, and the signal says it was
-     * fatal.
+     * A capture's outbox insert in the host's transaction is not deferred, so
+     * its deadlock propagates sanitised and is signalled as fatal.
      *
      * @return void
      */
@@ -715,10 +682,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * With no transaction open a capture's deadlock or lost connection ends
-     * nothing, so it follows the `REPORT` rule under the `throw` mode too: the
-     * capture returns, the record is spilled and reported once, and the signal
-     * is told once, not fatal.
+     * With no transaction open, a capture's deadlock or lost connection is
+     * reported under the `throw` mode too, and signalled once, not fatal.
      *
      * @param  \Closure(): \Illuminate\Database\QueryException  $failure
      * @return void
@@ -744,9 +709,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A deferred capture's write runs once the host has committed, so either
-     * failure ends nothing there: the commit stands, the record is spilled and
-     * reported once, and the signal is told at the commit, not fatal.
+     * A deferred capture's failure after the host commits is spilled and
+     * reported, and signalled at the commit, not fatal.
      *
      * @param  \Closure(): \Illuminate\Database\QueryException  $failure
      * @return void
@@ -776,10 +740,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * On MySQL an insert that waits on another session's row past its lock wait
-     * timeout, inside a host, raises Laravel's concurrency error, whose message
-     * holds the row. What reaches the host is the fixed sanitised deadlock, and
-     * the other session's row is untouched.
+     * On MySQL a real lock wait timeout inside a host propagates as the
+     * sanitised deadlock, and the other session's row is untouched.
      *
      * @return void
      */
@@ -828,8 +790,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * On MySQL a real deadlock of which the audit insert is the victim
-     * propagates sanitised when the host has no attempts to spare.
+     * On MySQL a real deadlock victimising the audit insert propagates
+     * sanitised when the host has no retries left.
      *
      * @return void
      */
@@ -841,8 +803,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * On MySQL a real deadlock of which the audit insert is the victim is
-     * retried by the host's `transaction()`, and the retry commits.
+     * On MySQL a real deadlock victimising the audit insert is retried by the
+     * host's `transaction()`.
      *
      * @return void
      */
@@ -854,8 +816,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * On PostgreSQL a real deadlock of which the audit insert is the victim
-     * propagates sanitised when the host has no attempts to spare.
+     * On PostgreSQL a real deadlock victimising the audit insert propagates
+     * sanitised when the host has no retries left.
      *
      * @return void
      */
@@ -867,8 +829,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * On PostgreSQL a real deadlock of which the audit insert is the victim is
-     * retried by the host's `transaction()`, and the retry commits.
+     * On PostgreSQL a real deadlock victimising the audit insert is retried by
+     * the host's `transaction()`.
      *
      * @return void
      */
@@ -880,10 +842,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * On a database server, a session ended under a host's transaction loses
-     * that transaction: the savepoint of the audit insert fails, and what
-     * reaches the host is the sanitised exception, unspilled. Laravel forgets
-     * the transaction when the host rolls back, and the host's work is gone.
+     * A session ended under a host's transaction fails the audit savepoint, and
+     * the host gets the sanitised exception, unspilled.
      *
      * @return void
      */
@@ -916,10 +876,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A real serialisation failure in the audit savepoint: Laravel wraps it in
-     * a `DeadlockException` with the code 0 and no phrase on its list, and it
-     * has ended the host's transaction all the same. Under the report rule it
-     * is the sanitised deadlock, with no spill.
+     * A real serialisation failure, which Laravel wraps as a
+     * `DeadlockException` with code 0, propagates as the sanitised deadlock.
      *
      * @return void
      */
@@ -942,7 +900,7 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * The same failure lets the host's `transaction()` retry: its second
+     * A host's `transaction()` retries a serialisation failure, and its second
      * attempt commits with the record.
      *
      * @return void
@@ -972,10 +930,9 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * An after-commit record's spill is not bound to a serialisation failure's
-     * dead transaction, which would write a replayable line for work rolled
-     * back: the code and class PostgreSQL gives reach the classifier through
-     * Laravel's wrapper, whose own code is 0.
+     * An after-commit spill is not bound to a serialisation failure's dead
+     * transaction; PostgreSQL's code reaches the classifier through Laravel's
+     * wrapper.
      *
      * @return void
      */
@@ -998,8 +955,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A lost connection on another connection than the one a transaction is
-     * open on ended nothing there, so a store's failure follows the rule.
+     * A lost connection on a connection other than the open transaction's
+     * follows the rule.
      *
      * @return void
      */
@@ -1039,8 +996,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Bind a store that updates the row another session has changed, in a
-     * savepoint, as a real store's own statement would.
+     * Bind a store that updates, in a savepoint, the row another session has
+     * changed.
      *
      * @return void
      */
@@ -1058,9 +1015,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Fix the transaction's snapshot at `REPEATABLE READ`, then have another
-     * session change the row and commit, so the next update of it cannot be
-     * serialised.
+     * Fix the snapshot at `REPEATABLE READ`, then have another session change
+     * and commit the row, so the next update cannot be serialised.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -1074,8 +1030,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Assert a host with no attempts to spare gets the sanitised deadlock from
-     * a real deadlock, with its work rolled back and the other session's kept.
+     * Assert a host with no retries left gets the sanitised deadlock, with its
+     * work rolled back and the other session's kept.
      *
      * @return void
      */
@@ -1092,9 +1048,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Assert a host with an attempt to spare retries a real deadlock: its
-     * second attempt commits with a record of its own, after the other
-     * session's.
+     * Assert a host with a retry left retries a real deadlock, and its second
+     * attempt commits after the other session's.
      *
      * @return void
      */
@@ -1111,18 +1066,10 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Run two sessions into a deadlock the audit insert is the victim of, and
-     * leave in the shared file how many attempts the child's host made and what
-     * it got.
-     *
-     * This process writes the entry the child will insert under the same id,
-     * along with enough other rows that MySQL takes the child as the smaller
-     * transaction, and tells it to go. The child takes a row of the host's
-     * table, then waits until this process waits on that row, and records. The
-     * cycle closes on its insert, which waits on this process's entry: MySQL
-     * finds it there, and on PostgreSQL, where a session looks only once it has
-     * waited for its own `deadlock_timeout`, this process's is too long to find
-     * it first. Only the first attempt contends; a retry takes its own id.
+     * Race two sessions into a deadlock that victimises the audit insert,
+     * leaving the child's attempts and outcome in the shared file. Extra parent
+     * rows make MySQL pick the child; a long parent `deadlock_timeout` makes
+     * PostgreSQL detect it in the child.
      *
      * @param  positive-int  $hostAttempts
      * @return void
@@ -1162,8 +1109,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * In the child: run the host's transaction, with the attempts given, and
-     * leave in the shared file how many it made and what it got.
+     * In the child, run the host's transaction with the given attempts and
+     * leave the attempts and outcome in the shared file.
      *
      * @param  positive-int  $hostAttempts
      * @return void
@@ -1188,10 +1135,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * In the child: take the host's row and record. The first attempt tells the
-     * parent it holds the row, waits until the parent waits on it, and records
-     * under the id the parent holds, which closes the cycle; a retry records
-     * under an id of its own.
+     * In the child, take the host's row and record; the first attempt closes
+     * the cycle on the parent's id, and a retry uses its own.
      *
      * @param  \Illuminate\Database\Connection  $host
      * @param  int  $attempt
@@ -1214,8 +1159,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Wait until another session is waiting on a lock, which on each engine its
-     * activity tables say.
+     * Wait until another session is waiting on a lock, per the engine's
+     * activity tables.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -1242,7 +1187,7 @@ final class HostFatalFailuresTest extends TestCase
 
     /**
      * End the connection's session from a second session, and wait until the
-     * server says it is gone.
+     * server reports it gone.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @return void
@@ -1290,7 +1235,7 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Leave in the shared file what the work threw, for the parent to read.
+     * Leave what the work threw in the shared file for the parent.
      *
      * @param  \Closure(): void  $work
      * @return void
@@ -1301,9 +1246,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * What the work threw, and what the failure path did about it: the class,
-     * message, code and whether it has a previous exception, how many spill
-     * lines and reports were made, and how many events were said.
+     * What the work threw, and what the failure path did: class, message, code,
+     * previous, spill lines, reports and events.
      *
      * @param  \Closure(): void  $work
      * @return array{thrown: ?class-string, message?: string, code?: int|string, chained?: bool, spilled?: int, reported?: int, said?: int}
@@ -1328,8 +1272,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * The outcome a sanitised deadlock leaves: its fixed text and code, with
-     * nothing chained, spilled or reported, and one event.
+     * The outcome of a sanitised deadlock: its fixed text and code, nothing
+     * chained, spilled or reported, and one event.
      *
      * @return array{thrown: class-string, message: string, code: int, chained: bool, spilled: int, reported: int, said: int}
      */
@@ -1381,7 +1325,7 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Have every record take the contended id, until a retry unpins it.
+     * Have every record take the contended id until a retry unpins it.
      *
      * @return void
      */
@@ -1418,7 +1362,7 @@ final class HostFatalFailuresTest extends TestCase
 
     /**
      * The store raising the failure on its first call and storing every record
-     * after that.
+     * after.
      *
      * @param  \Throwable  $failure
      * @return void
@@ -1443,10 +1387,9 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A store that raises the failure inside `$connection->transaction()` on
-     * the storage connection, as the database store's own insert does, so
-     * Laravel's `handleTransactionException()` handles it. It says it is
-     * durable and joins that connection, so every rule accepts it.
+     * A durable store joining the storage connection that raises the failure
+     * inside `$connection->transaction()`, so Laravel's
+     * `handleTransactionException()` handles it.
      *
      * @param  \Throwable  $failure
      * @return \Tests\Fixtures\Stores\CallbackStore
@@ -1463,9 +1406,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Raise the failure from the next outbox inserts, the number given or all
-     * of them, at the statement: inside `$connection->transaction()` when a
-     * transaction is open, as a real insert raises it.
+     * Raise the failure from the next outbox inserts, all when no count is
+     * given, inside `$connection->transaction()` when one is open.
      *
      * @param  \Throwable  $failure
      * @param  int  $times
@@ -1516,8 +1458,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Assert the exception is the sanitised deadlock: the fixed text and code,
-     * and nothing chained.
+     * Assert the exception is the sanitised deadlock: fixed text and code,
+     * nothing chained.
      *
      * @param  \Illuminate\Database\DeadlockException  $thrown
      * @param  string  $message
@@ -1579,8 +1521,7 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Deliver a captured record with the capture's signal, as a capture
-     * delivers it.
+     * Deliver a captured record with the capture's signal.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\CaptureSignal  $signal
      * @param  \SineMacula\Laravel\AuditLog\Records\Enums\Timing  $timing
@@ -1605,8 +1546,8 @@ final class HostFatalFailuresTest extends TestCase
 
     /**
      * What PostgreSQL raises for a serialisation failure, as Laravel throws it:
-     * its code is the string `40001`, which no constructor of the driver's
-     * exception takes, and no phrase on Laravel's list is in its message.
+     * code `40001`, a string no driver exception constructor takes, and no
+     * phrase Laravel lists.
      *
      * @param  string  $connection
      * @return \Illuminate\Database\QueryException
@@ -1644,8 +1585,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A failure Laravel recognises as a deadlock, whose message and bindings
-     * hold the secret as a real one holds the row.
+     * A failure Laravel recognises as a deadlock, holding the secret in its
+     * message and bindings.
      *
      * @return \Illuminate\Database\QueryException
      */
@@ -1655,8 +1596,8 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * A failure Laravel recognises as a lost connection, whose message and
-     * bindings hold the secret as a real one holds the row.
+     * A failure Laravel recognises as a lost connection, holding the secret in
+     * its message and bindings.
      *
      * @return \Illuminate\Database\QueryException
      */
@@ -1667,7 +1608,7 @@ final class HostFatalFailuresTest extends TestCase
 
     /**
      * A query failure with the driver's message, holding the secret in its
-     * bindings and its message.
+     * message and bindings.
      *
      * @param  string  $message
      * @return \Illuminate\Database\QueryException

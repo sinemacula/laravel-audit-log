@@ -26,13 +26,8 @@ use Tests\Fixtures\Stores\CallbackStore;
 use Tests\TestCase;
 
 /**
- * Integration tests for two real processes working one outbox: before a lease
- * ends a row has one owner, whichever process claims first; once it ends the
- * row can be taken over, and a first worker still alive then changes nothing,
- * whether its call succeeded or failed; recovery is idempotent, so both calling
- * the store leaves one entry; and a renewal keeps a slow worker's row its own.
- * Each process's clock is its own, as it would be on two machines, and the
- * processes meet on file gates rather than on timing.
+ * Integration tests for two real processes draining one outbox, each with its
+ * own clock, meeting on file gates instead of timing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,8 +86,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * Put the clock back, and remove what the children shared once the
-     * migrations have rolled back.
+     * Reset the clock, and remove the children's shared files after the
+     * migrations roll back.
      *
      * @return void
      */
@@ -107,9 +102,7 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * Two processes drain 50 rows at once and each destination call is named in
-     * a file: every record is delivered, and none twice, because before its
-     * lease ends a row has one owner.
+     * Two processes draining 50 rows at once deliver every record exactly once.
      *
      * @return void
      */
@@ -142,10 +135,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * A child held at its claim's update has already read the row as a
-     * candidate. The parent claims the row first; released, the child's update
-     * changes nothing and it holds no claim, and the row keeps the parent's
-     * token and one attempt.
+     * When the parent claims a row first, a child already holding it as a
+     * candidate claims nothing.
      *
      * @return void
      */
@@ -175,9 +166,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * A row whose worker was killed just after claiming it waits out the lease:
-     * up to the lease's very instant no drain can take it, a microsecond later
-     * one can, and its record is delivered with both attempts counted.
+     * A row whose worker was killed after claiming it can be reclaimed only
+     * after its lease, with both attempts counted.
      *
      * @return void
      */
@@ -206,9 +196,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * While a first worker is alive inside its destination with its lease
-     * running, a second drain has nothing to take, and the first finishes the
-     * row alone.
+     * While a first worker is alive inside its lease, a second drain has
+     * nothing to take.
      *
      * @return void
      */
@@ -250,10 +239,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * A first worker alive past its lease sleeps inside its destination while
-     * the parent reclaims the row, delivers it and deletes it. Released, the
-     * first worker counts itself stale, and its receipt, its retry and its
-     * delete change nothing of what the new owner left.
+     * A first worker alive past its lease is stale: its receipt, retry and
+     * delete change nothing the new owner left.
      *
      * @param  bool  $fails
      * @return void
@@ -291,9 +278,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * A first worker that outlived its lease, its row now under a new owner's
-     * claim and not yet finished, can renew, retry, fail and delete nothing,
-     * and each says so; the row stays the new owner's, who can still finish it.
+     * A stale claim cannot renew, retry, fail or delete a new owner's
+     * unfinished row.
      *
      * @return void
      */
@@ -341,11 +327,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * A first worker alive past its lease and a new owner both call the
-     * database store with one record. The new owner's row stands, the first
-     * worker's insert resolves as a duplicate of it, and its shared transaction
-     * rolls back as stale, so one entry is left, with both attempts on its one
-     * receipt.
+     * A stale worker and a new owner storing one record leave one entry, with
+     * both attempts on its receipt.
      *
      * @return void
      */
@@ -390,9 +373,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * Rows that failed once and have come due for their retry, raced by two
-     * processes through the database store, are each stored once, with one
-     * entry each and the failure cleared from each receipt.
+     * Two processes racing due retries through the database store store each
+     * row once and clear each failure.
      *
      * @return void
      */
@@ -448,10 +430,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * A first destination that takes longer than the whole lease, with nobody
-     * reaching for the row meanwhile, is followed by a renewal, so the second
-     * destination runs on a fresh lease: a second drain at a time past the
-     * original lease finds nothing to take, and the first worker finishes.
+     * A destination slower than the whole lease is followed by a renewal, so a
+     * second drain finds nothing to take.
      *
      * @return void
      */
@@ -509,8 +489,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * Bind a store that joins no transaction and names each record it is given
-     * in a file.
+     * Bind a store that joins no transaction and names each record it gets in a
+     * file.
      *
      * @return void
      */
@@ -522,9 +502,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * Bind a store that joins no transaction and names each record it is given
-     * in a file, and that holds a child inside the call until it is released,
-     * after which the child's call fails when told to.
+     * Bind a counting store that holds a child inside the call until released,
+     * then fails the call when told to.
      *
      * @param  bool  $childFails
      * @return void
@@ -561,8 +540,8 @@ final class DrainConcurrencyTest extends TestCase
     }
 
     /**
-     * Hold this process just before its claim's update runs, until it is
-     * released, having said it arrived.
+     * Hold this process just before its claim's update, after saying it
+     * arrived, until released.
      *
      * @return void
      */

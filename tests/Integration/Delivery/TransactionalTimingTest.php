@@ -22,13 +22,7 @@ use Tests\TestCase;
 
 /**
  * Integration tests for `transactional()` through the public API, on the engine
- * the suite runs against: atomic with the host's transaction on the storage
- * connection, refused before anything is consumed without one or when naming
- * another connection, and with a failed write that isolates itself in a
- * savepoint when caught and rolls the business change back when left uncaught.
- *
- * Storage is the default connection unless a test defines it as a connection of
- * its own. The second transacting connection needs no tables.
+ * the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,10 +47,10 @@ final class TransactionalTimingTest extends TestCase
     /** @var string The table holding the host's business data. */
     private const string INVOICES = 'timing_invoices';
 
-    /** @var string The message a record is refused with when the storage connection has no transaction open. */
+    /** @var string The refusal when the storage connection has no transaction open. */
     private const string NO_TRANSACTION = 'A transactional record needs a transaction open on the storage connection [%s].';
 
-    /** @var string The message a record is refused with when it names a connection other than the storage connection. */
+    /** @var string The refusal when a record names a connection other than the storage connection. */
     private const string ANOTHER_CONNECTION = 'A transactional record is written on the storage connection [%s], not [%s]; another connection needs the outbox.';
 
     /**
@@ -97,8 +91,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * The record is written inside the host's transaction, seen by it before
-     * the commit, and committed with the business change.
+     * The record is written inside the host's transaction and commits with the
+     * business change.
      *
      * @return void
      */
@@ -139,8 +133,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * The record goes with an inner transaction's rollback, and the outer
-     * transaction's business change commits without it.
+     * An inner rollback takes the record, and the outer business change commits
+     * without it.
      *
      * @return void
      */
@@ -162,7 +156,7 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * A transactional record with no transaction open is refused, and writes
+     * A transactional record with no transaction open is refused and writes
      * nothing.
      *
      * @return void
@@ -180,8 +174,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * A transaction on another connection is not one the record could be atomic
-     * with, so the record is refused.
+     * A transaction on another connection cannot make the record atomic, so it
+     * is refused.
      *
      * @return void
      */
@@ -197,7 +191,7 @@ final class TransactionalTimingTest extends TestCase
 
     /**
      * A record naming another connection is refused, even with a transaction
-     * open on both, because the entries table is not on it.
+     * open on both.
      *
      * @return void
      */
@@ -213,8 +207,7 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * A record naming the storage connection is accepted, as one naming none
-     * is, and atomic with it.
+     * A record naming the storage connection is accepted and atomic with it.
      *
      * @return void
      */
@@ -232,8 +225,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * A refusal consumes nothing: the same builder records once a transaction
-     * is open.
+     * A refusal consumes nothing, so the builder records once a transaction is
+     * open.
      *
      * @return void
      */
@@ -259,9 +252,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * A failed write propagates to the caller, and its savepoint leaves the
-     * host's transaction usable on every engine, PostgreSQL's aborted state
-     * included, so a caller that deliberately carries on can commit its work.
+     * A failed write propagates, and its savepoint leaves the host usable on
+     * every engine.
      *
      * @return void
      */
@@ -293,9 +285,7 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * Left uncaught, a failed write leaves the host's closure, whose
-     * transaction rolls the business change back: the atomicity a caller gets
-     * by not catching it.
+     * An uncaught failed write rolls the host's business change back.
      *
      * @return void
      *
@@ -324,8 +314,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * Whichever is called first, `failClosed()` leaves a transactional record
-     * transactional: it needs the transaction, and goes with its rollback.
+     * `failClosed()` leaves a transactional record transactional, whichever is
+     * called first.
      *
      * @return void
      */
@@ -358,9 +348,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * With a dedicated storage connection the host's transaction on its own
-     * connection is not the one that counts, and the record is refused naming
-     * the storage connection.
+     * With dedicated storage, only the host's transaction open, the record is
+     * refused naming the storage connection.
      *
      * @return void
      */
@@ -376,8 +365,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * With a dedicated storage connection, naming the connection the host
-     * transacts on is naming another connection.
+     * With dedicated storage, naming the host's connection is naming another
+     * connection.
      *
      * @return void
      */
@@ -394,8 +383,8 @@ final class TransactionalTimingTest extends TestCase
     }
 
     /**
-     * With a dedicated storage connection the record is atomic with a
-     * transaction on that connection, and untouched by one on the host's.
+     * With dedicated storage the record is atomic with that connection's
+     * transaction, untouched by the host's.
      *
      * @return void
      */
@@ -420,7 +409,7 @@ final class TransactionalTimingTest extends TestCase
 
     /**
      * Register the second transacting connection and the dedicated storage
-     * connection, each with a table prefix of its own.
+     * connection, each with its own table prefix.
      *
      * @param  mixed  $app
      * @return void

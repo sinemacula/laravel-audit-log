@@ -32,13 +32,7 @@ use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for the receipts on the engine the suite runs against: an
- * attempt counted before each call, a first attempt that falls to an update
- * when a racing owner made the receipt first, a delivery that is never changed
- * again, failures named by class, resets that keep deliveries, and every
- * receipt on the storage connection's writer however the outbox is placed, and
- * a bundle's receipt written only after both of its rows; on SQLite, MySQL and
- * PostgreSQL alike.
+ * Integration tests for the delivery receipts on SQLite, MySQL and PostgreSQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,8 +77,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * Roll back any transaction a failed test left open, then undo what the
-     * test changed and release the clock.
+     * Roll back any open transaction, undo the test's changes and release the
+     * clock.
      *
      * @return void
      */
@@ -108,8 +102,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * A first attempt makes the receipt: one attempt, first made now, not
-     * delivered, and no error named.
+     * A first attempt makes an undelivered receipt with one attempt and no
+     * error.
      *
      * @return void
      */
@@ -129,8 +123,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * Outside a transaction a first attempt opens none: no transaction begins,
-     * and the insert runs at level 0.
+     * Outside a transaction a first attempt opens none.
      *
      * @return void
      */
@@ -155,8 +148,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * Inside a host transaction a first attempt is inserted one level deeper,
-     * in a savepoint, and the host is back at its own level once it succeeds.
+     * Inside a host transaction a first attempt runs in a savepoint, and the
+     * host returns to its own level.
      *
      * @return void
      */
@@ -186,8 +179,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * A later attempt counts one more on the receipt, and keeps when the first
-     * was made.
+     * A later attempt counts one more and keeps when the first was made.
      *
      * @return void
      */
@@ -208,8 +200,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * A first attempt that finds the receipt made already, by a racing owner
-     * that read none either, counts on it instead.
+     * A first attempt that finds a racing owner's receipt counts on it instead.
      *
      * @return void
      */
@@ -225,8 +216,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * Inside a host transaction a racing first attempt rolls back to its own
-     * savepoint, so the host stays usable and commits what it wrote.
+     * A racing first attempt inside a host rolls back only its savepoint, and
+     * the host commits.
      *
      * @return void
      */
@@ -256,8 +247,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * A delivered receipt keeps the time it was first delivered, its attempts
-     * and its cleared error, whatever is asked of it later.
+     * A delivered receipt keeps its delivery time, attempts and cleared error
+     * whatever is asked later.
      *
      * @return void
      */
@@ -319,8 +310,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * An error class is cut on a character boundary, so a multibyte name never
-     * leaves half a character in the column.
+     * An error class is cut on a character boundary, never mid-character.
      *
      * @return void
      */
@@ -339,8 +329,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * A failure reported after a delivery, by a slower owner, never undoes it
-     * or names an error on it.
+     * A failure reported after a delivery never undoes it.
      *
      * @return void
      */
@@ -381,8 +370,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * The receipts of an entry are keyed by destination, each as stored, and
-     * another entry's are not among them.
+     * An entry's receipts are keyed by destination, excluding other entries'.
      *
      * @return void
      */
@@ -436,8 +424,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * Resetting starts an undelivered receipt's attempts again with no error
-     * named, for the entries given and no other.
+     * Resetting clears attempts and errors of undelivered receipts for the
+     * given entries only.
      *
      * @return void
      */
@@ -487,8 +475,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * A list of entries longer than one statement binds is reset in chunks,
-     * every failed receipt of it.
+     * A list of entries longer than one statement binds is reset in chunks.
      *
      * @return void
      */
@@ -527,8 +514,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * With the outbox moved to a connection of its own, the receipts stay on
-     * the storage connection, beside the entries.
+     * With the outbox on its own connection, the receipts stay on the storage
+     * connection.
      *
      * @return void
      */
@@ -547,9 +534,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * On a read/write split a receipt is written to the primary, the replica
-     * never sees it, and the receipts are still read, because they are read
-     * from the writer.
+     * On a read/write split receipts are written to and read from the primary.
      *
      * @return void
      */
@@ -569,8 +554,7 @@ final class ReceiptsTest extends TestCase
 
     /**
      * A receipt holds the six columns of the deliveries table and nothing of
-     * the record: the entry's id, the destination, a count, two times and an
-     * error's class.
+     * the record.
      *
      * @return void
      */
@@ -607,11 +591,8 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * A drained bundle's receipt is marked delivered only after both of its
-     * rows are written, the artifact's then the entry's, inside the transaction
-     * the receipt shares with them: when the receipt is written, the
-     * transaction already holds the entry and its artifact, and once it commits
-     * all three are kept.
+     * A drained bundle's receipt is marked delivered only after its artifact
+     * and entry, in the transaction they share.
      *
      * @return void
      */
@@ -664,8 +645,7 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * What the statement does to a bundle's delivery: inserts its artifact,
-     * inserts its entry, or marks its receipt delivered; otherwise nothing.
+     * What the statement does to a bundle's delivery, or `null`.
      *
      * @param  string  $query
      * @return ?string
@@ -681,9 +661,9 @@ final class ReceiptsTest extends TestCase
     }
 
     /**
-     * The rows of the table whose column holds the id, counted over the
-     * connection's own PDO, so the count is seen inside its open transaction
-     * and is not itself a statement the connection reports.
+     * The rows of the table matching the id, counted over the connection's own
+     * PDO so the count sees its open transaction and is not reported as a
+     * statement.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $table

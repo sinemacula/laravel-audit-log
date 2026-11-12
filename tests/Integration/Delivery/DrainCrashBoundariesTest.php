@@ -40,14 +40,7 @@ use Tests\TestCase;
 
 /**
  * Integration tests for a worker killed by `SIGKILL` at every receipt and
- * delete boundary of a drain: each kill leaves exactly what the boundary says,
- * and once the lease has passed a later drain finishes the work, with one entry
- * row, no outbox row and every receipt delivered. A destination whose receipt
- * says it has the record is not called again, one whose receipt does not may be
- * (a log line can repeat), and a database destination's insert and receipt
- * share a transaction, so a kill between them leaves neither. A kill after the
- * delete loses only the `AuditRecorded` event. A record that kills every worker
- * that takes it is abandoned at its attempts and kept.
+ * delete boundary of a drain, and the later drain that recovers it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -106,7 +99,7 @@ final class DrainCrashBoundariesTest extends TestCase
 
     /**
      * Stop the clock, register the command, point the log destination at its
-     * file, and name each `AuditRecorded` in a file, whichever process says it.
+     * file, and name each `AuditRecorded` in a file.
      *
      * @return void
      */
@@ -134,8 +127,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Put the clock and the outbox back, and remove what the children shared
-     * once the migrations have rolled back.
+     * Reset the clock and the outbox, and remove the children's shared files
+     * after the migrations roll back.
      *
      * @return void
      */
@@ -153,10 +146,8 @@ final class DrainCrashBoundariesTest extends TestCase
 
     /**
      * Rows of `[kill point, destinations, what the kill leaves, calls expected
-     * of each destination by the end]`, one per boundary. A kill point is
-     * before or after the statement its pattern matches. A lone destination is
-     * the bound store itself, so its receipt is under `store`; two are a stack,
-     * so their receipts are under their names.
+     * of each]`; a lone destination's receipt is under `store`, a stack's under
+     * their names.
      *
      * @formatter:off
      *
@@ -232,11 +223,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A worker killed at the boundary leaves what the boundary says, and once
-     * the clock has passed the lease a drain leaves one entry row, no outbox
-     * row and every receipt delivered, having called each destination as often
-     * as it says. `AuditRecorded` is said once, by whichever worker deleted the
-     * row, unless the kill came after that delete, when it is lost.
+     * A kill at each boundary leaves what the boundary says, and a drain after
+     * the lease delivers the record once per destination.
      *
      * @param  array{before?: string, after?: string}  $kill
      * @param  list<string>  $destinations
@@ -266,9 +254,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Each worker killed after its attempt was recorded and before the store
-     * counts on the row and on the receipt, and the drain that finishes counts
-     * as one more.
+     * A worker killed before the store counts its attempt, and the finishing
+     * drain counts one more.
      *
      * @return void
      */
@@ -300,8 +287,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * In the statements a drain runs, each destination's receipt is marked
-     * delivered before the outbox row is deleted.
+     * Each receipt is marked delivered before the outbox row is deleted.
      *
      * @return void
      */
@@ -328,8 +314,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A delivered receipt outlives its row, whether the delete was the last
-     * thing the worker did or the drain ran to its end.
+     * A delivered receipt outlives its row.
      *
      * @return void
      */
@@ -351,8 +336,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Kills at every boundary in turn, each on a record of its own, lose none:
-     * in the end there is one entry for each and no row is left.
+     * Kills at every boundary in turn lose no record.
      *
      * @return void
      */
@@ -378,11 +362,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A record that kills every worker that takes it counts an attempt each
-     * time. With two attempts allowed, the first two workers die calling the
-     * store, and the third finds the row past its attempts and fails it as
-     * abandoned without calling anything. The row is kept, the kill loop ends,
-     * and no drain takes it again.
+     * A record that kills every worker is failed as abandoned at its attempts
+     * and kept.
      *
      * @return void
      */
@@ -418,10 +399,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * A worker killed once its destination has failed and its receipt says so,
-     * before its row is released for a retry, leaves the row claimed and due at
-     * once when its lease has passed; the failure it left is cleared when the
-     * destination delivers.
+     * A kill between a failure and its retry leaves the row due after the
+     * lease, and the failure is cleared on delivery.
      *
      * @return void
      */
@@ -457,9 +436,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * The worker that recovers a row can be killed too: each kill counts, what
-     * the last one left stays, and a third worker finishes without calling a
-     * destination that has the record.
+     * Kills during recovery are counted, and a later worker finishes without
+     * calling destinations that have the record.
      *
      * @return void
      */
@@ -485,10 +463,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * With the outbox on a connection of its own the delete cannot share the
-     * entry's transaction: a kill before it leaves the entry and the delivered
-     * receipt on the storage connection and the row on the other, and a drain
-     * deletes the row without calling the store again.
+     * With the outbox on its own connection, a kill before the delete leaves
+     * the entry, and a drain deletes the row without calling the store.
      *
      * @return void
      */
@@ -526,10 +502,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * On SQLite, move the moved outbox on again, to a file of its own. Two
-     * connections to one file share its one write lock, so a renewal on the
-     * outbox connection, inside the transaction the storage connection holds,
-     * would wait on itself; a separate database server has no such lock.
+     * On SQLite, give the moved outbox a file of its own: two connections to
+     * one file share its write lock, so a renewal would wait on itself.
      *
      * @return void
      */
@@ -551,7 +525,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Run a drain in a child killed at the point given, and assert it was.
+     * Run a drain in a child killed at the given point, and assert it was.
      *
      * @param  array{before?: string, after?: string}  $kill
      * @return void
@@ -564,9 +538,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Assert the row, the entries, the receipts and the destination calls are
-     * what a kill at the boundary leaves. A row left behind has the one attempt
-     * of its one worker and that worker's claim, which nothing released.
+     * Assert the row, entries, receipts and calls are what a kill at the
+     * boundary leaves.
      *
      * @param  string  $id
      * @param  array{row: bool, entries: int, receipts: array<string, array{0: int, 1: bool}>, calls: array<string, int>}  $leaves
@@ -590,8 +563,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Assert the record is safe: one entry row, no outbox row, and every
-     * receipt it has delivered.
+     * Assert one entry row, no outbox row, and every receipt delivered.
      *
      * @param  string  $id
      * @return void
@@ -630,8 +602,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * How many times each destination was called, by name, whichever process
-     * called it.
+     * How many times each destination was called, by name, in any process.
      *
      * @return array<string, int>
      */
@@ -651,8 +622,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * The map in key order, so two are compared whatever order they were built
-     * in.
+     * The map in key order, so maps compare whatever order they were built in.
      *
      * @template TValue
      *
@@ -667,8 +637,8 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * Bind the store the names describe: a lone destination as the store
-     * itself, and more as a stack of them under their names.
+     * Bind a lone destination as the store, or several as a stack under their
+     * names.
      *
      * @param  list<string>  $names
      * @return void
@@ -685,9 +655,7 @@ final class DrainCrashBoundariesTest extends TestCase
     }
 
     /**
-     * The real store of the name, the database or a log on its own file, that
-     * names each call in a file first, whichever process makes it, and says
-     * what the real store says of itself.
+     * The named real store, wrapped to log each call to a file first.
      *
      * @param  string  $name
      * @return \Tests\Fixtures\Stores\CallbackStore

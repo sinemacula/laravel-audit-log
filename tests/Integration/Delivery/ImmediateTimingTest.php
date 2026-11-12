@@ -24,13 +24,7 @@ use Tests\TestCase;
 
 /**
  * Integration tests for `immediately()` and `failClosed()` through the public
- * API, on the engine the suite runs against: the record is written before
- * `record()` returns, inside the host's transaction on a shared connection and
- * outside it on a dedicated one, and `AuditRecorded` says only that the store
- * accepted it.
- *
- * Storage is the default connection unless a test defines it as a connection of
- * its own.
+ * API, on the engine the suite runs against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -90,7 +84,7 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * Inside a transaction the record is written before `record()` returns, and
+     * Inside a transaction the record is written before `record()` returns and
      * outlasts the commit.
      *
      * @return void
@@ -122,8 +116,7 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * On a shared connection the write is inside the host's transaction, so the
-     * savepoint isolates its failure but the host's rollback takes the record.
+     * On a shared connection the host's rollback takes the record.
      *
      * @return void
      */
@@ -141,8 +134,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * On a shared connection an inner rollback takes the record too, with the
-     * outer transaction still open.
+     * On a shared connection an inner rollback takes the record, with the outer
+     * transaction still open.
      *
      * @return void
      */
@@ -160,9 +153,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * On a dedicated connection the host's transaction is not open where the
-     * record is written, so the record outlives the host's rollback, and the
-     * business change does not.
+     * On a dedicated connection the record survives the host's rollback, and
+     * the business change does not.
      *
      * @return void
      */
@@ -185,9 +177,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * Under the `throw` mode a failed write propagates to the caller, and its
-     * savepoint leaves the host's transaction usable on every engine,
-     * PostgreSQL's aborted state included.
+     * Under the `throw` mode a failed write propagates, and its savepoint
+     * leaves the host usable on every engine.
      *
      * @return void
      */
@@ -214,9 +205,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * On a dedicated connection, under the `throw` mode, a failed write
-     * propagates to the caller and the host's transaction, on a connection it
-     * never touched, carries on.
+     * On a dedicated connection a failed write propagates under the `throw`
+     * mode and the host's transaction carries on.
      *
      * @return void
      */
@@ -240,8 +230,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * A fail-closed record with no timing of its own is written now, inside the
-     * open transaction and not after its commit.
+     * A fail-closed record with no timing of its own is written inside the open
+     * transaction.
      *
      * @return void
      */
@@ -259,8 +249,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * A fail-closed record's failed write reaches the caller at the call, where
-     * it can still decide the host's transaction, not at the commit.
+     * A fail-closed record's failed write reaches the caller at the call, not
+     * at the commit.
      *
      * @return void
      */
@@ -279,8 +269,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * On a dedicated connection a fail-closed record is durable when `record()`
-     * returns, so it outlives the host's rollback.
+     * On a dedicated connection a fail-closed record survives the host's
+     * rollback.
      *
      * @return void
      */
@@ -298,9 +288,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * `AuditRecorded` is dispatched while the host's transaction is open, so it
-     * says the store accepted the record, and the record can still go with the
-     * host's rollback.
+     * `AuditRecorded` is dispatched before the host commits, so the record can
+     * still go with a rollback.
      *
      * @return void
      */
@@ -325,9 +314,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * An immediate record is delivered once and not again when the host
-     * commits, a second write of which the store would quietly resolve as a
-     * duplicate, so only the notification shows it.
+     * An immediate record is dispatched once, and not again when the host
+     * commits.
      *
      * @return void
      */
@@ -349,8 +337,7 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * Register the dedicated storage connection, with a table prefix of its
-     * own.
+     * Register the dedicated storage connection with its own table prefix.
      *
      * @param  mixed  $app
      * @return void
@@ -414,8 +401,8 @@ final class ImmediateTimingTest extends TestCase
     }
 
     /**
-     * Run a capture that records into the probe table, which fails on its `NOT
-     * NULL` column with the engine's own `QueryException`, sanitised.
+     * Run a capture into the probe table, which fails on its `NOT NULL` column
+     * with the engine's `QueryException`, sanitised.
      *
      * @param  \Closure(): \SineMacula\Laravel\AuditLog\Records\AuditRecord  $capture
      * @return void

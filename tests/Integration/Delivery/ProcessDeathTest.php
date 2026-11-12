@@ -27,17 +27,7 @@ use Tests\TestCase;
 
 /**
  * Integration tests for a process killed by `SIGKILL` around a host's commit,
- * on the engine the suite runs against and with no test wrapper transaction: in
- * outbox mode a record exists exactly when its transaction committed, so a kill
- * after the commit leaves a row a later drain delivers, unchanged, and a
- * rollback or a kill before the commit leaves none. A drain killed mid-way
- * leaves the row for a later one.
- *
- * In sync mode the gap the documentation states is real: an after-commit record
- * is written by a commit callback, so a process that dies between the commit
- * and that callback keeps the business change and loses the record. The outbox
- * closes the gap on its own connection, and an outbox on another connection
- * keeps it.
+ * with no test wrapper transaction, in outbox and sync modes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -99,8 +89,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * Put the clock and the outbox back, drop the host's table, and remove what
-     * the children shared once the migrations have rolled back.
+     * Reset the clock and the outbox, drop the host's table, and remove the
+     * children's shared files after the migrations roll back.
      *
      * @return void
      */
@@ -119,9 +109,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * A process that commits a business change with an after-commit record and
-     * is killed at once, before any commit callback has run, leaves the change
-     * and one outbox row, and a later drain gives one entry and leaves no row.
+     * A process killed right after committing, before any callback, leaves the
+     * change and one row that a drain delivers once.
      *
      * @return void
      */
@@ -151,8 +140,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * A transaction the process rolls back before it is killed leaves neither
-     * the change nor a row, so a drain has nothing to deliver.
+     * A transaction rolled back before the kill leaves neither the change nor a
+     * row.
      *
      * @return void
      */
@@ -178,9 +167,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * A process killed once its row is inserted, before its commit, leaves
-     * neither the change nor the row: the engine rolls the open transaction
-     * back when the process is gone.
+     * A process killed after its insert but before its commit leaves neither
+     * the change nor the row.
      *
      * @return void
      */
@@ -206,9 +194,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * With an inner transaction rolled back and the outer committed, only the
-     * outer's record outlives the kill: the inner's row went with its
-     * savepoint.
+     * With an inner rollback and an outer commit, only the outer's row survives
+     * the kill.
      *
      * @return void
      */
@@ -240,8 +227,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * An immediate record with no transaction open commits by itself, so a kill
-     * straight after its insert leaves its row for a drain.
+     * An immediate record with no transaction open survives a kill after its
+     * insert.
      *
      * @return void
      */
@@ -262,8 +249,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * An immediate record inside a host has not committed when its insert
-     * returns, so a kill before the host's commit takes the row with the host.
+     * An immediate record inside a host goes with the host when killed before
+     * its commit.
      *
      * @return void
      */
@@ -285,8 +272,7 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * With the callbacks run and only then a kill, a sync record is written
-     * too: what separates it from the gap above is only where the kill falls.
+     * A sync record is written when the kill comes after the callbacks.
      *
      * @return void
      */
@@ -299,9 +285,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * A transactional record in outbox mode has committed with its host, so a
-     * kill straight after the commit, before any callback, leaves the change
-     * and the row.
+     * A transactional outbox row survives a kill after the commit, before any
+     * callback.
      *
      * @return void
      */
@@ -325,9 +310,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * A transactional record in sync mode is an entry inside the host's own
-     * transaction, so it needs no callback and no drain to outlive a kill
-     * before any callback has run.
+     * A sync transactional entry survives a kill after the commit, needing no
+     * callback or drain.
      *
      * @return void
      */
@@ -346,9 +330,7 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * The row a killed process left is delivered as it was finalised there:
-     * every column of the entry a later process stores encodes to the bytes of
-     * the envelope, with the time and signature the killed process gave it,
+     * A killed process's row drains to the same bytes it was finalised with,
      * however hostile its values.
      *
      * @return void
@@ -392,9 +374,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * A drain killed while it delivers a row leaves that row claimed and counts
-     * its attempt: another drain leaves it alone until the lease has passed,
-     * then delivers it once.
+     * A drain killed mid-delivery leaves the row claimed with its attempt
+     * counted, delivered once after the lease.
      *
      * @return void
      */
@@ -433,10 +414,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * A kill between the commit and its callbacks falls before the write: in
-     * sync mode the business change stands and the record is lost, which is the
-     * gap the documentation states. In outbox mode the row committed with the
-     * change, so the same kill loses nothing.
+     * A kill between the commit and its callbacks loses a sync record, the
+     * documented gap, but no outbox row.
      *
      * @return void
      */
@@ -463,8 +442,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * The gap remains for an outbox on another connection, whose row a record
-     * can only write once the host has committed: the same kill loses it.
+     * An outbox on another connection keeps the gap: the same kill loses the
+     * record.
      *
      * @return void
      */
@@ -481,8 +460,7 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * Put the default connection on a file on SQLite, so a child and its parent
-     * share it.
+     * Put the default connection on a SQLite file a child and its parent share.
      *
      * @param  mixed  $app
      * @return void
@@ -496,8 +474,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * In a child: commit a business change with an after-commit record, killed
-     * at the kill point set on the child, between the commit and its callbacks.
+     * In a child, commit a business change with an after-commit record, killed
+     * between the commit and its callbacks.
      *
      * @return void
      */
@@ -512,8 +490,8 @@ final class ProcessDeathTest extends TestCase
     }
 
     /**
-     * In a child: record the builder and name the record in the shared file, so
-     * the parent knows its id whatever then kills the child.
+     * In a child, record the builder and name the record in the shared file
+     * before anything can kill it.
      *
      * @param  \SineMacula\Laravel\AuditLog\Records\PendingRecord  $builder
      * @return void
