@@ -46,7 +46,7 @@ final class DeliveryTables
      */
     public static function outboxTable(): string
     {
-        return self::table(self::OUTBOX_TABLE, self::DEFAULT_OUTBOX);
+        return EntrySettings::configuredTable(self::OUTBOX_TABLE, self::DEFAULT_OUTBOX);
     }
 
     /**
@@ -59,7 +59,7 @@ final class DeliveryTables
      */
     public static function deliveriesTable(): string
     {
-        return self::table(self::DELIVERIES_TABLE, self::DEFAULT_DELIVERIES);
+        return EntrySettings::configuredTable(self::DELIVERIES_TABLE, self::DEFAULT_DELIVERIES);
     }
 
     /**
@@ -91,32 +91,5 @@ final class DeliveryTables
     public static function resolvedOutboxConnection(): string
     {
         return self::outboxConnection() ?? Config::string('database.default');
-    }
-
-    /**
-     * The table setting under the key, or the default, refused unless every
-     * index name the migrations derive from it fits.
-     *
-     * @param  string  $key
-     * @param  string  $default
-     * @return string
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function table(string $key, string $default): string
-    {
-        $table = Config::get($key, $default);
-
-        if (!is_string($table) || preg_match(EntrySettings::TABLE_PATTERN, $table) !== 1) {
-            $message = sprintf(
-                '`%s` must be a table name of 1 to %d lower-case letters, digits and underscores that does not start with a digit.',
-                $key,
-                EntrySettings::MAX_TABLE_CHARACTERS,
-            );
-
-            throw new \InvalidArgumentException($message);
-        }
-
-        return $table;
     }
 }

@@ -27,9 +27,6 @@ final readonly class EngineChecks
     /** @var list<string> The SQL modes, either of which makes MySQL refuse a value that does not fit. */
     private const array STRICT_MODES = ['STRICT_TRANS_TABLES', 'STRICT_ALL_TABLES'];
 
-    /** @var string The storage engine the entries table must use on MySQL. */
-    private const string ENGINE = 'InnoDB';
-
     /** @var string The problem of a connection that cannot be built or opened. */
     private const string UNOPENED = 'The %s connection [%s] could not be opened (%s).';
 
@@ -152,7 +149,7 @@ final readonly class EngineChecks
             false,
         );
 
-        if (is_string($engine) && strcasecmp($engine, self::ENGINE) !== 0) {
+        if (is_string($engine) && strcasecmp($engine, 'InnoDB') !== 0) {
             $problems[] = sprintf('The entries table uses the %s engine; it must use InnoDB.', $engine);
         }
 

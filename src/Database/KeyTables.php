@@ -36,9 +36,6 @@ final class KeyTables
     /** @var string The key uses table's full key. */
     private const string KEY_USES_TABLE = 'audit-log.privacy.key_uses_table';
 
-    /** @var string What a malformed table name is refused with: its key, then the longest name. */
-    private const string MALFORMED = '`%s` must be a table name of 1 to %d lower-case letters, digits and underscores that does not start with a digit.';
-
     /**
      * Disallow instantiation; utility container only.
      */
@@ -108,14 +105,6 @@ final class KeyTables
     {
         $table = Config::get($key);
 
-        if ($table === null || $table === '') {
-            return $default;
-        }
-
-        if (is_string($table) && preg_match(EntrySettings::TABLE_PATTERN, $table) === 1) {
-            return $table;
-        }
-
-        throw new \InvalidArgumentException(sprintf(self::MALFORMED, $key, EntrySettings::MAX_TABLE_CHARACTERS));
+        return $table === null || $table === '' ? $default : EntrySettings::configuredTable($key, $default);
     }
 }

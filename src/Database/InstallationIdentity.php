@@ -95,7 +95,7 @@ final readonly class InstallationIdentity
      */
     public function check(): void
     {
-        $value = self::present($this->valueThrough(StorageConnection::resolvedName()));
+        $value = $this->valueThrough(StorageConnection::resolvedName()) ?? throw new \UnexpectedValueException(self::ABSENT);
 
         $this->confirmAgainst(self::wellFormed($value));
     }
@@ -208,19 +208,6 @@ final readonly class InstallationIdentity
     private function state(string $connection): Builder
     {
         return $this->database->connection($connection)->table(IntegrityTables::stateTable())->useWritePdo();
-    }
-
-    /**
-     * The stored value, refused as absent when there is none.
-     *
-     * @param  ?string  $value
-     * @return string
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function present(?string $value): string
-    {
-        return $value ?? throw new \UnexpectedValueException(self::ABSENT);
     }
 
     /**

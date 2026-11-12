@@ -51,7 +51,7 @@ final class EntrySettings
      */
     public static function table(): string
     {
-        return self::named(self::KEY, self::DEFAULT_TABLE);
+        return self::configuredTable(self::KEY, self::DEFAULT_TABLE);
     }
 
     /**
@@ -63,7 +63,7 @@ final class EntrySettings
      */
     public static function artifactsTable(): string
     {
-        return self::named(self::ARTIFACTS_KEY, self::DEFAULT_ARTIFACTS_TABLE);
+        return self::configuredTable(self::ARTIFACTS_KEY, self::DEFAULT_ARTIFACTS_TABLE);
     }
 
     /**
@@ -76,7 +76,7 @@ final class EntrySettings
      *
      * @throws \InvalidArgumentException
      */
-    private static function named(string $key, string $default): string
+    public static function configuredTable(string $key, string $default): string
     {
         $table = Config::get($key, $default);
 
