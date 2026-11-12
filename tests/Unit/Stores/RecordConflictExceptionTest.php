@@ -9,11 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Stores\RecordConflictException;
 
 /**
- * Unit tests for the record conflict exception: the messages naming the id of
- * an entry with different content, of one that fails verification, of a bulk
- * record stored with another artifact or without its own and of a record
- * retention has already pruned, the id it keeps for a caller, and the class it
- * specialises.
+ * Unit tests for the record conflict exception's messages and the id it keeps.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,8 +23,7 @@ final class RecordConflictExceptionTest extends TestCase
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
 
     /**
-     * The exception for different content names the id in its message and keeps
-     * it.
+     * The different-content exception names the id and keeps it.
      *
      * @return void
      */
@@ -43,8 +38,7 @@ final class RecordConflictExceptionTest extends TestCase
     }
 
     /**
-     * The exception for a row that fails verification names the id in its
-     * message and keeps it.
+     * The unverified-row exception names the id and keeps it.
      *
      * @return void
      */
@@ -59,9 +53,7 @@ final class RecordConflictExceptionTest extends TestCase
     }
 
     /**
-     * The exception for a bulk record stored with another artifact, or without
-     * its own, names only the id in its message, never anything of either
-     * artifact, and keeps it.
+     * The different-artifact exception names only the id and keeps it.
      *
      * @return void
      */
@@ -77,8 +69,7 @@ final class RecordConflictExceptionTest extends TestCase
     }
 
     /**
-     * The exception for a record retention has already pruned names only the id
-     * in its message, says it is not stored again, and keeps the id.
+     * The pruned-record exception names only the id: it is not stored again.
      *
      * @return void
      */
@@ -106,8 +97,7 @@ final class RecordConflictExceptionTest extends TestCase
     }
 
     /**
-     * The exception is a final runtime exception, never an invalid argument:
-     * the record is well formed, and the stored entry is what disagrees.
+     * It is a final runtime exception: the stored entry disagrees.
      *
      * @return void
      */

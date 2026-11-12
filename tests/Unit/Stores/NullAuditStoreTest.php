@@ -14,9 +14,7 @@ use SineMacula\Laravel\AuditLog\Stores\NullAuditStore;
 use Tests\Fixtures\Records\RecordFactory;
 
 /**
- * Unit tests for the store that keeps nothing: every call succeeds, it never
- * says it is durable or joins a transaction, and it accepts a bulk record's
- * attachment, keeping nothing of it either.
+ * Unit tests for the store that keeps nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,8 +25,7 @@ use Tests\Fixtures\Records\RecordFactory;
 final class NullAuditStoreTest extends TestCase
 {
     /**
-     * Storing a record succeeds, every time, and the store holds nothing
-     * afterwards: it has no state at all.
+     * Storing a record always succeeds and leaves the store without state.
      *
      * @return void
      */
@@ -46,9 +43,7 @@ final class NullAuditStoreTest extends TestCase
     }
 
     /**
-     * It accepts attachments, since it keeps nothing of any record, so nothing
-     * of a bulk record is lost more than of another; storing a bundle succeeds
-     * and keeps nothing.
+     * It accepts attachments, since it keeps nothing of any record.
      *
      * @return void
      */
@@ -75,8 +70,7 @@ final class NullAuditStoreTest extends TestCase
     }
 
     /**
-     * Rows of `[connection]`: the default test connection, another and an empty
-     * name.
+     * Rows of `[connection]`: the test connection, another and an empty name.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -102,8 +96,7 @@ final class NullAuditStoreTest extends TestCase
     }
 
     /**
-     * The record is marked sensitive, so a failure raised beneath the store
-     * shows no value of it in a trace.
+     * The record is marked sensitive, so no trace shows a value of it.
      *
      * @return void
      */

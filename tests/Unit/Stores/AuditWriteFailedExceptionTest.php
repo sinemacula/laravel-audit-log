@@ -14,9 +14,7 @@ use SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics;
 use Tests\Concerns\SearchesForSecrets;
 
 /**
- * Unit tests for the exception that stands in for a failed write: the message
- * it builds from the diagnostics alone, the fields it keeps, that it has no
- * previous exception, and that it holds nothing of the failure it replaces.
+ * Unit tests for the exception that stands in for a failed write's exception.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,9 +34,7 @@ final class AuditWriteFailedExceptionTest extends TestCase
     private const string STORE = 'SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore';
 
     /**
-     * Rows of `[diagnostics, message]`: every optional field, none, and each on
-     * its own, so a field left out of the message, or named when it is not
-     * known, fails.
+     * Rows of `[diagnostics, message]`: all optional fields, none, each alone.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics, 1: string}>
      */
@@ -80,8 +76,7 @@ final class AuditWriteFailedExceptionTest extends TestCase
     }
 
     /**
-     * The message names the record, its code when known, the operation, the
-     * store and the exception's class, then each known detail in a fixed order.
+     * The message names each known field of the diagnostics in a fixed order.
      *
      * @param  \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics  $diagnostics
      * @param  string  $message
@@ -94,8 +89,7 @@ final class AuditWriteFailedExceptionTest extends TestCase
     }
 
     /**
-     * Each field of the diagnostics is kept under its own name, the operation
-     * as its value.
+     * Each field of the diagnostics is kept, the operation as its value.
      *
      * @return void
      */
@@ -128,8 +122,7 @@ final class AuditWriteFailedExceptionTest extends TestCase
     }
 
     /**
-     * The exception has no previous exception, so nothing reaches the failure
-     * it replaces.
+     * It has no previous exception, so nothing of the failure is chained to it.
      *
      * @return void
      */
@@ -139,9 +132,7 @@ final class AuditWriteFailedExceptionTest extends TestCase
     }
 
     /**
-     * Built from a query exception whose message, SQL, bindings, driver message
-     * and previous exception hold the secret, the exception holds none of it,
-     * in its message, its properties or its trace.
+     * No value of the failure reaches the message, the properties or the trace.
      *
      * @return void
      */
@@ -163,8 +154,7 @@ final class AuditWriteFailedExceptionTest extends TestCase
     }
 
     /**
-     * The exception is a final runtime exception, never an invalid argument:
-     * the record is well formed, and the write is what failed.
+     * It is a final runtime exception: the write failed, not the record.
      *
      * @return void
      */
@@ -178,8 +168,7 @@ final class AuditWriteFailedExceptionTest extends TestCase
     }
 
     /**
-     * The exception for the failure, built where the failure is a frame's
-     * argument, as the write path builds it.
+     * The exception for the failure, built as the write path builds it.
      *
      * @param  \Throwable  $failure
      * @return \SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException

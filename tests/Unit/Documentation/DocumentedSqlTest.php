@@ -12,24 +12,8 @@ use SineMacula\Laravel\AuditLog\Console\TableShape;
 use Tests\Concerns\RunsDocumentedSql;
 
 /**
- * A drift guard for the grants and triggers the storage note documents as SQL:
- * each of the eleven blocks is marked and found by its marker alone, names no
- * database or user but the placeholders, grants exactly the documented
- * privileges and nothing that changes the schema, grants each of the writer,
- * the maintenance user and the verifier what the role matrix says, and creates
- * exactly the documented triggers; each engine's checkpoints and import batches
- * triggers guard every immutable column and no column written later, the lock's
- * guards its id alone, and the journal's refuse everything; the artifacts' and
- * the holds' triggers are the entries' own; the SQLite prune takes the lock
- * first and recreates the very triggers it drops; each engine's key blocks
- * grant no role a delete, let the maintenance user update a key's four mutable
- * columns alone, refuse every change of a key use or a marker, and hold a key
- * to its immutable columns and its three transitions; the note states what it
- * must, in its own section, in order; and it lists the entries' indexes as the
- * schema checks expect them.
- *
- * The integration tests run the same blocks against each engine; this test
- * holds them to what the note says on any engine, SQLite included.
+ * A drift guard for the grants and triggers the storage note documents as SQL;
+ * the integration tests run the same blocks on each engine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -170,10 +154,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The scanner returns the block straight after the marker, past blank lines
-     * only, and nothing for a marker that is absent, repeated, followed by
-     * prose or a block of another language, or only the start of another
-     * marker.
+     * The scanner returns only an SQL block straight after a unique marker.
      *
      * @return void
      */
@@ -236,8 +217,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * A marker the storage note does not have fails the test that asks for it,
-     * naming the marker.
+     * A missing marker fails the test, naming the marker.
      *
      * @return void
      */
@@ -250,8 +230,8 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[marker, names]`: each block with the names it uses in a user or
-     * database position, which are placeholders alone.
+     * Rows of `[marker, names]`: each block's user and database names,
+     * placeholders only.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */
@@ -274,8 +254,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Every block names no database and no user but the placeholders, which a
-     * reader replaces with their own.
+     * Every block names no database or user but the placeholders.
      *
      * @param  string  $marker
      * @param  list<string>  $names
@@ -288,9 +267,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The name scanner finds a name in every user or database position the
-     * blocks use, quoted or not, and none in a message, a column or a value a
-     * statement sets.
+     * The name scanner finds each user or database name, none in values.
      *
      * @return void
      */
@@ -314,8 +291,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[statement]`: what the storage note must state about the grants
-     * and triggers, however its lines are wrapped.
+     * Rows of `[statement]`: what the note must state of grants and triggers.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -413,9 +389,8 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The storage note has its grants and triggers section, then the seams it
-     * leaves, between the failure and edge cases and the implementation
-     * anchors.
+     * The grants and triggers section and the seams sit before the
+     * implementation anchors.
      *
      * @return void
      */
@@ -429,9 +404,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The storage note's table of the entries' indexes lists each index the
-     * schema checks expect, by its suffix, with its columns in order and its
-     * uniqueness, and no other.
+     * The storage note lists exactly the indexes the schema checks expect.
      *
      * @return void
      */
@@ -467,10 +440,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine's checkpoints update trigger guards exactly the 17 immutable
-     * columns, in order, and no anchor column: on MySQL a null-safe comparison
-     * of each old and new value, on PostgreSQL the old and new rows compared
-     * with `IS DISTINCT FROM`, and on SQLite the columns an update names.
+     * Each engine's checkpoints update trigger guards the 17 immutable columns.
      *
      * @param  string  $marker
      * @return void
@@ -490,8 +460,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[marker, triggers]`: each block that creates triggers, with the
-     * name and table of each, in order.
+     * Rows of `[marker, triggers]`: each block's triggers, name and table.
      *
      * @return iterable<string, array{0: string, 1: array<string, string>}>
      */
@@ -510,11 +479,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine creates an update and a delete trigger on each of the eight
-     * tables, and PostgreSQL a truncate trigger on each too, each named after
-     * its table, but for SQLite's holds, which have no delete trigger; the
-     * SQLite prune creates the entries' and the artifacts' delete triggers
-     * alone.
+     * Each engine creates the documented triggers on every table.
      *
      * @param  string  $marker
      * @param  array<string, string>  $triggers
@@ -527,10 +492,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The PostgreSQL triggers call the two documented functions: the entries',
-     * the artifacts' and the holds' delete triggers the one that lets the
-     * maintenance user through, by `current_user`, and every other trigger the
-     * one that refuses everyone; the truncate triggers fire once per statement.
+     * The PostgreSQL triggers call the documented allow and refuse functions.
      *
      * @return void
      */
@@ -551,8 +513,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[marker, grants]`: each grants block with every grant it makes,
-     * as its privileges, its object and its grantees.
+     * Rows of `[marker, grants]`: each grants block's privileges and grantees.
      *
      * @return iterable<string, array{0: string, 1: list<array{0: string, 1: string, 2: string}>}>
      */
@@ -616,14 +577,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each grants block makes exactly the documented grants: the writer may
-     * read and insert the entries, the artifacts and the evidence, update the
-     * anchor columns alone, keep the state table, read the journal and the
-     * holds, and insert an import batch and update its progress alone; the
-     * maintenance user may read and delete the entries, the artifacts and the
-     * receipts, read the evidence, the state and the outbox, insert the
-     * journal, insert and delete a hold and update the lock's token and time;
-     * the verifier may read the evidence and the journal and keep the state.
+     * Each grants block makes exactly the documented grants for each role.
      *
      * @param  string  $marker
      * @param  list<array{0: string, 1: string, 2: string}>  $grants
@@ -649,9 +603,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * No grant gives a privilege that changes the schema, drops or truncates a
-     * table or creates a trigger, and none can be passed on; every statement of
-     * a grants block is a grant.
+     * No grant changes the schema or is grantable; every statement is a grant.
      *
      * @param  string  $marker
      * @return void
@@ -670,11 +622,8 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The SQLite prune runs in one immediate transaction: it drops the delete
-     * triggers of the tables a prune deletes from that have one, the entries'
-     * and the artifacts', leaves the line where the prune's own statements go,
-     * recreates each trigger exactly as the triggers block creates it, and
-     * commits.
+     * The SQLite prune drops and recreates the documented delete triggers in
+     * one transaction.
      *
      * @return void
      */
@@ -703,10 +652,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The SQLite prune takes the lifecycle lock before anything else: the
-     * statement straight after `BEGIN IMMEDIATE` updates the lock's one row,
-     * writing its token and its time alone, before any trigger is dropped, and
-     * the lock is named nowhere else.
+     * The SQLite prune takes the lifecycle lock before anything else.
      *
      * @return void
      */
@@ -725,9 +671,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine's import batches update trigger guards exactly the immutable
-     * batch columns, in order, and none of the columns the writer updates as an
-     * import runs.
+     * Each engine's import batches update trigger guards the immutable columns.
      *
      * @param  string  $marker
      * @return void
@@ -747,9 +691,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine's lock update trigger guards the lock's `id` alone, so a
-     * lifecycle transaction writes its token and its time, and the row is never
-     * renumbered.
+     * Each engine's lock update trigger guards the lock's `id` alone.
      *
      * @param  string  $marker
      * @return void
@@ -769,9 +711,8 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine's journal triggers are the members' own, with only the
-     * table's name changed: a journal row is never updated or deleted, with no
-     * condition, no column list and no maintenance exception.
+     * Each engine's journal triggers refuse every update and delete,
+     * unconditionally.
      *
      * @param  string  $marker
      * @return void
@@ -791,8 +732,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[marker, suffixes]`: each engine's triggers, with the suffix of
-     * each trigger the holds get.
+     * Rows of `[marker, suffixes]`: each engine's triggers for the holds.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */
@@ -806,10 +746,8 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine's holds triggers are the entries' own, with only the table's
-     * name changed: a hold is never updated, and is deleted by the maintenance
-     * user alone; SQLite, which has no users, has no holds delete trigger, so a
-     * release can delete one.
+     * Each engine's holds triggers are the entries' own; SQLite has no holds
+     * delete trigger, so a release can delete one.
      *
      * @param  string  $marker
      * @param  list<string>  $suffixes
@@ -830,10 +768,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Every column of the checkpoints, the import batches and the lock is
-     * either guarded by its update trigger or one the triggers leave writable,
-     * exactly as the shapes the schema checks hold, so a column added to a
-     * migration fails here until the triggers say which it is.
+     * Every guarded table's column is guarded or writable, as the schema holds.
      *
      * @return void
      */
@@ -848,9 +783,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The storage note's role matrix has a column for each of the writer, the
-     * maintenance user and the verifier, and a row for each table the shipped
-     * migrations create, under its default name, in order.
+     * The role matrix has a column per user and a row per shipped table.
      *
      * @return void
      */
@@ -867,10 +800,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine's grants block and its key block together give each user, on
-     * each table, exactly the privileges the role matrix lists, and nothing on
-     * a table the matrix gives the user none of; the grants the writer needs
-     * only in outbox mode are in no block.
+     * Each engine's grants give each user exactly what the role matrix lists.
      *
      * @param  string  $marker
      * @return void
@@ -894,10 +824,8 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each grants block lets the maintenance user alone delete, and only from
-     * the tables a prune deletes from and the holds a release deletes; the
-     * writer deletes from the integrity state alone, for the sweep, and the
-     * verifier deletes nothing.
+     * Only the maintenance user deletes, from pruned tables and holds; the
+     * writer deletes only the sweep's state.
      *
      * @param  string  $marker
      * @return void
@@ -923,8 +851,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[marker, suffixes]`: each engine's triggers, with the suffix of
-     * each trigger the entries and the artifacts get.
+     * Rows of `[marker, suffixes]`: each engine's entry and artifact triggers.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */
@@ -938,10 +865,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine's artifacts triggers are the entries' own, with only the
-     * table's name changed: an update of an artifact is refused always, with no
-     * condition and no column list, and a delete is refused but for the
-     * maintenance user exactly as an entry's is (on SQLite, refused always).
+     * Each engine's artifacts triggers are the entries' own, renamed.
      *
      * @param  string  $marker
      * @param  list<string>  $suffixes
@@ -972,12 +896,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The role matrix has a row for each key table, after the others, giving
-     * the writer `SELECT` and `INSERT` on the keys and the key uses and only
-     * `SELECT` on the markers, the maintenance user `SELECT` on the keys with
-     * `UPDATE` of the four mutable columns named, `SELECT` and `INSERT` on the
-     * markers and `SELECT` on the key uses, and the verifier `SELECT` on all
-     * three; the columns the matrix names are the ones the key blocks grant.
+     * The role matrix has a row per key table, as the key blocks grant.
      *
      * @return void
      */
@@ -1002,8 +921,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[marker, grants]`: each key grants block with every grant it
-     * makes, as its privileges, its object and its grantees.
+     * Rows of `[marker, grants]`: each key grants block's grants.
      *
      * @return iterable<string, array{0: string, 1: list<array{0: string, 1: string, 2: string}>}>
      */
@@ -1038,10 +956,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine with users documents its key grants in a block of its own,
-     * after the others, that grants exactly the documented privileges on the
-     * key tables alone, every statement a grant, none of them a delete, a
-     * privilege that changes the schema or one that can be passed on.
+     * Each key grants block grants exactly the documented privileges.
      *
      * @param  string  $marker
      * @param  list<array{0: string, 1: string, 2: string}>  $grants
@@ -1066,8 +981,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Rows of `[marker, suffixes]`: each engine's key triggers, with the suffix
-     * of each trigger every key table gets.
+     * Rows of `[marker, suffixes]`: each engine's key trigger suffixes.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */
@@ -1081,14 +995,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each engine documents its key triggers in a block of its own: each key
-     * table gets an update and a delete trigger, and on PostgreSQL a truncate
-     * trigger, named after it; the key uses' and the markers' refuse every
-     * change, as the members' do; and the subject keys' update trigger guards
-     * the eleven immutable columns in order and none of the four mutable ones,
-     * refuses an erased key, allows the three transitions alone, and lets the
-     * maintenance user alone through on MySQL and PostgreSQL, while SQLite,
-     * which has no users, checks no role.
+     * Each engine's key triggers freeze key uses and markers, and guard keys.
      *
      * @param  string  $marker
      * @param  list<string>  $suffixes
@@ -1155,10 +1062,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The script splitter ends a statement at a line ending with the delimiter
-     * in force, `;` until a `DELIMITER` line declares another, keeps a body's
-     * own semicolons under another delimiter, drops comment lines and empty
-     * statements, and keeps a last statement with no delimiter.
+     * The script splitter honours `DELIMITER`, comments and a final statement.
      *
      * @return void
      */
@@ -1206,9 +1110,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The names given replace their placeholders as whole words only, quoted or
-     * qualified, leave a longer word and any placeholder not given as it is,
-     * and with no names the SQL is unchanged.
+     * Names replace their placeholders as whole words only.
      *
      * @return void
      */
@@ -1237,11 +1139,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Assert the engine's key block refuses every change of a key use and a
-     * marker and every delete of a key, with no condition: on MySQL and SQLite
-     * each such trigger is the checkpoint members' own with the table renamed,
-     * and on PostgreSQL every trigger but the subject keys' update calls the
-     * one refusing function the block creates, a truncate once per statement.
+     * Assert the key block refuses every key use, marker change and key delete.
      *
      * @param  string  $engine
      * @param  string  $sql
@@ -1283,9 +1181,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The lists of columns the subject keys' update trigger holds unchanged, as
-     * the engine writes them: the old and new columns of each null-safe
-     * comparison on MySQL and SQLite, and the old and new rows on PostgreSQL.
+     * The column lists the subject keys' update trigger holds, per engine.
      *
      * @param  string  $engine
      * @param  string  $trigger
@@ -1309,8 +1205,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Each trigger of the tables, by its name, with the table it is on, for
-     * each suffix in order within each table.
+     * Each trigger of the tables by name, with its table, per suffix in order.
      *
      * @param  list<string>  $suffixes
      * @return array<string, string>
@@ -1329,10 +1224,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The statement that creates the trigger, from `CREATE TRIGGER` to the end
-     * of its body, without the delimiter: the `END` before `//` on MySQL, the
-     * `END` that ends a line with `;` on SQLite, and the function call that
-     * ends a line with `;` on PostgreSQL.
+     * The statement creating the trigger, up to its delimiter.
      *
      * @param  string  $sql
      * @param  string  $trigger
@@ -1348,10 +1240,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The lists of columns an update trigger compares, as the engine writes
-     * them: the old and new columns of each null-safe comparison on MySQL, the
-     * old and new rows, or the one old and new column, on PostgreSQL, and the
-     * columns of `UPDATE OF` on SQLite.
+     * The column lists an update trigger compares, as the engine writes them.
      *
      * @param  string  $marker
      * @param  string  $trigger
@@ -1392,8 +1281,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * Every grant the SQL makes, as its privileges, its object and its
-     * grantees, each with its whitespace made one space.
+     * Every grant in the SQL as privileges, object and grantees.
      *
      * @param  string  $sql
      * @return list<array{0: string, 1: string, 2: string}>
@@ -1408,10 +1296,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The names the SQL uses in a user or database position, each once, in
-     * order: a MySQL account's user, a grantee, a database a grant or a table
-     * name qualifies, a user or role created, and a name a trigger compares the
-     * user with.
+     * The user and database names the SQL uses, each once, in order.
      *
      * @param  string  $sql
      * @return list<string>
@@ -1447,8 +1332,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The delete triggers that let the maintenance user delete, on MySQL and
-     * PostgreSQL.
+     * The MySQL and PostgreSQL delete triggers the maintenance user passes.
      *
      * @return list<string>
      */
@@ -1458,8 +1342,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The rows of the storage note's role matrix, its header first, each as its
-     * cells with their whitespace trimmed, without the separator row.
+     * The role matrix's rows, header first, as trimmed cells, no separator.
      *
      * @return list<list<string>>
      */
@@ -1484,9 +1367,7 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The privileges a cell of the role matrix lists, in the matrix's order,
-     * and none for a cell of grants needed only in outbox mode, which no block
-     * makes.
+     * A matrix cell's privileges in order; none for outbox-only grants.
      *
      * @param  string  $cell
      * @return list<string>
@@ -1503,10 +1384,8 @@ final class DocumentedSqlTest extends TestCase
     }
 
     /**
-     * The privileges the SQL grants, by table, under its name without the
-     * database, then by user, each in the role matrix's order; a column grant
-     * counts as its privilege, and the database's and the schema's grants are
-     * left out.
+     * The privileges the SQL grants, by table then user; column grants count,
+     * database and schema grants are left out.
      *
      * @param  string  $sql
      * @return array<string, array<string, list<string>>>

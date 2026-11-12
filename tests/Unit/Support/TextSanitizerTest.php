@@ -10,9 +10,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
- * Unit tests for the text sanitiser: the text it keeps, the invalid UTF-8 it
- * repairs byte by byte, the controls it turns into spaces or removes, the caps
- * it cuts without splitting a character, and what it counts as clean.
+ * Unit tests for the text sanitiser: UTF-8 repair, controls and byte caps.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,8 +24,7 @@ final class TextSanitizerTest extends TestCase
     private const string REPLACEMENT = "\u{FFFD}";
 
     /**
-     * Rows of `[text]`: text that is already safe to store, including the
-     * characters that look like controls but are not.
+     * Rows of `[text]`: safe text, characters that only look like controls too.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -65,8 +62,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * Rows of `[text, cleaned]`: text that is not well-formed UTF-8, and what
-     * it becomes, one replacement character for each offending byte.
+     * Rows of `[text, cleaned]`: malformed UTF-8, one U+FFFD per bad byte.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -88,9 +84,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * Each malformed byte becomes U+FFFD, the bytes of every well-formed
-     * sequence around it are kept, and the repaired text is then cleaned like
-     * any other.
+     * Each malformed byte becomes U+FFFD, and the rest is cleaned as usual.
      *
      * @param  string  $text
      * @param  string  $cleaned
@@ -103,8 +97,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * Rows of `[text, cleaned]`: text holding a control character other than
-     * the whitespace controls, or a bidirectional control.
+     * Rows of `[text, cleaned]`: text with a non-whitespace or bidi control.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -134,8 +127,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * Each control and bidirectional control is removed, and the text around it
-     * is kept.
+     * Each control is removed, and the text around it is kept.
      *
      * @param  string  $text
      * @param  string  $cleaned
@@ -148,8 +140,8 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * Rows of `[text, cleaned]`: text holding the whitespace controls U+0009 to
-     * U+000D.
+     * Rows of `[text, cleaned]`: text with the whitespace controls
+     * U+0009-U+000D.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -167,8 +159,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * Each whitespace control becomes one space, so words either side of it are
-     * never glued together.
+     * Each whitespace control becomes one space, so words never glue together.
      *
      * @param  string  $text
      * @param  string  $cleaned
@@ -181,9 +172,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * A cap cuts at a character boundary at or below it, never through a
-     * character; text exactly at the cap is kept whole, which protects against
-     * an off-by-one mutation of the cut.
+     * A cap cuts on a character boundary; text at the cap is kept whole.
      *
      * @return void
      */
@@ -224,8 +213,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * Text is cleaned before it is cut, so a removed control does not count
-     * against the cap, and no cap leaves the text at any length.
+     * Text is cleaned before it is cut, so a removed control costs nothing.
      *
      * @return void
      */
@@ -271,9 +259,7 @@ final class TextSanitizerTest extends TestCase
     }
 
     /**
-     * `TextSanitizer` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *

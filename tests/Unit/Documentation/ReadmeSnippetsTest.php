@@ -14,20 +14,8 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
 
 /**
- * A drift guard for the README's PHP snippets: every class a snippet imports
- * exists; every class it names by its short name, statically, with `new` or
- * after `implements`, is one it imports, one of the package's own, the
- * framework's scheduler or one of the example application's own; every static
- * method or constant it reads on such a class exists, a call on the facade
- * being a method of the recorder or the facade's own; and every method it calls
- * on an object is one a class of the package declares, one of the framework
- * methods the snippets use, or one of the example application's own. So a class
- * or a method renamed in the code fails here until the README is changed with
- * it.
- *
- * It catches a name that does not exist, not a call on the wrong object or with
- * the wrong arguments: what a snippet does is held to the code by review, and
- * the README's first snippet runs verbatim in a feature test.
+ * A drift guard: every class, static member and method a README PHP snippet
+ * names exists. It catches a missing name, not a wrong call.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,10 +68,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The scanner finds a missing import, an unknown class, an unknown static
-     * method or constant, an unknown `::class` name, a call the facade does not
-     * offer and a method no class declares, and nothing in a snippet that names
-     * only what exists, an aliased import among them.
+     * The scanner finds each kind of missing name, and none in a valid snippet.
      *
      * @return void
      */
@@ -129,8 +114,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * What a snippet names that does not exist: an import, a class, a static
-     * member or a method called on an object, each once, in that order.
+     * What a snippet names that does not exist, each once, in order.
      *
      * @param  string  $code
      * @return list<string>
@@ -143,8 +127,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The classes the snippet imports from a namespace, by the short name each
-     * is imported as: its alias, or else its last segment.
+     * The snippet's imports by short name: its alias, else its last segment.
      *
      * @param  string  $code
      * @return array<string, string>
@@ -176,8 +159,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The short names the snippet makes with `new` or implements that are not
-     * classes it may name.
+     * Short names made with `new` or implemented that the snippet may not name.
      *
      * @param  string  $code
      * @param  array<string, string>  $imports
@@ -193,9 +175,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The static members the snippet reads that do not exist on the class their
-     * short name stands for, and the `::class` names that are no class the
-     * snippet may name.
+     * The static members and `::class` names read that do not exist.
      *
      * @param  string  $code
      * @param  array<string, string>  $imports
@@ -216,9 +196,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The methods the snippet calls on an object that no class of the package
-     * declares, nor the framework classes the snippets use, nor the example
-     * application.
+     * The methods called on an object that no known class declares.
      *
      * @param  string  $code
      * @return list<string>
@@ -233,9 +211,8 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * Whether the short name is a class the snippet may name: one it imports
-     * that exists, one of the package's own, the framework's scheduler or one
-     * of the example application's own.
+     * Whether the snippet may name the short name: an import, the package's,
+     * the scheduler or the example's.
      *
      * @param  string  $class
      * @param  array<string, string>  $imports
@@ -247,10 +224,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * Whether the static member exists on the class the short name resolves to:
-     * a method, a constant or an enum case, or, on the facade, a method of the
-     * recorder or of the facade. The example application's own classes hold
-     * whatever the example says.
+     * Whether the static member exists; an example class has any.
      *
      * @param  string  $class
      * @param  string  $member
@@ -277,8 +251,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * Whether a class of the package, or one of the framework classes the
-     * snippets call, declares the method.
+     * Whether a package or framework class the snippets use declares it.
      *
      * @param  string  $method
      * @return bool
@@ -295,9 +268,8 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The class the short name stands for: the import of that name when it
-     * exists, else the package's own class of that name, else the framework
-     * class the snippets name, else none.
+     * The class a short name stands for: its import, a package class, a
+     * framework class or none.
      *
      * @param  string  $class
      * @param  array<string, string>  $imports
@@ -313,8 +285,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * Whether the name is a class, an interface, an enum or a trait that
-     * exists.
+     * Whether a class, interface, enum or trait of the name exists.
      *
      * @param  string  $name
      * @return bool
@@ -325,8 +296,7 @@ final class ReadmeSnippetsTest extends TestCase
     }
 
     /**
-     * The lower-cased public methods the package's classes declare, those of
-     * their traits included and those inherited from the framework not.
+     * The lower-cased public methods of the package's classes, traits included.
      *
      * @return list<string>
      */

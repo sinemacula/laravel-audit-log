@@ -11,10 +11,8 @@ use SineMacula\Laravel\AuditLog\Contracts\DefinesAuditEvents;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 
 /**
- * A drift guard for the shipped English titles of the event codes: the file is
- * a flat map, sorted by key, with a plain title for every code an enum defining
- * events in `src/` ships, and for nothing else. The translations file is data,
- * which PHPUnit cannot attribute coverage to.
+ * A drift guard for the shipped English event titles; the file is data, which
+ * PHPUnit cannot cover.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,8 +32,7 @@ final class TranslationsTest extends TestCase
     private const string FORBIDDEN = '/[:\p{Cc}]/u';
 
     /**
-     * The file has a title for every shipped code and for nothing else: its
-     * keys are exactly the sorted shipped codes.
+     * The file's keys are exactly the sorted shipped codes.
      *
      * @return void
      */
@@ -49,8 +46,7 @@ final class TranslationsTest extends TestCase
     }
 
     /**
-     * Every title is a non-empty string with no placeholder and no control
-     * character, and no surrounding whitespace.
+     * Every title is a trimmed non-empty string, no placeholder or control.
      *
      * @return void
      */
@@ -67,8 +63,7 @@ final class TranslationsTest extends TestCase
     }
 
     /**
-     * The file is flat, keyed by the whole code, so related codes never nest
-     * into one another: no value is an array.
+     * The file is flat, keyed by the whole code: no value is an array.
      *
      * @return void
      */
@@ -95,8 +90,7 @@ final class TranslationsTest extends TestCase
     }
 
     /**
-     * The walk finds both enums that define the package's codes, so the checks
-     * above are not empty by construction.
+     * The walk finds both defining enums, so the checks are not empty.
      *
      * @return void
      */

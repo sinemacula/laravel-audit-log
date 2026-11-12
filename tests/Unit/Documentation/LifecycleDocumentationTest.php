@@ -25,15 +25,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 
 /**
  * A drift guard for the lifecycle note and the operations guide's lifecycle
- * commands: the note has its sections in order, makes each statement the
- * lifecycle's rules depend on, names each value of the lifecycle's enums in the
- * section that describes it and the seams it leaves, and never claims that a
- * hold, a prune or the journal stops destruction; the operations guide has a
- * row for every lifecycle command, the privacy commands among them, naming
- * every option the command declares.
- *
- * It catches an omission or a rename, not wrong prose: what the documentation
- * says about each of them is held to the code by review.
+ * commands: it catches an omission or a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,8 +68,7 @@ final class LifecycleDocumentationTest extends TestCase
     private const string PREVENTION_CLAIM = '/\b(?:prevents?|cannot\s+be\s+(?:deleted|destroyed|removed))\b|(?<!never\s)(?<!not\s)\bimpossible\b/i';
 
     /**
-     * The lifecycle note is titled and has the standard sections around its
-     * own, in order, and no other.
+     * The lifecycle note has exactly the standard sections around its own.
      *
      * @return void
      */
@@ -92,8 +83,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[statement]`: what the lifecycle note must say, each a rule or a
-     * limit a reader would otherwise find out the hard way.
+     * Rows of `[statement]`: the rules and limits the lifecycle note states.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -153,8 +143,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The lifecycle note makes each of those statements, however its lines are
-     * wrapped.
+     * The lifecycle note makes each statement, however its lines are wrapped.
      *
      * @param  string  $statement
      * @return void
@@ -166,8 +155,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[value, section]`: every value of the lifecycle's enums, with
-     * the section of the note that describes it.
+     * Rows of `[value, section]`: every lifecycle enum value and its section.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -189,8 +177,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * Every value of the lifecycle's enums is named, in code type, in the
-     * section of the note that describes it.
+     * Every lifecycle enum value is named, in code type, in its section.
      *
      * @param  string  $value
      * @param  string  $section
@@ -205,8 +192,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The note's seams name what the lifecycle leaves for later: the external
-     * verification of an imported bundle.
+     * The note's seams name the external verification of an imported bundle.
      *
      * @return void
      */
@@ -220,9 +206,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * Neither the lifecycle note nor the operations guide claims that a hold, a
-     * prune or the journal stops whoever holds the credentials from destroying
-     * rows, however the words are wrapped.
+     * Neither document claims a hold, a prune or the journal stops destruction.
      *
      * @return void
      */
@@ -234,8 +218,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The pattern for a claim of prevention finds each form, and neither a
-     * negated one nor a word that merely resembles one.
+     * The prevention pattern finds each form, and no negation or look-alike.
      *
      * @return void
      */
@@ -261,8 +244,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[command, options]`: each lifecycle command and the options it
-     * declares, in code type.
+     * Rows of `[command, options]`: each lifecycle command and its options.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */
@@ -291,8 +273,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The operations guide has a row for each lifecycle command, and that row
-     * names every option the command declares.
+     * The operations guide has a row per lifecycle command naming each option.
      *
      * @param  string  $command
      * @param  list<string>  $options
@@ -311,8 +292,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The commands' rows are read from what the commands declare, all ten and
-     * every option, so the check above is not empty by construction.
+     * The rows are all ten commands' options, so the check is not empty.
      *
      * @return void
      */
@@ -341,10 +321,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The row scanner reads only the table headed `Command`, and finds in it
-     * the row of exactly the command named, its arguments shown or not, never
-     * the row of a command whose name only starts with it, nor a row of another
-     * table.
+     * The row scanner finds only the named command's `Command` table row.
      *
      * @return void
      */
@@ -372,8 +349,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The row of the table headed `Command` whose first cell names the command,
-     * with or without its arguments, or an empty string when there is none.
+     * The `Command` table row naming the command, or an empty string.
      *
      * @param  string  $markdown
      * @param  string  $command
@@ -402,8 +378,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The Markdown without its fenced code blocks, so a `#` comment in a code
-     * block is never read as a heading.
+     * The Markdown without fenced code, so a `#` comment is never a heading.
      *
      * @param  string  $markdown
      * @return string
@@ -414,8 +389,7 @@ final class LifecycleDocumentationTest extends TestCase
     }
 
     /**
-     * The text with every run of whitespace made one space, so a sentence is
-     * found however its lines are wrapped.
+     * The text with whitespace runs collapsed, so a wrapped sentence matches.
      *
      * @param  string  $text
      * @return string

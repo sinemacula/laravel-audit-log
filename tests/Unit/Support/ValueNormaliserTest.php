@@ -28,10 +28,7 @@ use Tests\Unit\Stubs\StubUid;
 use Tests\Unit\Stubs\StubUser;
 
 /**
- * Unit tests for the value normaliser: each of its rules in order, models
- * first, the safe integer range, the shortest round-trip float format under any
- * precision setting, the depth bound, and the bounded diagnostics of keys that
- * collide once cleaned.
+ * Unit tests for the value normaliser: its rules, bounds and collisions.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,9 +75,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A model is normalised without its other attributes being read, without
-     * being turned into an array or JSON or cast to a string, and without a
-     * query, each of which this model refuses by throwing.
+     * A model is normalised without serialising, casting or querying it.
      *
      * @return void
      */
@@ -92,8 +87,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A model becomes its reference and never carries its attributes, though
-     * its `__toString()` and `toJson()` would serialise them.
+     * A model becomes its reference, never its attributes.
      *
      * @return void
      */
@@ -120,8 +114,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * An unsaved model cannot be referred to, so it is refused rather than
-     * stored without a key.
+     * An unsaved model is refused, never stored without a key.
      *
      * @return void
      */
@@ -165,8 +158,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Rows of `[date, the ISO string]`: immutable and mutable dates, in UTC and
-     * away from it.
+     * Rows of `[date, ISO string]`: immutable and mutable, in and out of UTC.
      *
      * @return iterable<string, array{0: \DateTimeInterface, 1: string}>
      */
@@ -181,8 +173,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Each date becomes the same instant as ISO-8601 in UTC with microseconds,
-     * and a mutable date is left in its own zone.
+     * Each date becomes ISO-8601 UTC with microseconds; a mutable one is kept.
      *
      * @param  \DateTimeInterface  $date
      * @param  string  $iso
@@ -224,9 +215,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A UUID of any class but its library's own, a named subclass or an
-     * anonymous one, can write anything, so it is marked without its methods
-     * being called.
+     * A UUID of another class, named or anonymous, is marked, never called.
      *
      * @return void
      */
@@ -253,9 +242,8 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A UUID of its library's own class still writes through the codec its
-     * factory was given, which may be the application's, so its string is
-     * cleaned and always encodes.
+     * A UUID of the library's own class is still cleaned, since its codec may
+     * be the application's.
      *
      * @return void
      */
@@ -325,9 +313,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A backed enum's value is normalised as the scalar it is: a string is
-     * cleaned like any other, and an integer beyond the safe range, either way,
-     * becomes its decimal string.
+     * A backed enum's value is normalised as the scalar it is.
      *
      * @return void
      */
@@ -339,8 +325,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Rows of `[integer, what it becomes]`: the safe range's bounds stay
-     * integers, and anything beyond them becomes its decimal string.
+     * Rows of `[integer, result]`: the safe range's bounds, and beyond them.
      *
      * @return iterable<string, array{0: int, 1: int|string}>
      */
@@ -359,8 +344,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Each integer within ±(2^53 − 1) stays an integer, and each beyond it
-     * becomes its decimal string, so no JSON reader rounds it.
+     * Integers within +/-(2^53 - 1) stay; beyond, they become decimal strings.
      *
      * @param  int  $value
      * @param  int|string  $expected
@@ -373,9 +357,8 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Rows of `[float, its string]`: the ECMAScript examples, both zeros, each
-     * boundary between positional and exponential form, and powers of two,
-     * where the shortest digits that read back are not the rounded ones.
+     * Rows of `[float, string]`: ECMAScript examples, zeros, form boundaries
+     * and powers of two.
      *
      * @return iterable<string, array{0: float, 1: string}>
      */
@@ -420,9 +403,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Each finite float becomes the fewest digits that read back as it, in the
-     * form ECMAScript writes, and reads back as the same float (negative zero
-     * equals zero).
+     * Each finite float becomes its shortest round-trip ECMAScript digits.
      *
      * @param  float  $value
      * @param  string  $expected
@@ -438,7 +419,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * The precision settings change nothing: the digits never come from them.
+     * The precision settings never change a float's digits.
      *
      * @return void
      */
@@ -492,8 +473,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A map keeps its keys and their order, so it encodes as an object even
-     * when its keys are digits out of order.
+     * A map keeps its keys and order, so digit keys out of order stay a map.
      *
      * @return void
      */
@@ -520,8 +500,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: objects of no supported class and resources, open or
-     * closed.
+     * Rows of `[value]`: unsupported objects and resources, open or closed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -569,8 +548,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Each value of no supported type is marked unserialisable, never cast and
-     * never called.
+     * Each unsupported value is marked unserialisable, never cast or called.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -585,8 +563,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A `Stringable` whose `__toString()` throws is marked without its method
-     * being called.
+     * A `Stringable` whose `__toString()` throws is marked, never called.
      *
      * @return void
      */
@@ -623,9 +600,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * The ninth nested array becomes `[TRUNCATED]`, while the eighth array's
-     * scalars stay; one level shallower would keep it, and one deeper would
-     * lose the eighth array's scalars.
+     * The ninth nested array becomes `[TRUNCATED]`; the eighth's scalars stay.
      *
      * @return void
      */
@@ -651,8 +626,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A self-referencing array ends in `[TRUNCATED]` at the ninth level rather
-     * than recursing for ever.
+     * A self-referencing array ends in `[TRUNCATED]` at the ninth level.
      *
      * @return void
      */
@@ -700,8 +674,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Map keys are cleaned like any other string, and integer keys become
-     * strings that PHP keeps as integers.
+     * Map keys are cleaned; integer keys become strings PHP keeps as integers.
      *
      * @return void
      */
@@ -711,8 +684,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Keys that collide once cleaned keep the first value, and the collision is
-     * diagnosed by its path, never its value.
+     * Keys colliding once cleaned keep the first value and diagnose the path.
      *
      * @return void
      */
@@ -726,8 +698,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * The value of a collided key is never normalised, so an unsaved model in
-     * it cannot fail the capture.
+     * A collided key's value is never normalised, so it cannot fail capture.
      *
      * @return void
      */
@@ -740,8 +711,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A collision is named by its segments: map keys cleaned, list indices kept
-     * as integers.
+     * A collision path is cleaned map keys and integer list indices.
      *
      * @return void
      */
@@ -758,8 +728,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A literal dot in a key stays inside its one segment, so the path cannot
-     * be mistaken for a deeper one.
+     * A literal dot in a key stays inside its one segment.
      *
      * @return void
      */
@@ -770,8 +739,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A list index in a collision is the element's own index, as an integer, so
-     * two elements of one list are told apart.
+     * A list index in a collision path is the element's integer index.
      *
      * @return void
      */
@@ -783,9 +751,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * An integer key of a map is a map key, so it is kept as its string, unlike
-     * a list index; a key that collides with one only once cleaned is named the
-     * same way.
+     * An integer map key in a collision path is a string, unlike a list index.
      *
      * @return void
      */
@@ -796,8 +762,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A collision's keys are named as they were cleaned, at every depth, never
-     * as they were given.
+     * A collision path holds keys as cleaned, at every depth.
      *
      * @return void
      */
@@ -809,8 +774,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A collision is still named at the deepest array kept, and a collision in
-     * an array beyond it is not met, since that array is truncated unread.
+     * A collision is named at the deepest array kept; deeper ones go unread.
      *
      * @return void
      */
@@ -825,9 +789,8 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * Every parameter that holds a raw value, a raw key or a diagnostic is
-     * marked sensitive, on the entry point and on each helper it passes
-     * through, because `Reference::to()` can throw from inside them.
+     * Every raw value, key and diagnostic parameter is sensitive, since
+     * `Reference::to()` can throw.
      *
      * @return void
      */
@@ -850,8 +813,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * The depth and the count hold no payload, so they stay readable in a stack
-     * trace.
+     * The depth and the count hold no payload, so a trace may show them.
      *
      * @return void
      */
@@ -862,8 +824,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A failure from inside the normaliser leaves no value and no key in the
-     * exception's stack trace, even with every frame keeping its arguments.
+     * A failure inside the normaliser leaves no raw value or key in the trace.
      *
      * @return void
      */
@@ -886,9 +847,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * At most 32 collision paths are kept, the first met, while the count
-     * covers every one; the boundary rows protect against an off-by-one
-     * mutation of the bound.
+     * At most 32 collision paths are kept, the first met; the count covers all.
      *
      * @return void
      */
@@ -932,9 +891,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * `ValueNormaliser` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *
@@ -955,8 +912,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * The value nested in maps to the depth given, the outermost map at
-     * depth 1.
+     * The value nested in maps to the depth given, the outermost at depth 1.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -997,8 +953,7 @@ final class ValueNormaliserTest extends TestCase
     }
 
     /**
-     * A map with as many keys colliding once cleaned as given: `kN` and `kN`
-     * followed by a NUL, for each N.
+     * `$count` pairs of keys that collide once cleaned: `kN` and `kN` plus NUL.
      *
      * @param  int  $count
      * @return array<string, int>

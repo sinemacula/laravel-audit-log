@@ -11,10 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
- * Unit tests for the stored time: the package's ISO-8601 UTC form written as
- * the database stores it and read back, the fewer fractional digits an engine
- * may return, the UTC instant it reads as, the default time zone it ignores,
- * and the malformed and impossible times it refuses.
+ * Unit tests for the stored time: the package's ISO-8601 UTC form in storage.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,8 +57,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * An instant is stored in UTC with all six of its fractional digits, zeros
-     * included.
+     * An instant is stored in UTC with all six fractional digits.
      *
      * @return void
      */
@@ -73,8 +69,8 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * Rows of `[stored time, the instant it reads back as]`: six fractional
-     * digits, fewer because PostgreSQL drops trailing zeros, and none.
+     * Rows of `[stored time, instant]`: six digits, fewer as PostgreSQL drops
+     * zeros, and none.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -97,9 +93,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * Each stored time reads back in the package's form, its fractional digits
-     * right-padded to six; the one-digit row protects against a mutation of the
-     * padded width, which would read `.1` as a hundredth.
+     * Each stored time reads back right-padded to six fractional digits.
      *
      * @param  string  $stored
      * @param  string  $instant
@@ -124,8 +118,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * A stored time reads as an instant in UTC with its microseconds kept,
-     * however few fractional digits it was stored with.
+     * A stored time reads as a UTC instant, its microseconds kept.
      *
      * @return void
      */
@@ -143,8 +136,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * A default time zone far from UTC changes nothing: every parse and every
-     * conversion is in UTC.
+     * A default time zone far from UTC changes nothing.
      *
      * @return void
      */
@@ -163,9 +155,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * An instant in any time zone is formatted in UTC: noon in UTC reads the
-     * same from Auckland, from a fixed offset, from a mutable date and from
-     * Carbon, and the mutable date is left as it was.
+     * An instant of any time zone or class is formatted in UTC, left unchanged.
      *
      * @return void
      */
@@ -182,8 +172,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * An instant formatted while the default time zone is far from UTC is still
-     * formatted in UTC.
+     * Formatting is in UTC whatever the default time zone.
      *
      * @return void
      */
@@ -195,8 +184,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: values that are not an instant in the package's form,
-     * or name a date or a time that does not exist.
+     * Rows of `[value]`: values off the package's form, or impossible instants.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -228,8 +216,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * Each malformed or impossible instant is refused for storage, naming the
-     * form, rather than rolled over to another instant.
+     * Each malformed or impossible instant is refused, never rolled over.
      *
      * @param  string  $value
      * @return void
@@ -244,8 +231,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * Only an instant in the package's form, on a date and at a time that
-     * exist, is an instant.
+     * Only an existing instant in the package's form is an instant.
      *
      * @return void
      */
@@ -262,8 +248,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * Rows of `[stored value]`: values that are not a stored time, or name a
-     * date or a time that does not exist.
+     * Rows of `[stored value]`: malformed or impossible stored times.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -296,8 +281,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * Each malformed or impossible stored time is refused as a value that came
-     * back wrong, naming the form.
+     * Each malformed or impossible stored time is refused, naming the form.
      *
      * @param  string  $stored
      * @return void
@@ -327,9 +311,7 @@ final class StoredTimeTest extends TestCase
     }
 
     /**
-     * `StoredTime` is a utility container, not to be instantiated: its
-     * constructor is private. Reflection invokes it so the line is covered
-     * while still documenting the access modifier.
+     * The constructor is private; reflection invokes it to cover the line.
      *
      * @return void
      *

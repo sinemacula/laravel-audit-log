@@ -13,14 +13,7 @@ use SineMacula\Laravel\AuditLog\Console\ReinstateCommand;
 use SineMacula\Laravel\AuditLog\Console\RewrapCommand;
 
 /**
- * A drift guard for the privacy guide: it has its sections in order, names
- * every privacy command and every option each declares in the commands' table,
- * makes each statement an operator would otherwise find out the hard way, from
- * the two guarantees to the key session on SQLite, and lists every part of the
- * estate an erasure must reach before it is complete.
- *
- * It catches an omission or a rename, not wrong prose: what the guide says
- * about each of them is held to the code by review.
+ * A drift guard for the privacy guide: omissions and renames, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,8 +76,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * Rows of `[command, options]`: each privacy command and the options it
-     * declares, in code type.
+     * Rows of `[command, options]`: each privacy command and its options.
      *
      * @return iterable<string, array{0: string, 1: list<string>}>
      */
@@ -100,8 +92,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * The guide's commands table has a row for each privacy command, and that
-     * row names every option the command declares.
+     * The commands table has a row per privacy command naming each option.
      *
      * @param  string  $command
      * @param  list<string>  $options
@@ -122,8 +113,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * The commands' rows are read from what the commands declare, all four and
-     * every option, so the check above is not empty by construction.
+     * The rows are all four commands' options, so the check is not empty.
      *
      * @return void
      */
@@ -137,9 +127,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * Rows of `[section, statement]`: what the guide must say, and where, each
-     * a default, a limit or a duty a reader would otherwise find out the hard
-     * way.
+     * Rows of `[section, statement]`: the defaults, limits and duties to state.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -183,8 +171,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * The guide makes each of those statements in its section, or before the
-     * first, however its lines are wrapped.
+     * The guide makes each statement in its section or before the first.
      *
      * @param  string  $section
      * @param  string  $statement
@@ -201,8 +188,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * The erasure section's checklist names every part of the estate an erasure
-     * must reach before it is complete, each an item of the list.
+     * The erasure checklist names every part of the estate it must reach.
      *
      * @return void
      */
@@ -224,8 +210,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * The section scanner reads only the section under its heading, and the
-     * checklist scanner only the items nested in a list.
+     * The section and checklist scanners read only what they must.
      *
      * @return void
      */
@@ -255,8 +240,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * The Markdown without its fenced code blocks, so a `#` comment in a code
-     * block is never read as a heading.
+     * The Markdown without fenced code, so a `#` comment is never a heading.
      *
      * @param  string  $markdown
      * @return string
@@ -267,8 +251,7 @@ final class PrivacyGuideTest extends TestCase
     }
 
     /**
-     * The text with every run of whitespace made one space, so a sentence is
-     * found however its lines are wrapped.
+     * The text with whitespace runs collapsed, so a wrapped sentence matches.
      *
      * @param  string  $text
      * @return string

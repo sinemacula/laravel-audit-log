@@ -22,13 +22,8 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportLineParser;
 
 /**
- * A drift guard for the retention and import guides: each has its sections in
- * order; every lifecycle command and every option it declares is named; the
- * import format is documented field by field, every field the parser accepts;
- * every value of the lifecycle's enums is named in its guide; and every call
- * the guides show on `AuditLog::lifecycle()`, the privacy guide's erasure and
- * key calls included, is a method of the lifecycle, and every method is shown.
- * It catches an omission or a rename, not wrong prose.
+ * A drift guard for the retention and import guides: it catches an omission or
+ * a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,8 +58,7 @@ final class LifecycleGuidesTest extends TestCase
     private const string LIFECYCLE_CALL = '/\bAuditLog::lifecycle\(\)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/';
 
     /**
-     * The retention guide is titled and has its sections, in order, and no
-     * other.
+     * The retention guide has exactly its sections, in order.
      *
      * @return void
      */
@@ -77,7 +71,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The import guide is titled and has its sections, in order, and no other.
+     * The import guide has exactly its sections, in order.
      *
      * @return void
      */
@@ -90,8 +84,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Rows of `[text]`: the name of each lifecycle command, and each of its
-     * options, in code type, as the commands declare them.
+     * Rows of `[text]`: each lifecycle command and option, as declared.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -110,7 +103,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Each lifecycle command and each of its options is named in the guides.
+     * Each lifecycle command and option is named in the guides.
      *
      * @param  string  $text
      * @return void
@@ -122,8 +115,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The commands' rows are read from what the commands declare, every command
-     * and every option, so the check above is not empty by construction.
+     * The rows are what the commands declare, so the check is not empty.
      *
      * @return void
      */
@@ -137,8 +129,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Rows of `[field]`: every field a line of the import format may give, its
-     * `format` among them.
+     * Rows of `[field]`: every field an import line may give, `format` too.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -150,8 +141,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Every field the parser accepts has a row of its own in the import
-     * format's section, naming its type and rule.
+     * Every parsed import field has its own row naming its type and rule.
      *
      * @param  string  $field
      * @return void
@@ -167,8 +157,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The import format's section documents exactly the fields the parser
-     * accepts: none it does not read.
+     * The import format section documents no field the parser does not read.
      *
      * @return void
      */
@@ -180,8 +169,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Rows of `[value, guide]`: every value of the lifecycle's public enums,
-     * with the guide that must name it.
+     * Rows of `[value, guide]`: every lifecycle enum value and its guide.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -216,8 +204,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Every call the guides show on `AuditLog::lifecycle()` is a public method
-     * of the lifecycle, and the guides show at least one.
+     * Each `AuditLog::lifecycle()` call shown exists, and at least one is.
      *
      * @return void
      */
@@ -231,8 +218,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * Every public method of the lifecycle is shown in the guides, called on
-     * `AuditLog::lifecycle()`.
+     * Every public lifecycle method is shown on `AuditLog::lifecycle()`.
      *
      * @return void
      */
@@ -244,8 +230,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The call scanner finds each method chained after `AuditLog::lifecycle()`,
-     * however it is spaced or wrapped, each once, and nothing else.
+     * The call scanner finds each chained lifecycle call once, however spaced.
      *
      * @return void
      */
@@ -268,9 +253,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The guides make no claim that a hold, a prune, the journal or an erasure
-     * prevents destruction by someone holding the database's credentials;
-     * "never impossible", the phrase that denies such a claim, is not one.
+     * No guide claims destruction is prevented; "never impossible" denies it.
      *
      * @return void
      */
@@ -308,8 +291,7 @@ final class LifecycleGuidesTest extends TestCase
     }
 
     /**
-     * The methods the text calls on `AuditLog::lifecycle()`, each once, in the
-     * order first shown.
+     * The methods called on `AuditLog::lifecycle()`, each once, in order.
      *
      * @param  string  $text
      * @return list<string>

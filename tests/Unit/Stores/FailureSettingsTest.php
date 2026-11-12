@@ -12,9 +12,7 @@ use SineMacula\Laravel\AuditLog\Stores\Enums\FailureMode;
 use SineMacula\Laravel\AuditLog\Stores\FailureSettings;
 
 /**
- * Unit tests for the failure settings: the default of each, the values each
- * accepts, the exact message each malformed value fails closed with, the reader
- * of every setting, and the values no message or stack trace ever shows.
+ * Unit tests for the failure settings: defaults, accepted values and refusals.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,8 +29,7 @@ final class FailureSettingsTest extends TestCase
     private const string CHANNEL = '`audit-log.failure.log_channel` must be a channel name of 1 to 64 characters, or null or empty for the default channel.';
 
     /**
-     * With nothing set, or none of the package's configuration at all, a
-     * failure is reported.
+     * With nothing set, or no package configuration, a failure is reported.
      *
      * @return void
      */
@@ -43,8 +40,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * Every mode is read by its stored value, and each read goes back to the
-     * configuration, so a change is seen by the next read.
+     * Every mode is read by its stored value, fresh on each read.
      *
      * @return void
      */
@@ -65,8 +61,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: what names no mode, or is no string; a `null` set
-     * explicitly is malformed, unlike a missing key.
+     * Rows of `[value]`: no mode or no string; an explicit `null` is malformed.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -105,8 +100,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * With no channel set, or one set to `null`, the spill goes to the default
-     * channel.
+     * An unset or `null` channel spills to the default channel.
      *
      * @return void
      */
@@ -118,8 +112,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * An empty channel, as an unset environment variable gives it, is the
-     * default channel.
+     * An empty channel, as an unset env var gives, is the default channel.
      *
      * @return void
      */
@@ -129,9 +122,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[channel]`: names the setting accepts, at each end of its
-     * length, counted in characters rather than bytes (protects against a
-     * mutation that counts bytes).
+     * Rows of `[channel]`: names at each end of the length, in characters.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -147,7 +138,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * A configured channel is the one the spill goes to, as configured.
+     * A configured channel is the one the spill goes to.
      *
      * @param  string  $channel
      * @return void
@@ -159,8 +150,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[value]`: values that are not a channel name of 1 to 64
-     * characters.
+     * Rows of `[value]`: values that are not a 1 to 64 character channel name.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -179,8 +169,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * Each malformed channel fails closed with its message, rather than falling
-     * back to the default channel.
+     * Each malformed channel fails closed, never falling back to the default.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -197,8 +186,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * Rows of `[setting, value, message]`: one malformed setting at a time,
-     * each of those `validate()` reads.
+     * Rows of `[setting, value, message]`: one malformed setting at a time.
      *
      * @return iterable<string, array{0: string, 1: int|string, 2: string}>
      */
@@ -211,8 +199,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * `validate()` reads every setting: each malformed one fails it, alone,
-     * with its own message.
+     * `validate()` fails on each malformed setting alone, with its message.
      *
      * @param  string  $setting
      * @param  int|string  $value
@@ -229,8 +216,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * With both settings malformed, `validate()` fails on the mode, and with
-     * both well formed, or neither set, it passes.
+     * `validate()` fails on the mode first; valid or unset settings pass.
      *
      * @return void
      */
@@ -259,9 +245,7 @@ final class FailureSettingsTest extends TestCase
     }
 
     /**
-     * A refusal names the setting's full key and never the value it refused, in
-     * its message or in the arguments of the settings' own frames of its stack
-     * trace.
+     * A refusal names the setting's key, never its value, in message or trace.
      *
      * @param  string  $setting
      * @return void

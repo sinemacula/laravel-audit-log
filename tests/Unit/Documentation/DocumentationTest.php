@@ -71,50 +71,8 @@ use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Stores\DocumentedSpillChannel;
 
 /**
- * A drift guard for the README, the guides in docs/guides and the design notes
- * in docs/design: every outcome, origin, provenance, field handling, key owner,
- * IP mode, identifier mode, failure mode, delivery mode, failed operation,
- * envelope failure, integrity status, anchoring status, finding, anchor driver,
- * journal kind, hold basis, prune status, import status, import format, import
- * rejection, key state, marker transition, erasure refusal, erasure status and
- * rewrap status, every configuration key by its full path, which a planted
- * undocumented leaf fails, and every method of the recorder and of the facade
- * is documented; every package event has a row in the events table and in the
- * events guide; every `AuditLog::` call shown exists or is planned; every
- * design note, the redaction note, the threat model, the delivery note and the
- * integrity, lifecycle, privacy and provider composition notes among them,
- * exists, has the standard sections and is listed in the index, which ends with
- * the standard sentence; the notes state what they must, and the threat model
- * opens with the limits of key matching and states each limit of integrity and
- * of erasure; the redaction note lists every entry of the matcher and every IP
- * mode, and never calls key matching fail-closed; the integrity note has a row
- * for every status and finding; every redaction, failure, delivery and
- * integrity setting's environment variable is in the README; the operations
- * guide has its sections, names every integrity command, option and progress
- * name, and claims nothing beyond its measurements; the outcomes table has
- * exactly its rows, and no document says a failed record is not true; the
- * documented spill channel is the one the tests use, and the spill and the
- * outbox are called personal data; every test a note cites and every file it
- * anchors exists, and no document cites a file kept out of the repository, a
- * milestone or another package of the suite, or describes a transition from a
- * release that does not exist; the vocabulary reserves every prefix and every
- * shipped code sits under one; and every example is valid and neutral, naming
- * no other package of the suite. The automatic-capture guide has its sections,
- * names every package code and states every gap in capture, the extending guide
- * has its sections and documents the correlation id format, which the builder
- * holds to, every capture setting's environment variable is in the README, and
- * the segments a watched model may not use are the vocabulary's prefixes. The
- * reading guide has its sections, makes each of its statements, names every
- * value of the read path, every export option and both read settings'
- * environment variables, and shows no call that does not exist; the threat
- * model states the limits of a PHP access policy; the reading note names the
- * seams it leaves, and no longer the decrypting reader or owner discovery,
- * which ship; each package code's row in the vocabulary keeps what its
- * definition retains; and no document says the immediate path is outside the
- * caller's transaction.
- *
- * It catches an omission or a rename, not wrong prose: what the documentation
- * says about each of them is held to the code by review.
+ * A drift guard for the README, the guides and the design notes: it catches an
+ * omission or a rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -163,7 +121,7 @@ final class DocumentationTest extends TestCase
     /** @var list<string> The sections of every design note, in order. */
     private const array SECTIONS = ['Purpose', 'Invariants', 'Success Path', 'Failure / Edge Cases', 'Implementation Anchors', 'Authoritative Tests', 'Change Triggers'];
 
-    /** @var list<string> The design notes the package ships so far. */
+    /** @var list<string> The design notes the package ships. */
     private const array NOTES = [
         'record-model.md',
         'event-definitions.md',
@@ -365,7 +323,7 @@ final class DocumentationTest extends TestCase
         'read-failed-write',
     ];
 
-    /** @var list<string> The facade calls the documentation may show before they ship; empty once every planned call shipped. */
+    /** @var list<string> The facade calls the documentation may show before they ship. */
     private const array PLANNED_CALLS = [];
 
     /** @var string The sentence the design index ends with. */
@@ -488,7 +446,7 @@ final class DocumentationTest extends TestCase
         'built from revealed pages, never from an export',
     ];
 
-    /** @var list<string> What the reading note's seams no longer name, since the package ships them. */
+    /** @var list<string> What the reading note's seams must not name, since the package ships them. */
     private const array SHIPPED_SEAMS = ['FieldReader', 'Owner discovery'];
 
     /** @var string The rule that keeps the export evidence verifiable, which the reading note and the reading guide both state. */
@@ -520,8 +478,7 @@ final class DocumentationTest extends TestCase
     private static ?string $documentation = null;
 
     /**
-     * Rows of `[enum value, enum]`: every outcome, origin, provenance, field
-     * handling, key owner, IP mode and identifier mode.
+     * Rows of `[enum value, enum]`: every value of the documented public enums.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -576,11 +533,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * A leaf planted in the shipped configuration, under a section the
-     * documentation already covers and in a new section of its own, is a leaf
-     * the provider yields and the check finds undocumented, while every leaf
-     * the documentation names, by its full path only, passes: a leaf named by
-     * its last segment, or inside a longer path, is not documented.
+     * A planted leaf fails; only a full-path mention documents a leaf.
      *
      * @return void
      */
@@ -603,7 +556,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[file]`: every design note the package ships so far.
+     * Rows of `[file]`: every design note the package ships.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -615,7 +568,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every design note the package ships so far exists.
+     * Every design note the package ships exists.
      *
      * @param  string  $note
      * @return void
@@ -639,9 +592,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every design note opens with one Title Case heading and has the seven
-     * standard sections in order, any other section sitting between the failure
-     * and edge cases and the implementation anchors.
+     * Every design note has a Title Case heading and the standard sections.
      *
      * @param  string  $note
      * @return void
@@ -667,8 +618,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The design index lists the standard sections in order and has a bullet
-     * for every note file and for no missing one, and its last paragraph is the
+     * The design index lists the sections and every note, and ends with the
      * standard sentence.
      *
      * @return void
@@ -705,9 +655,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every test file a note's authoritative tests cite exists, and every test
-     * method cited after it is declared in that file; every note cites at least
-     * one test.
+     * Every test file and method a note cites exists, and every note cites one.
      *
      * @param  string  $note
      * @return void
@@ -747,9 +695,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The citation scanner pairs each cited test method with the test file
-     * cited before it, across wrapped lines, and lists a method cited before
-     * any test file under a file that can never exist, so it is refused.
+     * The citation scanner pairs each method with the file cited before it.
      *
      * @return void
      */
@@ -796,8 +742,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every code the package ships, as a case of an enum defining events, sits
-     * under a reserved prefix.
+     * Every shipped code sits under a reserved prefix.
      *
      * @return void
      */
@@ -819,9 +764,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The shipped-code check reads the case values of an enum defining events
-     * and finds each one outside the reserved prefixes, so the check above is
-     * not empty by construction.
+     * The shipped-code check reads every case of a defining enum.
      *
      * @return void
      */
@@ -836,9 +779,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The documentation's examples record at least one code, and every code an
-     * example records or declares is a valid event code under no reserved
-     * prefix.
+     * Every example code is a valid event code under no reserved prefix.
      *
      * @return void
      */
@@ -861,8 +802,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The example scanner finds the first string-literal argument of every call
-     * that names a code and the value of every enum case, and nothing else.
+     * The example scanner finds every code argument and enum case value only.
      *
      * @return void
      */
@@ -888,9 +828,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The code blocks of the documentation name no other package of the suite:
-     * no namespace of it, no Composer package of it, and no configuration but
-     * the package's own and Laravel's.
+     * No code block names another package of the suite or its configuration.
      *
      * @return void
      */
@@ -900,8 +838,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The neutrality scanner finds every form of another package's name, in
-     * code and in strings, and none of the package's own or Laravel's.
+     * The neutrality scanner finds every foreign name, never the package's own.
      *
      * @return void
      */
@@ -963,8 +900,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * An event's row starts a table row with the event's whole class name, so
-     * neither a mention in prose nor a row of a longer name counts.
+     * An event's row must start with its whole class name.
      *
      * @return void
      */
@@ -1003,8 +939,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[method]`: every public method the facade declares of its own,
-     * beyond the recorder's.
+     * Rows of `[method]`: each public method the facade adds to the recorder's.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -1028,8 +963,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every `AuditLog::name(` the documentation shows is a method the recorder
-     * or the facade declares, or a call that is planned.
+     * Every `AuditLog::` call shown is the recorder's, the facade's or planned.
      *
      * @return void
      */
@@ -1041,8 +975,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The call scanner finds every call on the facade, however it is qualified
-     * or spaced, each once, and nothing else with that name in it.
+     * The call scanner finds each facade call once, however it is written.
      *
      * @return void
      */
@@ -1066,10 +999,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The calls allowed are those the recorder and the facade declare and the
-     * planned ones, by their exact names: what the facade inherits from
-     * Laravel, or forwards by magic, is not part of the package's surface, and
-     * a call in the wrong case is not the call.
+     * Only the package's own and the planned calls are allowed, by exact name.
      *
      * @return void
      */
@@ -1087,9 +1017,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * No planned call has shipped yet, so the list cannot outlive the methods
-     * it stands in for: a planned call that ships fails here until it is taken
-     * off the list.
+     * No planned call has shipped, so the list cannot outlive its methods.
      *
      * @return void
      */
@@ -1100,9 +1028,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The context note states what trusting a header depends on: `TrustProxies`
-     * must be configured, only the immediate peer is checked, and the trusted
-     * edge must overwrite or validate the headers.
+     * The context note states the proxy prerequisites of trusting a header.
      *
      * @return void
      */
@@ -1116,8 +1042,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The context note states that what is carried into a job is readable in
-     * the queue payload.
+     * The context note says what a job carries is readable in the payload.
      *
      * @return void
      */
@@ -1127,8 +1052,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[note, statement]`: what the notes must say, each a rule or a
-     * caveat a reader would otherwise find out the hard way.
+     * Rows of `[note, statement]`: what each note must state.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -1328,7 +1252,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Each of those notes states what it must, however the line is wrapped.
+     * Each note states what it must, however the line is wrapped.
      *
      * @param  string  $note
      * @param  string  $statement
@@ -1365,9 +1289,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The redaction note, the threat model, the delivery note, the integrity
-     * note, the reading note and the privacy note have their own sections, in
-     * order, between the failure and edge cases and the implementation anchors.
+     * Extra note sections sit in order before the implementation anchors.
      *
      * @param  string  $note
      * @param  list<string>  $extra
@@ -1382,8 +1304,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The threat model states the limits of key matching, in the sentence that
-     * says what the remedy is, however the line is wrapped.
+     * The threat model states the limits of key matching with their remedy.
      *
      * @return void
      */
@@ -1393,8 +1314,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Those limits are the first thing the threat model says: the first
-     * paragraph of its purpose starts with them.
+     * The threat model's purpose opens with those limits.
      *
      * @return void
      */
@@ -1406,8 +1326,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The threat model states in its own section what a leaked key gives up,
-     * however the line is wrapped.
+     * The threat model states what a leaked key gives up, in its own section.
      *
      * @return void
      */
@@ -1417,8 +1336,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The threat model states in its own section each limit of the log's
-     * integrity, however the lines are wrapped.
+     * The threat model states each limit of integrity in its own section.
      *
      * @return void
      */
@@ -1432,10 +1350,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The threat model states in its own section each limit of erasure: the two
-     * guarantees for keys, the derived wrapping key, recall, restores, what an
-     * erasure revokes, the inventory that replaces any claim of no personal
-     * data, and what the reveal grant shows, however the lines are wrapped.
+     * The threat model states each limit of erasure in its own section.
      *
      * @return void
      */
@@ -1449,8 +1364,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The threat model's section on key matching names the limits a reader
-     * would otherwise assume were covered.
+     * The threat model's key matching section names its limits.
      *
      * @return void
      */
@@ -1464,8 +1378,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The redaction note calls key matching a heuristic and, however the words
-     * are wrapped, never fail-closed; the threat model never does either.
+     * The redaction note and the threat model call key matching a heuristic,
+     * never fail-closed.
      *
      * @return void
      */
@@ -1479,9 +1393,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The phrase key matching is never described with is found in each of its
-     * forms, across a wrapped line, and not in a phrase that merely resembles
-     * it.
+     * The fail-closed pattern finds each form, across lines, and no look-alike.
      *
      * @return void
      */
@@ -1497,8 +1409,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[entry]`: each survivor, exempt final token and sensitive unit
-     * of the matcher, its tokens joined by `_`.
+     * Rows of `[entry]`: each matcher survivor, exempt final token and
+     * sensitive unit.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -1513,8 +1425,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every entry of the matcher is named in the redaction note's section on
-     * key matching, in code type.
+     * Every matcher entry is in the redaction note's key matching section.
      *
      * @param  string  $entry
      * @return void
@@ -1540,8 +1451,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The redaction settings read from the environment are named in the README,
-     * and there are as many as the settings that read one.
+     * Every redaction setting's env var is in the README.
      *
      * @return void
      */
@@ -1557,8 +1467,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The failure and delivery settings read from the environment are named in
-     * the README, and there are as many as the settings that read one.
+     * Every failure and delivery setting's env var is in the README.
      *
      * @return void
      */
@@ -1574,9 +1483,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The integrity settings for sealing, anchoring and verification read from
-     * the environment are named in the README, and there are as many as the
-     * settings that read one.
+     * Every integrity setting's env var is in the README.
      *
      * @return void
      */
@@ -1592,9 +1499,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every integrity status, anchoring status and finding has a row of its own
-     * in the integrity note's tables, and each finding's row names the status
-     * the finding gives, so the table cannot drift from the code.
+     * Every integrity status and finding has a row; a finding names its status.
      *
      * @return void
      */
@@ -1630,10 +1535,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The operations guide's section on sealing at volume shows plans of both
-     * engines in code blocks, names the engines and both sizes measured, and
-     * the sentence that limits them, and claims nothing beyond them, however
-     * the words are wrapped.
+     * The sealing-at-volume section shows both engines' plans and claims
+     * nothing beyond them.
      *
      * @return void
      */
@@ -1655,8 +1558,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The pattern for a claim beyond a measurement finds each form, across a
-     * wrapped line, and not a word that merely resembles one.
+     * The beyond-measurement pattern finds each form and no look-alike.
      *
      * @return void
      */
@@ -1672,8 +1574,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[text]`: the name of each integrity command, and each of its
-     * options, in code type, as the commands declare them.
+     * Rows of `[text]`: each integrity command and option, as declared.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -1692,8 +1593,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Each integrity command and each of its options is named in the operations
-     * guide.
+     * Each integrity command and option is named in the operations guide.
      *
      * @param  string  $text
      * @return void
@@ -1705,8 +1605,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The commands' rows are read from what the commands declare, both commands
-     * and every option, so the check above is not empty by construction.
+     * The rows are what the commands declare, so the check is not empty.
      *
      * @return void
      */
@@ -1718,8 +1617,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every progress name the package records is named in the operations
-     * guide's section on monitoring, which says what a stale one means.
+     * Each progress name is in the monitoring section, with what stale means.
      *
      * @return void
      */
@@ -1736,8 +1634,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * No document says a failed record is not true, because a failure or a
-     * denial can be true even when the business change rolls back.
+     * No document says a failed record is not true.
      *
      * @return void
      */
@@ -1747,9 +1644,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The phrase a failed record is never described with is found in each of
-     * its forms, across a wrapped line, and not in a phrase that merely
-     * resembles it.
+     * The not-true pattern finds each form, across lines, and no look-alike.
      *
      * @return void
      */
@@ -1765,9 +1660,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The guarantees of the outcomes note have exactly the rows they should, in
-     * order, so a row added, removed or renamed is seen here as well as by its
-     * test.
+     * The outcomes note's guarantees have exactly their rows, in order.
      *
      * @return void
      */
@@ -1779,8 +1672,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The automatic-capture guide opens with its title and has its sections, in
-     * order.
+     * The automatic-capture guide has its title and sections, in order.
      *
      * @return void
      */
@@ -1810,9 +1702,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every public contract an application or an integration implements has a
-     * row of the extending guide's extensibility table, so a new seam cannot go
-     * unlisted; the marker of the package's own events is not one.
+     * Every public contract an integration implements has an extensibility row.
      *
      * @return void
      */
@@ -1841,8 +1731,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[section, statement]`: each gap in capture, where nothing is
-     * recorded or a value is read for less than a reader would assume.
+     * Rows of `[section, statement]`: each gap in capture.
      *
      * @return iterable<string, array{0: string, 1: string}>
      */
@@ -1852,8 +1741,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Each gap in capture is stated in its section of the automatic-capture
-     * guide, however the lines are wrapped.
+     * Each gap in capture is stated in its section of the capture guide.
      *
      * @param  string  $section
      * @param  string  $statement
@@ -1869,9 +1757,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The capture settings read from the environment are named in the README
-     * and in the automatic-capture guide, and there are as many as the settings
-     * that read one.
+     * Every capture setting's env var is in the README and the capture guide.
      *
      * @return void
      */
@@ -1888,11 +1774,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The extending guide's section on correlation ids documents the format,
-     * the namespace's length and the neutral example, and the builder holds a
-     * correlation id to exactly that: the example and a namespace of 32
-     * characters are accepted, and a namespace of 33, an upper-case one and an
-     * id with no namespace are refused.
+     * The documented correlation id format is the one the builder enforces.
      *
      * @return void
      */
@@ -1922,9 +1804,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The segments a watched model's changes may not be stored under are the
-     * prefixes the vocabulary reserves, each without its dot, in the same
-     * order.
+     * Segments a watched model may not use are the reserved prefixes, in order.
      *
      * @return void
      */
@@ -1934,8 +1814,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The automatic-capture guide names every code the package captures, and
-     * every code of a watched model's changes, in code type.
+     * The capture guide names every captured code and every watched-model code.
      *
      * @return void
      */
@@ -1955,10 +1834,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Each key of the channel the tests use, but its path, is in the delivery
-     * note's code block with the same value, and the block has no key the tests
-     * do not use, so the documented channel and the tested one cannot drift
-     * apart.
+     * The documented spill channel matches the tested one, key for key.
      *
      * @return void
      */
@@ -1979,9 +1855,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * An entry of the channel is written as it is in configuration: a string in
-     * quotes, a permission in octal, a class by its name, and a map with its
-     * values written the same way, with a line feed in double quotes.
+     * A channel entry is written as it is in configuration.
      *
      * @return void
      */
@@ -1994,8 +1868,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The block is found by the channel's name, among others in its section,
-     * and a section without it gives nothing.
+     * The channel block is found by name; a section without it gives nothing.
      *
      * @return void
      */
@@ -2008,9 +1881,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The spill and the outbox are called personal data by the threat model, in
-     * its own section, and by the delivery note, along with what the outbox's
-     * encryption does not protect and who else can read a line.
+     * The threat model and the delivery note call the spill and the outbox
+     * personal data.
      *
      * @return void
      */
@@ -2028,8 +1900,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every event the package dispatches has a row in the events guide itself,
-     * which is where a reader of the guide looks for it.
+     * Every dispatched event has a row in the events guide.
      *
      * @param  string  $class
      * @return void
@@ -2041,8 +1912,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * No document cites a milestone, describes a transition from a release, or
-     * names another package of the suite, in prose as much as in code.
+     * No document cites a milestone, a release transition or a sibling package.
      *
      * @return void
      */
@@ -2054,8 +1924,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Those patterns find each form, and neither the package's own name nor a
-     * word that merely resembles one.
+     * The patterns find each form, not the package's name or a look-alike.
      *
      * @return void
      */
@@ -2081,8 +1950,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every file a note's implementation anchors name exists, and every note
-     * names at least one.
+     * Every file a note's anchors name exists, and every note names one.
      *
      * @param  string  $note
      * @return void
@@ -2098,8 +1966,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The anchor scanner finds each backticked file, and neither a method nor a
-     * constant cited after it.
+     * The anchor scanner finds each backticked file and no method or constant.
      *
      * @return void
      */
@@ -2111,8 +1978,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Nothing a reader of the repository can see cites what is kept out of it,
-     * since such a citation would lead nowhere.
+     * No document cites a file kept out of the repository.
      *
      * @return void
      */
@@ -2122,9 +1988,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The pattern for what is kept out of the repository finds each form of
-     * citation, and neither a requirement-like word nor the package's own
-     * environment variables.
+     * The local-citation pattern finds each form, not env vars or look-alikes.
      *
      * @return void
      */
@@ -2155,8 +2019,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[statement]`: what the reading guide must say, each a limit or a
-     * rule of reading the trail a reader would otherwise assume away.
+     * Rows of `[statement]`: each rule of reading the reading guide must state.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -2168,8 +2031,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The reading guide makes each of those statements, however the line is
-     * wrapped.
+     * The reading guide makes each of those statements, however wrapped.
      *
      * @param  string  $statement
      * @return void
@@ -2181,12 +2043,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The reading guide's sections say what each of their own rules pins: the
-     * scopes narrow only through the instance methods and warn of a static
-     * factory, the verification names what the viewer's scope must reach and
-     * the offline steps, and the subject access procedure has its four blocks,
-     * says what the reveal grant shows and what the erasure reaches, states its
-     * limits, and no longer defers owner discovery and erasure.
+     * The reading guide's scopes, verification and subject access sections say
+     * what they must.
      *
      * @return void
      */
@@ -2218,9 +2076,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The reading guide itself names every purpose, field state, export format,
-     * export finding and acknowledgement, in code type, where a reader of the
-     * guide looks for them.
+     * The reading guide names every read path value, in code type.
      *
      * @return void
      */
@@ -2243,9 +2099,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every call the reading guide's examples make is a method of a class they
-     * use, or one of the example application's own, so no example shows a call
-     * that does not exist.
+     * Every call the reading guide's examples make exists.
      *
      * @return void
      */
@@ -2270,9 +2124,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The check above knows a method of the trail, a scope's factory and a
-     * container binding, and none that does not exist, so it is not empty by
-     * construction.
+     * The reading call check knows real methods only, so it is not empty.
      *
      * @return void
      */
@@ -2290,9 +2142,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[statement]`: what the threat model says a PHP access policy
-     * cannot do, each a limit a reader of the trail's guarantees would
-     * otherwise assume away.
+     * Rows of `[statement]`: what a PHP access policy cannot do.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -2304,8 +2154,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The threat model states each of those limits in its own section, however
-     * the lines are wrapped.
+     * The threat model states each of those limits in its own section.
      *
      * @param  string  $statement
      * @return void
@@ -2317,8 +2166,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[text]`: the name of the export command and each of its options,
-     * in code type, as the command declares them.
+     * Rows of `[text]`: the export command and each option, as declared.
      *
      * @return iterable<string, array{0: string}>
      */
@@ -2335,7 +2183,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The export command and each of its options is named in the reading guide.
+     * The export command and each option are named in the reading guide.
      *
      * @param  string  $text
      * @return void
@@ -2347,8 +2195,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The export command's rows are read from what it declares, its name and
-     * every option, so the check above is not empty by construction.
+     * The export rows are what the command declares, so the check is not empty.
      *
      * @return void
      */
@@ -2360,9 +2207,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The read and export settings read from the environment are named in the
-     * README and in the reading guide, and there are as many as the settings
-     * that read one.
+     * Every read and export setting's env var is in the README and the guide.
      *
      * @return void
      */
@@ -2379,9 +2224,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * No document says an immediate write runs outside the caller's
-     * transaction, because one open on its connection holds it, and a read's
-     * record is refused there for that reason.
+     * No document puts an immediate write outside the caller's transaction.
      *
      * @return void
      */
@@ -2391,9 +2234,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The phrase the immediate path is never described with is found in each of
-     * its forms, across a wrapped line, and not in a phrase that merely
-     * resembles it.
+     * The outside-the-caller pattern finds each form and no look-alike.
      *
      * @return void
      */
@@ -2411,9 +2252,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The reading note names, in its own section, the seams the read path
-     * leaves: the decrypting field reader, and owner discovery and erasure for
-     * a subject access request.
+     * The reading note's seams name what the read path leaves, none that ships.
      *
      * @return void
      */
@@ -2431,7 +2270,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[activity]`: every code the package records of its read path.
+     * Rows of `[activity]`: every code the read path records.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity}>
      */
@@ -2443,9 +2282,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Each code of the read path has its row in the vocabulary's table of
-     * package codes, and the properties the row says it keeps are exactly the
-     * ones its definition retains, every other dropped.
+     * Each read path code's vocabulary row lists exactly what it retains.
      *
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @return void
@@ -2470,9 +2307,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[note, statement]`: what the integrity note must say, each a
-     * rule of sealing, anchoring and verification, and the inputs the golden
-     * vectors are computed from.
+     * Rows of `[note, statement]`: the rules the integrity note must state.
      *
      * @return array<string, array{0: string, 1: string}>
      */
@@ -2521,9 +2356,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[note, statement]`: what the notes the owners' keys reach must
-     * say of them, each a rule of encryption, key uses, reading or erasure a
-     * reader of that note would otherwise miss.
+     * Rows of `[note, statement]`: the owners' keys rules each note states.
      *
      * @return array<string, array{0: string, 1: string}>
      */
@@ -2563,8 +2396,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Rows of `[guide, statement]`: what the operations guide must say, each a
-     * caveat of running the integrity commands.
+     * Rows of `[guide, statement]`: the integrity commands' caveats to state.
      *
      * @return array<string, array{0: string, 1: string}>
      */
@@ -2603,8 +2435,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The dotted paths of the configuration's settings: every key whose value
-     * is not a map of further settings, a list and an empty array included.
+     * The configuration's leaf paths, lists and empty arrays included.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -2633,8 +2464,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The keys the text does not name by their full path, in code type, in the
-     * order given.
+     * The keys the text does not name by full path in code type, in order.
      *
      * @param  list<string>  $keys
      * @param  string  $text
@@ -2646,8 +2476,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Whether one of the classes the reading guide's examples use declares the
-     * method, its traits' included.
+     * Whether a reading guide class, traits included, declares the method.
      *
      * @param  string  $method
      * @return bool
@@ -2676,8 +2505,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Whether a heading is in Title Case: every word starts with a capital
-     * letter, but for the short words that stay lower case inside a title.
+     * Whether a heading is in Title Case, short words excepted.
      *
      * @param  string  $title
      * @return bool
@@ -2711,8 +2539,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The files a section anchors: each backticked path into the package's own
-     * source, configuration or database directories.
+     * The backticked source, configuration or database paths a section anchors.
      *
      * @param  string  $section
      * @return list<string>
@@ -2725,9 +2552,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The tests a section cites: each backticked test file, with the backticked
-     * test methods that follow it. A method cited before any file is listed
-     * under `?`, a file that can never exist.
+     * Each backticked test file a section cites, with its methods; a method
+     * before any file goes under `?`.
      *
      * @param  string  $section
      * @return array<string, list<string>>
@@ -2759,8 +2585,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The event codes the package ships: the case values of every enum in
-     * `src/` that defines events.
+     * The case values of every event-defining enum in `src/`.
      *
      * @return list<string>
      */
@@ -2840,9 +2665,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The codes examples record or declare: the first string-literal argument
-     * of each `record(`, `event(`, `accessed(` and `for(` call, and the value
-     * of each upper-case enum case, in the order they appear.
+     * The first string argument of each `record(`, `event(`, `accessed(` and
+     * `for(` call, and each upper-case enum case's value, in order.
      *
      * @param  string  $code
      * @return list<string>
@@ -2857,11 +2681,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The names of other packages of the suite that code names: a namespace of
-     * the suite other than the package's own, written with single or doubled
-     * backslashes, a Composer package of the suite other than this one, and the
-     * first segment of every configuration key read or written that is neither
-     * the package's own nor one of Laravel's files.
+     * The suite's other namespaces, Composer packages and configuration keys
+     * the code names.
      *
      * @param  string  $code
      * @return list<string>
@@ -2925,8 +2746,8 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The public methods the class declares itself, which are not inherited,
-     * but for its constructor and any magic method.
+     * The public methods the class declares itself, constructor and magic
+     * methods aside.
      *
      * @param  class-string  $class
      * @return list<string>
@@ -2948,8 +2769,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The text of a string literal `LITERAL` matched, whichever quotes it is
-     * in.
+     * The text of a matched `LITERAL`, whichever quotes it is in.
      *
      * @param  array<int|string, string>  $match
      * @return string
@@ -2960,8 +2780,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * The fenced code block of a section that holds the documented channel,
-     * found by its name, or nothing when none does.
+     * The section's code block holding the named channel, or nothing.
      *
      * @param  string  $section
      * @return string
@@ -3056,8 +2875,7 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * A file of the repository with every run of whitespace made one space, so
-     * a sentence is found however its lines are wrapped.
+     * A repository file, whitespace collapsed so a wrapped sentence matches.
      *
      * @param  string  $path
      * @return string

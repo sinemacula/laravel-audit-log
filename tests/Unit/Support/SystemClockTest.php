@@ -11,8 +11,7 @@ use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
 
 /**
- * Unit tests for the system clock: the current instant, always in UTC whatever
- * the runtime's time zone, and a frozen test clock honoured in any zone.
+ * Unit tests for the system clock, always in UTC and honouring a frozen clock.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,8 +53,7 @@ final class SystemClockTest extends TestCase
     }
 
     /**
-     * The current instant is the system's, given in UTC even when the runtime's
-     * default time zone is another.
+     * The current instant is in UTC whatever the default time zone.
      *
      * @return void
      */
@@ -74,8 +72,7 @@ final class SystemClockTest extends TestCase
     }
 
     /**
-     * A test instant frozen in Auckland's time zone is honoured, and given as
-     * the same instant in UTC, its microseconds kept.
+     * A test clock frozen in Auckland is honoured as the same UTC instant.
      *
      * @return void
      */
