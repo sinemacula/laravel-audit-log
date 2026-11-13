@@ -9,7 +9,6 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
@@ -25,6 +24,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Imports another system's records as this installation's acceptance of a
@@ -125,7 +125,7 @@ final readonly class AuditImporter
         $file        = new ImportFile($source->path);
         $sha256      = $file->sha256();
         $now         = $this->clock->now();
-        $operationId = Str::uuid7($now)->toString();
+        $operationId = UuidV7::at($now);
         $tally       = new ImportTally;
         $retention   = $this->retentionAt($now, $tally);
 
@@ -137,8 +137,8 @@ final readonly class AuditImporter
 
         $this->transaction->confirm();
 
-        $batchId = Str::uuid7($now)->toString();
-        $holdId  = $hold ? Str::uuid7($now)->toString() : null;
+        $batchId = UuidV7::at($now);
+        $holdId  = $hold ? UuidV7::at($now) : null;
         $import  = [$operationId, $batchId, $sha256, StoredTime::toStorage(StoredTime::format($now))];
 
         $this->batches->start(self::batchOf($import, $source, $authority, $holdId));
@@ -176,7 +176,7 @@ final readonly class AuditImporter
 
         $this->transaction->confirm();
 
-        $import = [Str::uuid7($this->clock->now())->toString(), $batchId, self::textOf($batch['file_sha256'] ?? null) ?? '', $startedAt];
+        $import = [UuidV7::at($this->clock->now()), $batchId, self::textOf($batch['file_sha256'] ?? null) ?? '', $startedAt];
 
         $closing = $running ? ImportStatus::INTERRUPTED : $stored;
 

@@ -5,13 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Database\Connection;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Places and releases holds and rebuilds their projection, each decided from
@@ -138,7 +138,7 @@ final readonly class HoldKeeper
         ?\DateTimeInterface $reviewBy,
         ?string $holdId = null,
     ): array {
-        $holdId ??= Str::uuid7($this->clock->now())->toString();
+        $holdId ??= UuidV7::at($this->clock->now());
 
         self::checkPlaceable($replay, $holdId);
 
@@ -227,7 +227,7 @@ final readonly class HoldKeeper
         $this->transaction->confirm();
 
         return $this->transaction->run(
-            Str::uuid7($this->clock->now())->toString(),
+            UuidV7::at($this->clock->now()),
             fn (Connection $connection): array => $this->replay()->verify($connection)->holds(),
         );
     }

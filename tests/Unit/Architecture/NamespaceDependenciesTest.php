@@ -165,11 +165,11 @@ final class NamespaceDependenciesTest extends TestCase
             'forbids' => ['Records', 'Stores', 'Integrity', 'Console'],
             'allows'  => [],
         ],
-        'the database helpers name nothing of the package but each other' => [
+        'the database helpers name nothing of the package but each other and the UUID helper' => [
             'from'    => ['Database'],
             'except'  => [],
             'forbids' => ['*'],
-            'allows'  => ['Database'],
+            'allows'  => ['Database', 'Support\UuidV7'],
         ],
         'only the service provider names the console' => [
             'from'    => ['*'],

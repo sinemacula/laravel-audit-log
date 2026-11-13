@@ -7,7 +7,6 @@ namespace SineMacula\Laravel\AuditLog\Keys;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Str;
 use Random\RandomException;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
@@ -15,6 +14,7 @@ use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
 use SineMacula\Laravel\AuditLog\Integrity\SubjectKeySigner;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Creates a unit's key on the key session, so it commits on its own and never
@@ -185,7 +185,7 @@ final readonly class KeyCreator
     private function insert(Connection $connection, #[\SensitiveParameter] KeyUnit $unit, int $generation): array
     {
         $now       = $this->clock->now();
-        $id        = Str::uuid7($now)->toString();
+        $id        = UuidV7::at($now);
         $dataKey   = self::dataKey();
         $wrapKeyId = $this->wrapper->currentKeyId();
         $context   = SubjectKeyRow::wrapContextOf($id, $unit->digest(), $generation, $wrapKeyId);

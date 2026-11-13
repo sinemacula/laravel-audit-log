@@ -7,7 +7,6 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
@@ -18,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
 use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * The one writer of the lifecycle journal, appending only onto the head a
@@ -103,7 +103,7 @@ final readonly class Journal
         $now = $this->clock->now();
 
         $draft = JournalRow::draft(
-            Str::uuid7($now)->toString(),
+            UuidV7::at($now),
             ($head[0] ?? 0) + 1,
             $this->settings->logId(),
             $kind,

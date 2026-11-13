@@ -87,6 +87,7 @@ use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Registers the package's bindings, listeners, middleware, commands, schedule,
@@ -191,6 +192,7 @@ final class AuditLogServiceProvider extends ServiceProvider
         $this->app->scopedIf(ReadGuard::class);
         $this->app->scopedIf(CommitQueue::class);
         $this->app->scopedIf(CapturedEvents::class);
+        $this->app->scopedIf(UuidV7::class);
     }
 
     /**

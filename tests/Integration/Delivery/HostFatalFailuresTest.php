@@ -15,12 +15,9 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 use Monolog\Handler\NullHandler;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
-use Ramsey\Uuid\Uuid;
-use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
@@ -146,8 +143,6 @@ final class HostFatalFailuresTest extends TestCase
     #[\Override]
     protected function tearDown(): void
     {
-        Str::createUuidsNormally();
-
         foreach (DB::getConnections() as $connection) {
             while ($connection->transactionLevel() > 0) {
                 $connection->rollBack();
@@ -760,8 +755,7 @@ final class HostFatalFailuresTest extends TestCase
             $host->beginTransaction();
 
             $this->reportOutcome(static function (): void {
-                self::pinTheContendedId();
-                self::recordHoldingTheSecret();
+                self::recordHoldingTheSecret(self::CONTENDED_ID);
             });
 
             $this->appendToChildFile(self::OUTCOME, (string) $host->transactionLevel());
@@ -1149,13 +1143,9 @@ final class HostFatalFailuresTest extends TestCase
         if ($attempt === 1) {
             $this->openGate('row-held');
             $this->awaitAnotherSessionsLockWait($host);
-
-            self::pinTheContendedId();
-        } else {
-            Str::createUuidsNormally();
         }
 
-        self::recordHoldingTheSecret();
+        self::recordHoldingTheSecret($attempt === 1 ? self::CONTENDED_ID : null);
     }
 
     /**
@@ -1315,23 +1305,21 @@ final class HostFatalFailuresTest extends TestCase
     }
 
     /**
-     * Record immediately, holding a secret the failure's message would carry.
+     * Record immediately, holding a secret the failure's message would carry,
+     * under the id given or a fresh one.
      *
+     * @param  ?string  $id
      * @return void
      */
-    private static function recordHoldingTheSecret(): void
+    private static function recordHoldingTheSecret(?string $id = null): void
     {
-        AuditLog::event(self::CODE)->immediately()->withProperties(['amount' => self::SECRET])->record();
-    }
+        $pending = AuditLog::event(self::CODE)->immediately()->withProperties(['amount' => self::SECRET]);
 
-    /**
-     * Have every record take the contended id until a retry unpins it.
-     *
-     * @return void
-     */
-    private static function pinTheContendedId(): void
-    {
-        Str::createUuidsUsing(static fn (): UuidInterface => Uuid::fromString(self::CONTENDED_ID));
+        if ($id !== null) {
+            $pending->identifiedAs($id);
+        }
+
+        $pending->record();
     }
 
     /**

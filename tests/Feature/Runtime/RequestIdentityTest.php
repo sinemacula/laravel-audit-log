@@ -8,11 +8,8 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Exceptions;
-use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
-use Ramsey\Uuid\Uuid;
-use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Runtime\CarriedContext;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
@@ -75,7 +72,7 @@ final class RequestIdentityTest extends TestCase
     }
 
     /**
-     * Put back the trusted proxies and the way ids are generated.
+     * Put back the trusted proxies.
      *
      * @return void
      */
@@ -83,7 +80,6 @@ final class RequestIdentityTest extends TestCase
     protected function tearDown(): void
     {
         Request::setTrustedProxies([], 0);
-        Str::createUuidsNormally();
 
         parent::tearDown();
     }
@@ -123,24 +119,13 @@ final class RequestIdentityTest extends TestCase
      */
     public function testIsLazy(): void
     {
-        $generated = new \ArrayObject;
-
-        Str::createUuidsUsing(static function () use ($generated): UuidInterface {
-            $generated->append(true);
-
-            return Uuid::uuid7();
-        });
-
         $identity = $this->identity();
 
         $identity->traceId();
 
-        self::assertCount(0, $generated);
         self::assertSame([], Context::allHidden());
 
-        $identity->requestId();
-
-        self::assertCount(1, $generated);
+        self::assertSame($identity->requestId(), Context::getHidden(CarriedContext::REQUEST_ID));
     }
 
     /**

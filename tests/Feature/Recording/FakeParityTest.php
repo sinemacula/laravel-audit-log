@@ -6,11 +6,8 @@ namespace Tests\Feature\Recording;
 
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
 use PHPUnit\Framework\Attributes\CoversClass;
-use Ramsey\Uuid\Uuid;
-use Ramsey\Uuid\UuidInterface;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
@@ -52,15 +49,13 @@ final class FakeParityTest extends TestCase
     private const string ID = '019b0000-0000-7000-8000-000000000001';
 
     /**
-     * Roll back any transaction a test left open, and put UUIDs back.
+     * Roll back any transaction a test left open.
      *
      * @return void
      */
     #[\Override]
     protected function tearDown(): void
     {
-        Str::createUuidsNormally();
-
         $connection = DB::connection(self::CONNECTION);
 
         while ($connection->transactionLevel() > 0) {
@@ -78,8 +73,6 @@ final class FakeParityTest extends TestCase
     public function testTheFakeHoldsTheRecordTheStoreReceived(): void
     {
         $this->app?->instance(Clock::class, FrozenClock::at('2026-11-01T12:00:00.123456Z'));
-
-        Str::createUuidsUsing(static fn (): UuidInterface => Uuid::fromString(self::ID));
 
         $fake = AuditLog::fake();
 
@@ -238,7 +231,7 @@ final class FakeParityTest extends TestCase
     }
 
     /**
-     * Record the one activity the parity test compares.
+     * Record the one activity the parity test compares, under one pinned id.
      *
      * @return void
      */
@@ -248,6 +241,7 @@ final class FakeParityTest extends TestCase
             ->on(Reference::of('invoice', '42'))
             ->by(Reference::of('staff', '7'))
             ->withProperties(['amount' => '1200.00', 'nested' => ['currency' => 'GBP']])
+            ->identifiedAs(self::ID)
             ->record();
     }
 }

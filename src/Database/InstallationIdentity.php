@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Str;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * The installation's id, a UUID v7 under `installation.id` in the integrity
@@ -129,7 +129,7 @@ final readonly class InstallationIdentity
 
         return [
             'name'       => self::NAME,
-            'value'      => json_encode(['id' => Str::uuid7($instant)->toString()], JSON_THROW_ON_ERROR),
+            'value'      => json_encode(['id' => UuidV7::at($instant)], JSON_THROW_ON_ERROR),
             'updated_at' => $instant->format(self::TIME_FORMAT),
         ];
     }

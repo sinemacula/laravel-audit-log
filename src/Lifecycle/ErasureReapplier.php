@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Database\Connection;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Integrity\AnchoredHead;
@@ -16,6 +15,7 @@ use SineMacula\Laravel\AuditLog\Integrity\JournalSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ErasureStatus;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Erases again, after a restore, every owner an erasures file names, and
@@ -103,7 +103,7 @@ final readonly class ErasureReapplier
         $file   = new ImportFile($path);
         $digest = self::measured($file);
         $erase ??= function (#[\SensitiveParameter] Reference $owner, ErasureRun $erasures) use ($authority): ErasureResult {
-            $ownOperationId = Str::uuid7($this->clock->now())->toString();
+            $ownOperationId = UuidV7::at($this->clock->now());
 
             return $this->eraser->erase($ownOperationId, $owner, $authority, true, true, $erasures);
         };

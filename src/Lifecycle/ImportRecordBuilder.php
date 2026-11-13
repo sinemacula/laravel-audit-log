@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Definitions\DefinitionSettings;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
@@ -20,6 +19,7 @@ use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Builds the imported record of an import line as the capture pipeline builds a
@@ -72,7 +72,7 @@ final readonly class ImportRecordBuilder
             }
 
             $pending   = self::described($line, $code);
-            $id        = Str::uuid7($importedAt)->toString();
+            $id        = UuidV7::at($importedAt);
             $minimised = $this->minimiser($dryRun)->minimise($pending->snapshot(), $definition, $id);
 
             return AuditRecord::fromImport($pending, $minimised, $definition->version, $definition->category, $line->occurredAt, $line->origin, $source, $id);
