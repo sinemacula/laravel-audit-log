@@ -28,9 +28,9 @@ where it came from, so each value's source, and what it does not claim, is fixed
 - A contributor only fills gaps. A value given to the builder is never replaced, `by(null)` and `forTenant(null)`
   included, and the first contributor to fill a field wins. Because the defaults run first, the ambient actor beats an
   application's contributor, which fills only what the defaults left.
-- No default fills a principal, a tenant or a session id unless a bound `Contracts\HeldActorReader` gives them with the
-  ambient actor: otherwise each comes from an explicit value or an application's contributor. No default stores a URL,
-  a path or a query string.
+- No default fills a credential id, and none fills a principal, a tenant or a session id unless a bound
+  `Contracts\HeldActorReader` gives them with the ambient actor: otherwise each comes from an explicit value or an
+  application's contributor. No default stores a URL, a path or a query string.
 - The actor comes from what a guard already holds. `Contributors\AmbientActor` walks `actor.guards` in order, or the
   default guard when it is `null`, read from configuration on every capture so `Auth::shouldUse()` counts. It asks each
   guard `hasUser()`, and reads the user through `Runtime\CachedUser`, never through `user()`, which loads a user through

@@ -130,6 +130,8 @@ final class SensitiveParametersTest extends TestCase
             'the context filled on a builder'     => [PendingRecord::class, 'fillContext', 'context'],
             'the credential a builder is given'   => [PendingRecord::class, 'usingCredential', 'credentialId'],
             'the context a contributor fills'     => [Contribution::class, 'fillContext', 'context'],
+            'the credential a builder is filled'  => [FillsAmbientContext::class, 'fillCredential', 'credentialId'],
+            'the credential a contributor fills'  => [Contribution::class, 'fillCredential', 'credentialId'],
             'the properties given to a recorder'  => [Recorder::class, 'record', 'properties'],
             'the builder a recorder writes'       => [Recorder::class, 'write', 'pending'],
             'the builder a record is made from'   => [AuditRecord::class, 'fromPending', 'pending'],

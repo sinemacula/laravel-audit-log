@@ -199,11 +199,11 @@ AuditLog::event('invoice.approved')->on($invoice)->correlatedWith('app:ticket-12
 
 ## Contributors
 
-A contributor fills what a record leaves out, such as the principal or the tenant, on every record, the captured ones
-included. Register one from a service provider's `boot()` with `AuditLog::contribute()`; it implements
-`Contracts\ContextContributor` and fills only what is still a gap, so a value a mapper set, or an actor a capture
-names as no one, is never replaced. [The context note](../design/context-resolution.md) says what each contributor may
-fill and in what order.
+A contributor fills what a record leaves out, such as the principal, the tenant or the credential, on every record, the
+captured ones included. Register one from a service provider's `boot()` with `AuditLog::contribute()`; it implements
+`Contracts\ContextContributor` and fills only what is still a gap, so a value a mapper set, or an actor a capture names
+as no one, is never replaced. [The context note](../design/context-resolution.md) says what each contributor may fill
+and in what order.
 
 ## Guards without GuardHelpers
 
