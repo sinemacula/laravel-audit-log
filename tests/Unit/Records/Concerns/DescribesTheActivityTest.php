@@ -469,6 +469,43 @@ final class DescribesTheActivityTest extends TestCase
     }
 
     /**
+     * An explicit credential id beats a filler in either order.
+     *
+     * @return void
+     */
+    public function testUsingCredentialBeatsAFillerInEitherOrder(): void
+    {
+        $before = (new PendingRecord)->usingCredential('key_01');
+        $after  = new PendingRecord;
+
+        $before->fillCredential('filled');
+        $after->fillCredential('filled');
+        $after->usingCredential('key_01');
+
+        self::assertSame('key_01', $before->snapshot()->credentialId);
+        self::assertSame('key_01', $after->snapshot()->credentialId);
+    }
+
+    /**
+     * A refused credential id leaves the field open for a filler.
+     *
+     * @return void
+     */
+    public function testARefusedCredentialLeavesTheFieldOpen(): void
+    {
+        $pending = new PendingRecord;
+
+        try {
+            $pending->usingCredential('');
+            self::fail('Expected the id to be refused.');
+        } catch (\InvalidArgumentException) {
+            $pending->fillCredential('filled');
+        }
+
+        self::assertSame('filled', $pending->snapshot()->credentialId);
+    }
+
+    /**
      * The credential id parameter is marked sensitive, so it never appears in a
      * stack trace.
      *

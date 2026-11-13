@@ -66,6 +66,9 @@ final class FillsAmbientContextTest extends TestCase
             'the session' => [static function (PendingRecord $pending): void {
                 $pending->fillSession('sess_ref_1');
             }, 'sessionId', 'sess_ref_1'],
+            'the credential' => [static function (PendingRecord $pending): void {
+                $pending->fillCredential('key_01');
+            }, 'credentialId', 'key_01'],
             'the request id' => [static function (PendingRecord $pending): void {
                 $pending->fillRequest('req-1');
             }, 'requestId', 'req-1'],
@@ -208,6 +211,7 @@ final class FillsAmbientContextTest extends TestCase
             $pending->fillTenant(Reference::of('organisation', $id));
             $pending->fillGuard("guard-{$id}");
             $pending->fillSession("sess-{$id}");
+            $pending->fillCredential("key-{$id}");
             $pending->fillRequest("req-{$id}", str_repeat($id, 32));
             $pending->fillClient("203.0.113.{$id}", "agent-{$id}");
         }
@@ -215,8 +219,8 @@ final class FillsAmbientContextTest extends TestCase
         $snapshot = $pending->snapshot();
 
         self::assertEquals([Reference::of('user', '1'), Reference::of('team', '1'), Reference::of('organisation', '1')], self::parties($snapshot));
-        self::assertSame(['guard-1', 'sess-1', 'req-1', str_repeat('1', 32), '203.0.113.1', 'agent-1'], [
-            $snapshot->guard, $snapshot->sessionId, $snapshot->requestId, $snapshot->traceId, $snapshot->ip, $snapshot->userAgent,
+        self::assertSame(['guard-1', 'sess-1', 'key-1', 'req-1', str_repeat('1', 32), '203.0.113.1', 'agent-1'], [
+            $snapshot->guard, $snapshot->sessionId, $snapshot->credentialId, $snapshot->requestId, $snapshot->traceId, $snapshot->ip, $snapshot->userAgent,
         ]);
     }
 
@@ -235,6 +239,7 @@ final class FillsAmbientContextTest extends TestCase
         $pending->fillTenant(null);
         $pending->fillGuard(null);
         $pending->fillSession(null);
+        $pending->fillCredential(null);
         $pending->fillRequest(null, null);
         $pending->fillClient(null, null);
 
@@ -245,14 +250,15 @@ final class FillsAmbientContextTest extends TestCase
         $pending->fillTenant(Reference::of('organisation', '1'));
         $pending->fillGuard('web');
         $pending->fillSession('sess-1');
+        $pending->fillCredential('key-1');
         $pending->fillRequest('req-1', self::TRACE);
         $pending->fillClient('203.0.113.7', 'agent');
 
         $snapshot = $pending->snapshot();
 
         self::assertEquals([Reference::of('user', '1'), Reference::of('team', '1'), Reference::of('organisation', '1')], self::parties($snapshot));
-        self::assertSame(['web', 'sess-1', 'req-1', self::TRACE, '203.0.113.7', 'agent'], [
-            $snapshot->guard, $snapshot->sessionId, $snapshot->requestId, $snapshot->traceId, $snapshot->ip, $snapshot->userAgent,
+        self::assertSame(['web', 'sess-1', 'key-1', 'req-1', self::TRACE, '203.0.113.7', 'agent'], [
+            $snapshot->guard, $snapshot->sessionId, $snapshot->credentialId, $snapshot->requestId, $snapshot->traceId, $snapshot->ip, $snapshot->userAgent,
         ]);
     }
 
@@ -580,6 +586,7 @@ final class FillsAmbientContextTest extends TestCase
         $guard   = 'A guard name must be from 1 to 64 characters, with no control characters.';
         $session = 'A session reference must be from 1 to 191 characters, with no control characters.';
         $request = 'A request id must be from 1 to 64 characters, with no control characters.';
+        $key     = 'A credential id must be from 1 to 191 characters, with no control characters.';
 
         yield from [
             'a 65-character guard' => [static function (PendingRecord $pending): void {
@@ -594,6 +601,12 @@ final class FillsAmbientContextTest extends TestCase
             'a 192-character session reference' => [static function (PendingRecord $pending): void {
                 $pending->fillSession(str_repeat('s', 192));
             }, $session],
+            'a 192-character credential id' => [static function (PendingRecord $pending): void {
+                $pending->fillCredential(str_repeat('k', 192));
+            }, $key],
+            'a credential id with a new line' => [static function (PendingRecord $pending): void {
+                $pending->fillCredential("key\n");
+            }, $key],
             'a 65-character request id' => [static function (PendingRecord $pending): void {
                 $pending->fillRequest(str_repeat('r', 65));
             }, $request],
@@ -632,12 +645,13 @@ final class FillsAmbientContextTest extends TestCase
 
         $pending->fillGuard(str_repeat('é', 64));
         $pending->fillSession(str_repeat('é', 191));
+        $pending->fillCredential(str_repeat('é', 191));
         $pending->fillRequest(str_repeat('é', 64));
 
         $snapshot = $pending->snapshot();
 
-        self::assertSame([str_repeat('é', 64), str_repeat('é', 191), str_repeat('é', 64)], [
-            $snapshot->guard, $snapshot->sessionId, $snapshot->requestId,
+        self::assertSame([str_repeat('é', 64), str_repeat('é', 191), str_repeat('é', 191), str_repeat('é', 64)], [
+            $snapshot->guard, $snapshot->sessionId, $snapshot->credentialId, $snapshot->requestId,
         ]);
     }
 
@@ -816,6 +830,7 @@ final class FillsAmbientContextTest extends TestCase
 
         $pending->fillGuard('web');
         $pending->fillSession('sess-1');
+        $pending->fillCredential('key-1');
         $pending->fillRequest('req-1', self::TRACE);
         $pending->fillClient('203.0.113.7', 'agent');
 

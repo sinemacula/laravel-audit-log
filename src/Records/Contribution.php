@@ -102,6 +102,20 @@ final readonly class Contribution
     }
 
     /**
+     * Fill the credential's identifier, never the secret.
+     *
+     * @param  ?string  $credentialId
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     */
+    public function fillCredential(#[\SensitiveParameter] ?string $credentialId): void
+    {
+        $this->pending->fillCredential($credentialId);
+    }
+
+    /**
      * Fill the request id and the W3C trace id of a trusted `traceparent`, each
      * on its own.
      *

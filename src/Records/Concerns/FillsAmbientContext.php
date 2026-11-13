@@ -200,6 +200,35 @@ trait FillsAmbientContext
     }
 
     /**
+     * Fill the credential's identifier, never the secret; validated, never
+     * cleaned or cut.
+     *
+     * @param  ?string  $credentialId
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     * @throws \LogicException
+     *
+     * @internal
+     */
+    public function fillCredential(#[\SensitiveParameter] ?string $credentialId): void
+    {
+        $this->assertUsable();
+
+        if ($credentialId === null) {
+            return;
+        }
+
+        self::checkIdentifier($credentialId, self::ID_MAX_CHARACTERS, 'A credential id');
+
+        if (!$this->claims('credential', true)) {
+            return;
+        }
+
+        $this->credentialId = $credentialId;
+    }
+
+    /**
      * Fill the request id and the W3C trace id of a trusted `traceparent`, each
      * on its own; validated, never cleaned or cut.
      *
@@ -332,7 +361,7 @@ trait FillsAmbientContext
     /**
      * Mark the field given, so no contributor fills it.
      *
-     * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
+     * @param  'actor'|'credential'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
      * @return void
      */
     private function give(string $field): void
@@ -344,7 +373,7 @@ trait FillsAmbientContext
      * Claim an unclaimed field for a contributor's value, saying whether to
      * keep it.
      *
-     * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
+     * @param  'actor'|'credential'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
      * @param  bool  $present
      * @return bool
      */
@@ -362,7 +391,7 @@ trait FillsAmbientContext
     /**
      * Whether the field was given, explicitly or by a contributor.
      *
-     * @param  'actor'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
+     * @param  'actor'|'credential'|'guard'|'ip'|'origin'|'principal'|'request'|'session'|'tenant'|'trace'|'user_agent'  $field
      * @return bool
      */
     private function isGiven(string $field): bool

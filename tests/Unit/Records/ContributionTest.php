@@ -61,6 +61,9 @@ final class ContributionTest extends TestCase
             'the session' => [static function (Contribution $contribution): void {
                 $contribution->fillSession('sess_ref_1');
             }, ['session_id' => 'sess_ref_1']],
+            'the credential' => [static function (Contribution $contribution): void {
+                $contribution->fillCredential('key_01');
+            }, ['credential_id' => 'key_01']],
             'the request id' => [static function (Contribution $contribution): void {
                 $contribution->fillRequest('req-1');
             }, ['request_id' => 'req-1']],
@@ -261,6 +264,7 @@ final class ContributionTest extends TestCase
             'fillTenant',
             'fillGuard',
             'fillSession',
+            'fillCredential',
             'fillRequest',
             'fillClient',
             'fillOrigin',

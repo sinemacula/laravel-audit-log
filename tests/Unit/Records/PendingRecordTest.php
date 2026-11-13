@@ -646,6 +646,9 @@ final class PendingRecordTest extends TestCase
             'fillSession' => [static function (PendingRecord $pending): void {
                 $pending->fillSession(null);
             }],
+            'fillCredential' => [static function (PendingRecord $pending): void {
+                $pending->fillCredential(null);
+            }],
             'fillRequest' => [static function (PendingRecord $pending): void {
                 $pending->fillRequest(null, null);
             }],
@@ -711,7 +714,7 @@ final class PendingRecordTest extends TestCase
         sort($rows);
         sort($refused);
 
-        self::assertCount(34, $mutators);
+        self::assertCount(35, $mutators);
         self::assertSame($mutators, $rows);
         self::assertSame($mutators, $refused);
     }
@@ -904,6 +907,9 @@ final class PendingRecordTest extends TestCase
             },
             'fillSession' => static function (PendingRecord $pending): void {
                 $pending->fillSession('sess_ref_1');
+            },
+            'fillCredential' => static function (PendingRecord $pending): void {
+                $pending->fillCredential('key_filled');
             },
             'fillRequest' => static function (PendingRecord $pending): void {
                 $pending->fillRequest('01932b4e-8a40-7000-8000-0000000000aa', '4bf92f3577b34da6a3ce929d0e0e4736');
