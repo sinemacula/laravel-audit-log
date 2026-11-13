@@ -8,7 +8,6 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
@@ -22,6 +21,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\PruneStatus;
 use SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Prunes the entries retention no longer keeps, seal by seal, each chunk in its
@@ -114,7 +114,7 @@ final readonly class Pruner
         self::checkBudget($maxSeconds);
 
         $startedAt = $this->clock->now();
-        $tally     = new PruneTally(Str::uuid7($startedAt)->toString(), $dryRun);
+        $tally     = new PruneTally(UuidV7::at($startedAt), $dryRun);
         $decisions = null;
         $replay    = null;
 

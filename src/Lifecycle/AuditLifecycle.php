@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\AuditLog\Lifecycle;
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
@@ -15,6 +14,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus;
 use SineMacula\Laravel\AuditLog\Records\Enums\Outcome;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * The privileged operations on the log's lifecycle, each recording its activity
@@ -475,7 +475,7 @@ final readonly class AuditLifecycle
      */
     private function operationId(): string
     {
-        return Str::uuid7($this->container->make(Clock::class)->now())->toString();
+        return UuidV7::at($this->container->make(Clock::class)->now());
     }
 
     /**

@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\AuditLog;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Encryption\StringEncrypter;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
@@ -24,6 +23,7 @@ use SineMacula\Laravel\AuditLog\Records\EventCode;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
 use SineMacula\Laravel\AuditLog\Records\SourceSettings;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * The pipeline every recorded or captured activity runs: its definition and
@@ -122,7 +122,7 @@ final readonly class RecordPipeline
 
         $filled     = $pending->snapshot();
         $occurredAt = $container->make(Clock::class)->now();
-        $id         = $filled->id ?? Str::uuid7($occurredAt)->toString();
+        $id         = $filled->id ?? $container->make(UuidV7::class)->next($occurredAt);
         $minimised  = $container->make(RecordMinimiser::class)->minimise($filled, $definition, $id);
         $attachment = $snapshot->manifest === null ? null : Attachment::sealed($snapshot->manifest, $container->make(StringEncrypter::class));
         $source     = $container->make(SourceSettings::class);

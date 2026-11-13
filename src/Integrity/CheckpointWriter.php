@@ -7,7 +7,6 @@ namespace SineMacula\Laravel\AuditLog\Integrity;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Query\Builder;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
@@ -15,6 +14,7 @@ use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Writes one seal in one transaction on the storage connection: reads the last
@@ -272,7 +272,7 @@ final readonly class CheckpointWriter
 
         return new SealEnvelope(
             $this->settings->logId(),
-            Str::uuid7($now)->toString(),
+            UuidV7::at($now),
             $previous === null ? 1 : $previous->sequence + 1,
             $previous?->id,
             $previousDigest,

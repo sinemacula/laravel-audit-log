@@ -10,7 +10,6 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Sleep;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
@@ -22,6 +21,7 @@ use SineMacula\Laravel\AuditLog\Records\ImportedSource;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * Writes one chunk of an import in its own transaction on the storage
@@ -156,7 +156,7 @@ final readonly class ImportWriter
      */
     public function plan(#[\SensitiveParameter] array $lines, ImportTally $tally, \DateTimeInterface $importedAt, ?RetentionDecisions $retention = null): void
     {
-        [$built] = $this->built(Str::uuid7($importedAt)->toString(), $lines, $tally, $importedAt, $retention, true);
+        [$built] = $this->built(UuidV7::at($importedAt), $lines, $tally, $importedAt, $retention, true);
 
         if ($built === []) {
             return;

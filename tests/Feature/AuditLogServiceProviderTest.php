@@ -115,6 +115,7 @@ use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
 use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 use Tests\Fixtures\Capture\Events\PortalSignedIn;
 use Tests\Fixtures\Capture\Mappers\PortalMapper;
@@ -765,6 +766,23 @@ final class AuditLogServiceProviderTest extends TestCase
 
         self::assertNotSame($captured, app(CapturedEvents::class));
         self::assertFalse(app(CapturedEvents::class)->isClaimed($event));
+    }
+
+    /**
+     * The record id generator is scoped, so ids of one instant follow each
+     * other within a request and the next request starts afresh.
+     *
+     * @return void
+     */
+    public function testTheRecordIdGeneratorIsScoped(): void
+    {
+        $generator = app(UuidV7::class);
+
+        self::assertSame($generator, app(UuidV7::class));
+
+        $this->app?->forgetScopedInstances();
+
+        self::assertNotSame($generator, app(UuidV7::class));
     }
 
     /**

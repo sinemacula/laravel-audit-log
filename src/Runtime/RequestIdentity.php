@@ -6,8 +6,8 @@ namespace SineMacula\Laravel\AuditLog\Runtime;
 
 use Illuminate\Http\Request;
 use Illuminate\Log\Context\Repository;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 
 /**
  * The request id and trace id of the work in hand, kept in hidden Context so a
@@ -73,7 +73,7 @@ final class RequestIdentity
             return $this->requestId = $carried;
         }
 
-        $this->requestId ??= $this->inboundRequestId() ?? Str::uuid7($this->clock->now())->toString();
+        $this->requestId ??= $this->inboundRequestId() ?? UuidV7::at($this->clock->now());
 
         $this->context->addHidden(CarriedContext::REQUEST_ID, $this->requestId);
 
