@@ -28,9 +28,9 @@ where it came from, so each value's source, and what it does not claim, is fixed
 - A contributor only fills gaps. A value given to the builder is never replaced, `by(null)` and `forTenant(null)`
   included, and the first contributor to fill a field wins. Because the defaults run first, the ambient actor beats an
   application's contributor, which fills only what the defaults left.
-- No default fills a credential id, and none fills a principal, a tenant or a session id unless a bound
-  `Contracts\HeldActorReader` gives them with the ambient actor: otherwise each comes from an explicit value or an
-  application's contributor. No default stores a URL, a path or a query string.
+- No default fills a principal, a tenant, a session id or a credential id unless a bound `Contracts\HeldActorReader`
+  gives them with the ambient actor: otherwise each comes from an explicit value or an application's contributor. No
+  default stores a URL, a path or a query string.
 - The actor comes from what a guard already holds. `Contributors\AmbientActor` walks `actor.guards` in order, or the
   default guard when it is `null`, read from configuration on every capture so `Auth::shouldUse()` counts. It asks each
   guard `hasUser()`, and reads the user through `Runtime\CachedUser`, never through `user()`, which loads a user through
@@ -39,10 +39,10 @@ where it came from, so each value's source, and what it does not claim, is fixed
 - `hasUser()` returns only a boolean, so `CachedUser` reads the guard's own `$user` with a narrowly bound closure, and
   only from a guard using Laravel's `GuardHelpers` trait, recognised by the trait and never by the guard's class or
   package. Any other guard is read only by a `Contracts\HeldActorReader` an integration binds, which reads what the
-  guard has bound into a `Records\HeldActor`: the actor and any principal, tenant and session reference. A reader's
-  answer beats the `GuardHelpers` reading of the same guard, and `null` leaves the guard to it. A guard neither reads,
-  or a user that is neither an Eloquent model nor `Authenticatable`, gives no ambient actor: an application's
-  contributor or `->by(Reference)` fills it.
+  guard has bound into a `Records\HeldActor`: the actor and any principal, tenant, session reference and credential id.
+  A reader's answer beats the `GuardHelpers` reading of the same guard, and `null` leaves the guard to it. A guard
+  neither reads, or a user that is neither an Eloquent model nor `Authenticatable`, gives no ambient actor: an
+  application's contributor or `->by(Reference)` fills it.
 - The first guard holding a user decides, and only it is given to the reader. When that guard's user cannot be read (a
   guard without the trait that no reader reads, a reader's `\InvalidArgumentException`, an unsaved model, an identifier
   that is neither a string nor an integer) there is no ambient actor, and the walk does not go on
@@ -52,7 +52,8 @@ where it came from, so each value's source, and what it does not claim, is fixed
 - The guard, principal, tenant and session go with the ambient or carried actor only: an open actor is filled with all
   of them, an actor already given as that same actor gets the principal, tenant and session but no guard, since a
   capture names its own, and `by($someoneElse)` and `by(null)` get none. Each is filled only where the record has none,
-  so an explicit value, `null` included, is kept.
+  so an explicit value, `null` included, is kept. The credential id is filled only with an open actor, never on a record
+  whose actor was given, so a held credential never sits on another actor's record.
 - A record made before the `auth` middleware has run has no actor, because no guard holds a user yet and none is loaded.
   Name the actor with `->by()`.
 - `Runtime\ExecutionFrames` is a scoped stack of `ExecutionFrame`s, each an `HTTP`, `COMMAND` or `JOB` `FrameKind`. The
@@ -103,10 +104,10 @@ where it came from, so each value's source, and what it does not claim, is fixed
 - When a job is queued, `Listeners\CarryContextIntoJobs` writes on the repository `ContextDehydrating` gives it, never
   on the facade: the request id, generated now if none exists yet, the trace id, and the actor's snapshot as strings
   (`audit-log.actor_type`, `audit-log.actor_id`, `audit-log.actor_guard`, and when known `audit-log.principal_type`,
-  `audit-log.principal_id`, `audit-log.tenant_type`, `audit-log.tenant_id` and `audit-log.session`). Carrying an actor
-  replaces the whole envelope, so an earlier actor's context never goes on with a later one. With no ambient actor
-  inside a job, the actor that job carried goes on, so chained jobs inherit it; any other snapshot left in Context is
-  dropped.
+  `audit-log.principal_id`, `audit-log.tenant_type`, `audit-log.tenant_id`, `audit-log.session` and
+  `audit-log.credential_id`). Carrying an actor replaces the whole envelope, so an earlier actor's context never goes on
+  with a later one. With no ambient actor inside a job, the actor that job carried goes on, so chained jobs inherit it;
+  any other snapshot left in Context is dropped.
 - In the job the identifiers are read from the hydrated Context, and `TrackJobFrames` reads the actor's snapshot from it
   as the job starts and keeps it on the job's frame, because Laravel hydrates a nested sync job's payload into the same
   Context and leaves it there. The frame's snapshot, the innermost job's, is what a record falls back to and what goes on

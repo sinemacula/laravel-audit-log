@@ -8,7 +8,7 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
 
 /**
  * The actor a guard holds, as a `Contracts\HeldActorReader` gives it, with the
- * principal, tenant and session reference that go with it.
+ * principal, tenant, session reference and credential that go with it.
  *
  * @api
  *
@@ -17,8 +17,8 @@ use SineMacula\Laravel\AuditLog\Support\TextSanitizer;
  */
 final readonly class HeldActor
 {
-    /** @var int Longest session reference, in characters: the `session_id` column. */
-    private const int SESSION_MAX_CHARACTERS = 191;
+    /** @var int Longest session reference or credential id, in characters: the `session_id` and `credential_id` columns. */
+    private const int MAX_CHARACTERS = 191;
 
     /**
      * Constructor.
@@ -27,6 +27,7 @@ final readonly class HeldActor
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $principal
      * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
      * @param  ?string  $session
+     * @param  ?string  $credentialId
      *
      * @throws \InvalidArgumentException
      */
@@ -43,9 +44,27 @@ final readonly class HeldActor
 
         /** An application-owned, non-secret session reference, never Laravel's session id. */
         public ?string $session = null,
+
+        /** The id of the credential the actor authenticated with, never the secret. */
+        #[\SensitiveParameter] public ?string $credentialId = null,
     ) {
-        if ($session !== null && ($session === '' || mb_strlen($session, 'UTF-8') > self::SESSION_MAX_CHARACTERS || !TextSanitizer::isClean($session))) {
-            throw new \InvalidArgumentException(sprintf('A session reference must be from 1 to %d characters, with no control characters.', self::SESSION_MAX_CHARACTERS));
+        self::check($session, 'A session reference');
+        self::check($credentialId, 'A credential id');
+    }
+
+    /**
+     * Refuse a value a record could not store.
+     *
+     * @param  ?string  $value
+     * @param  string  $name
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function check(#[\SensitiveParameter] ?string $value, string $name): void
+    {
+        if ($value !== null && ($value === '' || mb_strlen($value, 'UTF-8') > self::MAX_CHARACTERS || !TextSanitizer::isClean($value))) {
+            throw new \InvalidArgumentException(sprintf('%s must be from 1 to %d characters, with no control characters.', $name, self::MAX_CHARACTERS));
         }
     }
 }

@@ -53,10 +53,13 @@ final class CarriedContext
     /** @var string The hidden key of the session reference. */
     public const string SESSION = 'audit-log.session';
 
+    /** @var string The hidden key of the credential id. */
+    public const string CREDENTIAL = 'audit-log.credential_id';
+
     /** @var list<string> Every hidden key of the actor's envelope. */
     private const array ACTOR_KEYS = [
         self::ACTOR_TYPE, self::ACTOR_ID, self::ACTOR_GUARD,
-        self::PRINCIPAL_TYPE, self::PRINCIPAL_ID, self::TENANT_TYPE, self::TENANT_ID, self::SESSION,
+        self::PRINCIPAL_TYPE, self::PRINCIPAL_ID, self::TENANT_TYPE, self::TENANT_ID, self::SESSION, self::CREDENTIAL,
     ];
 
     /**
@@ -79,6 +82,7 @@ final class CarriedContext
                 self::referenceIn($context, self::PRINCIPAL_TYPE, self::PRINCIPAL_ID),
                 self::referenceIn($context, self::TENANT_TYPE, self::TENANT_ID),
                 self::stringIn($context, self::SESSION),
+                self::stringIn($context, self::CREDENTIAL),
             );
 
             return new ActorSnapshot($held, self::stringIn($context, self::ACTOR_GUARD) ?? '');
@@ -109,6 +113,7 @@ final class CarriedContext
             self::TENANT_TYPE    => $held->tenant?->type,
             self::TENANT_ID      => $held->tenant?->id,
             self::SESSION        => $held->session,
+            self::CREDENTIAL     => $held->credentialId,
         ], static fn (?string $value): bool => $value !== null));
     }
 

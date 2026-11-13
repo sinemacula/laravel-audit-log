@@ -39,6 +39,7 @@ use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Records\Concerns\DescribesTheActivity;
 use SineMacula\Laravel\AuditLog\Records\Concerns\FillsAmbientContext;
 use SineMacula\Laravel\AuditLog\Records\Contribution;
+use SineMacula\Laravel\AuditLog\Records\HeldActor;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\PendingRecord;
 use SineMacula\Laravel\AuditLog\Records\PendingSnapshot;
@@ -132,6 +133,7 @@ final class SensitiveParametersTest extends TestCase
             'the context a contributor fills'     => [Contribution::class, 'fillContext', 'context'],
             'the credential a builder is filled'  => [FillsAmbientContext::class, 'fillCredential', 'credentialId'],
             'the credential a contributor fills'  => [Contribution::class, 'fillCredential', 'credentialId'],
+            'the credential an actor is held by'  => [HeldActor::class, '__construct', 'credentialId'],
             'the properties given to a recorder'  => [Recorder::class, 'record', 'properties'],
             'the builder a recorder writes'       => [Recorder::class, 'write', 'pending'],
             'the builder a record is made from'   => [AuditRecord::class, 'fromPending', 'pending'],

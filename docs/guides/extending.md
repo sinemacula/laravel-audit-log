@@ -17,7 +17,7 @@ or registered from a service provider's `boot()`; each contract's docblock says 
 | Attachments on a custom store                | Implement `Contracts\AcceptsAttachments` on the store, as below: bulk members, read disclosures, export manifests                                                                       |
 | Events of the application or another package | Implement `Contracts\EventMapper` and register it with `AuditLog::map()`, as below                                                                                                      |
 | What a record leaves out                     | Implement `Contracts\ContextContributor` and register it with `AuditLog::contribute()`                                                                                                  |
-| Who a guard without `GuardHelpers` holds     | Implement `Contracts\HeldActorReader` and bind it, as below: the actor, principal, tenant and session it has bound, carried into queued jobs                                            |
+| Who a guard without `GuardHelpers` holds     | Implement `Contracts\HeldActorReader` and bind it, as below: the actor, principal, tenant, session and credential it has bound, carried into queued jobs                                |
 | The application's event codes                | Implement `Contracts\DefinesAuditEvents` on a string-backed enum and register it with `AuditLog::define()`                                                                              |
 | Encrypted fields                             | Implement `Contracts\FieldEncrypter`, given each value's place, and bind it; the package seals under each owner's key, and `Privacy\NoFieldEncrypter` never encrypts                    |
 | How an owner's key is wrapped                | Implement `Contracts\KeyWrapper` and bind it to wrap owners' keys with an external key service; the package binds `Keys\LocalKeyWrapper`                                                |
@@ -210,7 +210,7 @@ and in what order.
 The ambient actor is read without calling a guard's `user()`, and the package can do that only for a guard using
 Laravel's `GuardHelpers`. For any other guard, bind a `Contracts\HeldActorReader`. It is asked about the first guard in
 `actor.guards` whose `hasUser()` is true, and returns a `Records\HeldActor` built from what that guard has already
-bound, with the principal, tenant and session reference when it knows them:
+bound, with the principal, tenant, session reference and credential id when it knows them:
 
 ```php
 $this->app->bind(HeldActorReader::class, TokenGuardReader::class);
@@ -230,6 +230,7 @@ final class TokenGuardReader implements HeldActorReader
 
 - `null` leaves the guard to the `GuardHelpers` reading, and an `\InvalidArgumentException` means no ambient actor.
 - The reader must read only what the guard holds: never `user()`, never authenticate, never read a request.
-- The session reference is an application-owned, non-secret reference, never Laravel's session id.
+- The session reference is an application-owned, non-secret reference, never Laravel's session id. The credential id
+  names the credential the actor used, never its secret, and fills only a record whose actor was open.
 - The actor and its context fill a record whose actor is open, or already that same actor, and are carried into the
   jobs it queues. A guard the reader reads must not keep its user from one queued job to the next on a worker.
