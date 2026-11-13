@@ -17,7 +17,8 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   values, references as type and id pairs, and the time as a string; every ambient value is resolved before the record
   is built, and no object, enum or model is ever in it.
 - Its `id` is a UUID version 7 of the time it occurred, to the microsecond, made apart from Laravel's shared generator.
-  Records sort in the order they were captured, and those of one instant in a request or job do too. `occurred_at` is ISO-8601 in UTC with microseconds (`2026-10-31T23:34:56.789012Z`).
+  Records sort in the order they were captured, and those of one instant in a request or job do too. `occurred_at` is
+  ISO-8601 in UTC with microseconds (`2026-10-31T23:34:56.789012Z`).
 - The id is minted before the record is minimised, never after: the pipeline reads the clock once and mints the id from
   it (a package record keeps the id the package gave it), minimising seals every encrypted value for that entry, and
   `AuditRecord::fromPending()` takes the id it was given. An envelope is bound to its entry and its path, so a record
