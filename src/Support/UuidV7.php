@@ -17,12 +17,12 @@ use Random\RandomException;
  */
 final class UuidV7
 {
-    /** @var string The last id `next()` made; empty before the first. */
+    /** @var string The last id `next()` made, as its 16 bytes; empty before the first. */
     private string $last = '';
 
     /**
-     * The next id of the given time, after every id this instance made of the
-     * same microsecond, so ids of one instant sort in the order they were made.
+     * The next id of the given time; ids of one microsecond count up from the
+     * first, so ids of one instant sort in the order they were made.
      *
      * @param  \DateTimeInterface  $time
      * @return string
@@ -31,14 +31,15 @@ final class UuidV7
      */
     public function next(\DateTimeInterface $time): string
     {
-        $id = self::at($time);
+        $bytes = self::bytesOf($time);
 
-        if (strncmp($id, $this->last, 19) === 0 && strcmp($id, $this->last) <= 0) {
-            $tail = bin2hex(pack('J', unpack('J', (string) hex2bin(str_replace('-', '', substr($this->last, 19))))[1] + 1));
-            $id   = substr($this->last, 0, 19) . substr($tail, 0, 4) . '-' . substr($tail, 4);
+        if (strncmp($bytes, $this->last, 8) === 0) {
+            $bytes = substr($this->last, 0, 8) . pack('J', unpack('J', substr($this->last, 8))[1] + 1);
         }
 
-        return $this->last = $id;
+        $this->last = $bytes;
+
+        return self::formatted($bytes);
     }
 
     /**
@@ -52,16 +53,38 @@ final class UuidV7
      */
     public static function at(\DateTimeInterface $time): string
     {
+        return self::formatted(self::bytesOf($time));
+    }
+
+    /**
+     * The 16 bytes of a fresh UUID v7 of the given time.
+     *
+     * @param  \DateTimeInterface  $time
+     * @return string
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function bytesOf(\DateTimeInterface $time): string
+    {
         try {
-            $tail = random_bytes(8);
+            $random = random_int(0, 0x3FFFFFFFFFFFFFFF);
         } catch (RandomException) {
             throw new \UnexpectedValueException('A UUID could not be drawn.');
         }
 
-        $tail[0] = chr(0x80 | (ord($tail[0]) & 0x3F));
+        $microseconds = (int) $time->format('Uu');
 
-        $bytes = substr(pack('J', (int) $time->format('Uv')), 2) . pack('n', 0x7000 | ((int) $time->format('u') % 1000)) . $tail;
+        return substr(pack('J', intdiv($microseconds, 1000)), 2) . pack('n', 0x7000 | $microseconds % 1000) . pack('J', PHP_INT_MIN | $random);
+    }
 
+    /**
+     * The bytes as a lower-case UUID string.
+     *
+     * @param  string  $bytes
+     * @return string
+     */
+    private static function formatted(string $bytes): string
+    {
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
     }
 }

@@ -79,8 +79,8 @@ final class UuidV7Test extends TestCase
     }
 
     /**
-     * Ids one instance makes of one instant are distinct and sort in the order
-     * they were made.
+     * Ids one instance makes of one instant count up by one, so they sort in
+     * the order they were made.
      *
      * @return void
      */
@@ -104,6 +104,10 @@ final class UuidV7Test extends TestCase
             self::assertMatchesRegularExpression(self::PATTERN, $id);
             self::assertSame($time->getTimestampMs(), self::millisecondOf($id));
             self::assertSame('71c8', substr($id, 14, 4));
+        }
+
+        for ($made = 1; $made < 500; $made++) {
+            self::assertSame(self::tailOf($ids[$made - 1]) + 1, self::tailOf($ids[$made]));
         }
     }
 
@@ -136,6 +140,22 @@ final class UuidV7Test extends TestCase
         $present = self::millisecondOf(Str::uuid7()->toString());
 
         self::assertLessThan($future->getTimestampMs(), $present);
+    }
+
+    /**
+     * The last 64 bits of a UUID, as a signed integer.
+     *
+     * @param  string  $id
+     * @return int
+     */
+    private static function tailOf(string $id): int
+    {
+        $unpacked = unpack('J', (string) hex2bin(substr(str_replace('-', '', $id), 16)));
+
+        self::assertIsArray($unpacked);
+        self::assertIsInt($unpacked[1]);
+
+        return $unpacked[1];
     }
 
     /**
