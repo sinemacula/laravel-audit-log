@@ -121,6 +121,7 @@ final class ActorContributorTest extends TestCase
 
         self::assertNull($snapshot->actor);
         self::assertNull($snapshot->guard);
+        self::assertNull($snapshot->credentialId);
         self::assertFalse($pending->isActorSettled());
     }
 
@@ -349,8 +350,8 @@ final class ActorContributorTest extends TestCase
     }
 
     /**
-     * An open actor is filled with the reader's actor, guard, principal, tenant
-     * and session.
+     * An open actor is filled with the reader's actor, guard, principal,
+     * tenant, session and credential.
      *
      * @return void
      */
@@ -365,11 +366,27 @@ final class ActorContributorTest extends TestCase
         self::assertSame('p-1', $snapshot->principal?->id);
         self::assertSame('t-1', $snapshot->tenant?->id);
         self::assertSame('session-1', $snapshot->sessionId);
+        self::assertSame('key-1', $snapshot->credentialId);
+    }
+
+    /**
+     * An explicit credential beats the held one.
+     *
+     * @return void
+     */
+    public function testAnExplicitCredentialBeatsTheHeldOne(): void
+    {
+        $this->bindAReader();
+
+        $snapshot = $this->contributed((new PendingRecord)->event('invoice.approved')->usingCredential('key-explicit'));
+
+        self::assertSame('id-9', $snapshot->actor?->id);
+        self::assertSame('key-explicit', $snapshot->credentialId);
     }
 
     /**
      * An actor settled to the ambient actor gets its principal, tenant and
-     * session but no guard, and an explicit principal is kept.
+     * session but no guard or credential, and an explicit principal is kept.
      *
      * @return void
      */
@@ -384,6 +401,7 @@ final class ActorContributorTest extends TestCase
         self::assertSame($principal, $snapshot->principal);
         self::assertSame('t-1', $snapshot->tenant?->id);
         self::assertSame('session-1', $snapshot->sessionId);
+        self::assertNull($snapshot->credentialId);
     }
 
     /**
@@ -405,6 +423,7 @@ final class ActorContributorTest extends TestCase
             self::assertNull($snapshot->principal);
             self::assertNull($snapshot->tenant);
             self::assertNull($snapshot->sessionId);
+            self::assertNull($snapshot->credentialId);
         }
     }
 
@@ -425,6 +444,7 @@ final class ActorContributorTest extends TestCase
         self::assertSame('p-1', $snapshot->principal?->id);
         self::assertSame('t-1', $snapshot->tenant?->id);
         self::assertSame('session-1', $snapshot->sessionId);
+        self::assertSame('key-1', $snapshot->credentialId);
     }
 
     /**
@@ -451,13 +471,13 @@ final class ActorContributorTest extends TestCase
     }
 
     /**
-     * An actor with a principal, a tenant and a session.
+     * An actor with a principal, a tenant, a session and a credential.
      *
      * @return \SineMacula\Laravel\AuditLog\Records\HeldActor
      */
     private static function heldWithContext(): HeldActor
     {
-        return new HeldActor(Reference::of('identity', 'id-9'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1');
+        return new HeldActor(Reference::of('identity', 'id-9'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1', 'key-1');
     }
 
     /**

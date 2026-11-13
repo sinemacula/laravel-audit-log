@@ -22,7 +22,7 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 final class HeldActorTest extends TestCase
 {
     /**
-     * The actor alone needs no principal, tenant or session.
+     * The actor alone needs no principal, tenant, session or credential.
      *
      * @return void
      */
@@ -35,31 +35,36 @@ final class HeldActorTest extends TestCase
         self::assertNull($held->principal);
         self::assertNull($held->tenant);
         self::assertNull($held->session);
+        self::assertNull($held->credentialId);
     }
 
     /**
-     * Every part is kept as given, a 191-character session reference included.
+     * Every part is kept as given, a 191-character session reference and
+     * credential id included.
      *
      * @return void
      */
     public function testKeepsEveryPart(): void
     {
-        $principal = Reference::of('principal', 'p-1');
-        $tenant    = Reference::of('tenant', 't-1');
-        $session   = str_repeat('é', 191);
-        $held      = new HeldActor(Reference::of('user', '42'), $principal, $tenant, $session);
+        $principal  = Reference::of('principal', 'p-1');
+        $tenant     = Reference::of('tenant', 't-1');
+        $session    = str_repeat('é', 191);
+        $credential = str_repeat('k', 191);
+        $held       = new HeldActor(Reference::of('user', '42'), $principal, $tenant, $session, $credential);
 
         self::assertSame($principal, $held->principal);
         self::assertSame($tenant, $held->tenant);
         self::assertSame($session, $held->session);
+        self::assertSame($credential, $held->credentialId);
     }
 
     /**
-     * Rows of `[session]` a record could not store.
+     * Rows of `[value]` a record could not store as a session reference or a
+     * credential id.
      *
      * @return iterable<string, array{0: string}>
      */
-    public static function provideRefusedSessions(): iterable
+    public static function provideRefusedValues(): iterable
     {
         yield 'empty' => [''];
         yield 'too long' => [str_repeat('a', 192)];
@@ -73,12 +78,27 @@ final class HeldActorTest extends TestCase
      * @param  string  $session
      * @return void
      */
-    #[DataProvider('provideRefusedSessions')]
+    #[DataProvider('provideRefusedValues')]
     public function testRefusesASessionARecordCouldNotStore(string $session): void
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('A session reference must be from 1 to 191 characters, with no control characters.');
 
         new HeldActor(Reference::of('user', '42'), session: $session);
+    }
+
+    /**
+     * A credential id a record could not store is refused.
+     *
+     * @param  string  $credentialId
+     * @return void
+     */
+    #[DataProvider('provideRefusedValues')]
+    public function testRefusesACredentialARecordCouldNotStore(string $credentialId): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A credential id must be from 1 to 191 characters, with no control characters.');
+
+        new HeldActor(Reference::of('user', '42'), credentialId: $credentialId);
     }
 }

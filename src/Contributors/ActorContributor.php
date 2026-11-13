@@ -10,13 +10,14 @@ use SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot;
 use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
 
 /**
- * Fills the actor, its guard and the principal, tenant and session that go with
- * it: the ambient actor or, inside a job frame, the actor the job carried.
+ * Fills the actor, its guard, credential and the principal, tenant and session
+ * that go with it: the ambient actor or, inside a job frame, the actor the job
+ * carried.
  *
- * An actor settled to that same actor gets all but the guard, and one settled
- * to anyone else gets nothing, so another person's context never lands on the
- * record. A guard user the job did not inherit beats the carried actor: it says
- * who started the work.
+ * An actor settled to that same actor gets all but the guard and credential,
+ * and one settled to anyone else gets nothing, so another person's context
+ * never lands on the record. A guard user the job did not inherit beats the
+ * carried actor: it says who started the work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,6 +69,7 @@ final readonly class ActorContributor implements ContextContributor
         if (!$contribution->isActorSettled()) {
             $contribution->fillActor($held->actor);
             $contribution->fillGuard($actor->guard);
+            $contribution->fillCredential($held->credentialId);
         } elseif ($contribution->actor()?->equals($held->actor) !== true) {
             return;
         }

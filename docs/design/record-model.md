@@ -56,9 +56,9 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   either order, and the first contributor to fill a field wins.
 - A contributor never sees the builder. It is given a `Contribution`, a narrow view (`@api`) that holds nothing of its
   own and delegates to the builder: the fillers (`fillActor()`, `fillPrincipal()`, `fillTenant()`, `fillGuard()`,
-  `fillSession()`, `fillRequest()`, `fillClient()`, `fillOrigin()`, `fillContext()`) and the reads `code()`,
-  `subject()`, `actor()`, `hasActor()` and `isActorSettled()`. It cannot record the record, choose its timing, or read
-  its properties or note. The builder's own fillers are `@internal`, and an application never calls them.
+  `fillSession()`, `fillCredential()`, `fillRequest()`, `fillClient()`, `fillOrigin()`, `fillContext()`) and the reads
+  `code()`, `subject()`, `actor()`, `hasActor()` and `isActorSettled()`. It cannot record the record, choose its timing,
+  or read its properties or note. The builder's own fillers are `@internal`, and an application never calls them.
 - A filler given `null` changes nothing and leaves the field open for the next contributor; `fillContext()` adds only
   the keys the context does not hold yet; and a malformed value is refused whether or not it would have been used,
   except an IP address, which `fillClient()` takes as it comes for minimising to judge.
@@ -127,9 +127,10 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
 - Each value is validated and normalised as it is given, so the builder's properties and context hold only strings,
   integers, booleans, `null`, lists and maps, and every other field a validated value.
 - Contributors fill the gaps the application left, each through a `Contribution`. The package's defaults fill the
-  origin, the request and trace ids, the IP address and user agent, the actor and its guard, and the context (see
-  `context-resolution.md`). The application's own, registered with `AuditLog::contribute()`, then fill whatever is left,
-  such as the principal, the tenant or the session reference.
+  origin, the request and trace ids, the IP address and user agent, the actor, its guard and any credential its held
+  actor names, and the context (see `context-resolution.md`). The application's own, registered with
+  `AuditLog::contribute()`, then fill whatever is left, such as the principal, the tenant, the session reference or the
+  credential.
 - `record()` hands the builder to the recorder, which runs the contributors, reads the clock and mints the entry's id,
   minimises what they leave for that entry (see `redaction.md`), builds the `AuditRecord` from that with the minted id,
   the code's event version and category, the time it occurred and the application's source id and region, delivers it

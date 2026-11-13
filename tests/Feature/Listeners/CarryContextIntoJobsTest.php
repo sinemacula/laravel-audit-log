@@ -50,7 +50,7 @@ final class CarryContextIntoJobsTest extends TestCase
     /** @var list<string> The actor's hidden keys. */
     private const array ACTOR_KEYS = [
         CarriedContext::ACTOR_TYPE, CarriedContext::ACTOR_ID, CarriedContext::ACTOR_GUARD,
-        CarriedContext::PRINCIPAL_TYPE, CarriedContext::PRINCIPAL_ID, CarriedContext::TENANT_TYPE, CarriedContext::TENANT_ID, CarriedContext::SESSION,
+        CarriedContext::PRINCIPAL_TYPE, CarriedContext::PRINCIPAL_ID, CarriedContext::TENANT_TYPE, CarriedContext::TENANT_ID, CarriedContext::SESSION, CarriedContext::CREDENTIAL,
     ];
 
     /**

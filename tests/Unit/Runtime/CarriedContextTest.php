@@ -72,6 +72,7 @@ final class CarriedContextTest extends TestCase
         self::assertSame('audit-log.tenant_type', CarriedContext::TENANT_TYPE);
         self::assertSame('audit-log.tenant_id', CarriedContext::TENANT_ID);
         self::assertSame('audit-log.session', CarriedContext::SESSION);
+        self::assertSame('audit-log.credential_id', CarriedContext::CREDENTIAL);
     }
 
     /**
@@ -109,7 +110,8 @@ final class CarriedContextTest extends TestCase
     }
 
     /**
-     * The actor's principal, tenant and session read back as they went out.
+     * The actor's principal, tenant, session and credential read back as they
+     * went out.
      *
      * @return void
      */
@@ -212,6 +214,8 @@ final class CarriedContextTest extends TestCase
             'an array for the session'    => [[...self::ENVELOPE, CarriedContext::SESSION => ['session-1']]],
             'an empty session'            => [[...self::ENVELOPE, CarriedContext::SESSION => '']],
             'a control character session' => [[...self::ENVELOPE, CarriedContext::SESSION => "sess\nion"]],
+            'an empty credential'         => [[...self::ENVELOPE, CarriedContext::CREDENTIAL => '']],
+            'an integer credential'       => [[...self::ENVELOPE, CarriedContext::CREDENTIAL => 7]],
         ];
     }
 
@@ -243,6 +247,7 @@ final class CarriedContextTest extends TestCase
             CarriedContext::TENANT_TYPE    => 'tenant',
             CarriedContext::TENANT_ID      => 't-1',
             CarriedContext::SESSION        => 'session-1',
+            CarriedContext::CREDENTIAL     => 'key-1',
             CarriedContext::REQUEST_ID     => 'app:request-1',
             CarriedContext::TRACE_ID       => '4bf92f3577b34da6a3ce929d0e0e4736',
         ]);
@@ -281,13 +286,15 @@ final class CarriedContextTest extends TestCase
     }
 
     /**
-     * A snapshot with a principal, a tenant and a session.
+     * A snapshot with a principal, a tenant, a session and a credential.
      *
      * @return \SineMacula\Laravel\AuditLog\Runtime\ActorSnapshot
      */
     private static function fullSnapshot(): ActorSnapshot
     {
-        return new ActorSnapshot(new HeldActor(Reference::of('App\Models\User', '42'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1'), 'web');
+        $held = new HeldActor(Reference::of('App\Models\User', '42'), Reference::of('principal', 'p-1'), Reference::of('tenant', 't-1'), 'session-1', 'key-1');
+
+        return new ActorSnapshot($held, 'web');
     }
 
     /**

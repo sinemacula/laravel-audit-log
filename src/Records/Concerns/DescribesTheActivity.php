@@ -256,6 +256,7 @@ trait DescribesTheActivity
         self::checkIdentifier($credentialId, self::ID_MAX_CHARACTERS, 'A credential id');
 
         $this->credentialId = $credentialId;
+        $this->give('credential');
 
         return $this;
     }
