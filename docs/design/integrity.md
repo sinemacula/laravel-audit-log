@@ -17,7 +17,7 @@ none of this promises is in `threat-model.md`.
 - Every entry is finalised once, by `Records\RecordFinaliser`, which stamps `recorded_at` from the clock (never before
   `occurred_at`) and signs it; retries and replays reuse the finalised record, never sign again.
 - The signature is HMAC-SHA256, as 64 lower-case hex characters in `hmac`, under the ring's signing key, whose id is
-  stored in `key_id`. It covers the 35 signed columns, every column but `hmac`: the 32 captured ones, then
+  stored in `key_id`. It covers the 36 signed columns, every column but `hmac`: the 33 captured ones, then
   `recorded_at`, `integrity_version` and `key_id`. `integrity_version` is 1, and it is signed too.
 - The canonical encoding of version 1 (`Integrity\CanonicalEncoder`) works on decoded stored values and never
   normalises, sanitises, truncates or repairs them. `null`, `true` and `false` are themselves; an integer is its decimal
@@ -27,7 +27,7 @@ none of this promises is in `threat-model.md`.
   object and invalid UTF-8 are refused with an `\UnexpectedValueException`: the package stores decimals as strings.
 - Every signed column is required to verify, nullable ones included; a missing column is malformed, never `null`.
   Columns a row has beyond the version's list are not signed, and `audit-log:check` reports them.
-- The captured-content digest is SHA-256 over the canonical encoding of the 32 captured columns, leaving out the four
+- The captured-content digest is SHA-256 over the canonical encoding of the 33 captured columns, leaving out the four
   finalisation columns. The store compares it to tell a stored duplicate from a conflict, so a record finalised twice,
   at another time or under another key, is still the same record.
 - With `integrity.keys` empty, the key is derived from `app.key`: a `base64:` key is decoded to bytes first, then
@@ -52,7 +52,7 @@ none of this promises is in `threat-model.md`.
 - Removing a key from the ring leaves its rows unverifiable. Verification keys are kept as long as the rows they
   signed, independently of when an encryption key is retired: moving `app.key` into `app.previous_keys` keeps the old
   derived key verifying, and dropping it from there does not. Choose the managed ring before going live, because rows
-  signed under a derived key cannot yet be carried into it.
+  signed under a derived key cannot be carried into it.
 - A row's signature proves that row alone: it shows neither that every entry is present nor that none was deleted. That
   is what a seal adds, for the rows it holds.
 - An entry with an artifact signs `properties._audit.manifest`, its artifact's `artifact_id`, `kind`, `digest` and
@@ -162,8 +162,9 @@ none of this promises is in `threat-model.md`.
 - A row signed under a key the ring no longer holds raises `UnknownKeyException`; the store lets it propagate rather
   than call the row a conflict.
 - An envelope in the outbox or a spill line that fails is refused with a distinct `Records\Enums\EnvelopeFailure`:
-  `signature_mismatch`, `unknown_key`, `unsupported_version` or `malformed`. The outbox row is failed and kept, and the
-  spill line is counted and left in its file; `delivery.md` has every outcome.
+  `signature_mismatch`, `unknown_key`, `unsupported_version`, `malformed`, `truncated`, `unsigned`, `id_mismatch` or
+  `oversize`. The outbox row is failed and kept, and the spill line is counted and left in its file; `delivery.md` has
+  every outcome.
 - A malformed integrity setting (a log id outside the grammar, a number outside its range, a schedule that is no cron
   expression, an anchor path that could leave its namespace) fails closed with an `\InvalidArgumentException` naming the
   key, never its value; a malformed schedule is reported and schedules nothing for that run, and the other runs are
@@ -250,8 +251,8 @@ after the last row the one before read, so a run always ends.
 ## Anchors
 
 `integrity.anchor.driver` chooses the anchor the package binds to `Contracts\CheckpointAnchor`: `null`
-(`Enums\AnchorDriver::NONE`, the default) binds `Integrity\Anchors\NullAnchor`, which anchors nothing and cannot
-discover, and `disk` (`AnchorDriver::DISK`) binds `Integrity\Anchors\DiskAnchor` on `integrity.anchor.disk`, or
+(`Integrity\Enums\AnchorDriver::NONE`, the default) binds `Integrity\Anchors\NullAnchor`, which anchors nothing and
+cannot discover, and `disk` (`AnchorDriver::DISK`) binds `Integrity\Anchors\DiskAnchor` on `integrity.anchor.disk`, or
 `filesystems.default` when it is `null` or empty, under `integrity.anchor.path`. An application may bind its own.
 
 - The contract has five answers: `name()`, 1 to 64 characters, kept in each seal's `anchor` column; `anchor()`, which
@@ -375,9 +376,10 @@ writes each line as one JSON object, the summary last. Nothing is accumulated, s
   the encrypter's class; a ranged run leaves it.
 - A complete run records `verify.last_full` with whether it passed at the strictness it ran at, and that strictness, so
   a strict run that failed on its anchoring alone never records a pass.
-- A segment reports its most severe integrity status, then its first finding in the order of `Enums\Finding`, then the
-  first bad id in member order. Every run prints the exact range it checked, the head it observed, the anchor's head,
-  the segments in each status, those awaiting their first anchoring and, for a complete run, the unsealed entries.
+- A segment reports its most severe integrity status, then its first finding in the order of
+  `Integrity\Enums\Finding`, then the first bad id in member order. Every run prints the exact range it checked, the
+  head it observed, the anchor's head, the segments in each status, those awaiting their first anchoring and, for a
+  complete run, the unsealed entries.
 - A run exits 0 when it passes and 1 when any segment or finding is `tampered`, `incomplete` or `unverifiable`, or when
   it stops. With `--strict` and an anchor configured it also fails on any segment short of `anchored`, on an
   `unavailable` or `contradicted` one, on an anchor whose `supportsDiscovery()` is `false`, since a truncated tail could
@@ -568,7 +570,6 @@ keep the log verifiable, and what makes its deletions accountable, is fixed here
 ## Seams Left
 
 - Carrying derived keys into a managed ring, and listing the ring's ids for reports.
-- The health snapshot, which reads the progress.
 - The enterprise check profile, which requires the scheduled verification to be `--strict`.
 
 ## Implementation Anchors

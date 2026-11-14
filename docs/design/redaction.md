@@ -10,9 +10,9 @@ is in `threat-model.md`.
 
 ## Invariants
 
-- Minimising runs once, at capture. `Recorder::write()` takes a fresh snapshot after the contributors have run and gives
-  it to `Privacy\RecordMinimiser`, and `AuditRecord::fromPending()` takes the `Privacy\Minimised` value it returns, so
-  the captured record, and everything given a record afterwards, holds only minimised values.
+- Minimising runs once, at capture. `RecordPipeline::write()` takes a fresh snapshot after the contributors have run
+  and gives it to `Privacy\RecordMinimiser`, and `AuditRecord::fromPending()` takes the `Privacy\Minimised` value it
+  returns, so the captured record, and everything given a record afterwards, holds only minimised values.
 - The properties pass through key matching, then the field rules, then the byte budget. The context passes through key
   matching, then the string cap, then its byte budget. No field rule touches the context, and none reaches the package's
   own metadata.

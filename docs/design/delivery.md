@@ -80,7 +80,7 @@ loses, repeats or invents a record changes what the log is evidence of, so each 
 6. Each run takes the rows due when it starts, at most `--limit` (100 by default, from 1 to 10000) or, with
    `--until-empty`, batch after batch of that many. It claims each row, decrypts and verifies it, delivers it to each
    destination, deletes the row once every destination has it and then dispatches `AuditRecorded`. It prints how many
-   rows were delivered, retried, failed, taken over and missed, and exits non-zero when any row failed.
+   rows were delivered, pruned, retried, failed, taken over and missed, and exits non-zero when any row failed.
 
 ## Failure / Edge Cases
 
@@ -164,13 +164,13 @@ one, a dedicated file:
   `audit-log:check` prints `[spill] OK` for it, and for any other channel a `[spill]` warning that replaying what it
   holds is unverified and that whole records in plaintext go to it and to everything it feeds. The same format with a
   `permission` missing or open to group or others, or a file already written with such a mode, is noted too, since
-  Monolog applies a permission only when it is given and only as it creates the file. - A line is written at `critical`
-  past Laravel's log wrapper, so it has no shared context and no `MessageLogged` listener sees it, while the channel's
-  handlers and formatter still run. Laravel's `Context` reaches a logger as `extra`, which only a format printing
-  `%extra%` shows. The line is the marker `audit-log-spill:v1` and a space, then the record's canonical JSON. A carriage
-  return and a line feed are escaped by that encoding, and every `%` is written as `\u0025`, because a `LineFormatter`
-  rewrites a `%token%` in its output even after the message is substituted. The escape decodes to the same value, so the
-  line still verifies. A line is never truncated by the package.
+  Monolog applies a permission only when it is given and only as it creates the file.
+- A line is written at `critical` past Laravel's log wrapper, so it has no shared context and no `MessageLogged`
+  listener sees it, while the channel's handlers and formatter still run. Laravel's `Context` reaches a logger as
+  `extra`, which only a format printing `%extra%` shows. The line is the marker `audit-log-spill:v1` and a space, then
+  the record's canonical JSON. A carriage return and a line feed are escaped by that encoding, and every `%` is written
+  as `\u0025`, because a `LineFormatter` rewrites a `%token%` in its output even after the message is substituted. The
+  escape decodes to the same value, so the line still verifies. A line is never truncated by the package.
 - Other channels can damage a line. A syslog or cloud log handler may cut it at a size limit or rewrite it, and a cut
   line is skipped and counted as `truncated`, never repaired.
 - **Access.** The file holds whole records, so `permission` is `0600` and it belongs to the application's user alone. A
@@ -343,7 +343,7 @@ A record with an artifact carries a `Records\Attachment`, the artifact descripto
 `disclosure` or an export's `export` manifest (`Records\Enums\ArtifactKind`):
 
 - The envelope of a record with an attachment is a bundle of three keys, through the canonical encoding:
-  `bundle_version` (`EnvelopeCodec::BUNDLE_VERSION`, 1), `record`, the record's 36 columns, and `attachment`, its `id`,
+  `bundle_version` (`EnvelopeCodec::BUNDLE_VERSION`, 1), `record`, the record's 37 columns, and `attachment`, its `id`,
   `entry_id`, `kind`, `member_count`, `digest` and sealed `members`. A record without one keeps its plain envelope.
 - `EnvelopeCodec::MAX_BYTES` applies to the whole bundle, so a bundle over it is `oversize` like any record. A bundle
   version this release does not read is `unsupported_version`, and one with another key, or an attachment the signed
@@ -366,8 +366,8 @@ A record with an artifact carries a `Records\Attachment`, the artifact descripto
 
 ## Formatters
 
-A `Contracts\AuditFormatter` turns a finalised record into one deterministic line. `LogAuditStore` uses one, and nothing
-else does yet. A projection is never the integrity artefact.
+A `Contracts\AuditFormatter` turns a finalised record into one deterministic line. `LogAuditStore` and the exporter's
+OCSF and CEF formats use one. A projection is never the integrity artefact.
 
 - `Export\NdjsonFormatter` is the canonical JSON envelope, with its HMAC.
 - `Export\OcsfFormatter` writes one event of OCSF `1.9.0` (`OcsfFormatter::VERSION`), in canonical JSON. A code is

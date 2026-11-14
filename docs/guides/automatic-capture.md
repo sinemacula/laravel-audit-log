@@ -10,18 +10,18 @@ signing included. Recording the events of another package is in [the extending g
 
 Each of these events is recorded as one row, under a code of the package's own:
 
-| Laravel event                      | Code                                      | Outcome   | Actor             | Subject                        | Kept                                       |
-|------------------------------------|-------------------------------------------|-----------|-------------------|--------------------------------|--------------------------------------------|
-| `Login`                            | `authentication.signed_in`                | `success` | the user          | the user                       | `remember`                                 |
-| `Login`, from a remember-me cookie | `authentication.session_restored`         | `success` | the user          | the user                       | `remember`                                 |
-| `Failed`                           | `authentication.sign_in_failed`           | `failure` | none, explicitly  | the user when found, else none | the identifier, hashed                     |
-| `Logout`, `CurrentDeviceLogout`    | `authentication.signed_out`               | `success` | the user, or none | the user, or none              | nothing                                    |
-| `OtherDeviceLogout`                | `authentication.signed_out_other_devices` | `success` | the user, or none | the user, or none              | nothing                                    |
-| `Lockout`                          | `authentication.locked_out`               | `denied`  | none, explicitly  | none                           | the IP address, and the identifier, hashed |
-| `Registered`                       | `account.registered`                      | `success` | the user          | the user                       | nothing                                    |
-| `Verified`                         | `account.email_verified`                  | `success` | the user          | the user                       | nothing                                    |
-| `PasswordReset`                    | `account.password_reset`                  | `success` | the user          | the user                       | nothing                                    |
-| `PasswordResetLinkSent`            | `account.password_reset_requested`        | `success` | none, explicitly  | the user                       | nothing                                    |
+| Laravel event                      | Code                                      | Outcome   | Actor             | Subject                        | Kept                                                      |
+|------------------------------------|-------------------------------------------|-----------|-------------------|--------------------------------|-----------------------------------------------------------|
+| `Login`                            | `authentication.signed_in`                | `success` | the user          | the user                       | `remember`                                                |
+| `Login`, from a remember-me cookie | `authentication.session_restored`         | `success` | the user          | the user                       | `remember`                                                |
+| `Failed`                           | `authentication.sign_in_failed`           | `failure` | none, explicitly  | the user when found, else none | the identifier, hashed                                    |
+| `Logout`, `CurrentDeviceLogout`    | `authentication.signed_out`               | `success` | the user, or none | the user, or none              | nothing                                                   |
+| `OtherDeviceLogout`                | `authentication.signed_out_other_devices` | `success` | the user, or none | the user, or none              | nothing                                                   |
+| `Lockout`                          | `authentication.locked_out`               | `denied`  | none, explicitly  | none                           | the IP address and user agent, and the identifier, hashed |
+| `Registered`                       | `account.registered`                      | `success` | the user          | the user                       | nothing                                                   |
+| `Verified`                         | `account.email_verified`                  | `success` | the user          | the user                       | nothing                                                   |
+| `PasswordReset`                    | `account.password_reset`                  | `success` | the user          | the user                       | nothing                                                   |
+| `PasswordResetLinkSent`            | `account.password_reset_requested`        | `success` | none, explicitly  | the user                       | nothing                                                   |
 
 - Every value is read from the event, never from what a guard holds now. The actor and the subject are the event's
   user. A failed sign-in, a lockout and a reset link name no one as the actor explicitly, because anyone can cause

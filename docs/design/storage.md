@@ -25,10 +25,9 @@ written and what the store may do to a row are fixed here; a change to any of th
   the form PostgreSQL returns, and `FinalisedRecord` refuses any other form before a record is signed.
 - `context` and `properties` are `json`, never `jsonb`: the integrity of a row never depends on an engine keeping the
   text it was given, and the canonical encoding verifies whatever key order the engine returns.
-- `occurred_at` and `recorded_at` are `dateTime(6)`, deviating from the family's whole seconds so records made in one
-  request sort. Both are UTC, written as `Y-m-d H:i:s.u` by `Stores\RowCodec` only, through `Support\StoredTime`; Carbon
-  is never bound into a query, because the grammar's format drops microseconds and the session's time zone would move
-  the instant.
+- `occurred_at` and `recorded_at` are `dateTime(6)`, to the microsecond, so records made in one request sort. Both are
+  UTC, written as `Y-m-d H:i:s.u` by `Stores\RowCodec` only, through `Support\StoredTime`; Carbon is never bound into a
+  query, because the grammar's format drops microseconds and the session's time zone would move the instant.
 - No timestamps and no foreign keys.
 - The ten secondary indexes are named after the configured table, `<table>` followed by each suffix below, with their
   columns in this order:
@@ -63,11 +62,11 @@ written and what the store may do to a row are fixed here; a change to any of th
   MariaDB is not supported, whether through its own driver or the `mysql` one. Column-level collation is never set,
   because PostgreSQL has no such collation.
 - `entries.artifacts_table` (`audit_log_artifacts` by default) is always on the storage connection, beside the entries
-  that name its rows. It holds one row per bulk operation, in seven columns: `id`, the artifact's own UUID and its
-  primary key; `entry_id`, the UUID of the entry whose signed manifest names the artifact, under the unique
-  `<table>_entry_unique`, so an entry has at most one artifact; `kind` (`string(16)`, `bulk`); `member_count`
-  (`unsignedInteger`); `digest` (`string(64)`, the SHA-256 of the canonical member list in hex); `members`
-  (`longText`, the canonical member list encrypted with the application's key); and `created_at` (`dateTime(6)`, the
+  that name its rows. It holds one row per bulk operation, disclosure or export, in seven columns: `id`, the artifact's
+  own UUID and its primary key; `entry_id`, the UUID of the entry whose signed manifest names the artifact, under the
+  unique `<table>_entry_unique`, so an entry has at most one artifact; `kind` (`string(16)`, `bulk`, `disclosure` or
+  `export`); `member_count` (`unsignedInteger`); `digest` (`string(64)`, the SHA-256 of the canonical form in hex);
+  `members` (`longText`, the canonical form encrypted with the application's key); and `created_at` (`dateTime(6)`, the
   entry's `recorded_at`). It follows the entries table: the table name's grammar, no foreign keys, and on MySQL
   `utf8mb4_0900_bin` and `InnoDB`, so an artifact commits with its entry.
 - An artifact is written with its entry and never changed. It is kept as long as its entry and deleted only with it, by
@@ -176,13 +175,14 @@ written and what the store may do to a row are fixed here; a change to any of th
   `entry_id`, keyed by `<table>_primary` over both and indexed by `<table>_entry_index` over `entry_id`. The storage
   connection's writer inserts the rows with their entry; the table is append-only, an index derived from the entries
   that `audit-log:verify` proves complete, and a prune leaves its rows.
-- `DatabaseAuditStore` writes a record whose envelopes name a key that is a canonical lower-case UUID together with
-  its key uses: the entry, then one multi-row insert of a row for each distinct key, in one transaction outside a host
+- `DatabaseAuditStore` writes a record whose envelopes name a key that is a canonical lower-case UUID together with its
+  key uses: the entry, then one multi-row insert of a row for each distinct key, in one transaction outside a host
   transaction and in a savepoint inside one, so a failed key use rolls its entry back and neither is ever kept without
-  the other. A record with no such envelope keeps its single insert. A key is created on a session of its own, a second
-  connection to the storage connection's writer that commits on its own (`Keys\KeySession`), except where a second
-  connection could not see or write what the storage connection does: in-memory SQLite, the testing manager's base
-  transaction, and SQLite inside a transaction, where the storage connection itself creates it.
+  the other. A record with an artifact has it inserted in the same transaction, first, and a record with neither such an
+  envelope nor an artifact keeps its single insert. A key is created on a session of its own, a second connection to the
+  storage connection's writer that commits on its own (`Keys\KeySession`), except where a second connection could not
+  see or write what the storage connection does: in-memory SQLite, the testing manager's base transaction, and SQLite
+  inside a transaction, where the storage connection itself creates it.
 - The migrations are published under `audit-log-migrations` and never loaded from the package. Each runs on its own
   table's connection (the entries' `getConnection()` is `StorageConnection::name()`), and a collision guard refuses to
   create a table over an existing one, naming the setting that renames it, such as `entries.table` or
@@ -208,18 +208,17 @@ written and what the store may do to a row are fixed here; a change to any of th
   query builder bypasses the model (on Laravel 12 `incrementEach()` on an entry is forwarded to it), so append-only
   access is enforced by the grants, never by the model.
 - `Stores\DatabaseAuditStore` writes one plain insert per record on the storage connection's writer, never
-  `insertOrIgnore`, `upsert` or a conflict clause. Outside a transaction it opens none; inside one that Laravel manages
-  on the storage connection it inserts in a savepoint of one attempt, which Laravel rolls back when the insert fails.
-  The guarantee is narrow: one failed audit statement does not abort a healthy host transaction on the storage
-  connection. Deadlocks and other concurrency errors, lost connections and an already-aborted host transaction
-  propagate.
+  `insertOrIgnore`, `upsert` or a conflict clause. Outside a transaction it opens none, but for a record with an
+  artifact or key uses, whose rows it writes in one; inside one that Laravel manages on the storage connection it
+  inserts in a savepoint of one attempt, which Laravel rolls back when the insert fails. The guarantee is narrow: one
+  failed audit statement does not abort a healthy host transaction on the storage connection. Deadlocks and other
+  concurrency errors, lost connections and an already-aborted host transaction propagate.
 - Laravel never releases a savepoint that succeeds, and on PostgreSQL each one is a subtransaction held until the host
   transaction ends, released or not. Past 64 in one transaction PostgreSQL's snapshots overflow and every session of
   the cluster, hot standbys included, slows until it ends, so the records stored in one host transaction are kept well
-  under 64. Captured records count as well: a Gate denial or an authentication event written at once inside a host
-  transaction on the storage connection, and a watched model's change inserted into the outbox inside its own
-  transaction, each hold one, so busy watched models or Gate capture on PostgreSQL want the storage, or the outbox, on
-  a connection of their own.
+  under 64. Captured records count as well: an authentication event written at once inside a host transaction on the
+  storage connection, and a watched model's change inserted into the outbox inside its own transaction, each hold one,
+  so busy watched models on PostgreSQL want the storage, or the outbox, on a connection of their own.
 - A unique violation is caught outside the savepoint, once it is rolled back, and the row under the record's id is read
   on the writer. Success needs a row that verifies and holds the same captured content; it is kept as it is, its
   `recorded_at` and key included. See `outcomes.md` for every result.
@@ -297,22 +296,22 @@ The role matrix is what the blocks grant, per table and user; "outbox mode" mark
 when delivery runs through the outbox, which the blocks leave out. The last three rows are granted by each engine's key
 block, which runs after the others:
 
-| Table                          | Writer                                                       | Maintenance                                                                  | Verifier                     |
-|--------------------------------|--------------------------------------------------------------|------------------------------------------------------------------------------|------------------------------|
-| `audit_log_entries`            | `SELECT`, `INSERT`                                           | `SELECT`, `DELETE`                                                           | `SELECT`                     |
-| `audit_log_artifacts`          | `SELECT`, `INSERT`                                           | `SELECT`, `DELETE`                                                           | `SELECT`                     |
-| `audit_log_outbox`             | outbox mode: `SELECT`, `INSERT`, `UPDATE`, `DELETE`          | `SELECT`, when on the storage database                                       | none                         |
-| `audit_log_deliveries`         | outbox mode: `SELECT`, `INSERT`, `UPDATE`                    | `SELECT`, `DELETE`                                                           | none                         |
-| `audit_log_checkpoints`        | `SELECT`, `INSERT`, `UPDATE` of the four anchor columns      | `SELECT`                                                                     | `SELECT`                     |
-| `audit_log_checkpoint_members` | `SELECT`, `INSERT`                                           | `SELECT`                                                                     | `SELECT`                     |
-| `audit_log_integrity_state`    | `SELECT`, `INSERT`, `UPDATE`, `DELETE`                       | `SELECT`                                                                     | `SELECT`, `INSERT`, `UPDATE` |
-| `audit_log_lifecycle`          | `SELECT`                                                     | `SELECT`, `INSERT`                                                           | `SELECT`                     |
-| `audit_log_holds`              | `SELECT`                                                     | `SELECT`, `INSERT`, `DELETE`                                                 | `SELECT`                     |
-| `audit_log_lifecycle_lock`     | none                                                         | `SELECT`, `UPDATE` of `token` and `locked_at`                                | none                         |
-| `audit_log_import_batches`     | `SELECT`, `INSERT`, `UPDATE` of the status, counts and times | none                                                                         | none                         |
-| `audit_log_subject_keys`       | `SELECT`, `INSERT`                                           | `SELECT`, `UPDATE` of `state`, `wrapped_key`, `wrap_key_id` and `erasure_id` | `SELECT`                     |
-| `audit_log_owner_erasures`     | `SELECT`                                                     | `SELECT`, `INSERT`                                                           | `SELECT`                     |
-| `audit_log_key_uses`           | `SELECT`, `INSERT`                                           | `SELECT`                                                                     | `SELECT`                     |
+| Table                          | Writer                                                                     | Maintenance                                                                  | Verifier                     |
+|--------------------------------|----------------------------------------------------------------------------|------------------------------------------------------------------------------|------------------------------|
+| `audit_log_entries`            | `SELECT`, `INSERT`                                                         | `SELECT`, `DELETE`                                                           | `SELECT`                     |
+| `audit_log_artifacts`          | `SELECT`, `INSERT`                                                         | `SELECT`, `DELETE`                                                           | `SELECT`                     |
+| `audit_log_outbox`             | outbox mode: `SELECT`, `INSERT`, `UPDATE`, `DELETE`                        | `SELECT`, when on the storage database                                       | none                         |
+| `audit_log_deliveries`         | outbox mode: `SELECT`, `INSERT`, `UPDATE`                                  | `SELECT`, `DELETE`                                                           | none                         |
+| `audit_log_checkpoints`        | `SELECT`, `INSERT`, `UPDATE` of the four anchor columns                    | `SELECT`                                                                     | `SELECT`                     |
+| `audit_log_checkpoint_members` | `SELECT`, `INSERT`                                                         | `SELECT`                                                                     | `SELECT`                     |
+| `audit_log_integrity_state`    | `SELECT`, `INSERT`, `UPDATE`, `DELETE`                                     | `SELECT`                                                                     | `SELECT`, `INSERT`, `UPDATE` |
+| `audit_log_lifecycle`          | `SELECT`                                                                   | `SELECT`, `INSERT`                                                           | `SELECT`                     |
+| `audit_log_holds`              | `SELECT`                                                                   | `SELECT`, `INSERT`, `DELETE`                                                 | `SELECT`                     |
+| `audit_log_lifecycle_lock`     | none                                                                       | `SELECT`, `UPDATE` of `token` and `locked_at`                                | none                         |
+| `audit_log_import_batches`     | `SELECT`, `INSERT`, `UPDATE` of the status, counts, conflict ids and times | none                                                                         | none                         |
+| `audit_log_subject_keys`       | `SELECT`, `INSERT`                                                         | `SELECT`, `UPDATE` of `state`, `wrapped_key`, `wrap_key_id` and `erasure_id` | `SELECT`                     |
+| `audit_log_owner_erasures`     | `SELECT`                                                                   | `SELECT`, `INSERT`                                                           | `SELECT`                     |
+| `audit_log_key_uses`           | `SELECT`, `INSERT`                                                         | `SELECT`                                                                     | `SELECT`                     |
 
 - The writer, the application's user, is granted `SELECT` and `INSERT` on the entries, the artifacts, the checkpoints
   and the members, `UPDATE` on the checkpoints' four anchor columns alone, and `SELECT`, `INSERT`, `UPDATE` and `DELETE`

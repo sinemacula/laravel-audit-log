@@ -2384,7 +2384,7 @@ final class DocumentationTest extends TestCase
             'a page in one call'                  => [self::READING_NOTE, 'in one call, answered in order and in number'],
             'the owner\'s entries'                => [self::READING_NOTE, '`holdingDataOf()` compiles to an `EXISTS` over the key uses joined to the owner\'s keys'],
             'key uses with their entry'           => [$storage, 'so a failed key use rolls its entry back and neither is ever kept without the other'],
-            'no envelope keeps one insert'        => [$storage, 'A record with no such envelope keeps its single insert'],
+            'no envelope keeps one insert'        => [$storage, 'a record with neither such an envelope nor an artifact keeps its single insert'],
             'the default encrypter'               => [self::REDACTION_NOTE, 'The package binds `Privacy\SubjectKeyEncrypter`, the default encrypter'],
             'never encrypting is explicit'        => [self::REDACTION_NOTE, 'is the explicit choice never to encrypt'],
             'typed plaintext'                     => [self::REDACTION_NOTE, 'so the string `"true"` and the boolean `true` seal apart'],

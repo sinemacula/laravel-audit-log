@@ -114,8 +114,8 @@ An `Access\AccessScope` is what the policy answers with. It starts from one of t
 - `AccessScope::tenants(...$tenants)` sees the entries of exactly these tenants, each matched as its type and id
   together, at most 100. `withTenantless()` adds the entries whose tenant type and tenant id are both `null`.
 
-Narrow a scope only through its instance methods, each of which only ever intersects with what the scope already holds,
-so repeating one never widens it:
+Narrow a scope only through its instance methods, each of which, `withTenantless()` aside, only ever intersects with
+what the scope already holds, so repeating one never widens it:
 
 ```php
 $scope = AccessScope::tenants(Reference::to($organisation))
@@ -130,6 +130,7 @@ $scope = AccessScope::tenants(Reference::to($organisation))
   rows by actor or subject only; it is not a complete disclosure policy. An entry about one person can name another,
   and an entry whose principal or tenant is the person is not selected.
 - A list left empty, given empty or emptied by an intersection, denies; it never means unrestricted.
+  `exceptCategories()` given none excepts nothing.
 - A static factory reached through an instance starts a fresh scope: `$scope->tenants($other)` or `$scope->all()`
   discards every restriction `$scope` held.
 - The scope is applied to every statement before the caller's filters, which can only narrow it. A filter outside the
