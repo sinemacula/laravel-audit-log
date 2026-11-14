@@ -1,8 +1,9 @@
 # Reference: https://qlty.sh/d/qlty-toml
 #
-# Code-quality configuration for both the Qlty CLI and Qlty Cloud. Plugins, lint
-# and format rules come from the shared sinemacula/coding-standards source; this
-# file wires that source in and adds the settings specific to this repository.
+# Code-quality configuration for both the Qlty CLI and Qlty Cloud. Lint and
+# format rules come from the shared sinemacula/coding-standards source; this
+# file wires that source in and selects the plugins relevant to a PHP
+# repository.
 config_version = "0"
 
 exclude_patterns = [
@@ -46,9 +47,8 @@ name = "php-codesniffer"
 package_file = "composer.json"
 package_filters = ["slevomat", "dealerdirect", "sinemacula"]
 
-# The standards package comes from extra_packages, which is silently ignored
-# whenever package_file is set, so this plugin declares its packages here rather
-# than reading composer.json.
+# extra_packages is silently ignored whenever package_file is set, so this
+# plugin declares its packages here rather than reading composer.json.
 [[plugin]]
 name = "php-cs-fixer"
 extra_packages = ["sinemacula/coding-standards@1.30.0"]
