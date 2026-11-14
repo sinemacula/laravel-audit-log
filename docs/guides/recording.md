@@ -100,7 +100,8 @@ another package's events are in [the extending guide](extending.md).
 Secret-shaped keys are redacted everywhere, at capture. This is a heuristic: it cannot find a secret in free text or
 under an innocuous key, and an event definition, which allowlists a code's fields, is the remedy. See
 [redaction](../design/redaction.md) and the [threat model](../design/threat-model.md). A sign-in identifier is never
-a property: it is stored as a keyed hash, so failed attempts correlate without keeping the address:
+a property: by default it is stored as a keyed hash, so failed attempts correlate without keeping the address, and
+`redaction.identifiers` set to `drop` keeps nothing:
 
 ```php
 AuditLog::event('app.sign_in_failed')->withIdentifier($email)->failed('invalid_credentials')->record();

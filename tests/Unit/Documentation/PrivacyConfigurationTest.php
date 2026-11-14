@@ -41,6 +41,14 @@ final class PrivacyConfigurationTest extends TestCase
     /** @var string The guide the README links for owners' keys and erasure. */
     private const string GUIDE = 'docs/guides/privacy.md';
 
+    /** @var list<string> The calls the privacy guide shows, as they are written there. */
+    private const array CALLS = [
+        'encrypt(\'card\', KeyOwner::ACTOR)',
+        'revealingEncryptedFields()',
+        'holdingDataOf()',
+        'AuditLog::lifecycle()->erase(',
+    ];
+
     /**
      * Rows of `[leaf, env var or null, default as shown]`: every privacy leaf.
      *
@@ -124,14 +132,18 @@ final class PrivacyConfigurationTest extends TestCase
     }
 
     /**
-     * The privacy guide names each privacy command, the options that accept a
-     * blocked or pending erasure, the erasure's record and its two outcomes.
+     * The privacy guide shows the privacy calls, and names each command, the
+     * partial and pending options, the erasure's record and its two outcomes.
      *
      * @return void
      */
-    public function testThePrivacyGuideNamesTheCommandsAndTheTwoOutcomes(): void
+    public function testThePrivacyGuideShowsTheCallsAndNamesTheCommandsAndOutcomes(): void
     {
         $guide = self::collapsed(self::read('/' . self::GUIDE));
+
+        foreach (self::CALLS as $call) {
+            self::assertStringContainsString($call, $guide, sprintf('The privacy guide does not show %s.', $call));
+        }
 
         foreach (self::COMMANDS as $command) {
             self::assertStringContainsString('`' . $command, $guide, sprintf('The privacy guide does not name `%s`.', $command));
