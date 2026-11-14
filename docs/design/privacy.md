@@ -160,7 +160,7 @@ trail is read is in `reading.md`; how an erasure is journalled is in `lifecycle.
   what AES-GCM allows under one key with random nonces, and rotation is on demand.
 - The envelope is `{v: 1, k: <key row id>, c: base64url(nonce || ciphertext || tag)}`: AES-256-GCM, a 12-byte nonce
   drawn by `random_bytes()` inside the call and never a parameter, and a 16-byte tag (`Privacy\FieldCipher`). `c` is
-  strict base64url with no padding whose re-encoding is the stored text, of 30 to 1052 decoded bytes.
+  strict base64url with no padding whose re-encoding is the stored text, of 29 to 1052 decoded bytes.
 - The additional data is the canonical encoding of `{d: 'sinemacula/audit-log:field:v1', entry, k, log, path, v}`,
   where `log` is the integrity log's id and `path` a JSON list: the column (`properties`, `context` or `ip`), then each
   list index as an integer at the element's stored index and each map key as PHP keys it, an integer from 0 as that

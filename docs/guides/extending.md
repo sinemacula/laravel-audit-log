@@ -10,29 +10,30 @@ out. Neither needs the package to know anything about the code that uses it. Wha
 Every concrete class of the package is `final`. It is extended through the contracts below, each bound in the container
 or registered from a service provider's `boot()`; each contract's docblock says what an implementation must keep to:
 
-| Extension point                              | How                                                                                                                                                                                     |
-|----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Where records are kept                       | Implement `Contracts\AuditStore` and bind it; bind a `Stores\StackAuditStore` to reach several stores                                                                                   |
-| What a store's return means                  | Implement `Contracts\DurableAuditStore` on the store: whether a return is durable, and whose transaction it joins                                                                       |
-| Attachments on a custom store                | Implement `Contracts\AcceptsAttachments` on the store, as below: bulk members, read disclosures, export manifests                                                                       |
-| Events of the application or another package | Implement `Contracts\EventMapper` and register it with `AuditLog::map()`, as below                                                                                                      |
-| What a record leaves out                     | Implement `Contracts\ContextContributor` and register it with `AuditLog::contribute()`                                                                                                  |
-| Who a guard without `GuardHelpers` holds     | Implement `Contracts\HeldActorReader` and bind it, as below: the actor, principal, tenant, session and credential it has bound, carried into queued jobs                                |
-| The application's event codes                | Implement `Contracts\DefinesAuditEvents` on a string-backed enum and register it with `AuditLog::define()`                                                                              |
-| Encrypted fields                             | Implement `Contracts\FieldEncrypter`, given each value's place, and bind it; the package seals under each owner's key, and `Privacy\NoFieldEncrypter` never encrypts                    |
-| How an owner's key is wrapped                | Implement `Contracts\KeyWrapper` and bind it to wrap owners' keys with an external key service; the package binds `Keys\LocalKeyWrapper`                                                |
-| Where seals are anchored                     | Set `integrity.anchor.driver`, or implement `Contracts\CheckpointAnchor` and bind it                                                                                                    |
-| How long entries are kept and preserved      | Implement `Contracts\RetentionPolicy` and bind it; the package binds `Lifecycle\ConfiguredRetentionPolicy`, which reads `retention.*`                                                   |
-| Where verification reads prune records       | Implement `Contracts\PruneLedger` to return the records the pruner journals, as the bound `Lifecycle\JournalPruneLedger` does; any other answer verifies every pruned member as missing |
-| Lines for a log or a security tool           | Implement `Contracts\AuditFormatter` and give it to the `Stores\LogAuditStore` the application binds                                                                                    |
-| OCSF classes of a code                       | Implement `Contracts\OcsfMapper` and name it in the code's definition with `EventDefinition::ocsf()`                                                                                    |
-| Which entries a viewer may read              | Implement `Contracts\AuditAccessPolicy` and bind it; it is asked on every terminal call, and `Access\DenyAllPolicy` denies all                                                          |
-| How an entry's encrypted fields are shown    | Implement `Contracts\FieldReader`; asked a page at a time through `readAll()`, under the reveal grant only; the default answers `encrypted`, a decrypting one also `erased`             |
-| The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                                                                                                 |
+| Extension point                              | How                                                                                                                                                                                                       |
+|----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Where records are kept                       | Implement `Contracts\AuditStore` and bind it; bind a `Stores\StackAuditStore` to reach several stores                                                                                                     |
+| What a store's return means                  | Implement `Contracts\DurableAuditStore` on the store: whether a return is durable, and whose transaction it joins                                                                                         |
+| Attachments on a custom store                | Implement `Contracts\AcceptsAttachments` on the store, as below: bulk members, read disclosures, export manifests                                                                                         |
+| Events of the application or another package | Implement `Contracts\EventMapper` and register it with `AuditLog::map()`, as below                                                                                                                        |
+| What a record leaves out                     | Implement `Contracts\ContextContributor` and register it with `AuditLog::contribute()`                                                                                                                    |
+| Who a guard without `GuardHelpers` holds     | Implement `Contracts\HeldActorReader` and bind it, as below: the actor, principal, tenant, session and credential it has bound, carried into queued jobs                                                  |
+| The application's event codes                | Implement `Contracts\DefinesAuditEvents` on a string-backed enum and register it with `AuditLog::define()`                                                                                                |
+| Encrypted fields                             | Implement `Contracts\FieldEncrypter`, given each value's place, and bind it; the package seals under each owner's key, and `Privacy\NoFieldEncrypter` never encrypts                                      |
+| How an owner's key is wrapped                | Implement `Contracts\KeyWrapper` and bind it to wrap owners' keys with an external key service; the package binds `Keys\LocalKeyWrapper`                                                                  |
+| Where seals are anchored                     | Set `integrity.anchor.driver`, or implement `Contracts\CheckpointAnchor` and bind it                                                                                                                      |
+| How long entries are kept and preserved      | Implement `Contracts\RetentionPolicy` and bind it; the package binds `Lifecycle\ConfiguredRetentionPolicy`, which reads `retention.*`                                                                     |
+| Where verification reads prune records       | Implement `Contracts\PruneLedger` to return the records the pruner journals, as the bound `Lifecycle\JournalPruneLedger` does; any other answer verifies every pruned member as missing                   |
+| Lines for a log or a security tool           | Implement `Contracts\AuditFormatter` and give it to the `Stores\LogAuditStore` the application binds                                                                                                      |
+| OCSF classes of a code                       | Implement `Contracts\OcsfMapper` and name it in the code's definition with `EventDefinition::ocsf()`                                                                                                      |
+| Which entries a viewer may read              | Implement `Contracts\AuditAccessPolicy` and bind it; it is asked on every terminal call, and `Access\DenyAllPolicy` denies all                                                                            |
+| How an entry's encrypted fields are shown    | Implement `Contracts\FieldReader`; asked a page at a time through `readAll()`, under the reveal grant only; the default decrypts or answers `erased`, and `Privacy\SealedFieldReader` answers `encrypted` |
+| The time records are stamped with            | Implement `Contracts\Clock` and bind it                                                                                                                                                                   |
 
 An integration that binds over a contract only while it still holds the package's default asks
 `AuditLogServiceProvider::isPackageDefault($container, $contract)`: true while the contract resolves to the package's
-own default, resolved or not, and false for any binding or instance made over it, even of the default's class.
+own default, resolved or not, and false for any binding made over it, even of the default's class, and for an instance
+of any other class.
 
 A store that keeps attachments, a bulk operation's subjects, a read's disclosure and an export's manifest, implements
 `Contracts\AcceptsAttachments` and returns `true` from `acceptsAttachments()` only when it keeps the attachment and its
@@ -77,8 +78,9 @@ AuditLog::map(OrderEvent::class, OrderEventMapper::class, except: [OrderViewed::
   a timing other than `afterTransaction()`, `failClosed()` or `transactional()` are each a contained failure that
   writes nothing. The capture writes the builder returned, at once.
 - A mapper of a refusal, such as a failed sign-in or a denied decision, ends its builder with `afterTransaction()`. The
-  record then waits for the outermost transaction open on the storage connection to end, and is written whether it
-  commits or rolls back, so a refusal that makes the caller roll back is still kept.
+  record then waits for the outermost transaction open on the storage connection (the outbox connection in outbox
+  mode) to end, and is written whether it commits or rolls back, so a refusal that makes the caller roll back is still
+  kept.
 - An event that is a bulk operation is mapped with `covering($subjects)` on the builder, as the application records
   one: the record carries the manifest of the subjects, bounded and refused as a bulk operation's is (see
   [Bulk operations](automatic-capture.md#bulk-operations)). A refusal is a contained failure that writes nothing.

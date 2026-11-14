@@ -33,7 +33,8 @@ the trail is in `docs/guides/reading.md`; what a PHP policy cannot stop is in `t
 - **The scope algebra.** `Access\AccessScope` starts from `none()`, `all()` or `tenants()` and narrows through
   `withTenantless()`, `onlyCategories()`, `exceptCategories()` and `onlyAbout()`. References match as exact `(type, id)`
   pairs, never as lists of types and ids apart; tenantless means both tenant columns are `null`; `none()` absorbs every
-  operation; an empty list denies and never means unrestricted; narrowing only intersects, so nothing widens.
+  operation; an empty list denies and never means unrestricted, and `exceptCategories()` given none excepts nothing;
+  narrowing only intersects, so nothing widens, `withTenantless()` aside.
   `revealingEncryptedFields()` grants the scope its encrypted fields: off on every starting scope, kept by every
   narrowing, part of the normalised form, the fingerprint and so the cursor's binding, and a denied scope stays denied
   and reveals nothing. A scope

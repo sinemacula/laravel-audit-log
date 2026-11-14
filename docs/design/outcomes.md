@@ -24,6 +24,8 @@ read of the trail returns, and when, since its own record is written before anyt
   | A row under the id verifies and holds the same captured content                  | `store()` returns; the first row is kept, its `recorded_at` and key included                  |
   | A row under the id verifies but holds different captured content                 | `RecordConflictException::differentContent()`                                                 |
   | A row under the id fails verification                                            | `RecordConflictException::unverified()`                                                       |
+  | The entry is stored with another artifact or none, or the artifact without it    | `RecordConflictException::differentArtifact()`                                                |
+  | A unique violation finds no row under the id, and retention pruned the id        | `RecordConflictException::alreadyPruned()`                                                    |
   | A row under the id is signed under a key the ring does not hold                  | `UnknownKeyException`                                                                         |
   | A row under the id has an unsupported version or is malformed                    | `\UnexpectedValueException`                                                                   |
   | Another unique index is violated, the source identity included                   | the original `UniqueConstraintViolationException`, never a success                            |
@@ -133,8 +135,8 @@ What the table cannot say in a cell:
   `transaction()` closure captures its record again under a new id and a spill would be a second record of one activity.
   With no transaction open the same failure ended nothing, and it follows the policy. A deadlock or a lost connection
   raised by a spill channel, a reporter or a listener on any connection with a transaction open propagates sanitised
-  too, once the remaining steps have run: the write's own connection decides only what the write's own failure ended. -
-  **What counts as fatal is read from the driver, not from the record.** A failed statement's message holds its
+  too, once the remaining steps have run: the write's own connection decides only what the write's own failure ended.
+- **What counts as fatal is read from the driver, not from the record.** A failed statement's message holds its
   bindings, so a record's value could read as a deadlock. The classifier reads the driver's own exception, and a data or
   constraint failure, whose driver message can quote a value, is never fatal. A lost connection is only ever a database
   failure, so a store's cURL error or a channel's missing file saying the same words is an ordinary failure, and a
@@ -236,13 +238,15 @@ decides when that record is stored, and so what its return promises:
 ### Captured Records
 
 - A captured record is written immediately under `report`, whatever `failure.mode` says, so a capture inside a
-  transaction is written in a savepoint and rolled back with the host on a shared connection.
+  transaction is written in a savepoint and rolled back with the host on a shared connection. A failed sign-in, a
+  lockout and a Gate denial instead wait for the outermost transaction to end, and are written whether it commits or
+  rolls back.
 - Model changes are the exception, the one captured source that waits for commit. A watched model's record is built and
   minimised when its event fires, then written after the commit of the transaction open on the model's own connection,
   `$model->getConnection()->getName()`, and dropped by its rollback. In outbox mode, with the outbox on that connection,
   its row is inserted inside the transaction, as `after-commit-outbox-same` is.
-- A mapper never chooses a timing, `failClosed()` or `transactional()`: a mapped record that sets any of them is a
-  contained capture failure, and writes nothing.
+- A mapper never chooses a timing but `afterTransaction()`, nor `failClosed()` or `transactional()`: a mapped record
+  that sets any of them is a contained capture failure, and writes nothing.
 
 ### Immediately and the Savepoint
 
@@ -308,10 +312,11 @@ decides when that record is stored, and so what its return promises:
 - **Under `throw`, an after-commit write failure surfaces after the business data has committed.** The exception comes
   out of the code that committed, `commit()` or `DB::transaction()`, long after `record()` returned. The business data
   stays committed, the connection is out of its transaction and no row exists, so the exception does not mean a
-  rollback, and retrying the work repeats what already committed. - **One record's failure costs no other.** Every
-  deferred write and bound spill of an outermost transaction, and of those nested in it, runs in one commit callback,
-  placed at the first audit use in that transaction. All of them run, the first failure is thrown once they have, and
-  any later one is reported, since only one exception can leave a commit.
+  rollback, and retrying the work repeats what already committed.
+- **One record's failure costs no other.** Every deferred write and bound spill of an outermost transaction, and of
+  those nested in it, runs in one commit callback, placed at the first audit use in that transaction. All of them run,
+  the first failure is thrown once they have, and any later one is reported, since only one exception can leave a
+  commit.
 - That thrown failure stops the application's after-commit callbacks registered behind the first audit use, because
   Laravel runs them in order and nothing catches the exception. The callbacks before it have already run.
 - **An application callback can still cost the audit log its records.** One that throws and was registered before the

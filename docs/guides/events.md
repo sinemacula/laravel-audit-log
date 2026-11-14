@@ -73,7 +73,8 @@ Event::listen(static function (AuditCaptureFailed $event): void {
   `SineMacula\Laravel\AuditLog\Capture\CaptureFailedException`, which names the same three classes and holds no
   previous exception, so route the package's reports to the same place.
 - A watched model's change is written after its transaction commits, so its event fires when that commit runs the
-  write, not when the model was saved.
+  write, not when the model was saved. A failed sign-in, a lockout and a Gate denial are written after the
+  transaction, so inside one theirs fires when it ends.
 - One failure is not contained. A deadlock or a lost connection that ended a transaction open on its connection, during
   a capture that writes at once, propagates sanitised, as it does from any write, because the application's
   transaction is already gone.

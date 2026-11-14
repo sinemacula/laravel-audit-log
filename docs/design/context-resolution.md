@@ -9,9 +9,9 @@ where it came from, so each value's source, and what it does not claim, is fixed
 
 ## Invariants
 
-- A capture runs one pipeline, in this order (`Recorder::write()`): the definition is found in `EventCatalogue`, with
-  `definitions.require_registered` read for this capture; `RecordDelivery::check()` accepts the timing; the contributors
-  fill the gaps, in order; a fresh snapshot is taken, because the first predates what they filled, and
+- A capture runs one pipeline, in this order (`RecordPipeline::write()`): the definition is found in `EventCatalogue`,
+  with `definitions.require_registered` read for this capture; `RecordDelivery::check()` accepts the timing; the
+  contributors fill the gaps, in order; a fresh snapshot is taken, because the first predates what they filled, and
   `Privacy\RecordMinimiser` minimises it under the definition; `AuditRecord::fromPending()` builds the record from what
   that leaves, its id and `occurred_at` from the `Clock` and its source from `source.id` and `source.region`;
   `RecordDelivery::deliver()` finalises it once and stores it, after commit unless the builder chose otherwise; and
@@ -115,9 +115,9 @@ where it came from, so each value's source, and what it does not claim, is fixed
   never trusted and never an error.
 - The snapshot records who started the work, not current authentication. It is never resolved back into a model, and it
   stays valid after the actor is deleted.
-- **Hidden Context travels in the queue payload unencrypted.** It stays out of the logs, but the actor's reference, the
-  guard's name and the identifiers can be read by anything that can read the queue's storage. `ShouldBeEncrypted`
-  encrypts the job's command, not this.
+- **Hidden Context travels in the queue payload unencrypted.** It stays out of the logs, but the actor's, principal's
+  and tenant's references, the guard's name, the session reference, the credential id and the identifiers can be read by
+  anything that can read the queue's storage. `ShouldBeEncrypted` encrypts the job's command, not this.
 - Only the package's own state is ever reset: its frames, its remembered ids and its hidden keys. The rest of Context
   and the guards belong to the application and are left alone.
 - Laravel's guards outlive a job on a worker, so `TrackJobFrames` notes on the frame of any job that is not a `SyncJob`
@@ -217,18 +217,19 @@ where it came from, so each value's source, and what it does not claim, is fixed
 
 ## Package Events
 
-| Event                                                   | Dispatched when                 | Carries                                                                        |
-|---------------------------------------------------------|---------------------------------|--------------------------------------------------------------------------------|
-| `SineMacula\Laravel\AuditLog\Events\AuditRecorded`      | The store has accepted a record | The record's id, code and category, no more                                    |
-| `SineMacula\Laravel\AuditLog\Events\AuditWriteFailed`   | A write failed                  | The record's id and code, the store's class and the exception's class, no more |
-| `SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed` | An event could not be captured  | The classes of the event, of what translated it and of the exception, no more  |
+| Event                                                     | Dispatched when                 | Carries                                                                                                           |
+|-----------------------------------------------------------|---------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `SineMacula\Laravel\AuditLog\Events\AuditRecorded`        | The store has accepted a record | The record's id, code and category, no more                                                                       |
+| `SineMacula\Laravel\AuditLog\Events\AuditWriteFailed`     | A write failed                  | The record's id and code, the store's class and the exception's class, no more                                    |
+| `SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed`   | An event could not be captured  | The classes of the event, of what translated it and of the exception, no more                                     |
+| `SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed` | Sealing or verification failed  | The command, the status counts, the first finding and its id, the heads and whether the run was complete, no more |
 
 Accepted is not always durable, and `outcomes.md` says when it is. Every package event implements
 `Contracts\AuditLogEvent`.
 
 ## Implementation Anchors
 
-- `src/Recorder.php`: `write()`; `src/Privacy/RecordMinimiser.php`: `minimise()`; `src/Facades/AuditLog.php`;
+- `src/RecordPipeline.php`: `write()`; `src/Privacy/RecordMinimiser.php`: `minimise()`; `src/Facades/AuditLog.php`;
   `src/AuditLogServiceProvider.php`: `registerListeners()`, `registerHttpFrame()`, `freezeRegistrationOnceBooted()`.
 - `src/Contracts/ContextContributor.php`, `src/Records/Contribution.php`, `src/Contributors/ContributorRegistry.php`.
 - `src/Contracts/HeldActorReader.php`, `src/Records/HeldActor.php`.

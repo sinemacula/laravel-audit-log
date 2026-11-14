@@ -30,8 +30,10 @@ each contract must keep to is in its docblock and in the extending guide's table
 
 - The recorder, its catalogue, its contributor and mapper registries and its model watcher are one per application, and
   the recorder holds no request: the execution frames, the request identity, the report latch, the write and read
-  guards, the commit queue and the captured events are scoped, so Octane and a queue worker start each request or job
-  without them.
+  guards, the commit queue, the captured events and the UUID v7 generator are scoped, so Octane and a queue worker
+  start each request or job without them.
+- `AuditLogServiceProvider::isPackageDefault()` tells an integration whether a contract still resolves to the package's
+  default, so it can bind over that default alone.
 - There is no manager and no driver registry. Binding `Contracts\AuditStore` is the one seam for where records go, a
   `Stores\StackAuditStore` among the choices, and binding `Privacy\NoFieldEncrypter` is the choice never to encrypt.
 - Definitions, contributors, event mappers and watched models are registrations, not bindings. They are made through
@@ -77,9 +79,10 @@ each contract must keep to is in its docblock and in the extending guide's table
 
 3. The package's provider boots, in this order: it loads its translations under the `audit-log` namespace; in the
    console, it registers its publishing tags and its commands and, once the application resolves its schedule, the
-   scheduled runs; it listens for the events that track execution frames and carry context into jobs; it listens for
-   Laravel's authentication events and Gate evaluations and defines the package's own codes; it prepends the middleware
-   that enters an HTTP frame to the global stack; and it freezes registration once the application has booted.
+   scheduled runs; it listens for the events that track execution frames, carry context into jobs and watch transactions
+   for the commit queue; it listens for Laravel's authentication events and Gate evaluations and defines the package's
+   own codes; it prepends the middleware that enters an HTTP frame to the global stack; and it freezes registration once
+   the application has booted.
 4. The application's and the composing packages' `boot()` methods register their definitions, contributors, event
    mappers and watched models. All of them run before the application has booted, so each is accepted whichever
    provider boots first; the first `AuditLog::map()` adds the one listener that routes mapped events.
@@ -114,8 +117,8 @@ each contract must keep to is in its docblock and in the extending guide's table
 
 ## Implementation Anchors
 
-- `src/AuditLogServiceProvider.php`: `register()`, `boot()`, `registerSchedule()`, `registerListeners()`,
-  `registerCapture()`, `registerHttpFrame()`, `freezeRegistrationOnceBooted()`.
+- `src/AuditLogServiceProvider.php`: `register()`, `boot()`, `isPackageDefault()`, `registerSchedule()`,
+  `registerListeners()`, `registerCapture()`, `registerHttpFrame()`, `freezeRegistrationOnceBooted()`.
 - `src/Facades/AuditLog.php`: `recorder()`, `fake()`; `src/Recorder.php`: `define()`, `contribute()`, `map()`,
   `watch()`.
 - `src/Definitions/EventCatalogue.php`, `src/Contributors/ContributorRegistry.php`, `src/Capture/MapperRegistry.php`,
@@ -134,7 +137,8 @@ each contract must keep to is in its docblock and in the extending guide's table
 - `tests/Feature/AuditLogServiceProviderTest.php` `testTheDefaultsAreBound`,
   `testTheEncrypterAndReaderAreBoundAfreshPerResolution`, `testTheWrapperIsBound`,
   `testTheAnchorReadsTheSettingsOnEachResolution`, `testTheRecorderIsASingleton`, `testTheRuntimeStateIsScoped`,
-  `testTheCaptureStateIsScoped`, `testAnEarlierPolicyAndFieldReaderAreKept`, `testRegistrationIsFrozenOnceBooted`,
+  `testTheCaptureStateIsScoped`, `testAnEarlierPolicyAndFieldReaderAreKept`,
+  `testIsPackageDefaultTellsThePackagesDefaultFromAnyOther`, `testRegistrationIsFrozenOnceBooted`,
   `testMappingAndWatchingAreFrozenOnceBooted`, `testRegistrationInAProvidersBootIsAccepted`,
   `testMappingAndWatchingInAProvidersBootAreAccepted`, `testADifferentDefinitionOfAPackageCodeIsRefusedAtBoot`,
   `testAMalformedSettingDoesNotStopBoot`, `testTheHttpFrameMiddlewareIsFirstAndOnce`

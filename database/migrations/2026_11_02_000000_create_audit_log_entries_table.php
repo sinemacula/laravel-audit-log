@@ -92,8 +92,7 @@ return new class extends Migration {
             $blueprint->json('context')->nullable();
             $blueprint->json('properties')->nullable();
 
-            // To the microsecond, unlike the whole seconds the family's other
-            // tables keep, so the records of one request sort in order.
+            // To the microsecond, so the records of one request sort in order.
             $blueprint->dateTime('occurred_at', 6);
             $blueprint->dateTime('recorded_at', 6);
 

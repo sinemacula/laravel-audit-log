@@ -38,9 +38,9 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
   kept only once its transaction has committed.
 - The journal is chained, signed and sealed, and written only under the lock, onto the head the operation verified
   there. A destructive decision replays the verified chain; it never reads the holds projection.
-- The projection is a convenience index, never trusted: `lifecycle.holds_table` lists holds for `audit-log:holds` and
-  `audit-log:check`, and a prune or a release decides from the journal alone, so a projection row deleted, inserted or
-  edited by hand changes nothing either does.
+- The projection is a convenience index, never trusted: `lifecycle.holds_table` lists holds for `audit-log:check`,
+  `audit-log:holds` lists them from the journal, and a prune or a release decides from the journal alone, so a
+  projection row deleted, inserted or edited by hand changes nothing either does.
 - Every lifecycle operation confirms the installation first, once and never in a dry run: the installation id,
   `installation.id` in `integrity.state_table`, is ensured through the storage connection's writer and must read the
   same through the maintenance connection (`Database\InstallationIdentity`), so the operation's deletions and journal

@@ -115,7 +115,7 @@ return [
     |---------------------------------------------------------------------------
     |
     | The signed, chained journal of every hold, release, prune and import; the
-    | active holds, listed for `audit-log:holds` and never trusted for a
+    | active holds, read by `audit-log:check` and never trusted for a
     | decision; and the one row every lifecycle transaction locks first. All are
     | on the storage connection; set them before migrating, since changing one
     | later moves no table.

@@ -69,8 +69,9 @@ shown, or anything stored outside a sealed field. How keys, reading and erasure 
   the owners' wrapped keys, but neither a wrapping key, a hashing key nor plaintext of what was hashed or sealed. A
   leak of the database with the keys gives what the next section says, and every sealed field whose key is not
   erased.
-- Reading the queue's storage gives the identifiers and the actor's reference, as `context-resolution.md` says, and no
-  property, because a record's payload never travels in the job's hidden Context.
+- Reading the queue's storage gives the identifiers, the actor's, principal's and tenant's references, the guard's
+  name, the session reference and the credential id, as `context-resolution.md` says, and no property, because a
+  record's payload never travels in the job's hidden Context.
 - A writer of the database without the integrity key can still change or delete rows. A change to a sealed entry, a seal
   or a member, and a deletion of any of them, is found by the next verification, except a deletion of the newest seals
   with their members and entries, which only the anchor finds. A row it inserts is found too: an entry with a junk HMAC

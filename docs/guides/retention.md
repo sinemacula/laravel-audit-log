@@ -86,8 +86,10 @@ $this->app->singleton(RetentionPolicy::class, ContractedRetention::class);
 - `retainFor()` answers 1 to 36500 days, or `null` to keep forever. A run asks once per category and tenant pair it
   meets, and freezes the answer for the rest of the run; an entry of no tenant is asked with a `null` tenant.
 - A policy keeps no state and never reads the entries table. Whatever it throws, or an answer out of range, stops the
-  run, which ends `failed` with `policy_failed`; the chunks it committed stand.
-- With a policy of your own bound, the scheduler runs `audit-log:prune` whatever the settings say.
+  run, which ends `failed`: with `configuration_refused` for an `\InvalidArgumentException` or a
+  `Lifecycle\RetentionConflictException`, and with `policy_failed` for anything else; the chunks it committed stand.
+- With a policy of your own bound, the scheduler runs `audit-log:prune` whatever the retention periods say, unless
+  `retention.schedule` is `null` or empty.
 
 ## Preservation
 
@@ -223,11 +225,12 @@ drain and `audit-log:replay` never store a pruned record again: they find it amo
 as pruned.
 
 Every lifecycle operation writes its activity record after it commits: `audit_log.held`, `audit_log.released`,
-`audit_log.pruned` and `audit_log.imported`. A record that cannot be written never undoes the operation: it is
-reported, the result says `recorded: false`, and the command warns. `audit-log:reconcile` then writes, from the
-journal, every record still missing for the operations journalled within the days `--since` looks back, 7 by default
-and up to 3650, and skips those already recorded, stored or still waiting in the outbox. A record's id is derived from
-its code and its operation, so however often it is written, by the operation or by reconciliation, it is stored once:
+`audit_log.pruned`, `audit_log.imported`, `audit_log.subject_erased`, `audit_log.keys_reinstated` and
+`audit_log.keys_rewrapped`. A record that cannot be written never undoes the operation: it is reported, the result says
+`recorded: false`, and the command warns. `audit-log:reconcile` then writes, from the journal, every record still
+missing for the operations journalled within the days `--since` looks back, 7 by default and up to 3650, and skips those
+already recorded, stored or still waiting in the outbox. A record's id is derived from its code and its operation, so
+however often it is written, by the operation or by reconciliation, it is stored once:
 
 ```bash
 php artisan audit-log:reconcile --since=30
