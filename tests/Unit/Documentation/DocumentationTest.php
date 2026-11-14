@@ -1454,50 +1454,51 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every redaction setting's env var is in the README.
+     * Every redaction setting's env var is in the configuration guide.
      *
      * @return void
      */
-    public function testEveryRedactionLeafNamesItsEnvVarInTheReadme(): void
+    public function testEveryRedactionLeafNamesItsEnvVarInTheConfigurationGuide(): void
     {
         preg_match_all('/\bAUDIT_LOG_REDACTION_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
 
         self::assertCount(5, $variables[0], 'The configuration does not read the redaction environment variables it should.');
 
         foreach ($variables[0] as $variable) {
-            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+            self::assertStringContainsString('`' . $variable . '`', self::read('/docs/guides/configuration.md'));
         }
     }
 
     /**
-     * Every failure and delivery setting's env var is in the README.
+     * Every failure and delivery setting's env var is in the configuration
+     * guide.
      *
      * @return void
      */
-    public function testEveryDeliveryLeafNamesItsEnvVarInTheReadme(): void
+    public function testEveryDeliveryLeafNamesItsEnvVarInTheConfigurationGuide(): void
     {
         preg_match_all('/\bAUDIT_LOG_(?:FAILURE|DELIVERY)_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
 
         self::assertCount(9, $variables[0], 'The configuration does not read the failure and delivery environment variables it should.');
 
         foreach ($variables[0] as $variable) {
-            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+            self::assertStringContainsString('`' . $variable . '`', self::read('/docs/guides/configuration.md'));
         }
     }
 
     /**
-     * Every integrity setting's env var is in the README.
+     * Every integrity setting's env var is in the configuration guide.
      *
      * @return void
      */
-    public function testEveryIntegrityLeafNamesItsEnvVarInTheReadme(): void
+    public function testEveryIntegrityLeafNamesItsEnvVarInTheConfigurationGuide(): void
     {
         preg_match_all('/\bAUDIT_LOG_INTEGRITY_(?:LOG|CHECKPOINTS|MEMBERS|STATE|SEAL|VERIFY|ANCHOR)_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
 
         self::assertCount(17, $variables[0], 'The configuration does not read the integrity environment variables it should.');
 
         foreach ($variables[0] as $variable) {
-            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+            self::assertStringContainsString('`' . $variable . '`', self::read('/docs/guides/configuration.md'));
         }
     }
 
@@ -1760,18 +1761,19 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every capture setting's env var is in the README and the capture guide.
+     * Every capture setting's env var is in the configuration and capture
+     * guides.
      *
      * @return void
      */
-    public function testEveryCaptureLeafNamesItsEnvVarInTheReadme(): void
+    public function testEveryCaptureLeafNamesItsEnvVarInTheConfigurationGuide(): void
     {
         preg_match_all('/\bAUDIT_LOG_CAPTURE_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
 
         self::assertCount(4, $variables[0], 'The configuration does not read the capture environment variables it should.');
 
         foreach ($variables[0] as $variable) {
-            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+            self::assertStringContainsString('`' . $variable . '`', self::read('/docs/guides/configuration.md'));
             self::assertStringContainsString('`' . $variable . '`', self::read(self::CAPTURE_GUIDE));
         }
     }
@@ -2210,18 +2212,19 @@ final class DocumentationTest extends TestCase
     }
 
     /**
-     * Every read and export setting's env var is in the README and the guide.
+     * Every read and export setting's env var is in the configuration and
+     * reading guides.
      *
      * @return void
      */
-    public function testEveryReadLeafNamesItsEnvVarInTheReadme(): void
+    public function testEveryReadLeafNamesItsEnvVarInTheConfigurationGuide(): void
     {
         preg_match_all('/\bAUDIT_LOG_(?:READ|EXPORT)_[A-Z_]+\b/', self::read('/config/audit-log.php'), $variables);
 
         self::assertSame(['AUDIT_LOG_READ_MAX_PER_PAGE', 'AUDIT_LOG_EXPORT_CHUNK'], $variables[0], 'The configuration does not read the read environment variables it should.');
 
         foreach ($variables[0] as $variable) {
-            self::assertStringContainsString('`' . $variable . '`', self::read('/README.md'));
+            self::assertStringContainsString('`' . $variable . '`', self::read('/docs/guides/configuration.md'));
             self::assertStringContainsString('`' . $variable . '`', self::read(self::READING_GUIDE));
         }
     }

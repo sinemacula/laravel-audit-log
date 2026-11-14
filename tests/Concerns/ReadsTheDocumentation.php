@@ -53,13 +53,14 @@ trait ReadsTheDocumentation
     }
 
     /**
-     * Every README configuration row, by key without backticks, as cells.
+     * Every row of the configuration guide's table, by key without backticks,
+     * as cells.
      *
      * @return array<string, list<string>>
      */
     protected static function configurationRows(): array
     {
-        preg_match_all('/^\| `([a-z_.]+)` +\|.*\|$/m', self::readme(), $matches, PREG_SET_ORDER);
+        preg_match_all('/^\| `([a-z_.]+)` +\|.*\|$/m', self::read('/docs/guides/configuration.md'), $matches, PREG_SET_ORDER);
 
         $rows = [];
 
