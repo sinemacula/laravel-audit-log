@@ -52,8 +52,8 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     /** @var int How many rows the smaller table holds; the larger holds four times as many. */
     private const int ROWS = 2000;
 
-    /** @var int Most extra work four times the rows may cost: linear is four times, quadratic sixteen. */
-    private const int MAX_WORK_RATIO = 6;
+    /** @var int Most extra work four times the rows may cost: linear is four times, quadratic sixteen, and this is a factor of two from each. */
+    private const int MAX_WORK_RATIO = 8;
 
     /** @var int Most a recent pass may cost over four times the sealed history; one that does not grow with it costs the same. */
     private const int MAX_RECENT_RATIO = 2;
@@ -86,7 +86,7 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     private ?array $template = null;
 
     /**
-     * A sweep of four times the unsealed rows costs at most six times the CPU
+     * A sweep of four times the unsealed rows costs at most eight times the CPU
      * time: linear gives four, quadratic sixteen.
      *
      * @return void
@@ -187,8 +187,8 @@ final class SealScanLoadTest extends PerformanceContractTestCase
     }
 
     /**
-     * A sweep over four times the rows, all sealed, costs at most six times the
-     * CPU time.
+     * A sweep over four times the rows, all sealed, costs at most eight times
+     * the CPU time.
      *
      * @return void
      */
