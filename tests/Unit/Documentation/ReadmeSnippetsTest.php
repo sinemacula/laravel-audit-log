@@ -14,8 +14,9 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Recorder;
 
 /**
- * A drift guard: every class, static member and method a README PHP snippet
- * names exists. It catches a missing name, not a wrong call.
+ * A drift guard: every class, static member and method a PHP snippet of the
+ * README or the recording guide names exists. It catches a missing name, not a
+ * wrong call.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,18 +45,17 @@ final class ReadmeSnippetsTest extends TestCase
     private static ?array $packageMethods = null;
 
     /**
-     * Every PHP snippet of the README names only classes, static members and
-     * methods that exist.
+     * Every PHP snippet of the README and the recording guide names only
+     * classes, static members and methods that exist.
      *
      * @return void
      */
     public function testEverySnippetNamesOnlyWhatExists(): void
     {
-        $readme = file_get_contents(dirname(__DIR__, 3) . '/README.md');
+        $root     = dirname(__DIR__, 3);
+        $markdown = file_get_contents($root . '/README.md') . file_get_contents($root . '/docs/guides/recording.md');
 
-        self::assertIsString($readme);
-
-        preg_match_all('/^```php\n(.*?)^```[ \t]*$/ms', $readme, $blocks);
+        preg_match_all('/^```php\n(.*?)^```[ \t]*$/ms', $markdown, $blocks);
 
         $problems = [];
 
@@ -63,8 +63,8 @@ final class ReadmeSnippetsTest extends TestCase
             array_push($problems, ...self::problemsIn($block));
         }
 
-        self::assertNotSame([], $blocks[1], 'The README shows no PHP snippet.');
-        self::assertSame([], $problems, 'The README\'s snippets name what does not exist.');
+        self::assertNotSame([], $blocks[1], 'The README and the recording guide show no PHP snippet.');
+        self::assertSame([], $problems, 'The snippets name what does not exist.');
     }
 
     /**
