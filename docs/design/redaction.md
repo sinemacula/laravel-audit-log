@@ -383,7 +383,7 @@ its IPv4 address, in every mode including `full`, so one client has one form, on
 - `tests/Unit/Privacy/SensitiveParametersTest.php` `testEveryRawValueParameterIsSensitive`,
   `testThePrivacyLayersRawParametersAreAllSensitive`
 - `tests/Unit/Documentation/DocumentationTest.php` `testTheRedactionNoteCallsKeyMatchingAHeuristic`,
-  `testTheRedactionNoteListsEveryMatcherEntry`, `testEveryRedactionLeafNamesItsEnvVarInTheReadme`
+  `testTheRedactionNoteListsEveryMatcherEntry`, `testEveryRedactionLeafNamesItsEnvVarInTheConfigurationGuide`
 - `tests/Feature/RecorderTest.php` `testMinimisingSeesWhatTheContributorsFilled`,
   `testARegisteredCodeDropsItsUnlistedFields`, `testAnUnregisteredCodeRetainsItsFields`,
   `testAMinimiserFailureFailsTheWriteAndStoresNothing`, `testAMinimiserFailureLeavesTheBuilderUsable`,

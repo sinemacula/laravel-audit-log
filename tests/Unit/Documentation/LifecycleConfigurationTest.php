@@ -10,8 +10,9 @@ use PHPUnit\Framework\TestCase;
 use Tests\Concerns\ReadsTheDocumentation;
 
 /**
- * A drift guard keeping the README in step with the lifecycle: it catches an
- * omission or a rename, not wrong prose.
+ * A drift guard keeping the README, the configuration guide and the lifecycle
+ * guides in step with the lifecycle: it catches an omission or a rename, not
+ * wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,7 +20,7 @@ use Tests\Concerns\ReadsTheDocumentation;
  * @internal
  */
 #[CoversNothing]
-final class LifecycleReadmeTest extends TestCase
+final class LifecycleConfigurationTest extends TestCase
 {
     use ReadsTheDocumentation;
 
@@ -56,19 +57,20 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * Each leaf has a README row naming its env var, or `-` for a map.
+     * Each leaf has a configuration guide row naming its env var, or `-` for a
+     * map.
      *
      * @param  string  $leaf
      * @param  ?string  $env
      * @return void
      */
     #[DataProvider('provideLeaves')]
-    public function testEveryLifecycleRetentionAndImportLeafNamesItsEnvVarInTheReadme(string $leaf, ?string $env): void
+    public function testEveryLifecycleRetentionAndImportLeafNamesItsEnvVarInTheConfigurationGuide(string $leaf, ?string $env): void
     {
         $row = self::configurationRows()[$leaf] ?? null;
 
-        self::assertNotNull($row, sprintf('The README\'s configuration table has no row for `%s`.', $leaf));
-        self::assertSame($env === null ? '-' : '`' . $env . '`', $row[2], sprintf('The README names the wrong env var for `%s`.', $leaf));
+        self::assertNotNull($row, sprintf('The configuration guide has no row for `%s`.', $leaf));
+        self::assertSame($env === null ? '-' : '`' . $env . '`', $row[2], sprintf('The configuration guide names the wrong env var for `%s`.', $leaf));
     }
 
     /**
@@ -96,19 +98,21 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * The README names each lifecycle command, the facade call and both guides.
+     * The lifecycle guides name each lifecycle command and the facade call, and
+     * the README links both.
      *
      * @return void
      */
-    public function testTheReadmeNamesTheLifecycleCommandsAndGuides(): void
+    public function testTheGuidesNameTheLifecycleCommandsAndTheReadmeLinksThem(): void
     {
         $readme = self::readme();
+        $guides = implode("\n", array_map(static fn (string $guide): string => self::read('/' . $guide), self::GUIDES));
 
         foreach (self::COMMANDS as $command) {
-            self::assertMatchesRegularExpression('/(`|artisan )' . preg_quote($command, '/') . '[`\s]/', $readme, sprintf('The README does not name `%s`.', $command));
+            self::assertMatchesRegularExpression('/(`|artisan )' . preg_quote($command, '/') . '[`\s]/', $guides, sprintf('No lifecycle guide names `%s`.', $command));
         }
 
-        self::assertStringContainsString('AuditLog::lifecycle()->hold(', $readme);
+        self::assertStringContainsString('AuditLog::lifecycle()->hold(', $guides);
 
         foreach (self::GUIDES as $guide) {
             self::assertStringContainsString('](' . $guide . ')', $readme, sprintf('The README does not link %s.', $guide));
@@ -130,15 +134,18 @@ final class LifecycleReadmeTest extends TestCase
     }
 
     /**
-     * The README never names Laravel's `model:prune`; retention is the
-     * package's own.
+     * Neither the README nor the configuration guide names Laravel's
+     * `model:prune`; retention is the package's own.
      *
      * @return void
      */
-    public function testTheReadmeNeverNamesModelPrune(): void
+    public function testNeitherTheReadmeNorTheConfigurationGuideNamesModelPrune(): void
     {
+        $guide = self::collapsed(self::read('/docs/guides/configuration.md'));
+
         self::assertStringNotContainsString('model:prune', self::readme());
-        self::assertStringContainsString('retention through `audit-log:prune`, scheduled by the package', self::readme());
+        self::assertStringNotContainsString('model:prune', $guide);
+        self::assertStringContainsString('it schedules `audit-log:prune` daily too', $guide);
     }
 
     /**

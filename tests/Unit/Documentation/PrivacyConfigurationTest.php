@@ -10,8 +10,9 @@ use PHPUnit\Framework\TestCase;
 use Tests\Concerns\ReadsTheDocumentation;
 
 /**
- * A drift guard keeping the README in step with owners' keys and erasure: it
- * catches an omission or a rename, not wrong prose.
+ * A drift guard keeping the README, the configuration guide and the privacy
+ * guide in step with owners' keys and erasure: it catches an omission or a
+ * rename, not wrong prose.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,7 +20,7 @@ use Tests\Concerns\ReadsTheDocumentation;
  * @internal
  */
 #[CoversNothing]
-final class PrivacyReadmeTest extends TestCase
+final class PrivacyConfigurationTest extends TestCase
 {
     use ReadsTheDocumentation;
 
@@ -40,11 +41,11 @@ final class PrivacyReadmeTest extends TestCase
     /** @var string The guide the README links for owners' keys and erasure. */
     private const string GUIDE = 'docs/guides/privacy.md';
 
-    /** @var list<string> The calls the usage shows, as they are written there. */
+    /** @var list<string> The calls the privacy guide shows, as they are written there. */
     private const array CALLS = [
-        '->encrypt(\'card\', KeyOwner::ACTOR)',
-        '->revealingEncryptedFields()',
-        '->holdingDataOf($customer)',
+        'encrypt(\'card\', KeyOwner::ACTOR)',
+        'revealingEncryptedFields()',
+        'holdingDataOf()',
         'AuditLog::lifecycle()->erase(',
     ];
 
@@ -68,7 +69,8 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * Each leaf has a row naming its default and env var, or `-` for a map.
+     * Each leaf has a row in the configuration guide naming its default and env
+     * var, or `-` for a map.
      *
      * @param  string  $leaf
      * @param  ?string  $env
@@ -76,13 +78,13 @@ final class PrivacyReadmeTest extends TestCase
      * @return void
      */
     #[DataProvider('provideLeaves')]
-    public function testEveryPrivacyLeafNamesItsDefaultAndEnvVarInTheReadme(string $leaf, ?string $env, string $default): void
+    public function testEveryPrivacyLeafNamesItsDefaultAndEnvVarInTheConfigurationGuide(string $leaf, ?string $env, string $default): void
     {
         $row = self::configurationRows()[$leaf] ?? null;
 
-        self::assertNotNull($row, sprintf('The README\'s configuration table has no row for `%s`.', $leaf));
-        self::assertSame($default, $row[1], sprintf('The README names the wrong default for `%s`.', $leaf));
-        self::assertSame($env === null ? '-' : '`' . $env . '`', $row[2], sprintf('The README names the wrong env var for `%s`.', $leaf));
+        self::assertNotNull($row, sprintf('The configuration guide has no row for `%s`.', $leaf));
+        self::assertSame($default, $row[1], sprintf('The configuration guide names the wrong default for `%s`.', $leaf));
+        self::assertSame($env === null ? '-' : '`' . $env . '`', $row[2], sprintf('The configuration guide names the wrong env var for `%s`.', $leaf));
     }
 
     /**
@@ -119,60 +121,39 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * The features say an encrypted field is sealed under its owner's key and
-     * erased with it, and link the privacy guide.
+     * The README links the privacy guide from its guides table.
      *
      * @return void
      */
-    public function testTheFeaturesNameEncryptionByDefaultAndTheGuide(): void
+    public function testTheReadmeLinksThePrivacyGuide(): void
     {
-        $readme   = self::readme();
-        $features = self::between($readme, '## Features', '## Installation');
-
-        self::assertStringContainsString('**[Owners\' keys and erasure](' . self::GUIDE . ')**', $features);
-        self::assertStringContainsString("sealed under a key of its\n" . '  owner\'s by default', $features);
-        self::assertStringContainsString('erased by destroying the owner\'s keys', $features);
-        self::assertStringContainsString('encrypted values shown only to a scope the access policy grants them', $features);
-        self::assertStringNotContainsString('encrypted values never shown', $readme);
-        self::assertMatchesRegularExpression('/^\| \[Privacy\]\(' . preg_quote(self::GUIDE, '/') . '\) +\|/m', $readme);
+        self::assertMatchesRegularExpression('/^\| \[Privacy\]\(' . preg_quote(self::GUIDE, '/') . '\) +\|/m', self::readme());
         self::assertFileExists(self::root() . '/' . self::GUIDE);
     }
 
     /**
-     * The usage shows the privacy calls and names each privacy command.
+     * The privacy guide shows the privacy calls, and names each command, the
+     * partial and pending options, the erasure's record and its two outcomes.
      *
      * @return void
      */
-    public function testTheUsageShowsTheCallsAndTheCommands(): void
+    public function testThePrivacyGuideShowsTheCallsAndNamesTheCommandsAndOutcomes(): void
     {
-        $usage = self::between(self::readme(), '### Encrypted fields and erasure', '### Guides');
+        $guide = self::collapsed(self::read('/' . self::GUIDE));
 
         foreach (self::CALLS as $call) {
-            self::assertStringContainsString($call, $usage, sprintf('The README does not show %s.', $call));
+            self::assertStringContainsString($call, $guide, sprintf('The privacy guide does not show %s.', $call));
         }
 
         foreach (self::COMMANDS as $command) {
-            self::assertStringContainsString('php artisan ' . $command . ' ', $usage, sprintf('The README does not run `%s`.', $command));
+            self::assertStringContainsString('`' . $command, $guide, sprintf('The privacy guide does not name `%s`.', $command));
         }
 
-        self::assertStringContainsString('`--partial`', $usage);
-        self::assertStringContainsString('`--pending`', $usage);
-        self::assertStringContainsString('`audit_log.subject_erased`', $usage);
-    }
-
-    /**
-     * The usage states both outcomes apart, and what credentials can still do.
-     *
-     * @return void
-     */
-    public function testTheUsageStatesTheTwoOutcomesAndWhatCredentialsCanDo(): void
-    {
-        $usage = self::collapsed(self::between(self::readme(), '### Encrypted fields and erasure', '### Guides'));
-
-        self::assertStringContainsString('An erasure revokes the owner\'s fields in the live store when it commits; it is complete only once the procedure', $usage);
-        self::assertStringContainsString('Database credentials can still destroy or restore keys, and `audit-log:verify` and `audit-log:check` make that detectable', $usage);
-        self::assertStringContainsString('re-apply the erasures since with `audit-log:erase --reapply=<file>`', $usage);
-        self::assertStringContainsString('References, hashes and the members of manifests are not erased.', $usage);
+        self::assertStringContainsString('`--partial`', $guide);
+        self::assertStringContainsString('`--pending`', $guide);
+        self::assertStringContainsString('`audit_log.subject_erased`', $guide);
+        self::assertStringContainsString('Revoked in the live store is what the package does', $guide);
+        self::assertStringContainsString('Erasure complete is the operator\'s procedure across the estate', $guide);
     }
 
     /**
@@ -186,7 +167,7 @@ final class PrivacyReadmeTest extends TestCase
 
         self::assertNotNull($row);
         self::assertStringStartsWith(self::MAINTENANCE_ROW, $row[3]);
-        self::assertStringContainsString(self::RESTORE_CHECK, self::collapsed(self::readme()));
+        self::assertStringContainsString(self::RESTORE_CHECK, self::collapsed(self::read('/docs/guides/configuration.md')));
     }
 
     /**
@@ -210,7 +191,8 @@ final class PrivacyReadmeTest extends TestCase
     }
 
     /**
-     * A shipped default as the README's table shows it, in backticks.
+     * A shipped default as the configuration guide's table shows it, in
+     * backticks.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -225,26 +207,5 @@ final class PrivacyReadmeTest extends TestCase
             is_int($default) || is_string($default) => (string) $default,
             default                                 => self::fail('A privacy default is not null, an array, an integer or a string.'),
         } . '`';
-    }
-
-    /**
-     * The text between the two headings, which the test fails without.
-     *
-     * @param  string  $text
-     * @param  string  $from
-     * @param  string  $to
-     * @return string
-     */
-    private static function between(string $text, string $from, string $to): string
-    {
-        $start = strpos($text, $from);
-
-        self::assertIsInt($start, sprintf('The README has no `%s`.', $from));
-
-        $end = strpos($text, $to, $start);
-
-        self::assertIsInt($end, sprintf('The README has no `%s` after `%s`.', $to, $from));
-
-        return substr($text, $start, $end - $start);
     }
 }

@@ -110,19 +110,20 @@ final class FreshnessDocumentationTest extends TestCase
     }
 
     /**
-     * The README names the freshness check and each monitoring env var.
+     * The configuration guide names the freshness check and each monitoring env
+     * var.
      *
      * @return void
      */
-    public function testTheReadmeNamesTheFreshnessCheckAndItsSettings(): void
+    public function testTheConfigurationGuideNamesTheFreshnessCheckAndItsSettings(): void
     {
-        self::assertStringContainsString('`php artisan audit-log:check --freshness`', self::section('README.md', 'Usage'));
+        self::assertStringContainsString('`php artisan audit-log:check --freshness`', self::section('docs/guides/configuration.md', 'Checking the configuration'));
 
-        $readme = self::read('README.md');
+        $guide  = self::read('docs/guides/configuration.md');
         $config = self::read('config/audit-log.php');
 
         foreach (self::SETTINGS as $key => $env) {
-            self::assertMatchesRegularExpression('/^\| `' . preg_quote($key, '/') . '` +\| [^|]+\| `' . $env . '` +\|/m', $readme, $key);
+            self::assertMatchesRegularExpression('/^\| `' . preg_quote($key, '/') . '` +\| [^|]+\| `' . $env . '` +\|/m', $guide, $key);
             self::assertStringContainsString("env('{$env}',", $config, $key);
         }
     }
