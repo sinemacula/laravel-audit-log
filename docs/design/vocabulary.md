@@ -26,7 +26,8 @@ exported.
 - The package defines its own codes while the application boots, before anything is recorded, so an application or an
   integration that defines one of them differently is refused at boot. The `audit_log.` codes are in the catalogue from
   the moment it is made, before any registration and whatever the freeze. An integration records its own activity
-  under codes it defines, never under the package's.
+  under codes it defines. An event that means the same thing as one the package captures may record under the
+  package's code with the package's definition; the `audit_log.` codes are the package's alone.
 - A model's codes are under the segment it is watched as, which is never a reserved prefix's segment, so a model's
   change never collides with a code the package or an integration records.
 - A record of access to sensitive data maps to `sensitive_read`, and other sensitive operations to `sensitive_create`,

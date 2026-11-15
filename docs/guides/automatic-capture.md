@@ -35,8 +35,8 @@ Each of these events is recorded as one row, under a code of the package's own:
   user has the same code and the same hash, and no subject, so attempts against one identifier correlate whether or not
   it exists. A missing or malformed identifier still records the failure.
 - Each code is defined by the package at boot, at version 1, in the `security` category, with every field it does not
-  list dropped. An application or an integration that defines one of them differently is refused at boot; record your
-  own activity under codes of your own.
+  list dropped. An application or an integration that defines one of them differently is refused at boot. Record your
+  own activity under codes of your own, or under one of these for an event that means the same thing.
 - One event object is recorded once, even when a mapping of the application sees it too.
 - A captured record is written at once, and a failure is reported rather than thrown, as the last section says. A
   failed sign-in and a lockout are written after the transaction instead: once the outermost transaction open on the

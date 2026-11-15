@@ -10,10 +10,11 @@ use SineMacula\Laravel\AuditLog\Records\PendingRecord;
  * Event mapper contract: translates a dispatched event into the record of what
  * happened.
  *
- * An implementation keeps no state, names its own code rather than deriving one
- * from the event's class, never records anything itself, and never chooses a
- * timing, `failClosed()` or `transactional()`. Anything else it gets wrong,
- * throwing included, is a contained capture failure.
+ * An implementation keeps no state, names its code rather than deriving one
+ * from the event's class, never records anything itself, and chooses no timing
+ * but `afterTransaction()`, nor `failClosed()` or `transactional()`. Anything
+ * else it gets wrong is a contained capture failure, unless it ended the
+ * application's transaction.
  *
  * @api
  *

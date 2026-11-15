@@ -87,10 +87,12 @@ AuditLog::map(OrderEvent::class, OrderEventMapper::class, except: [OrderViewed::
 - What the mapper's own work sets off is captured as it would be anywhere else: a watched model it saves and a Gate
   check it denies are each recorded by their own capture. Capturing or dispatching the event it is mapping again
   writes nothing, so a mapper never runs inside itself.
-- The mapper names its own codes, never one of the package's own codes (those `Capture\Enums\CapturedActivity`
-  defines) and never a code derived from the event's class, so renaming the class never changes the trail. An
-  integration records under the reserved prefix that fits its activity, such as `mfa.` or `sso.`; an application's own
-  events use the application's own prefixes.
+- The mapper names its code, never one derived from the event's class, so renaming the class never changes the trail.
+  An integration records under the reserved prefix that fits its activity, such as `mfa.` or `sso.`; an application's
+  own events use the application's own prefixes. An event that means the same thing as one the package captures, such
+  as a sign-in or a password reset, may record under the package's code (those `Capture\Enums\CapturedActivity`
+  defines) with its definition unchanged, so one query answers across guards. Defining such a code differently is
+  refused at boot, and the `audit_log.` codes are the package's alone.
 - A capture never throws into the code that dispatched the event, but for a failure that ended the application's
   transaction; the automatic-capture guide says what each failure does.
 
