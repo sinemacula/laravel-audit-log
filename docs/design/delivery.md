@@ -169,8 +169,9 @@ one, a dedicated file:
   listener sees it, while the channel's handlers and formatter still run. Laravel's `Context` reaches a logger as
   `extra`, which only a format printing `%extra%` shows. The line is the marker `audit-log-spill:v1` and a space, then
   the record's canonical JSON. A carriage return and a line feed are escaped by that encoding, and every `%` is written
-  as `\u0025`, because a `LineFormatter` rewrites a `%token%` in its output even after the message is substituted. The
-  escape decodes to the same value, so the line still verifies. A line is never truncated by the package.
+  as `\u0025`, because a `LineFormatter` before Monolog 3.13 rewrites a `%token%` in its output even after the message
+  is substituted. The escape decodes to the same value, so the line still verifies. A line is never truncated by the
+  package.
 - Other channels can damage a line. A syslog or cloud log handler may cut it at a size limit or rewrite it, and a cut
   line is skipped and counted as `truncated`, never repaired.
 - **Access.** The file holds whole records, so `permission` is `0600` and it belongs to the application's user alone. A
