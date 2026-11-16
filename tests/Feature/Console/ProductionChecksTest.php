@@ -40,6 +40,10 @@ final class ProductionChecksTest extends TestCase
     private const string UNSCHEDULED = '`audit-log.%s` is disabled, so the package does not schedule `%s`; run it elsewhere and monitor it with'
         . ' `audit-log:check --freshness`.';
 
+    /** @var string The note on a disabled prune that could delete something. */
+    private const string UNSCHEDULED_PRUNE = '`audit-log.retention.schedule` is disabled, so the package does not schedule `audit-log:prune`; run it'
+        . ' elsewhere and monitor it with `audit-log:check --freshness`.';
+
     /**
      * Register the command with a default install's bindings, so it passes.
      *
@@ -189,6 +193,89 @@ final class ProductionChecksTest extends TestCase
             sprintf(self::UNSCHEDULED, 'integrity.seal.sweep_schedule', 'audit-log:seal --sweep'),
             sprintf(self::UNSCHEDULED, 'integrity.verify.schedule', 'audit-log:verify --strict --sweep-first'),
         ], $this->checks()->notes());
+    }
+
+    /**
+     * A disabled prune is a note once it could delete something, by a retention
+     * shorter than forever or by a policy of the application's own.
+     *
+     * @return void
+     */
+    public function testADisabledPruneIsNotedOnceItCouldDelete(): void
+    {
+        $this->inProduction();
+
+        $this->config()->set('audit-log.retention.schedule', null);
+
+        self::assertSame([], $this->checks()->notes());
+
+        $this->config()->set('audit-log.retention.categories', ['security' => 30]);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(0, $code);
+        self::assertContains('[production] note: ' . self::UNSCHEDULED_PRUNE, $output);
+
+        $this->config()->set(['audit-log.retention.categories' => [], 'audit-log.retention.after_days' => 30]);
+
+        self::assertSame([self::UNSCHEDULED_PRUNE], $this->checks()->notes());
+
+        $this->config()->set('audit-log.retention.after_days', 0);
+        $this->app?->instance(RetentionPolicy::class, \Mockery::mock(RetentionPolicy::class));
+
+        self::assertSame([self::UNSCHEDULED_PRUNE], $this->checks()->notes());
+
+        $this->config()->set('audit-log.retention.schedule', '30 3 * * *');
+
+        self::assertSame([], $this->checks()->notes());
+    }
+
+    /**
+     * A policy that cannot be resolved counts as deleting, as it does for the
+     * schedule, whatever its retention settings say.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testAPolicyThatCannotBeResolvedCountsAsDeleting(): void
+    {
+        $this->inProduction();
+
+        $this->config()->set('audit-log.retention.schedule', '');
+
+        foreach ([new \RuntimeException('The policy cannot be built.'), new \InvalidArgumentException('The policy refuses its settings.')] as $failure) {
+            $this->app?->bind(RetentionPolicy::class, static fn (): RetentionPolicy => throw $failure);
+
+            self::assertSame([self::UNSCHEDULED_PRUNE], $this->checks()->notes());
+        }
+
+        $this->config()->set('audit-log.retention.after_days', 'often');
+
+        self::assertSame([self::UNSCHEDULED_PRUNE], $this->checks()->notes());
+    }
+
+    /**
+     * A malformed retention setting under the package's policy, or a malformed
+     * schedule, is left to `config` and never noted.
+     *
+     * @return void
+     */
+    public function testAMalformedRetentionSettingIsLeftToConfig(): void
+    {
+        $this->inProduction();
+
+        $this->config()->set(['audit-log.retention.schedule' => null, 'audit-log.retention.after_days' => 'often']);
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertNotContains('[production] note: ' . self::UNSCHEDULED_PRUNE, $output);
+        self::assertSame([], $this->checks()->notes());
+
+        $this->config()->set(['audit-log.retention.after_days' => 30, 'audit-log.retention.schedule' => 'often']);
+
+        self::assertSame([], $this->checks()->notes());
     }
 
     /**

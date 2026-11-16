@@ -221,7 +221,9 @@ SELECT name, value, updated_at FROM audit_log_integrity_state ORDER BY name;
 - When the application's environment is `production`, `audit-log:check` also lists a `[production]` subject: the
   testing `FakeAuditStore` bound as the store, or as a destination of a stack, is a problem, since it keeps records in
   memory and loses them. A seal, sweep or verification schedule set to `null` or empty is a `[production] note:`,
-  which does not fail the run, saying to run that command elsewhere and watch it with `--freshness`.
+  which does not fail the run, saying to run that command elsewhere and watch it with `--freshness`. So is a
+  `retention.schedule` set to `null` or empty while the prune could delete something: a retention shorter than
+  forever, a policy of the application's own, or a policy that cannot be resolved.
 
 **Clocks.** Recording servers and the database must run NTP. The package records time from the application's clock,
 and verification reports an entry recorded far ahead of its own clock as `future_unsealed`, so a server whose clock

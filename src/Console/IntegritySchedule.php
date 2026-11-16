@@ -95,8 +95,34 @@ final readonly class IntegritySchedule
     }
 
     /**
+     * Whether the prune is registered once its schedule is set: a policy that
+     * cannot be resolved counts as deleting, and goes to the reporter if given.
+     *
+     * @param  ?\Closure(\Throwable): void  $report
+     * @return bool
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function wouldPrune(?\Closure $report = null): bool
+    {
+        try {
+            $configured = $this->isConfiguredPolicy();
+        } catch (\Throwable $exception) {
+            // The prune refuses the policy itself and records the refusal
+            if ($report !== null) {
+                $report($exception);
+            }
+
+            return true;
+        }
+
+        return $this->deletesUnder($configured);
+    }
+
+    /**
      * The prune's cron expression, or `null` when unset or the prune can delete
-     * nothing; an unresolvable policy is reported and counts as deleting.
+     * nothing; an unresolvable policy is reported, never thrown, since it would
+     * stop every task of the application.
      *
      * @return ?string
      *
@@ -106,21 +132,7 @@ final readonly class IntegritySchedule
     {
         $cron = $this->retention->schedule();
 
-        if ($cron === null) {
-            return null;
-        }
-
-        try {
-            $configured = $this->isConfiguredPolicy();
-        } catch (\Throwable $exception) {
-            // The prune refuses the policy itself and records the refusal; an
-            // exception here would stop every task of the application
-            $this->handler->report($exception);
-
-            $configured = false;
-        }
-
-        return $this->deletesUnder($configured) ? $cron : null;
+        return $cron !== null && $this->wouldPrune($this->handler->report(...)) ? $cron : null;
     }
 
     /**
