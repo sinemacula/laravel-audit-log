@@ -19,8 +19,9 @@ is in `threat-model.md`.
 - The marker is `[REDACTED]` (`Redactor::MARKER`). A built-in secret is never un-redacted: a value key matching replaced
   stays the marker under `retain`, `redact`, `pseudonymise` and `encrypt`, and is removed by `drop`, because hashing or
   encrypting the marker would look like evidence of a value.
-- `properties._audit` is the last key of the properties and holds `note`, `identifier_hash` and `omitted`, in that order
-  and only as present. A caller's key cannot begin `_audit`, so nothing in it can be spoofed through `withProperties()`.
+- `properties._audit` is the last key of the properties and holds `note`, `identifier_hash`, `manifest` and `omitted`,
+  in that order and only as present. A caller's key cannot begin `_audit`, so nothing in it can be spoofed through
+  `withProperties()`.
 - A sign-in identifier is given with `withIdentifier()`, never as a property, and is stored only at
   `properties._audit.identifier_hash`. It is a normalised, keyed hash under `redaction.identifiers` `hash`, the default,
   and nothing under `drop`, so an `unlisted` `drop` cannot lose it and no column ever holds it.
@@ -232,10 +233,10 @@ Each is measured on the complete final JSON, with `CanonicalEncoder::JSON_FLAGS`
 - The tiers of the properties are: keys no rule governs go first; then keys a rule governs, itself or beneath them, so a
   branch holding a rule-governed field goes with them; and the note last of all. The tiers of the context are:
   application keys first, then the fixed package names `route`, `method`, `command`, `job` and `channel`.
-- The metadata protected is `identifier_hash` and `omitted`, which are bounded and never omitted. The properties keep
-  `ByteBudget::METADATA_RESERVE_BYTES` (4600) free for them at their largest, so the final encoding fits whatever the
-  omissions add. A note is not protected. The context has no metadata and no reserve, and `_audit` in it is an ordinary
-  key.
+- The metadata protected is `identifier_hash`, `manifest` and `omitted`, which are bounded and never omitted. The
+  properties keep `ByteBudget::METADATA_RESERVE_BYTES` (4600) free for them at their largest, so the final encoding fits
+  whatever the omissions add. A note is not protected. The context has no metadata and no reserve, and `_audit` in it is
+  an ordinary key.
 - `properties._audit.omitted` is `{count, paths}`, for the context's omissions as well, and absent when nothing was
   removed. `count` counts removed branches: every explicit or unlisted removal, every key a budget omitted, every key
   past the ceiling, a note or an address that was not stored, and every collision (see `record-model.md`), including

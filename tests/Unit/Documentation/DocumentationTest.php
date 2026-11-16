@@ -1102,7 +1102,7 @@ final class DocumentationTest extends TestCase
             'a filled value is minimised'         => [$context, 'A filled value is minimised too'],
             'the walker reaches a nested rule'    => [$definitions, 'keeps `customer.email` and drops the rest of `customer`'],
             'the rules apply at capture'          => [$definitions, 'the rules apply at capture'],
-            'what the metadata holds'             => [$record, 'it holds `note`, `identifier_hash` and `omitted`'],
+            'what the metadata holds'             => [$record, 'it holds `note`, `identifier_hash`, `manifest` and `omitted`'],
             'an owned note is sealed'             => [$record, 'it is sealed through `Contracts\FieldEncrypter`'],
             'the record takes the minimised'      => [$record, '`AuditRecord::fromPending()` takes the minimised value'],
             'the id is minted first'              => [$record, 'The id is minted before the record is minimised, never after'],
