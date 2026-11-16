@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Container\Container;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
@@ -42,12 +43,12 @@ final class ProviderBindingOrderTest extends TestCase
     use MockeryPHPUnitIntegration;
 
     /**
-     * The rows hold every default, the access policy and the scoped state among
-     * them, and no held actor reader, an optional seam with no default.
+     * The rows hold a default of each kind the provider binds, the access
+     * policy among them, and no held actor reader, an optional seam.
      *
      * @return void
      */
-    public function testTheRowsHoldEveryDefaultAndNoHeldActorReader(): void
+    public function testTheRowsHoldEachKindOfDefaultAndNoHeldActorReader(): void
     {
         $abstracts = array_keys(iterator_to_array(self::provideBoundAbstracts()));
 
@@ -66,12 +67,22 @@ final class ProviderBindingOrderTest extends TestCase
      */
     public static function provideBoundAbstracts(): iterable
     {
-        $container = self::container();
-        $before    = array_keys($container->getBindings());
+        // A new application makes itself the global container; put back the one
+        // the rest of the run uses
+        $global = Container::getInstance();
 
-        (new AuditLogServiceProvider($container))->register();
+        try {
+            $container = self::container();
+            $before    = array_keys($container->getBindings());
 
-        foreach (array_diff(array_keys($container->getBindings()), $before) as $abstract) {
+            (new AuditLogServiceProvider($container))->register();
+
+            $abstracts = array_diff(array_keys($container->getBindings()), $before);
+        } finally {
+            Container::setInstance($global);
+        }
+
+        foreach ($abstracts as $abstract) {
             yield $abstract => [$abstract];
         }
     }
