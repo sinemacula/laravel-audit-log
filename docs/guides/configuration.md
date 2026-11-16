@@ -106,7 +106,8 @@ problem and unusable key at once, exits non-zero on any, and writes nothing. It 
 the one a replay can read, and fails on one that would fail together with the store. After a database restore it fails
 too, on keys an erasure destroyed and on a database behind its anchor, until `audit-log:erase --reapply` has re-applied
 the erasures since. In production it also fails on the testing fake bound as the store or a stack's destination, and
-notes, without failing, a seal, sweep or verification schedule turned off.
+notes, without failing, a seal, sweep or verification schedule turned off, and a prune schedule turned off while the
+prune could delete something.
 
 Watch the scheduled runs from cron or an uptime monitor with `php artisan audit-log:check --freshness`, which exits
 non-zero once sealing, the sweep, verification, retention, anchoring or the outbox is stale or failed; see

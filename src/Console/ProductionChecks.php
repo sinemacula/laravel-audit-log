@@ -8,11 +8,13 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities;
 use SineMacula\Laravel\AuditLog\Integrity\SealSettings;
+use SineMacula\Laravel\AuditLog\Lifecycle\RetentionSettings;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
 
 /**
  * The production checks of `audit-log:check`: the testing fake store bound in
- * production, and notes on disabled seal, sweep and verification schedules.
+ * production, and notes on disabled seal, sweep, verification and prune
+ * schedules.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,6 +42,7 @@ final readonly class ProductionChecks
      * @param  \Illuminate\Contracts\Foundation\Application  $application
      * @param  \Illuminate\Config\Repository  $config
      * @param  \SineMacula\Laravel\AuditLog\Delivery\StoreCapabilities  $capabilities
+     * @param  \SineMacula\Laravel\AuditLog\Console\IntegritySchedule  $schedule
      */
     public function __construct(
 
@@ -51,6 +54,9 @@ final readonly class ProductionChecks
 
         /** What the bound store says of itself, and of its destinations. */
         private StoreCapabilities $capabilities,
+
+        /** What decides whether the prune could delete something. */
+        private IntegritySchedule $schedule,
     ) {}
 
     /**
@@ -83,8 +89,9 @@ final readonly class ProductionChecks
     }
 
     /**
-     * The note on each disabled seal, sweep or verification schedule, in
-     * production; a malformed one is left to `config`.
+     * The note on each disabled seal, sweep or verification schedule, and on a
+     * disabled prune that could delete something, in production; a malformed
+     * one is left to `config`.
      *
      * @return list<string>
      */
@@ -118,7 +125,26 @@ final readonly class ProductionChecks
             $notes[] = sprintf(self::UNSCHEDULED, 'audit-log.' . $setting, $command);
         }
 
+        if ($this->prunesUnscheduled()) {
+            $notes[] = sprintf(self::UNSCHEDULED, 'audit-log.retention.schedule', 'audit-log:prune');
+        }
+
         return $notes;
+    }
+
+    /**
+     * Whether the prune has no schedule but would be registered with one.
+     *
+     * @return bool
+     */
+    private function prunesUnscheduled(): bool
+    {
+        try {
+            return (new RetentionSettings($this->config))->schedule() === null && $this->schedule->wouldPrune();
+        } catch (\InvalidArgumentException) {
+            // The malformed setting is listed under `config`
+            return false;
+        }
     }
 
     /**
