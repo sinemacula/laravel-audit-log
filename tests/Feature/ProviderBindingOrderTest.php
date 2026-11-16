@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Container\Container;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
@@ -12,28 +13,20 @@ use Orchestra\Testbench\TestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
-use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
-use SineMacula\Laravel\AuditLog\Contracts\FieldReader;
-use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
+use SineMacula\Laravel\AuditLog\Contracts\HeldActorReader;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
-use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
-use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
-use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
-use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Privacy\NoFieldEncrypter;
 use SineMacula\Laravel\AuditLog\Privacy\SubjectKeyEncrypter;
 use SineMacula\Laravel\AuditLog\Recorder;
-use SineMacula\Laravel\AuditLog\Runtime\ExecutionFrames;
-use SineMacula\Laravel\AuditLog\Runtime\ReportLatch;
-use SineMacula\Laravel\AuditLog\Runtime\RequestIdentity;
-use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Support\SystemClock;
+use SineMacula\Laravel\AuditLog\Support\UuidV7;
 use Tests\Fixtures\Support\FrozenClock;
 
 /**
@@ -50,31 +43,44 @@ final class ProviderBindingOrderTest extends TestCase
     use MockeryPHPUnitIntegration;
 
     /**
-     * Rows of `[abstract]`: every abstract the package's provider binds.
+     * The rows hold a default of each kind the provider binds, the access
+     * policy among them, and no held actor reader, an optional seam.
+     *
+     * @return void
+     */
+    public function testTheRowsHoldEachKindOfDefaultAndNoHeldActorReader(): void
+    {
+        $abstracts = array_keys(iterator_to_array(self::provideBoundAbstracts()));
+
+        foreach ([AuditAccessPolicy::class, Clock::class, FieldEncrypter::class, CheckpointAnchor::class, Recorder::class, UuidV7::class] as $abstract) {
+            self::assertContains($abstract, $abstracts);
+        }
+
+        self::assertNotContains(HeldActorReader::class, $abstracts);
+    }
+
+    /**
+     * Rows of `[abstract]`: every abstract the package's provider binds, read
+     * from the bindings it makes on a bare application.
      *
      * @return iterable<string, array{0: string}>
      */
     public static function provideBoundAbstracts(): iterable
     {
-        $abstracts = [
-            Clock::class,
-            AuditStore::class,
-            FieldEncrypter::class,
-            FieldReader::class,
-            KeyWrapper::class,
-            RetentionPolicy::class,
-            PruneLedger::class,
-            CheckpointAnchor::class,
-            KeyRing::class,
-            IntegritySettings::class,
-            Recorder::class,
-            EventCatalogue::class,
-            ContributorRegistry::class,
-            ExecutionFrames::class,
-            RequestIdentity::class,
-            ReportLatch::class,
-            WriteGuard::class,
-        ];
+        // A new application makes itself the global container; put back the one
+        // the rest of the run uses
+        $global = Container::getInstance();
+
+        try {
+            $container = self::container();
+            $before    = array_keys($container->getBindings());
+
+            (new AuditLogServiceProvider($container))->register();
+
+            $abstracts = array_diff(array_keys($container->getBindings()), $before);
+        } finally {
+            Container::setInstance($global);
+        }
 
         foreach ($abstracts as $abstract) {
             yield $abstract => [$abstract];
