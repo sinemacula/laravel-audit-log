@@ -14,6 +14,8 @@
         customPath: "vendor/bin/phpunit"
     },
     initialTestsPhpOptions: "-d memory_limit=1G",
+    // The Performance suite's load runs exhaust the initial run's memory
+    testFrameworkExtraArgs: "--exclude-testsuite=Performance",
     timeout: 30,
     mutators: {
         "@default": true
