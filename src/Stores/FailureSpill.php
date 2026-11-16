@@ -14,8 +14,9 @@ use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
  * Writes a record whose write failed to the failure channel as one `critical`
  * line `audit-log:replay` reads back: the marker, then the canonical envelope.
  *
- * Every `%` is written as `\u0025`, since Monolog's `LineFormatter` rewrites a
- * `%token%` even after substitution; the HMAC is over decoded values.
+ * Every `%` is written as `\u0025`, since `LineFormatter` before Monolog 3.13
+ * rewrites a `%token%` even after substitution; the HMAC is over decoded
+ * values.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -9,9 +9,6 @@ use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
-use Monolog\Formatter\LineFormatter;
-use Monolog\Level;
-use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Delivery\SpillReader;
@@ -576,21 +573,15 @@ final class FailureSpillTest extends TestCase
     }
 
     /**
-     * Rows of `[token, rewritten]`: `LineFormatter` tokens and whether it
-     * rewrites one left unescaped.
+     * Rows of `[token]`: the `LineFormatter` tokens.
      *
-     * @return iterable<string, array{0: string, 1: bool}>
+     * @return iterable<string, array{0: string}>
      */
     public static function providePercentTokens(): iterable
     {
-        yield from [
-            'the datetime'    => ['%datetime%', true],
-            'a context value' => ['%context.x%', true],
-            'an extra value'  => ['%extra.y%', true],
-            'the message'     => ['%message%', false],
-            'the level'       => ['%level_name%', true],
-            'the channel'     => ['%channel%', true],
-        ];
+        foreach (['%datetime%', '%context.x%', '%extra.y%', '%message%', '%level_name%', '%channel%'] as $token) {
+            yield $token => [$token];
+        }
     }
 
     /**
@@ -598,11 +589,10 @@ final class FailureSpillTest extends TestCase
      * the file as spilled and still verifies.
      *
      * @param  string  $token
-     * @param  bool  $rewritten
      * @return void
      */
     #[DataProvider('providePercentTokens')]
-    public function testAPercentTokenSurvivesTheDocumentedChannel(string $token, bool $rewritten): void
+    public function testAPercentTokenSurvivesTheDocumentedChannel(string $token): void
     {
         $this->spillTo(self::SPILL_CHANNEL);
 
@@ -617,13 +607,6 @@ final class FailureSpillTest extends TestCase
         self::assertSame(FailureSpill::line($record->toArray()) . "\n", $contents);
         self::assertSame(CanonicalEncoder::encode($record->toArray()), CanonicalEncoder::encode($decoded));
         self::assertTrue(app(RecordSigner::class)->verifies($decoded));
-
-        $with      = DocumentedSpillChannel::config('unused')['formatter_with'];
-        $formatter = new LineFormatter($with['format'], allowInlineLineBreaks: $with['allowInlineLineBreaks']);
-        $unescaped = 'before ' . $token . ' after';
-        $formatted = $formatter->format(new LogRecord(new \DateTimeImmutable, 'testing', Level::Critical, $unescaped));
-
-        self::assertSame($rewritten, $unescaped . "\n" !== $formatted);
     }
 
     /**
