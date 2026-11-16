@@ -83,9 +83,9 @@ pinned by a golden fixture; a change to any of them is a new record version, nev
   under the same source id and record id, a conflict, and it is signed with the row, so it cannot be edited unseen. An
   imported record is this installation's acceptance of what its source asserted, never a claim that the event
   happened as asserted.
-- `properties._audit` belongs to the package: it holds `note`, `identifier_hash` and `omitted`, in that order and only
-  as present, and it is the last key of the properties. A caller's key beginning `_audit`, at any depth and after its
-  key is cleaned, is refused.
+- `properties._audit` belongs to the package: it holds `note`, `identifier_hash`, `manifest` and `omitted`, in that
+  order and only as present, and it is the last key of the properties. A caller's key beginning `_audit`, at any depth
+  and after its key is cleaned, is refused.
 - A note (`withNote()`) is cleaned and cut to `PendingRecord::NOTE_MAX_BYTES` (1024) bytes on a character boundary. A
   note without an owner is stored at `properties._audit.note`, after the caller's keys, in plaintext, and cannot be
   erased. A note with an owner (`KeyOwner::ACTOR`, `KeyOwner::SUBJECT`, a model or a reference) is never stored in
