@@ -1065,6 +1065,7 @@ final class DocumentationTest extends TestCase
         $testing     = '/docs/design/testing-helpers.md';
         $definitions = '/docs/design/event-definitions.md';
         $record      = '/docs/design/record-model.md';
+        $redaction   = '/docs/design/redaction.md';
         $storage     = '/docs/design/storage.md';
         $integrity   = '/docs/design/integrity.md';
 
@@ -1103,6 +1104,8 @@ final class DocumentationTest extends TestCase
             'the walker reaches a nested rule'    => [$definitions, 'keeps `customer.email` and drops the rest of `customer`'],
             'the rules apply at capture'          => [$definitions, 'the rules apply at capture'],
             'what the metadata holds'             => [$record, 'it holds `note`, `identifier_hash`, `manifest` and `omitted`'],
+            'the metadata in the redaction note'  => [$redaction, 'holds `note`, `identifier_hash`, `manifest` and `omitted`'],
+            'the metadata the budget protects'    => [$redaction, 'The metadata protected is `identifier_hash`, `manifest` and `omitted`'],
             'an owned note is sealed'             => [$record, 'it is sealed through `Contracts\FieldEncrypter`'],
             'the record takes the minimised'      => [$record, '`AuditRecord::fromPending()` takes the minimised value'],
             'the id is minted first'              => [$record, 'The id is minted before the record is minimised, never after'],
