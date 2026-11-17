@@ -17,10 +17,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\AuditLogServiceProvider;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
+use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
+use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
@@ -29,6 +32,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Hold;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
+use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
@@ -237,6 +241,34 @@ final class LifecycleProofsTest extends TestCase
         self::assertSame([1, ['security' => 1]], [$third['deleted'], $third['categories']]);
         self::assertNotSame($version, $third['policy_version']);
         self::assertSame([$version, $third['policy_version']], $this->policyVersions());
+    }
+
+    /**
+     * A code moved to another category leaves its earlier rows in theirs, and
+     * they are pruned by that category's retention.
+     *
+     * @return void
+     */
+    public function testARecategorisedCodeKeepsItsEarlierRowsInTheirCategory(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.retention.categories', ['finance' => 30, 'billing' => 3650]);
+
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-01 10:00:00', 'UTC'));
+        $this->recordUnder('finance');
+
+        CarbonImmutable::setTestNow(new CarbonImmutable(self::NOW, 'UTC'));
+        $this->recordUnder('billing');
+
+        $categories = fn (): array => $this->storage()->table(EntrySettings::table())->where('event', 'invoice.approved')->orderBy('occurred_at')->pluck('category')->all();
+
+        self::assertSame(['finance', 'billing'], $categories());
+
+        $this->seal();
+
+        $pruned = $this->jsonOf('audit-log:prune');
+
+        self::assertSame([1, ['finance' => 1]], [$pruned['deleted'], $pruned['categories']]);
+        self::assertSame(['billing'], $categories());
     }
 
     /**
@@ -544,6 +576,27 @@ final class LifecycleProofsTest extends TestCase
         app(DatabaseAuditStore::class)->store($finalised);
 
         return $finalised->record->id;
+    }
+
+    /**
+     * Record `invoice.approved` with the code defined in the category given.
+     *
+     * @param  string  $category
+     * @return void
+     */
+    private function recordUnder(string $category): void
+    {
+        $catalogue = new EventCatalogue;
+
+        $catalogue->define(EventDefinition::for('invoice.approved')->category($category));
+
+        $recorder = new Recorder($catalogue, new ContributorRegistry);
+
+        app()->instance(EventCatalogue::class, $catalogue);
+        app()->instance(Recorder::class, $recorder);
+
+        AuditLog::swap($recorder);
+        AuditLog::record('invoice.approved');
     }
 
     /**
