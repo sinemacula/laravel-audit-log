@@ -81,13 +81,15 @@ jobs:
                     composer test:mutation -- --git-diff-base="$base"
 
     # ==========================================================================
-    # JOB: FULL MUTATION SUITE (SCHEDULED + MANUAL)
+    # JOB: FULL MUTATION COVERAGE (SCHEDULED + MANUAL)
     # ==========================================================================
-    mutation-full:
+    # The suite runs once, in parallel, to record which tests cover each line;
+    # the mutation jobs below reuse it instead of each running the suite again.
+    mutation-full-coverage:
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-        name: Mutation Full / PHP 8.3
+        name: Mutation Full Coverage / PHP 8.3
         runs-on: ubuntu-latest
-        timeout-minutes: 60
+        timeout-minutes: 30
 
         steps:
             -   name: Checkout
@@ -101,5 +103,63 @@ jobs:
                     php-version: 8.3
                     coverage: pcov
 
+            -   name: Record coverage
+                run: composer test:mutation:coverage
+
+            -   name: Upload coverage
+                uses: actions/upload-artifact@v7
+                with:
+                    name: mutation-coverage
+                    path: build/mutation-coverage
+                    if-no-files-found: error
+                    retention-days: 1
+
+    # ==========================================================================
+    # JOB: FULL MUTATION SUITE (SCHEDULED + MANUAL)
+    # ==========================================================================
+    # Each shard mutates every fourth source file, so the source is split
+    # evenly and a new file joins a shard without any list to maintain.
+    mutation-full:
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        needs: mutation-full-coverage
+        name: Mutation Full / PHP 8.3 (${{ matrix.shard }}/4)
+        runs-on: ubuntu-latest
+        timeout-minutes: 60
+
+        strategy:
+            fail-fast: false
+            matrix:
+                shard: [ 1, 2, 3, 4 ]
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            -   name: Setup PHP
+                uses: sinemacula/.github/.github/actions/setup-php@v3.0.1
+                with:
+                    php-version: 8.3
+                    coverage: pcov
+
+            -   name: Download coverage
+                uses: actions/download-artifact@v8
+                with:
+                    name: mutation-coverage
+                    path: build/mutation-coverage
+
             -   name: Full mutation suite
-                run: composer test:mutation:full
+                env:
+                    SHARD: ${{ matrix.shard }}
+                run: |
+                    files=$(find src -name '*.php' | LC_ALL=C sort | awk -v shard="$SHARD" 'NR % 4 == shard % 4' | paste -sd, -)
+                    composer test:mutation:full -- --coverage=build/mutation-coverage --skip-initial-tests --filter="$files"
+
+            -   name: Upload mutation report
+                if: always()
+                uses: actions/upload-artifact@v7
+                with:
+                    name: mutation-full-${{ matrix.shard }}
+                    path: build/infection-full*.log
+                    if-no-files-found: warn
