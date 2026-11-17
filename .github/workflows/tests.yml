@@ -62,6 +62,14 @@ jobs:
             -   name: PHPUnit
                 run: composer test:coverage
 
+            -   name: Upload coverage report
+                if: ${{ matrix.php == '8.3' }}
+                uses: actions/upload-artifact@v7
+                with:
+                    name: clover
+                    path: clover.xml
+                    retention-days: 1
+
             -   name: Coverage gate
                 run: |
                     php -r '$m = simplexml_load_file("clover.xml")->project->metrics; $s = (int) $m["statements"]; $c = (int) $m["coveredstatements"]; echo "Lines covered: {$c}/{$s}\n"; exit($c < $s ? 1 : 0);'
