@@ -59,6 +59,9 @@ final class OutboxDrainerTest extends TestCase
     /** @var string Past the default lease of a claim taken at the start. */
     private const string PAST_THE_LEASE = '2026-11-01T12:05:01.000000Z';
 
+    /** @var string The claim token of a worker that takes a row over. */
+    private const string OTHER_WORKER = '01932b4e-ffff-7000-8000-000000000001';
+
     /** @var string An application key other than the one the tests start with. */
     private const string OTHER_APP_KEY = 'base64:b3RoZXIgYXBwbGljYXRpb24ga2V5IGZvciB0ZXN0cyE=';
 
@@ -1119,6 +1122,82 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
+     * A claim lost just before the delete of a delivered row counts it stale
+     * and dispatches nothing, leaving the row to its new owner.
+     *
+     * @return void
+     */
+    public function testAClaimLostBeforeTheDeleteIsStale(): void
+    {
+        Event::fake([AuditRecorded::class]);
+
+        $this->bindStore(new PlainStore);
+
+        $id = $this->enqueue($this->finalisedRecord());
+
+        $this->takeOverBefore('delete from');
+
+        self::assertSame([0, 0, 0, 1, 0], self::tally($this->drain()));
+        self::assertSame(self::OTHER_WORKER, $this->outboxRow($id)['claimed_by'] ?? null);
+        Event::assertNotDispatched(AuditRecorded::class);
+    }
+
+    /**
+     * A claim lost just before the retry is written counts the row stale and
+     * leaves it as the new owner has it.
+     *
+     * @return void
+     */
+    public function testAClaimLostBeforeTheRetryIsStale(): void
+    {
+        $this->bindStore(CallbackStore::failingWith(new \DomainException('Down.'), participatesOn: []));
+
+        $id = $this->enqueue($this->finalisedRecord());
+
+        $this->takeOverBefore('update', 'set [`"]?available_at[`"]? =');
+
+        self::assertSame([0, 0, 0, 1, 0], self::tally($this->drain()));
+
+        $row = $this->outboxRow($id);
+
+        self::assertNotNull($row);
+        self::assertSame(self::NOW, $row['available_at']);
+        self::assertNull($row['last_error_class']);
+        self::assertSame(self::OTHER_WORKER, $row['claimed_by']);
+    }
+
+    /**
+     * A claim lost just before the row is failed counts it stale, unreported
+     * and unsaid, and leaves it unfailed.
+     *
+     * @return void
+     */
+    public function testAClaimLostBeforeTheFailureIsStale(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.delivery.outbox.max_attempts', 1);
+
+        $handler = $this->recordingHandler();
+
+        Event::fake([AuditWriteFailed::class]);
+
+        $this->bindStore(CallbackStore::failingWith(new \DomainException('Down.'), participatesOn: []));
+
+        $id = $this->enqueue($this->finalisedRecord());
+
+        $this->takeOverBefore('update', 'set [`"]?failed_at[`"]? =');
+
+        self::assertSame([0, 0, 0, 1, 0], self::tally($this->drain()));
+
+        $row = $this->outboxRow($id);
+
+        self::assertNotNull($row);
+        self::assertNull($row['failed_at']);
+        self::assertSame(self::OTHER_WORKER, $row['claimed_by']);
+        self::assertSame([], $handler->reports());
+        Event::assertNotDispatched(AuditWriteFailed::class);
+    }
+
+    /**
      * A run drains at most the limit of rows, oldest first.
      *
      * @return void
@@ -1479,6 +1558,30 @@ final class OutboxDrainerTest extends TestCase
             if ($times-- > 0) {
                 throw new \DomainException('The outbox cannot be written.');
             }
+        });
+    }
+
+    /**
+     * Hand every outbox row to another worker just before the first outbox
+     * statement that starts with the verb and continues as the pattern given.
+     *
+     * @param  string  $verb
+     * @param  string  $rest
+     * @return void
+     */
+    private function takeOverBefore(string $verb, string $rest = ''): void
+    {
+        $pattern = '/\A' . $verb . ' [`"]?' . preg_quote(DeliveryTables::outboxTable(), '/') . '[`"]? ' . $rest . '/';
+        $taken   = false;
+
+        DB::connection(self::CONNECTION)->beforeExecuting(static function (string $query) use ($pattern, &$taken): void {
+            if ($taken || preg_match($pattern, $query) !== 1) {
+                return;
+            }
+
+            $taken = true;
+
+            DB::connection(self::CONNECTION)->table(DeliveryTables::outboxTable())->update(['claimed_by' => self::OTHER_WORKER]);
         });
     }
 

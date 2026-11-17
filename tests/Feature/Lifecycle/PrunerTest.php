@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Sleep;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
@@ -1181,6 +1182,103 @@ final class PrunerTest extends TestCase
         self::assertSame('failed', $this->payloadsOf(JournalKind::PRUNE_RUN)[1]['status']);
         self::assertSame([sprintf('The prune run `%s` stopped with RuntimeException; the chunks it committed stand.', $result->operationId)], $this->reported());
         self::assertSame('failed', app(IntegrityProgress::class)->get(IntegrityProgress::RETENTION_LAST_RUN)['status'] ?? null);
+    }
+
+    /**
+     * A finish row that fails to write fails the run, reported by class, and
+     * the committed chunks stand.
+     *
+     * @return void
+     */
+    public function testAFailedFinishRowFailsTheRunAndIsReported(): void
+    {
+        $id = $this->storeEntry(self::OLD);
+
+        $this->sealAll();
+
+        DB::listen(static function (QueryExecuted $query): void {
+            $finish = array_filter($query->bindings, static fn (mixed $binding): bool => is_string($binding) && str_contains($binding, '"phase":"finish"'));
+
+            if (!str_starts_with($query->sql, 'insert') || !in_array(JournalKind::PRUNE_RUN->value, $query->bindings, true) || $finish === []) {
+                return;
+            }
+
+            throw new \RuntimeException('The finish row was refused.');
+        });
+
+        $result = $this->prune();
+
+        self::assertSame([PruneStatus::FAILED, 'prune_failed', 1], [$result->status, $result->failure, $result->deleted]);
+        self::assertSame([], $this->present([$id]));
+        self::assertSame(['policy', 'prune_run', 'prune'], $this->kinds());
+        self::assertSame([sprintf('The prune run `%s` stopped with RuntimeException; the chunks it committed stand.', $result->operationId)], $this->reported());
+        self::assertSame('failed', app(IntegrityProgress::class)->get(IntegrityProgress::RETENTION_LAST_RUN)['status'] ?? null);
+    }
+
+    /**
+     * A progress write that fails is reported by class, and the run's result
+     * stands.
+     *
+     * @return void
+     */
+    public function testAFailedProgressWriteIsReportedAndTheRunStands(): void
+    {
+        $this->storeEntry(self::OLD);
+        $this->sealAll();
+
+        DB::listen(static function (QueryExecuted $query): void {
+            $written = str_starts_with($query->sql, 'insert') && str_contains($query->sql, IntegrityTables::stateTable());
+
+            if (!$written || !in_array(IntegrityProgress::RETENTION_LAST_RUN, $query->bindings, true)) {
+                return;
+            }
+
+            throw new \RuntimeException('The progress was refused.');
+        });
+
+        $result = $this->prune();
+
+        self::assertSame([PruneStatus::COMPLETE, 1], [$result->status, $result->deleted]);
+        self::assertSame(['policy', 'prune_run', 'prune', 'prune_run'], $this->kinds());
+        self::assertSame('complete', $this->payloadsOf(JournalKind::PRUNE_RUN)[1]['status']);
+        self::assertSame([sprintf('The prune run `%s` stopped with RuntimeException; the chunks it committed stand.', $result->operationId)], $this->reported());
+    }
+
+    /**
+     * Rows of `[columns]`: stored columns that make a member's time or tenant
+     * unreadable.
+     *
+     * @return iterable<string, array{0: array<string, string>}>
+     */
+    public static function provideUnreadableTimesAndTenants(): iterable
+    {
+        yield from [
+            'an unreadable time'   => [['occurred_at' => 'not a time']],
+            'an empty tenant type' => [['tenant_type' => '', 'tenant_id' => '1']],
+        ];
+    }
+
+    /**
+     * A member whose time or tenant cannot be read is never pruned, and the run
+     * does not fail.
+     *
+     * @param  array<string, string>  $columns
+     * @return void
+     */
+    #[DataProvider('provideUnreadableTimesAndTenants')]
+    public function testAnUnreadableTimeOrTenantIsNeverPruned(array $columns): void
+    {
+        $id = $this->storeEntry(self::OLD);
+
+        $this->sealAll();
+        $this->maintenance()->table(EntrySettings::table())->where('id', $id)->update($columns);
+
+        $result = $this->prune();
+
+        self::assertSame([PruneStatus::COMPLETE, null, 0], [$result->status, $result->failure, $result->deleted]);
+        self::assertSame([$id], $this->present([$id]));
+        self::assertSame([], $this->records());
+        self::assertSame([], $this->reported());
     }
 
     /**

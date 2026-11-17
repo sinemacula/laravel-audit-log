@@ -9,9 +9,11 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem as Files;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -422,6 +424,47 @@ final class AnchorerTest extends TestCase
         $seals  = $this->seals();
 
         self::assertSame(['sequence' => 1, 'sealId' => $seals[0]['id'], 'finding' => $finding], $result->refusal());
+        self::assertSame(['latest'], $anchor->calls());
+        self::assertSame([null, null], array_column($seals, 'anchored_at'));
+        self::assertSame([null, null], array_column($seals, 'anchor_error_class'));
+    }
+
+    /**
+     * Rows of `[the column]`: a stored seal's digest or signature.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideSealCredentials(): iterable
+    {
+        yield from [
+            'seal digest' => ['seal_digest'],
+            'signature'   => ['signature'],
+        ];
+    }
+
+    /**
+     * A seal whose digest or signature is null, as only a drifted nullable
+     * column can hold, is refused as malformed and never anchored.
+     *
+     * @param  string  $column
+     * @return void
+     */
+    #[DataProvider('provideSealCredentials')]
+    public function testASealWithANullCredentialIsRefusedAsMalformed(string $column): void
+    {
+        $this->sealSeals(2);
+
+        Schema::connection(StorageConnection::name())->table(IntegrityTables::checkpointsTable(), static function (Blueprint $table) use ($column): void {
+            $table->string($column, 64)->nullable()->change();
+        });
+
+        $this->editFirstSeal([$column => null]);
+
+        $anchor = new RecordingAnchor;
+        $result = $this->anchorer($anchor)->anchorPending();
+        $seals  = $this->seals();
+
+        self::assertSame(['sequence' => 1, 'sealId' => $seals[0]['id'], 'finding' => Finding::SEAL_MALFORMED], $result->refusal());
         self::assertSame(['latest'], $anchor->calls());
         self::assertSame([null, null], array_column($seals, 'anchored_at'));
         self::assertSame([null, null], array_column($seals, 'anchor_error_class'));

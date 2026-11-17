@@ -53,4 +53,25 @@ final class DirectLogTest extends TestCase
 
         self::assertSame($logger, DirectLog::channel($manager, 'plain'));
     }
+
+    /**
+     * The constructor is private; reflection invokes it so the line is covered.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    public function testConstructorIsPrivate(): void
+    {
+        $reflection  = new \ReflectionClass(DirectLog::class);
+        $constructor = $reflection->getConstructor();
+
+        self::assertNotNull($constructor);
+        self::assertTrue($constructor->isPrivate());
+
+        $instance = $reflection->newInstanceWithoutConstructor();
+        $constructor->invoke($instance);
+
+        self::assertInstanceOf(DirectLog::class, $instance);
+    }
 }

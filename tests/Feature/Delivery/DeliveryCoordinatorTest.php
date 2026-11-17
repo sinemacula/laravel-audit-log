@@ -199,6 +199,72 @@ final class DeliveryCoordinatorTest extends TestCase
     }
 
     /**
+     * Receipts that cannot be read leave the delivery incomplete, naming the
+     * store, before any destination is called.
+     *
+     * @return void
+     */
+    public function testUnreadableReceiptsCallNoDestination(): void
+    {
+        $store = $this->bindStore(new PlainStore);
+
+        [$record, $claim] = $this->claimedRecord();
+
+        $failed = false;
+
+        DB::connection(self::CONNECTION)->beforeExecuting(static function (string $query) use (&$failed): void {
+            if ($failed || !str_starts_with($query, 'select ') || !str_contains($query, DeliveryTables::deliveriesTable())) {
+                return;
+            }
+
+            $failed = true;
+
+            throw new \DomainException('The receipts are unreadable.');
+        });
+
+        $result = $this->coordinator()->deliver($record, $claim);
+
+        self::assertSame(DeliveryOutcome::INCOMPLETE, $result->outcome);
+        self::assertSame(\DomainException::class, $result->failure()->exceptionClass);
+        self::assertSame($record->record->id, $result->failure()->recordId);
+        self::assertSame('drain', $result->failure()->operation->value);
+        self::assertSame(PlainStore::class, $result->failure()->store);
+        self::assertNull($result->failure()->destination);
+        self::assertSame(0, $store->calls());
+        self::assertSame(0, $this->receiptCount());
+    }
+
+    /**
+     * A receipt that fails to keep a destination's failure leaves the result
+     * naming the destination's failure, not the receipt's.
+     *
+     * @return void
+     */
+    public function testAFailedReceiptKeepsTheDestinationsFailure(): void
+    {
+        $this->bindStore(CallbackStore::failingWith(new \LogicException('The store is down.'), participatesOn: []));
+
+        [$record, $claim] = $this->claimedRecord();
+
+        DB::connection(self::CONNECTION)->beforeExecuting(static function (string $query): void {
+            if (preg_match('/\Aupdate .* set [`"]?last_error_class[`"]? = /', $query) === 1 && str_contains($query, DeliveryTables::deliveriesTable())) {
+                throw new \DomainException('The receipt failed.');
+            }
+        });
+
+        $result = $this->coordinator()->deliver($record, $claim);
+
+        $receipt = $this->receipt($record->record->id, DeliveryCoordinator::STORE_DESTINATION);
+
+        self::assertSame(DeliveryOutcome::INCOMPLETE, $result->outcome);
+        self::assertSame(\LogicException::class, $result->failure()->exceptionClass);
+        self::assertIsArray($receipt);
+        self::assertSame(1, $receipt['attempts']);
+        self::assertNull($receipt['delivered_at']);
+        self::assertNull($receipt['last_error_class']);
+    }
+
+    /**
      * Each destination of a stack has a receipt of its own, under its id.
      *
      * @return void

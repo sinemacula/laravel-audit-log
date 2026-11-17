@@ -6,8 +6,10 @@ namespace Tests\Feature\Lifecycle;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
@@ -459,6 +461,59 @@ final class RewrapperTest extends TestCase
             self::assertSame('A subject key changed while its batch was rewrapped; the batch is rolled back.', $exception->getMessage());
         }
 
+        self::assertEquals($before, $this->storedSubjectKeys());
+        self::assertSame([], $this->journalRows());
+    }
+
+    /**
+     * A failed key update is thrown without its bindings or quoted values, and
+     * the batch rolls back.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFailedKeyUpdateIsThrownWithoutItsBindings(): void
+    {
+        [$key] = $this->makeSubjectKey(self::owner(1));
+
+        $this->ring(true);
+
+        $before = $this->storedSubjectKeys();
+
+        /** @var \ArrayObject<string, list<string>> $failed */
+        $failed = new \ArrayObject;
+
+        DB::connection(StorageConnection::forMaintenance())->beforeExecuting(static function (string $sql, array $bindings, Connection $connection) use ($failed, $key): void {
+            if (!str_starts_with(strtolower($sql), 'update') || !str_contains($sql, KeyTables::subjectKeysTable())) {
+                return;
+            }
+
+            $failed[$sql] = array_values(array_filter($bindings, is_string(...)));
+
+            $driver            = new \PDOException(sprintf('SQLSTATE[23000]: Integrity constraint violation: 19 refused \'%s\'', $key->wrappedKey));
+            $driver->errorInfo = ['23000', 19, null];
+
+            throw new QueryException((string) $connection->getName(), $sql, $bindings, $driver);
+        });
+
+        try {
+            $this->rewrap();
+
+            self::fail('Expected the update to be rethrown.');
+        } catch (QueryException $exception) {
+            $bindings = $failed[$exception->getSql()] ?? [];
+
+            self::assertSame([], $exception->getBindings());
+            self::assertContains($key->wrappedKey, $bindings);
+            self::assertStringContainsString('SQLSTATE[23000]', $exception->getMessage());
+
+            foreach ($bindings as $binding) {
+                self::assertStringNotContainsString($binding, $exception->getMessage());
+            }
+        }
+
+        self::assertCount(1, $failed);
         self::assertEquals($before, $this->storedSubjectKeys());
         self::assertSame([], $this->journalRows());
     }

@@ -8,11 +8,13 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Encryption\StringEncrypter;
+use Illuminate\Database\Connection;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Database\DatabaseTransactionRecord;
 use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Database\DeadlockException;
+use Illuminate\Database\Events\TransactionCommitting;
 use Illuminate\Database\QueryException;
 use Illuminate\Encryption\MissingAppKeyException;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +28,7 @@ use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
+use SineMacula\Laravel\AuditLog\Delivery\CommitQueue;
 use SineMacula\Laravel\AuditLog\Delivery\DeliverySettings;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\FailureRule;
 use SineMacula\Laravel\AuditLog\Delivery\Outbox;
@@ -44,6 +47,7 @@ use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
 use Tests\Concerns\CapturesLogLines;
 use Tests\Concerns\InteractsWithOutbox;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
@@ -62,7 +66,7 @@ use Tests\TestCase;
 #[CoversClass(OutboxWriter::class)]
 final class OutboxWriterTest extends TestCase
 {
-    use CapturesLogLines, InteractsWithOutbox, MockeryPHPUnitIntegration, SearchesForSecrets;
+    use CapturesLogLines, InteractsWithOutbox, MockeryPHPUnitIntegration, RunsInsideTheTestingWrapper, SearchesForSecrets;
 
     /** @var string A second connection a host transacts on. */
     private const string OTHER = 'audit_other';
@@ -243,6 +247,36 @@ final class OutboxWriterTest extends TestCase
     }
 
     /**
+     * A record waiting on another connection whose commit proves a rollback is
+     * reported with the abort's SQLSTATE and never inserted.
+     *
+     * @return void
+     */
+    public function testAnAbortedCommitOnAnotherConnectionReportsTheRecord(): void
+    {
+        $record = $this->record();
+
+        $this->begin(self::OTHER);
+
+        $this->write($record, Timing::AFTER_COMMIT, self::OTHER);
+
+        app(CommitQueue::class)->probe(new TransactionCommitting(self::postgresAborted()));
+
+        DB::connection(self::OTHER)->commit();
+
+        $report = $this->firstReport();
+
+        self::assertCount(1, $this->reporter->reports());
+        self::assertSame($record->id, $report->recordId);
+        self::assertSame('25P02', $report->sqlState);
+        self::assertSame('outbox', $report->operation);
+        self::assertNull($report->getPrevious());
+        self::assertHoldsNoSecret($report, 'the report');
+        self::assertSame(0, $this->outboxCount());
+        self::assertSame([], $this->spillLines());
+    }
+
+    /**
      * A record pinned to the outbox connection is inserted inside its
      * transaction, though a later transaction is open elsewhere.
      *
@@ -369,6 +403,129 @@ final class OutboxWriterTest extends TestCase
         $writer->write($this->record(), Timing::AFTER_COMMIT, null, FailureRule::REPORT);
 
         self::assertSame(1, $this->outboxCount());
+    }
+
+    /**
+     * With no transaction open, an after-transaction record is inserted at
+     * once.
+     *
+     * @return void
+     */
+    public function testAfterTransactionWithNoTransactionInsertsNow(): void
+    {
+        $record = $this->record();
+
+        $this->write($record, Timing::AFTER_TRANSACTION);
+
+        self::assertNotNull($this->outboxRow($record->id));
+    }
+
+    /**
+     * A transaction on another connection cannot hold an after-transaction
+     * record, so it is inserted at once and survives that rollback.
+     *
+     * @return void
+     */
+    public function testAfterTransactionIsNotHeldByAnotherConnection(): void
+    {
+        $other = $this->begin(self::OTHER);
+
+        $this->write($this->record(), Timing::AFTER_TRANSACTION);
+
+        self::assertSame(1, $this->outboxCount());
+        self::assertSame([], $other->getCallbacks());
+
+        DB::connection(self::OTHER)->rollBack();
+
+        self::assertSame(1, $this->outboxCount());
+    }
+
+    /**
+     * An after-transaction record waits for the outbox transaction, and its
+     * commit inserts it under the record's id.
+     *
+     * @return void
+     */
+    public function testAfterTransactionIsInsertedAtTheCommit(): void
+    {
+        $record = $this->record();
+
+        $this->begin();
+
+        $this->write($record, Timing::AFTER_TRANSACTION);
+
+        self::assertSame(0, $this->outboxCount());
+
+        $this->outboxConnection()->commit();
+
+        self::assertSame(1, $this->outboxCount());
+        self::assertNotNull($this->outboxRow($record->id));
+    }
+
+    /**
+     * An insert that fails fatally past a rollback inside a still open wrapper
+     * is reported, and nothing escapes the rollback.
+     *
+     * @return void
+     */
+    public function testAFatalInsertPastARollbackIsReportedNotThrown(): void
+    {
+        $record = $this->record();
+
+        $this->insideTheTestingWrapper($this->outboxConnection(), function (Connection $connection) use ($record): void {
+            $this->breakTheInsert(self::DEADLOCK, '40001', 1213);
+
+            $connection->beginTransaction();
+
+            $this->write($record, Timing::AFTER_TRANSACTION);
+
+            $connection->rollBack();
+
+            self::assertSame(1, $connection->transactionLevel());
+            self::assertSame(0, $this->outboxCount());
+        });
+
+        $report = $this->firstReport();
+
+        self::assertCount(1, $this->reporter->reports());
+        self::assertSame($record->id, $report->recordId);
+        self::assertSame(DeadlockException::class, $report->exceptionClass);
+        self::assertSame('outbox', $report->operation);
+        self::assertStringNotContainsStringIgnoringCase(self::SECRET, $report->getMessage());
+        self::assertNull($report->getPrevious());
+        self::assertSame([], $this->spillLines());
+    }
+
+    /**
+     * A capture's insert that escapes the attempt past a rollback is reported
+     * once by class and signalled, and the rollback completes.
+     *
+     * @return void
+     */
+    public function testACapturesInsertPastARollbackIsContained(): void
+    {
+        $signal = $this->signal();
+
+        $this->begin();
+
+        $this->write($this->record(), Timing::AFTER_TRANSACTION, null, FailureRule::REPORT, $signal);
+
+        $this->breakTheConnectionResolver();
+
+        try {
+            $this->outboxConnection()->rollBack();
+        } finally {
+            $this->app?->alias('db', ConnectionResolverInterface::class);
+        }
+
+        self::assertSame(0, $this->outboxConnection()->transactionLevel());
+        self::assertCount(1, $this->reporter->reports());
+        self::assertSame(\RuntimeException::class, $this->firstReport()->exceptionClass);
+        self::assertSame('outbox', $this->firstReport()->operation);
+        self::assertSame([\RuntimeException::class], $this->signalled);
+        self::assertFalse($signal->isFatal());
+        self::assertSame(0, $this->outboxCount());
+        self::assertHoldsNoSecret($this->reporter->reports(), 'the reports');
     }
 
     /**
@@ -1842,6 +1999,27 @@ final class OutboxWriterTest extends TestCase
 
             throw $failure;
         });
+    }
+
+    /**
+     * A PostgreSQL stand-in for the other connection whose `select 1` fails
+     * with SQLSTATE `25P02`, as an aborted transaction answers.
+     *
+     * @return \Illuminate\Database\Connection
+     */
+    private static function postgresAborted(): Connection
+    {
+        $previous = new \PDOException('SQLSTATE[25P02]: In failed sql transaction.');
+
+        $previous->errorInfo = ['25P02', 7, ''];
+
+        $connection = \Mockery::mock(Connection::class);
+
+        $connection->allows('getName')->andReturn(self::OTHER);
+        $connection->allows('getDriverName')->andReturn('pgsql');
+        $connection->expects('scalar')->with('select 1', [], false)->andThrow(new QueryException(self::OTHER, 'select 1', [], $previous));
+
+        return $connection;
     }
 
     /**

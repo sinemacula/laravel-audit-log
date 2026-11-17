@@ -387,6 +387,37 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
+     * A reporter that throws does not replace the failure it was reporting.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testABrokenReporterDoesNotReplaceTheFailure(): void
+    {
+        $reporter = new RecordingExceptionHandler(throwsOnReport: true);
+        $thrown   = new \RuntimeException('The directory could not be reached.');
+
+        app()->instance(ExceptionHandler::class, $reporter);
+
+        $this->usePolicy(static fn (): never => throw $thrown);
+        $this->pointAtProbeTable();
+
+        try {
+            $this->financeTrail()->count();
+
+            self::fail('Expected the policy\'s exception.');
+        } catch (\RuntimeException $caught) {
+            self::assertSame($thrown, $caught);
+        }
+
+        $reports = array_map(static fn (\Throwable $report): string => $report->getMessage(), $reporter->reports());
+
+        self::assertContains(AuditReadRefusedException::unrecorded()->getMessage(), $reports);
+        self::assertSame(0, $this->probeCount());
+    }
+
+    /**
      * A success whose record cannot be written is refused as unrecorded.
      *
      * @return void
@@ -712,6 +743,47 @@ final class TrailReaderTest extends TestCase
 
         self::assertSame(TrailReader::DEFAULT_PER_PAGE, $this->financeTrail()->cursorPaginate()->perPage);
         self::assertSame(50, TrailReader::DEFAULT_PER_PAGE);
+    }
+
+    /**
+     * Provide page sizes either side of a configured range of 1 to 10.
+     *
+     * @return iterable<string, array{int}>
+     */
+    public static function providePageSizesOutsideTheRange(): iterable
+    {
+        yield from [
+            'none'     => [0],
+            'one over' => [11],
+        ];
+    }
+
+    /**
+     * A page size outside the range is refused before the policy or a query.
+     *
+     * @param  int  $perPage
+     * @return void
+     */
+    #[DataProvider('providePageSizesOutsideTheRange')]
+    public function testAPageSizeOutsideTheRangeIsRefused(int $perPage): void
+    {
+        app(ConfigRepository::class)->set('audit-log.read.max_per_page', 10);
+
+        $policy = $this->usePolicy(static fn (): AccessScope => AccessScope::all());
+
+        $this->captureQueries();
+
+        try {
+            $this->financeTrail()->cursorPaginate($perPage);
+
+            self::fail('Expected the page size to be refused.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertSame('A page of the audit trail holds from 1 to 10 entries.', $refusal->getMessage());
+        }
+
+        self::assertSame([], $this->capturedQueries());
+        self::assertSame([], $policy->asked());
+        self::assertSame([], $this->readRecords());
     }
 
     /**

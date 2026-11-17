@@ -207,6 +207,21 @@ final class ImportCommandTest extends TestCase
     }
 
     /**
+     * A retention policy that fails to answer is warned of, and no count shown.
+     *
+     * @return void
+     */
+    public function testAFailingRetentionPolicyIsWarnedOf(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.retention.schedule', 'every night');
+
+        self::assertSame(0, $this->import($this->file([self::line('rec-1'), self::line('rec-2')])));
+        self::assertStringContainsString('Read 2 lines: imported 2,', $this->printed);
+        self::assertStringContainsString('The lines past their retention on arrival could not be counted: the retention policy failed to answer.', $this->printed);
+        self::assertStringNotContainsString('lines were past their retention on arrival', $this->printed);
+    }
+
+    /**
      * Conflicting source record ids are printed and dropped envelopes counted.
      *
      * @return void

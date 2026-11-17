@@ -8,13 +8,16 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Delivery\Replayer;
 use SineMacula\Laravel\AuditLog\Delivery\ReplayResult;
@@ -920,6 +923,26 @@ final class ReplayerTest extends TestCase
 
         self::assertSame([0, 0, 0, 0, ['signature_mismatch' => 1]], self::tally($result));
         self::assertTrue($result->hasSkippedOrFailed());
+    }
+
+    /**
+     * A dry run counts a record failed by id and class when its tombstones
+     * cannot be read, and stores nothing.
+     *
+     * @return void
+     */
+    public function testADryRunCountsUnreadableTombstonesFailed(): void
+    {
+        $record = $this->finalisedRecord();
+
+        Schema::connection(StorageConnection::name())->drop(IntegrityTables::membersTable());
+
+        $result = $this->replayer()->spill($this->file(self::lineOf($record) . "\n"), true);
+
+        self::assertSame([0, 0, 1, 0, []], self::tally($result));
+        self::assertSame(['line 1: failed ' . $record->record->id . ' (' . QueryException::class . ')'], $result->events());
+        self::assertTrue($result->hasSkippedOrFailed());
+        self::assertSame(0, $this->entryCount());
     }
 
     /**

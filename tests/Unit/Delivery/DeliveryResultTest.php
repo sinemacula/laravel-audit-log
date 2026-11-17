@@ -39,15 +39,15 @@ final class DeliveryResultTest extends TestCase
     }
 
     /**
-     * Rows of `[result, outcome]`: each delivery that holds no failure.
+     * Rows of `[factory, outcome]`: each delivery that holds no failure.
      *
-     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Delivery\DeliveryResult, 1: \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryOutcome}>
+     * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Delivery\DeliveryResult, 1: \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryOutcome}>
      */
     public static function provideResultsWithoutAFailure(): iterable
     {
         yield from [
-            'a complete delivery' => [DeliveryResult::complete(), DeliveryOutcome::COMPLETE],
-            'a stale delivery'    => [DeliveryResult::stale(), DeliveryOutcome::STALE],
+            'a complete delivery' => [DeliveryResult::complete(...), DeliveryOutcome::COMPLETE],
+            'a stale delivery'    => [DeliveryResult::stale(...), DeliveryOutcome::STALE],
         ];
     }
 
@@ -55,13 +55,15 @@ final class DeliveryResultTest extends TestCase
      * Any other delivery names its outcome, and asking it for a failure is a
      * mistake rather than a `null` a caller could misread.
      *
-     * @param  \SineMacula\Laravel\AuditLog\Delivery\DeliveryResult  $result
+     * @param  \Closure(): \SineMacula\Laravel\AuditLog\Delivery\DeliveryResult  $factory
      * @param  \SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryOutcome  $outcome
      * @return void
      */
     #[DataProvider('provideResultsWithoutAFailure')]
-    public function testAnyOtherDeliveryHoldsNoFailure(DeliveryResult $result, DeliveryOutcome $outcome): void
+    public function testAnyOtherDeliveryHoldsNoFailure(\Closure $factory, DeliveryOutcome $outcome): void
     {
+        $result = $factory();
+
         self::assertSame($outcome, $result->outcome);
 
         $this->expectException(\LogicException::class);

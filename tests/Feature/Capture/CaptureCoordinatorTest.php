@@ -6,6 +6,7 @@ namespace Tests\Feature\Capture;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -448,6 +449,61 @@ final class CaptureCoordinatorTest extends TestCase
         );
         self::assertCount(2, $this->reporter->reports());
         self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * A failure before the capture is contained when no connection is read.
+     *
+     * @return void
+     */
+    public function testAnUnreadableResolverStillContainsTheFailure(): void
+    {
+        self::registry()->map(PortalEvent::class, PortalMapper::class);
+
+        $this->app?->bind(CapturedEvents::class, static function (): never {
+            throw new \UnexpectedValueException('The capture state is unavailable.');
+        });
+
+        $this->app?->bind(ConnectionResolverInterface::class, static function (): never {
+            throw new \RuntimeException('The resolver is broken.');
+        });
+
+        try {
+            self::assertNull(self::coordinator()->mapped(new SignedInToPortal));
+            self::assertNull(self::coordinator()->captured(new SignedInToPortal, self::SOURCE, self::describer()));
+        } finally {
+            $this->app?->alias('db', ConnectionResolverInterface::class);
+        }
+
+        self::assertSame(
+            [[SignedInToPortal::class, null, \UnexpectedValueException::class], [SignedInToPortal::class, self::SOURCE, \UnexpectedValueException::class]],
+            array_map(self::classesOf(...), $this->failures),
+        );
+        self::assertCount(2, $this->reporter->reports());
+        self::assertSame(0, $this->fake->count());
+    }
+
+    /**
+     * A write guard that cannot be made fails neither the report nor the
+     * announcement, so the caller gets `null`.
+     *
+     * @return void
+     */
+    public function testAnAnnouncerThatCannotBeMadeIsContained(): void
+    {
+        self::registry()->map(PortalEvent::class, PortalMapper::class);
+
+        $this->app?->bind(WriteGuard::class, static function (): never {
+            throw new \UnexpectedValueException('The guard is unavailable.');
+        });
+
+        try {
+            self::assertNull(self::coordinator()->mapped(new SignedInToPortal));
+        } finally {
+            $this->app?->scoped(WriteGuard::class);
+        }
+
+        $this->assertNothingHappened();
     }
 
     /**

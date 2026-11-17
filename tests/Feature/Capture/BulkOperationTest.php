@@ -12,6 +12,7 @@ use Illuminate\Log\LogManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Capture\BulkManifests;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
@@ -44,6 +45,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Recorder::class)]
+#[CoversClass(BulkManifests::class)]
 #[CoversClass(DatabaseAuditStore::class)]
 final class BulkOperationTest extends TestCase
 {

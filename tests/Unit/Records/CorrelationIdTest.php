@@ -57,4 +57,25 @@ final class CorrelationIdTest extends TestCase
     {
         self::assertSame($valid, CorrelationId::isValid($id));
     }
+
+    /**
+     * The constructor is private; reflection invokes it so the line is covered.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    public function testConstructorIsPrivate(): void
+    {
+        $reflection  = new \ReflectionClass(CorrelationId::class);
+        $constructor = $reflection->getConstructor();
+
+        self::assertNotNull($constructor);
+        self::assertTrue($constructor->isPrivate());
+
+        $instance = $reflection->newInstanceWithoutConstructor();
+        $constructor->invoke($instance);
+
+        self::assertInstanceOf(CorrelationId::class, $instance);
+    }
 }

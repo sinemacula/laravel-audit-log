@@ -34,7 +34,8 @@ final class AuditWriteFailedExceptionTest extends TestCase
     private const string STORE = 'SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore';
 
     /**
-     * Rows of `[diagnostics, message]`: all optional fields, none, each alone.
+     * Rows of `[diagnostics, message]`: all optional fields, none, each
+     * alone and no record read.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics, 1: string}>
      */
@@ -71,6 +72,10 @@ final class AuditWriteFailedExceptionTest extends TestCase
             'the destination alone' => [
                 self::diagnostics(null, FailedOperation::DRAIN, null, null, null, 'warehouse'),
                 "{$base} was not written: drain {$tail}, destination warehouse.",
+            ],
+            'no record read' => [
+                new WriteDiagnostics(null, 'invoice.approved', FailedOperation::DRAIN, self::STORE, QueryException::class, null, null, null, null),
+                "No audit record was read: drain {$tail}.",
             ],
         ];
     }

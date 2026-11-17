@@ -109,7 +109,8 @@ final class PruneSealsTest extends TestCase
             'a malformed signature' => [static fn (self $test) => $test->changeSeal(['signature' => 'not a signature'])],
             'a log id'              => [static fn (self $test) => app(ConfigRepository::class)->set('audit-log.integrity.log_id', 'another-log')],
             'a member count'        => [static fn (self $test) => $test->dropAMember()],
-            'a members digest'      => [static fn (self $test) => $test->changeAMembersHmac()],
+            'a members digest'      => [static fn (self $test) => $test->changeAMembersHmac(str_repeat('e', 64))],
+            'a malformed member'    => [static fn (self $test) => $test->changeAMembersHmac('not a digest')],
             'an unknown key'        => [static fn (self $test) => $test->rekeySeal('k1999')],
             'an algorithm version'  => [static fn (self $test) => $test->changeSeal(['algorithm_version' => 9])],
             'a signer'              => [static fn (self $test) => $test->changeSeal(['signer' => 'other'])],
@@ -223,13 +224,14 @@ final class PruneSealsTest extends TestCase
     }
 
     /**
-     * Change one member's sealed HMAC.
+     * Change one member's sealed HMAC, as a raw value.
      *
+     * @param  string  $hmac
      * @return void
      */
-    public function changeAMembersHmac(): void
+    public function changeAMembersHmac(string $hmac): void
     {
-        $this->maintenance()->table(IntegrityTables::membersTable())->where('entry_id', self::IDS[0])->update(['hmac' => str_repeat('e', 64)]);
+        $this->maintenance()->table(IntegrityTables::membersTable())->where('entry_id', self::IDS[0])->update(['hmac' => $hmac]);
     }
 
     /**
