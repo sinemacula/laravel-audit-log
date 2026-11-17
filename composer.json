@@ -95,6 +95,9 @@
         "test:mutation": [
             "@php -d memory_limit=-1 vendor/bin/infection --configuration=infection.json5 --only-covering-test-cases --threads=max --git-diff-lines --git-diff-base=origin/master --map-source-class-to-test --min-msi=90 --min-covered-msi=90 --ignore-msi-with-no-mutations --test-framework-extra-args=--do-not-fail-on-empty-test-suite"
         ],
+        "test:mutation:coverage": [
+            "@php -d memory_limit=-1 vendor/bin/paratest --exclude-testsuite Performance --coverage-xml=build/mutation-coverage/coverage-xml --log-junit=build/mutation-coverage/junit.xml"
+        ],
         "test:mutation:full": [
             "@php -d memory_limit=-1 vendor/bin/infection --configuration=infection.full.json5 --only-covering-test-cases --threads=max"
         ]
@@ -114,6 +117,7 @@
         "test:performance": "Run the Performance test suite for query and write budget contracts.",
         "test:performance:coverage": "Run the Performance test suite with clover coverage report.",
         "test:mutation": "Run the Infection mutation-testing gate against the MSI thresholds.",
+        "test:mutation:coverage": "Record the coverage and test results the full mutation suite reuses.",
         "test:mutation:full": "Run the full Infection mutation suite without MSI thresholds."
     },
     "config": {
