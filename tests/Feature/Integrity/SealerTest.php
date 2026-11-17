@@ -347,6 +347,35 @@ final class SealerTest extends TestCase
     }
 
     /**
+     * Without a mark, a chain head whose stored time is not text is refused
+     * before anything is sealed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAStoredSealTimeThatIsNotTextIsRefused(): void
+    {
+        $this->storeEntryAt('2026-11-01 12:30:00');
+        $this->sealer()->seal();
+
+        app(IntegrityProgress::class)->forget(IntegrityProgress::SEAL_RECENT);
+        DB::connection(StorageConnection::name())->table(IntegrityTables::checkpointsTable())->update(['last_recorded_at' => 20261101]);
+
+        $later = $this->storeEntryAt('2026-11-01 12:40:00');
+
+        try {
+            $this->sealer()->seal();
+            self::fail('A malformed seal time was accepted.');
+        } catch (\UnexpectedValueException $exception) {
+            self::assertSame('A stored seal\'s `last_recorded_at` is malformed.', $exception->getMessage());
+        }
+
+        self::assertCount(1, $this->seals());
+        self::assertSame(0, $this->countMembers($later));
+    }
+
+    /**
      * Batches follow each other without restarting, each strictly after the
      * last row before, together sealing every row once, in order.
      *

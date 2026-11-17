@@ -203,6 +203,24 @@ final class ImportClassifierTest extends TestCase
     }
 
     /**
+     * A stored row without a digest is a conflict, even for an identical line.
+     *
+     * @return void
+     */
+    public function testAStoredRowWithoutADigestIsAConflict(): void
+    {
+        $this->store(self::line(1, 'rec-1'));
+
+        $this->connection()->table(EntrySettings::table())->where('source_record_id', 'rec-1')->update(['source_digest' => null]);
+
+        $plan = $this->classifier()->classify($this->connection(), [self::line(2, 'rec-1')]);
+
+        self::assertSame([], $plan->lines);
+        self::assertSame(0, $plan->duplicates);
+        self::assertSame(['rec-1'], $plan->conflictIds());
+    }
+
+    /**
      * A definition changed between imports still finds the duplicate.
      *
      * @return void

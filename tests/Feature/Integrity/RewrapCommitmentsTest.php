@@ -104,6 +104,29 @@ final class RewrapCommitmentsTest extends TestCase
     }
 
     /**
+     * A rewrap row whose payload is nested too deep to decode commits nothing,
+     * even beside a well-formed listing.
+     *
+     * @return void
+     */
+    public function testAPayloadTooDeepToReadCommitsNothing(): void
+    {
+        $commitments = new RewrapCommitments;
+        $key         = $this->key();
+        $deep        = [];
+
+        for ($depth = 0; $depth < 64; $depth++) {
+            $deep = [$deep];
+        }
+
+        $commitments->fold($this->journalRow(JournalKind::REWRAP, ['run_id' => 'r', 'rotate' => true, 'keys' => [
+            ['key_id' => $key->id, 'after' => ['state' => 'superseded', 'wrap_key_id' => (string) $key->wrapKeyId, 'wrapped_digest' => (string) $key->wrappedDigest()]],
+        ], 'skipped' => $deep]));
+
+        self::assertSame(Finding::KEY_SUBSTITUTED, $commitments->findingOf(self::inState($key, KeyState::SUPERSEDED)));
+    }
+
+    /**
      * A signed live key of a unit of its own, as a row the store would read.
      *
      * @return \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow

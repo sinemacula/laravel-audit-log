@@ -425,9 +425,7 @@ final readonly class EnvelopeCodec
     {
         $assoc = json_decode($json, true, self::DEPTH);
 
-        if (!is_array($assoc)) {
-            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
-        }
+        assert(is_array($assoc));
 
         return self::finalised(static fn (): AuditRecord => AuditRecord::fromEnvelope($assoc), $fields, $id);
     }
@@ -471,13 +469,8 @@ final readonly class EnvelopeCodec
     {
         ['recorded_at' => $recordedAt, 'integrity_version' => $integrityVersion, 'key_id' => $keyId, 'hmac' => $hmac, 'context' => $context, 'properties' => $properties] = $fields;
 
-        if (!is_string($recordedAt) || !is_int($integrityVersion) || !is_string($keyId) || !is_string($hmac)) {
-            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
-        }
-
-        if (!self::isJsonColumn($context) || !self::isJsonColumn($properties)) {
-            throw new EnvelopeRejectedException(EnvelopeFailure::MALFORMED, $id);
-        }
+        assert(is_string($recordedAt) && is_int($integrityVersion) && is_string($keyId) && is_string($hmac));
+        assert(self::isJsonColumn($context) && self::isJsonColumn($properties));
 
         try {
             return FinalisedRecord::decoded($record(), $recordedAt, $integrityVersion, $keyId, $hmac, $context, $properties);

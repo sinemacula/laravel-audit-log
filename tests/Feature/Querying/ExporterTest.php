@@ -665,6 +665,68 @@ final class ExporterTest extends TestCase
     }
 
     /**
+     * A throwing policy whose record fails is still rethrown, and reported.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testAPolicyFailureWhoseRecordFailsIsStillThrown(): void
+    {
+        $thrown = new \RuntimeException('The directory could not be reached.');
+
+        $this->usePolicy(static fn (): never => throw $thrown);
+        $this->pointAtProbeTable();
+
+        try {
+            $this->trail()->export($this->target());
+
+            self::fail('Expected the policy\'s exception.');
+        } catch (\RuntimeException $caught) {
+            self::assertSame($thrown, $caught);
+        }
+
+        $reports = array_map(static fn (\Throwable $report): string => $report->getMessage(), $this->reporter?->reports() ?? []);
+
+        self::assertContains(AuditReadRefusedException::unrecorded()->getMessage(), $reports);
+        self::assertSame(0, $this->probeCount());
+        self::assertSame([], $this->temporaries());
+        self::assertFileDoesNotExist($this->target());
+    }
+
+    /**
+     * A reporter that throws never replaces the policy's exception.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testABrokenReporterNeverReplacesThePolicysException(): void
+    {
+        $thrown   = new \RuntimeException('The directory could not be reached.');
+        $reporter = new RecordingExceptionHandler(throwsOnReport: true);
+
+        app()->instance(ExceptionHandler::class, $reporter);
+
+        $this->usePolicy(static fn (): never => throw $thrown);
+        $this->pointAtProbeTable();
+
+        try {
+            $this->trail()->export($this->target());
+
+            self::fail('Expected the policy\'s exception.');
+        } catch (\RuntimeException $caught) {
+            self::assertSame($thrown, $caught);
+        }
+
+        $reports = array_map(static fn (\Throwable $report): string => $report->getMessage(), $reporter->reports());
+
+        self::assertContains(AuditReadRefusedException::unrecorded()->getMessage(), $reports);
+        self::assertSame([], $this->temporaries());
+        self::assertFileDoesNotExist($this->target());
+    }
+
+    /**
      * A line that cannot be written is recorded as `format_failed` and refused.
      *
      * @return void

@@ -221,6 +221,121 @@ final class ExportFileTest extends TestCase
     }
 
     /**
+     * A probe that cannot be created reports no hard links, so the target is
+     * refused without `force`.
+     *
+     * @return void
+     */
+    public function testAProbeThatCannotBeCreatedRefusesWithoutForce(): void
+    {
+        $target = $this->path(str_repeat('t', 220));
+
+        $this->assertRefused(
+            \InvalidArgumentException::class,
+            'The export target\'s filesystem cannot hold a hard link, so it cannot be published without force.',
+            static fn () => ExportFile::check($target, false),
+        );
+
+        self::assertSame([], $this->hidden());
+    }
+
+    /**
+     * A temporary file that cannot be made private is removed and refused.
+     *
+     * @return void
+     */
+    public function testATempThatCannotBeMadePrivateIsRemoved(): void
+    {
+        NoLinkStreamWrapper::register();
+        NoLinkStreamWrapper::fail('chmod', '.trail.ndjson.');
+
+        $this->assertRefused(
+            \UnexpectedValueException::class,
+            'The export\'s temporary file could not be made private.',
+            function (): void {
+                ExportFile::prepare(NoLinkStreamWrapper::wrap($this->target()), true);
+            },
+        );
+
+        self::assertSame([], $this->hidden());
+    }
+
+    /**
+     * A line the temporary file does not take whole is refused and not counted.
+     *
+     * @return void
+     */
+    public function testAShortWriteIsRefused(): void
+    {
+        NoLinkStreamWrapper::register();
+        NoLinkStreamWrapper::fail('write', '.trail.ndjson.');
+
+        $file = ExportFile::prepare(NoLinkStreamWrapper::wrap($this->target()), true);
+
+        $this->assertRefused(
+            \UnexpectedValueException::class,
+            'The export\'s temporary file could not be written.',
+            static fn () => $file->write('first', self::FIRST_ID, self::FIRST_AT),
+        );
+
+        self::assertSame(0, $file->lines());
+        self::assertNull($file->first());
+        self::assertSame(self::EMPTY_SHA256, $file->fileSha256());
+
+        $file->discard();
+
+        self::assertSame([], $this->hidden());
+    }
+
+    /**
+     * A temporary file that cannot be flushed refuses the bundle before its
+     * temporary file is made.
+     *
+     * @return void
+     */
+    public function testAFailedFlushRefusesTheBundle(): void
+    {
+        $this->fixTheUuid();
+
+        NoLinkStreamWrapper::register();
+        NoLinkStreamWrapper::fail('flush', '.trail.ndjson.' . self::UUID);
+
+        $file = ExportFile::prepare(NoLinkStreamWrapper::wrap($this->target()), true);
+
+        $file->write('first', self::FIRST_ID, self::FIRST_AT);
+
+        $this->assertRefused(\UnexpectedValueException::class, 'The export\'s temporary file could not be written.', static fn () => $file->writeBundle(self::BUNDLE));
+        self::assertSame(['.trail.ndjson.' . self::UUID . '.tmp'], $this->temps());
+
+        $file->discard();
+
+        self::assertSame([], $this->hidden());
+    }
+
+    /**
+     * A bundle its temporary file does not take whole is refused, and that file
+     * is still discarded.
+     *
+     * @return void
+     */
+    public function testAShortBundleWriteIsRefused(): void
+    {
+        NoLinkStreamWrapper::register();
+        NoLinkStreamWrapper::fail('write', ExportFile::MANIFEST_SUFFIX);
+
+        $file = ExportFile::prepare(NoLinkStreamWrapper::wrap($this->target()), true);
+
+        $file->write('first', self::FIRST_ID, self::FIRST_AT);
+
+        $this->assertRefused(\UnexpectedValueException::class, 'The export\'s bundle could not be written.', static fn () => $file->writeBundle(self::BUNDLE));
+        self::assertCount(2, $this->temps());
+
+        $file->discard();
+
+        self::assertSame([], $this->hidden());
+    }
+
+    /**
      * A dangling link counts as an existing target.
      *
      * @return void

@@ -312,6 +312,50 @@ final class KeyStoreTest extends TestCase
     }
 
     /**
+     * A largest generation the driver returns as a digit string is read as an
+     * integer.
+     *
+     * @return void
+     */
+    public function testAStringifiedLargestGenerationIsReadAsAnInteger(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+        $unit  = new KeyUnit($owner, null, 'default');
+
+        [$first] = $this->makeSubjectKey($owner);
+
+        $this->supersede($first->id);
+        $this->makeSubjectKey($owner);
+
+        $this->keyConnection()->getPdo()->setAttribute(\PDO::ATTR_STRINGIFY_FETCHES, true);
+
+        self::assertSame(2, self::store()->largestGeneration($this->keyConnection(), $unit->digest()));
+    }
+
+    /**
+     * A largest generation that is not a whole number is refused.
+     *
+     * @return void
+     */
+    public function testAMalformedLargestGenerationIsRefused(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+
+        [$key] = $this->makeSubjectKey($owner);
+
+        if ($this->keyConnection()->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores text in an integer column.');
+        }
+
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['generation' => 'x']);
+
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage('A unit\'s largest generation is malformed.');
+
+        self::store()->largestGeneration($this->keyConnection(), (new KeyUnit($owner, null, 'default'))->digest());
+    }
+
+    /**
      * A page of every key walks them in id order from the first or after an id,
      * each as its stored row, up to the limit; a limit below one is refused.
      *

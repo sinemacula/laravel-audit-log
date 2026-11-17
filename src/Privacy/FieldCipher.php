@@ -85,7 +85,10 @@ final class FieldCipher
         $ciphertext = openssl_encrypt($plaintext, self::CIPHER, $fieldKey, OPENSSL_RAW_DATA, $nonce, $tag, $additionalData, self::TAG_BYTES);
 
         if ($ciphertext === false) {
+            // Only an OpenSSL build without AES-256-GCM fails here.
+            // @codeCoverageIgnoreStart
             throw new \UnexpectedValueException('The plaintext could not be sealed.');
+            // @codeCoverageIgnoreEnd
         }
 
         return ['v' => self::VERSION, 'k' => $keyId, 'c' => self::base64url($nonce . $ciphertext . $tag)];
@@ -213,8 +216,11 @@ final class FieldCipher
     {
         try {
             return random_bytes(self::NONCE_BYTES);
+            // Only a failing system random source reaches this catch.
+            // @codeCoverageIgnoreStart
         } catch (RandomException) {
             throw new \UnexpectedValueException('A nonce could not be drawn.');
+            // @codeCoverageIgnoreEnd
         }
     }
 

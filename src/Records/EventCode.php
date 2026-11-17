@@ -76,19 +76,13 @@ final readonly class EventCode
      * @param  \SineMacula\Laravel\AuditLog\Querying\Enums\PackageActivity  $activity
      * @return self
      *
-     * @throws \LogicException
+     * @throws \InvalidArgumentException
      *
      * @internal
      */
     public static function package(PackageActivity $activity): self
     {
-        $code = new self($activity->value);
-
-        if (!str_starts_with($code->value, self::RESERVED_PREFIX)) {
-            throw new \LogicException(sprintf('The package\'s own event codes begin with the `%s` prefix.', self::RESERVED_PREFIX));
-        }
-
-        return $code;
+        return new self($activity->value);
     }
 
     /**

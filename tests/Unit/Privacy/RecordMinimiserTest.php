@@ -312,6 +312,23 @@ final class RecordMinimiserTest extends TestCase
     }
 
     /**
+     * A given map that is itself an envelope is emptied, with each of its
+     * members diagnosed.
+     *
+     * @return void
+     */
+    public function testAGivenMapThatIsAnEnvelopeIsEmptiedAndDiagnosed(): void
+    {
+        $envelope = ['v' => 1, 'k' => '01932b4e-e000-7000-8000-000000000001', 'c' => 'Y2FyZA'];
+        $pending  = self::contextOf($envelope)->withProperties($envelope);
+
+        $minimised = $this->minimise($pending, EventDefinition::for(self::CODE)->retain('v')->retain('k')->retain('c'));
+
+        self::assertNull($minimised->context);
+        self::assertSame(['_audit' => ['omitted' => ['count' => 6, 'paths' => ['c', 'context.*', 'k', 'v']]]], $minimised->properties);
+    }
+
+    /**
      * A colliding context key is masked with the context's own rule, under its
      * prefix, literal only for a fixed package name, and counted.
      *

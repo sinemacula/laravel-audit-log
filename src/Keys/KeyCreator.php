@@ -106,10 +106,13 @@ final readonly class KeyCreator
      */
     private function createOn(Connection $connection, #[\SensitiveParameter] KeyUnit $unit): ?array
     {
+        // Only MySQL takes this lock; KeySessionEnginesTest covers it there.
+        // @codeCoverageIgnoreStart
         if (self::locksTheSession($connection)) {
             $this->lock->acquire($connection, $unit->owner, true);
         }
 
+        // @codeCoverageIgnoreEnd
         try {
             $made = $connection->transaction(fn (Connection $connection): ?array => $this->createWithin($connection, $unit), 1);
         } catch (UniqueConstraintViolationException) {
@@ -251,6 +254,8 @@ final readonly class KeyCreator
             return;
         }
 
+        // Only PostgreSQL runs this; KeySessionEnginesTest covers it there.
+        // @codeCoverageIgnoreStart
         if ($connection->transactionLevel() === 1) {
             $connection->statement('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
 
@@ -263,6 +268,7 @@ final readonly class KeyCreator
         if ($level !== 'read committed') {
             throw new \UnexpectedValueException('A key is created at `read committed` alone, and the transaction it would be created in is not.');
         }
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -288,8 +294,11 @@ final readonly class KeyCreator
     {
         try {
             return random_bytes(self::DATA_KEY_BYTES);
+            // Only a failing system random source reaches this catch.
+            // @codeCoverageIgnoreStart
         } catch (RandomException) {
             throw new \UnexpectedValueException('A data key could not be drawn.');
+            // @codeCoverageIgnoreEnd
         }
     }
 }

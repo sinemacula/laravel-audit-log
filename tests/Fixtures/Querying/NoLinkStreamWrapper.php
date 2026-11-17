@@ -6,8 +6,8 @@ namespace Tests\Fixtures\Querying;
 
 /**
  * A stream wrapper over the local filesystem that, like a FAT volume or an
- * object-store mount, cannot hold a hard link; it wraps only what an export's
- * target checks use.
+ * object-store mount, cannot hold a hard link; it wraps only what an export
+ * uses, and can fail a write, flush or chmod of a path.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,8 +24,14 @@ final class NoLinkStreamWrapper
     /** @var ?resource The context PHP gives every wrapper. */
     public mixed $context = null;
 
+    /** @var array<string, string> The path fragment each failing operation matches. */
+    private static array $failures = [];
+
     /** @var ?resource The local file a stream opened. */
     private mixed $handle = null;
+
+    /** @var string The local path a stream opened. */
+    private string $path = '';
 
     /**
      * Register the wrapper under its scheme.
@@ -44,11 +50,26 @@ final class NoLinkStreamWrapper
      */
     public static function unregister(): void
     {
+        self::$failures = [];
+
         if (!in_array(self::SCHEME, stream_get_wrappers(), true)) {
             return;
         }
 
         stream_wrapper_unregister(self::SCHEME);
+    }
+
+    /**
+     * Fail the operation, `write`, `flush` or `chmod`, on paths holding the
+     * fragment.
+     *
+     * @param  string  $operation
+     * @param  string  $fragment
+     * @return void
+     */
+    public static function fail(string $operation, string $fragment): void
+    {
+        self::$failures[$operation] = $fragment;
     }
 
     /**
@@ -84,6 +105,7 @@ final class NoLinkStreamWrapper
         }
 
         $this->handle = $handle;
+        $this->path   = self::local($path);
 
         return true;
     }
@@ -96,7 +118,11 @@ final class NoLinkStreamWrapper
      */
     public function stream_write(string $data): int
     {
-        return is_resource($this->handle) ? (int) fwrite($this->handle, $data) : 0;
+        if (self::fails('write', $this->path) || !is_resource($this->handle)) {
+            return 0;
+        }
+
+        return (int) fwrite($this->handle, $data);
     }
 
     /**
@@ -106,7 +132,7 @@ final class NoLinkStreamWrapper
      */
     public function stream_flush(): bool
     {
-        return is_resource($this->handle) && fflush($this->handle);
+        return !self::fails('flush', $this->path) && is_resource($this->handle) && fflush($this->handle);
     }
 
     /**
@@ -153,7 +179,34 @@ final class NoLinkStreamWrapper
         return @unlink(self::local($path));
     }
 
+    /**
+     * Change the local file's mode; no other metadata is wrapped.
+     *
+     * @param  string  $path
+     * @param  int  $option
+     * @param  array<int, int>|int|string  $value
+     * @return bool
+     */
+    public function stream_metadata(string $path, int $option, array|int|string $value): bool
+    {
+        $local = self::local($path);
+
+        return $option === STREAM_META_ACCESS && is_int($value) && !self::fails('chmod', $local) && chmod($local, $value);
+    }
+
     // phpcs:enable PSR1.Methods.CamelCapsMethodName.NotCamelCaps, Squiz.NamingConventions.ValidFunctionName.ScopeNotCamelCaps, SineMacula.NamingConventions.BooleanMethodName.NotPredicate
+
+    /**
+     * Whether the operation is set to fail on the local path.
+     *
+     * @param  string  $operation
+     * @param  string  $local
+     * @return bool
+     */
+    private static function fails(string $operation, string $local): bool
+    {
+        return isset(self::$failures[$operation]) && str_contains($local, self::$failures[$operation]);
+    }
 
     /**
      * The local path a wrapped one names.

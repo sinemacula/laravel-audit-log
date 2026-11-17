@@ -21,16 +21,22 @@ use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
 final class InstallationMismatchExceptionTest extends TestCase
 {
     /**
-     * Rows of `[exception, message]`: each named constructor, with the message
-     * it carries.
+     * Rows of `[factory, message]`: each named constructor, with the message it
+     * carries.
      *
-     * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Database\InstallationMismatchException, 1: string}>
+     * @return iterable<string, array{0: \Closure(): \SineMacula\Laravel\AuditLog\Database\InstallationMismatchException, 1: string}>
      */
     public static function provideRefusals(): iterable
     {
         yield from [
-            'absent'     => [InstallationMismatchException::absent(), 'The maintenance connection reaches no installation id; it must reach the storage connection\'s database.'],
-            'mismatched' => [InstallationMismatchException::mismatched(), 'The storage and maintenance connections reach different installations.'],
+            'absent' => [
+                InstallationMismatchException::absent(...),
+                'The maintenance connection reaches no installation id; it must reach the storage connection\'s database.',
+            ],
+            'mismatched' => [
+                InstallationMismatchException::mismatched(...),
+                'The storage and maintenance connections reach different installations.',
+            ],
         ];
     }
 
@@ -38,13 +44,15 @@ final class InstallationMismatchExceptionTest extends TestCase
      * Each message is one sentence naming no id, UUID or connection, since an
      * operator reads it beside logs others may see.
      *
-     * @param  \SineMacula\Laravel\AuditLog\Database\InstallationMismatchException  $exception
+     * @param  \Closure(): \SineMacula\Laravel\AuditLog\Database\InstallationMismatchException  $factory
      * @param  string  $message
      * @return void
      */
     #[DataProvider('provideRefusals')]
-    public function testEachMessageIsASentenceNamingNoValue(InstallationMismatchException $exception, string $message): void
+    public function testEachMessageIsASentenceNamingNoValue(\Closure $factory, string $message): void
     {
+        $exception = $factory();
+
         self::assertSame($message, $exception->getMessage());
         self::assertStringEndsWith('.', $message);
         self::assertMatchesRegularExpression('/\A[A-Z]/', $message);

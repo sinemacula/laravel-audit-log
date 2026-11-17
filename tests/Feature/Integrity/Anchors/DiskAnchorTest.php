@@ -783,6 +783,32 @@ final class DiskAnchorTest extends TestCase
     }
 
     /**
+     * A top marker without its object above a missing marker, which no run of
+     * the anchorer leaves, is malformed, never a head further back.
+     *
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function testAMarkerWithoutItsObjectAboveAGapIsUnexpected(): void
+    {
+        $disk   = Storage::fake(self::DISK);
+        $anchor = self::anchorOn($disk);
+
+        foreach (range(1, 4) as $sequence) {
+            $anchor->anchor(self::summary($sequence));
+        }
+
+        $disk->delete('audit-log-anchors/app-eu-1/by-sequence/00000000000000000003');
+        $disk->delete($anchor->pathOf(self::summary(4)));
+
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage('The anchor\'s newest object is malformed.');
+
+        $anchor->latest();
+    }
+
+    /**
      * Rows of `[bytes]`: newest objects that are not exactly the canonical
      * summary of their sequence and digest in the anchor's log.
      *

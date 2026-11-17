@@ -156,6 +156,34 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
+     * A destroyed entry without a string key id never erases a key.
+     *
+     * @return void
+     */
+    public function testADestroyedEntryWithoutAStringKeyIdIsIgnored(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+        $entry = self::entryId();
+
+        [$key, $dataKey] = $this->makeSubjectKey($owner);
+
+        $field = self::field($entry, self::CARD, $this->sealEnvelope($dataKey, $key->id, '4242', $entry, self::CARD));
+
+        $this->eraseByHand($owner);
+
+        $listed    = $this->journalRow(JournalKind::ERASURE, ['destroyed' => [['key_id' => 42], ['key_id' => null], 'loose', ['id' => $key->id], ['key_id' => $key->id]]]);
+        $malformed = $this->journalRow(JournalKind::ERASURE, ['destroyed' => [['key_id' => 42], ['other' => $key->id], $key->id]]);
+
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['erasure_id' => $listed->id]);
+
+        self::assertSame([self::ERASED], $this->displays([$field]));
+
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['erasure_id' => $malformed->id]);
+
+        self::assertSame([self::UNREADABLE], $this->displays([$field]));
+    }
+
+    /**
      * A key with no wrapped key and no verified erasure row is unreadable.
      *
      * @return void

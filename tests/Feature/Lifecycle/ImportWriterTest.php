@@ -6,6 +6,7 @@ namespace Tests\Feature\Lifecycle;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Events\TransactionBeginning;
@@ -18,6 +19,7 @@ use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\FieldEncrypter;
+use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Contributors\ContributorRegistry;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
@@ -44,6 +46,7 @@ use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\MakesSubjectKeys;
+use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
@@ -496,6 +499,145 @@ final class ImportWriterTest extends TestCase
 
         self::assertSame(1, $tally->pastRetention());
         self::assertSame(2, $tally->imported());
+    }
+
+    /**
+     * A dry run of rejected lines classifies nothing.
+     *
+     * @return void
+     */
+    public function testADryRunOfRejectedLinesClassifiesNothing(): void
+    {
+        $log   = $this->statements();
+        $tally = new ImportTally;
+
+        $this->writer()->plan([self::line(1, 'rec-1', 'bad'), self::line(2, 'rec-2', 'worse')], $tally, CarbonImmutable::now());
+
+        self::assertSame([], $log->getArrayCopy());
+        self::assertSame([0, 0, 0, 2], [$tally->imported(), $tally->duplicates(), $tally->conflicts(), $tally->rejected()]);
+    }
+
+    /**
+     * A dry run whose classification fails is rethrown without its bindings or
+     * quoted values.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADryRunsFailedClassificationIsRethrownMasked(): void
+    {
+        $this->connection()->beforeExecuting(static function (string $sql, array $bindings, Connection $connection): void {
+            if (!str_starts_with(strtolower($sql), 'select') || !str_contains($sql, EntrySettings::table())) {
+                return;
+            }
+
+            $driver            = new \PDOException('SQLSTATE[22021]: Character not in repertoire: 7 ERROR:  invalid byte sequence for encoding "UTF8" near \'rec-secret-1\'');
+            $driver->errorInfo = ['22021', 7, 'invalid byte sequence'];
+
+            throw new QueryException((string) $connection->getName(), $sql, $bindings, $driver);
+        });
+
+        try {
+            $this->writer()->plan([self::line(1, 'rec-secret-1')], new ImportTally, CarbonImmutable::now());
+            self::fail('Expected the dry run to fail.');
+        } catch (\Throwable $exception) {
+            self::assertInstanceOf(QueryException::class, $exception);
+            self::assertSame([], $exception->getBindings());
+            self::assertSame('22021', $exception->errorInfo[0] ?? null);
+            self::assertStringNotContainsString('rec-secret-1', $exception->getMessage());
+            self::assertStringNotContainsString('rec-secret-1', (string) $exception->getPrevious()?->getMessage());
+        }
+    }
+
+    /**
+     * A failing retention lookup gives the count up once, is reported by class
+     * and writes every line.
+     *
+     * @return void
+     */
+    public function testAFailingRetentionLookupGivesTheCountUpOnce(): void
+    {
+        $reporter = new RecordingExceptionHandler;
+
+        app()->instance(ExceptionHandler::class, $reporter);
+
+        $policy = new class implements RetentionPolicy {
+            /** @var int How many times a retention was asked for. */
+            public int $asked = 0;
+
+            /**
+             * The policy's version.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function version(): string
+            {
+                return 'custom:1';
+            }
+
+            /**
+             * Count the question, then throw naming a tenant a report must
+             * never show.
+             *
+             * @param  string  $category
+             * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
+             * @return ?int
+             *
+             * @throws \RuntimeException
+             */
+            #[\Override]
+            public function retainFor(string $category, ?Reference $tenant): ?int
+            {
+                $this->asked++;
+
+                throw new \RuntimeException('org_01 is under review');
+            }
+
+            /**
+             * Nothing obliges the package to keep anything.
+             *
+             * @param  string  $category
+             * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
+             * @return ?int
+             */
+            #[\Override]
+            public function preserveFor(string $category, ?Reference $tenant): ?int
+            {
+                return null;
+            }
+        };
+
+        $tally = self::read(2);
+
+        $this->writer()->write(self::BATCH, self::lines(2), $tally, CarbonImmutable::now(), new RetentionDecisions($policy, CarbonImmutable::now()));
+
+        $messages = array_map(static fn (\Throwable $report): string => $report->getMessage(), $reporter->reports());
+
+        self::assertSame(1, $policy->asked);
+        self::assertSame(['Counting an import\'s lines past retention did not complete: RuntimeException; the import goes on without the count.'], $messages);
+        self::assertFalse($tally->countsPastRetention());
+        self::assertNull($tally->pastRetention());
+        self::assertSame(2, $tally->imported());
+        self::assertSame(2, $this->entries());
+    }
+
+    /**
+     * A line whose source cannot be built is rejected as an invalid field.
+     *
+     * @return void
+     */
+    public function testALineWhoseSourceCannotBeBuiltIsRejected(): void
+    {
+        $tally   = self::read(2);
+        $tooLong = str_repeat('r', ImportedSource::SOURCE_RECORD_ID_MAX_CHARACTERS + 1);
+
+        $this->writer()->write(self::BATCH, [self::line(1, $tooLong), self::line(2, 'rec-2')], $tally, CarbonImmutable::now());
+
+        self::assertSame(['invalid_field' => 1], $tally->rejections());
+        self::assertSame(1, $tally->imported());
+        self::assertSame(['rec-2'], self::strings($this->connection()->table(EntrySettings::table())->pluck('source_record_id')->all()));
     }
 
     /**

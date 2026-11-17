@@ -125,15 +125,11 @@ final class ArtifactInspector
      */
     private static function canonicalOf(#[\SensitiveParameter] string $plaintext, ArtifactKind $kind): ?array
     {
-        try {
-            $read = match ($kind) {
-                ArtifactKind::BULK       => Manifest::readCanonical($plaintext),
-                ArtifactKind::DISCLOSURE => DisclosureManifest::read($plaintext),
-                ArtifactKind::EXPORT     => ExportManifest::read($plaintext),
-            };
-        } catch (\JsonException) {
-            return null;
-        }
+        $read = match ($kind) {
+            ArtifactKind::BULK       => Manifest::readCanonical($plaintext),
+            ArtifactKind::DISCLOSURE => DisclosureManifest::read($plaintext),
+            ArtifactKind::EXPORT     => ExportManifest::read($plaintext),
+        };
 
         return $read === null ? null : ['count' => $read['count'], 'digest' => $read['digest']];
     }

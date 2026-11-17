@@ -31,9 +31,6 @@ final readonly class OwnerLock
     /** @var int The hex characters of the digest a lock's name keeps. */
     private const int NAME_DIGEST_CHARACTERS = 32;
 
-    /** @var int The bytes of the digest a lock's key is read from. */
-    private const int KEY_BYTES = 8;
-
     /** @var int Most `release_lock()` calls one release makes, one per level a retried transaction may have taken. */
     private const int MAX_RELEASES = 5;
 
@@ -68,13 +65,8 @@ final readonly class OwnerLock
      */
     public static function key(#[\SensitiveParameter] Reference $owner): int
     {
-        $unpacked = unpack('J', substr(self::digest($owner, true), 0, self::KEY_BYTES));
-
-        if (!is_array($unpacked) || !is_int($unpacked[1] ?? null)) {
-            throw new \UnexpectedValueException('An owner\'s lock key could not be read.');
-        }
-
-        return $unpacked[1];
+        // `J` reads only the digest's first 8 bytes
+        return unpack('J', self::digest($owner, true))[1];
     }
 
     /**

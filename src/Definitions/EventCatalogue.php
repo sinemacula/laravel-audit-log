@@ -32,7 +32,6 @@ final class EventCatalogue
      * Constructor.
      *
      * @throws \InvalidArgumentException
-     * @throws \LogicException
      */
     public function __construct()
     {

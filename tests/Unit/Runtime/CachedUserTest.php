@@ -40,7 +40,16 @@ final class CachedUserTest extends TestCase
      */
     public function testConstructorIsPrivate(): void
     {
-        self::assertTrue((new \ReflectionMethod(CachedUser::class, '__construct'))->isPrivate());
+        $reflection  = new \ReflectionClass(CachedUser::class);
+        $constructor = $reflection->getConstructor();
+
+        self::assertNotNull($constructor);
+        self::assertTrue($constructor->isPrivate());
+
+        $instance = $reflection->newInstanceWithoutConstructor();
+        $constructor->invoke($instance);
+
+        self::assertInstanceOf(CachedUser::class, $instance);
     }
 
     /**

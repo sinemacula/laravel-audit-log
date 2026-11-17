@@ -195,12 +195,7 @@ final class ExportManifest
             return null;
         }
 
-        try {
-            $canonical = CanonicalEncoder::encode($decoded);
-        } catch (\UnexpectedValueException) {
-            // A value with no canonical form is no manifest
-            return null;
-        }
+        $canonical = CanonicalEncoder::encode($decoded);
 
         return $canonical === $plaintext && is_int($decoded['lines']) ? ['count' => $decoded['lines'], 'digest' => hash('sha256', $plaintext), 'fields' => $decoded] : null;
     }

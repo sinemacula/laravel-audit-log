@@ -150,8 +150,6 @@ final readonly class Manifest
      *
      * @param  string  $plaintext
      * @return ?array{count: int, digest: string}
-     *
-     * @throws \JsonException
      */
     public static function readCanonical(#[\SensitiveParameter] string $plaintext): ?array
     {

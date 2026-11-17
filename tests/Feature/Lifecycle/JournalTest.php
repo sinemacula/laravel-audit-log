@@ -8,6 +8,8 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -311,6 +313,43 @@ final class JournalTest extends TestCase
         self::assertInstanceOf(\LogicException::class, $exception);
         self::assertSame('The journal was appended to outside the lifecycle lock.', $exception->getMessage());
         self::assertNull($exception->getPrevious());
+    }
+
+    /**
+     * Any other failed insert is rethrown without the row's values.
+     *
+     * @return void
+     */
+    public function testAFailedInsertIsRethrownMasked(): void
+    {
+        $this->journalRow(JournalKind::POLICY, ['version' => 'config:0000000000000001']);
+
+        $journal = LifecycleTables::journalTable();
+
+        DB::connection(StorageConnection::forMaintenance())->beforeExecuting(static function (string $query, array $bindings, Connection $connection) use ($journal): void {
+            if (!str_starts_with(strtolower($query), 'insert') || !str_contains($query, $journal)) {
+                return;
+            }
+
+            $driver            = new \PDOException('SQLSTATE[22001]: String data, right truncated: 1406 Data too long, value \'config:0000000000000009\'');
+            $driver->errorInfo = ['22001', 1406, 'Data too long, value \'config:0000000000000009\''];
+
+            throw new QueryException($connection->getName() ?? '', $query, $bindings, $driver);
+        });
+
+        $exception = $this->thrownBy(fn () => $this->append(JournalKind::POLICY, ['version' => 'config:0000000000000009']));
+
+        self::assertInstanceOf(QueryException::class, $exception);
+        self::assertNotInstanceOf(UniqueConstraintViolationException::class, $exception);
+        self::assertSame([], $exception->getBindings());
+        self::assertStringNotContainsString('config:0000000000000009', $exception->getMessage());
+
+        $driver = $exception->getPrevious();
+
+        self::assertInstanceOf(\PDOException::class, $driver);
+        self::assertStringNotContainsString('config:0000000000000009', $driver->getMessage());
+        self::assertSame('22001', $driver->errorInfo[0] ?? null);
+        self::assertCount(1, $this->journalRows());
     }
 
     /**

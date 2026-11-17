@@ -67,6 +67,8 @@ composer test:mutation        # Mutation gate scoped to your diff against master
 composer test:mutation:full   # Full mutation run, no threshold
 ```
 
+CI fails a pull request with an uncovered line in `src/`.
+
 The scheduled full mutation run records coverage once with `composer test:mutation:coverage`, then splits the source
 into four parts that each run `composer test:mutation:full -- --coverage=build/mutation-coverage --skip-initial-tests`
 with a `--filter` naming their files.

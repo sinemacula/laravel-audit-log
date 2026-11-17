@@ -6,12 +6,17 @@ namespace Tests\Feature\Delivery;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\DeadlockException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxWriter;
 use SineMacula\Laravel\AuditLog\Delivery\RecordDelivery;
+use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Records\Enums\Timing;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
@@ -40,6 +45,9 @@ final class AfterTransactionDeliveryTest extends TestCase
 
     /** @var string A second connection, on an in-memory SQLite database. */
     private const string OTHER = 'other';
+
+    /** @var string A failure Laravel reads as a concurrency error. */
+    private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock';
 
     /** @var list<string> The class each capture's signal passed on, in order. */
     private array $signalled = [];
@@ -328,6 +336,44 @@ final class AfterTransactionDeliveryTest extends TestCase
     }
 
     /**
+     * A listener's deadlock on a connection still open after the rollback is
+     * reported, and nothing leaves the rollback.
+     *
+     * @return void
+     */
+    public function testADeadlockAfterARollbackIsReported(): void
+    {
+        $reporter   = $this->reporter();
+        $connection = $this->openBehindADeadlockingListener();
+
+        $this->deliver();
+        $connection->rollBack();
+
+        self::assertSame(0, $connection->transactionLevel());
+        self::assertSame(1, $this->entryCount());
+        self::assertSame([DeadlockException::class], $this->reportedClasses($reporter));
+    }
+
+    /**
+     * A capture's deadlock on a connection still open after the rollback is
+     * reported and signalled, and nothing leaves the rollback.
+     *
+     * @return void
+     */
+    public function testACapturesDeadlockAfterARollbackIsSignalled(): void
+    {
+        $reporter   = $this->reporter();
+        $connection = $this->openBehindADeadlockingListener();
+
+        $this->deliver($this->signal());
+        $connection->rollBack();
+
+        self::assertSame(0, $connection->transactionLevel());
+        self::assertSame([DeadlockException::class], $this->signalled);
+        self::assertSame([DeadlockException::class], $this->reportedClasses($reporter));
+    }
+
+    /**
      * In outbox mode the row is inserted once the transaction on the outbox
      * connection has rolled back.
      *
@@ -359,6 +405,49 @@ final class AfterTransactionDeliveryTest extends TestCase
     private function deliver(?CaptureSignal $signal = null): void
     {
         app(RecordDelivery::class)->deliver(RecordFactory::captured(), Timing::AFTER_TRANSACTION, null, false, $signal);
+    }
+
+    /**
+     * Open a transaction on the other connection, make every `AuditRecorded`
+     * listener deadlock on it, and return the storage connection with a
+     * transaction open.
+     *
+     * @return \Illuminate\Database\ConnectionInterface
+     */
+    private function openBehindADeadlockingListener(): ConnectionInterface
+    {
+        $previous = new \PDOException(self::DEADLOCK);
+
+        $previous->errorInfo = ['40001', 1213, 'Deadlock found when trying to get lock'];
+
+        $deadlock = new QueryException(self::OTHER, 'update hosts set x = 1', [], $previous);
+
+        DB::connection(self::OTHER)->beginTransaction();
+
+        Event::listen(AuditRecorded::class, static function () use ($deadlock): never {
+            throw $deadlock;
+        });
+
+        $connection = DB::connection(self::CONNECTION);
+
+        $connection->beginTransaction();
+
+        return $connection;
+    }
+
+    /**
+     * The class of the failure behind each sanitised report, in order.
+     *
+     * @param  \Tests\Fixtures\Privacy\RecordingExceptionHandler  $reporter
+     * @return list<string>
+     */
+    private function reportedClasses(RecordingExceptionHandler $reporter): array
+    {
+        return array_map(static function (\Throwable $report): string {
+            self::assertInstanceOf(AuditWriteFailedException::class, $report);
+
+            return $report->exceptionClass;
+        }, $reporter->reports());
     }
 
     /**

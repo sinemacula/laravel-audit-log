@@ -253,6 +253,20 @@ final class EraseCommandTest extends TestCase
     }
 
     /**
+     * A reapply whose erasure record is not written warns and still reconciles.
+     *
+     * @return void
+     */
+    public function testAnUnrecordedReapplyWarns(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.redaction.keys', ['entries_affected']);
+
+        self::assertSame(0, $this->command(['--reapply' => $this->file([(string) json_encode(self::OWNER)])]));
+        self::assertStringContainsString('An erasure\'s audit_log.subject_erased record could not be written; audit-log:reconcile writes it from the journal.', $this->printed);
+        self::assertMatchesRegularExpression('/Restore reconciled in journal row [0-9a-f-]{36}/', $this->printed);
+    }
+
+    /**
      * A reapply that leaves the restore unreconciled exits 1 and says why.
      *
      * @return void

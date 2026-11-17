@@ -533,6 +533,53 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
+     * A failed import whose batch row cannot be read is recorded with its
+     * start's counts.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFailedImportWithAnUnreadableBatchKeepsItsStartsCounts(): void
+    {
+        $unreadable = true;
+
+        DB::listen(static function (QueryExecuted $query): void {
+            $imported = in_array('invoice.approved', $query->bindings, true);
+
+            if ($imported && str_starts_with(strtolower($query->sql), 'insert') && str_contains($query->sql, EntrySettings::table())) {
+                throw new \RuntimeException('The entries could not be written.');
+            }
+        });
+
+        DB::connection(StorageConnection::name())->beforeExecuting(static function (string $sql) use (&$unreadable): void {
+            if ($unreadable && str_starts_with(strtolower($sql), 'select') && str_contains($sql, LifecycleTables::importBatchesTable())) {
+                $unreadable = false;
+
+                throw new \RuntimeException('The batch could not be read.');
+            }
+        });
+
+        try {
+            $this->lifecycle()->import(ImportSource::fromFile($this->file([self::line('rec-1')]), self::SOURCE), self::authority(), hold: true);
+
+            self::fail('Expected the import to fail.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The entries could not be written.', $exception->getMessage());
+        }
+
+        $record     = $this->readRecords('audit_log.imported')[0];
+        $properties = self::propertiesOf($record);
+        $batch      = (array) DB::connection(StorageConnection::name())->table(LifecycleTables::importBatchesTable())->first();
+
+        self::assertSame(['failure', 'import_failed'], [$record['outcome'], $record['reason']]);
+        self::assertSame(1, (int) $batch['lines_read']);
+        self::assertSame(['failed', 0, 0, $batch['id'], $batch['hold_id']], [
+            $properties['status'], $properties['lines_read'], $properties['imported'], $properties['batch_id'], $properties['hold_id'],
+        ]);
+    }
+
+    /**
      * An import refused before its start records nothing and is rethrown.
      *
      * @return void
@@ -585,6 +632,39 @@ final class AuditLifecycleTest extends TestCase
             'authority_reason' => 'case.review',
             'outcome'          => 'failure',
         ], self::propertiesOf($record));
+    }
+
+    /**
+     * Closing an import whose finish was already journalled settles its batch
+     * and records nothing more.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testClosingAnImportWhoseFinishWasJournalledRecordsNothing(): void
+    {
+        $fail = true;
+
+        DB::connection(StorageConnection::name())->beforeExecuting(static function (string $sql) use (&$fail): void {
+            if ($fail && str_starts_with(strtolower($sql), 'update') && str_contains($sql, LifecycleTables::importBatchesTable()) && str_contains($sql, 'finished_at')) {
+                $fail = false;
+
+                throw new \RuntimeException('The batch could not be written.');
+            }
+        });
+
+        $result  = $this->lifecycle()->import(ImportSource::fromFile($this->file([self::line('rec-1')]), self::SOURCE), self::authority());
+        $batchId = (string) $result->batchId;
+        $batches = DB::connection(StorageConnection::name())->table(LifecycleTables::importBatchesTable());
+
+        self::assertSame('running', $batches->value('status'));
+
+        $closed = $this->lifecycle()->closeImport($batchId, self::authority());
+
+        self::assertSame([ImportStatus::COMPLETE, false, false], [$closed->status, $closed->committed, $closed->recorded]);
+        self::assertSame('complete', $batches->value('status'));
+        self::assertSame([$result->operationId], array_map(self::operationOf(...), $this->readRecords('audit_log.imported')));
     }
 
     /**

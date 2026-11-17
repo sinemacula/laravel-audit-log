@@ -828,6 +828,33 @@ final class DeliveryChecksTest extends TestCase
     }
 
     /**
+     * Rows of `[the channel's path]`: none, and one that is not a string.
+     *
+     * @return iterable<string, array{0: ?int}>
+     */
+    public static function provideUnreadablePaths(): iterable
+    {
+        yield from [
+            'no path'       => [null],
+            'a number path' => [42],
+        ];
+    }
+
+    /**
+     * A documented channel with no path to read has no file to note.
+     *
+     * @param  ?int  $path
+     * @return void
+     */
+    #[DataProvider('provideUnreadablePaths')]
+    public function testADocumentedChannelWithNoPathHasNoFileNote(?int $path): void
+    {
+        $this->spillTo([...DocumentedSpillChannel::config(sys_get_temp_dir() . '/audit-log-spill.log'), 'path' => $path]);
+
+        self::assertNull($this->checks()->spillNote());
+    }
+
+    /**
      * A `daily` channel otherwise as documented has no note.
      *
      * @return void

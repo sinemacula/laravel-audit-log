@@ -8,6 +8,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
@@ -96,6 +97,43 @@ final class PruneTombstonesTest extends TestCase
 
         app()->instance(PruneLedger::class, $fresh);
 
+        self::assertSame([], $this->tombstones()->prunedAmong($this->sealed));
+    }
+
+    /**
+     * Rows of `[column]`: the seal's members digest or a member's HMAC, either
+     * of which an unreadable value makes the seal unreadable.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideUnreadableColumns(): iterable
+    {
+        yield from [
+            'the seal' => ['members_digest'],
+            'a member' => ['hmac'],
+        ];
+    }
+
+    /**
+     * A seal that cannot be read covers none of its absent members.
+     *
+     * @param  string  $column
+     * @return void
+     */
+    #[DataProvider('provideUnreadableColumns')]
+    public function testASealThatCannotBeReadCoversNothing(string $column): void
+    {
+        $this->pruneByHand($this->sealed[1]);
+
+        self::assertTrue($this->tombstones()->isPruned($this->sealed[1]));
+
+        $connection = DB::connection(StorageConnection::name());
+        $rows       = $column === 'hmac'
+            ? $connection->table(IntegrityTables::membersTable())->where('entry_id', $this->sealed[0])
+            : $connection->table(IntegrityTables::checkpointsTable())->where('id', (string) $this->seals()[0]['id']);
+
+        self::assertSame(1, $rows->update([$column => 'not a digest']));
+        self::assertFalse($this->tombstones()->isPruned($this->sealed[1]));
         self::assertSame([], $this->tombstones()->prunedAmong($this->sealed));
     }
 

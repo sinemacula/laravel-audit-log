@@ -69,7 +69,6 @@ enum PackageActivity: string implements DefinesAuditEvents
      * @return \SineMacula\Laravel\AuditLog\Definitions\EventDefinition
      *
      * @throws \InvalidArgumentException
-     * @throws \LogicException
      */
     #[\Override]
     public function definition(): EventDefinition
