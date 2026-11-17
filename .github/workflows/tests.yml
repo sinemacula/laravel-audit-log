@@ -62,6 +62,10 @@ jobs:
             -   name: PHPUnit
                 run: composer test:coverage
 
+            -   name: Coverage gate
+                run: |
+                    php -r '$m = simplexml_load_file("clover.xml")->project->metrics; $s = (int) $m["statements"]; $c = (int) $m["coveredstatements"]; echo "Lines covered: {$c}/{$s}\n"; exit($c < $s ? 1 : 0);'
+
             -   name: Publish code coverage
                 if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.php == '8.3' }}
                 uses: qltysh/qlty-action/coverage@0ff2178667bf8eb28ed0013a7ef54857a24d4056 # v2
