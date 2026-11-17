@@ -40,7 +40,7 @@ default = true
 [[source]]
 name = "sinemacula"
 repository = "https://github.com/sinemacula/coding-standards"
-tag = "v1.30.2"
+tag = "v1.31.0"
 
 [[plugin]]
 name = "php-codesniffer"
@@ -51,7 +51,7 @@ package_filters = ["slevomat", "dealerdirect", "sinemacula"]
 # plugin declares its packages here rather than reading composer.json.
 [[plugin]]
 name = "php-cs-fixer"
-extra_packages = ["sinemacula/coding-standards@1.30.2"]
+extra_packages = ["sinemacula/coding-standards@1.31.0"]
 
 # phpstan runs from a dedicated sandbox file that lists the analysis stack and
 # every dependency the analysed code references, so a package the code starts
