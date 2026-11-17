@@ -123,6 +123,7 @@ use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Definitions\Enums\InvoiceActivity;
 use Tests\Fixtures\Querying\ClosurePolicy;
+use Tests\Fixtures\Support\PlainHttpKernel;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
@@ -968,6 +969,23 @@ final class AuditLogServiceProviderTest extends TestCase
         $this->app?->register($this->provider(), true);
 
         self::assertCount(1, array_keys($kernel->getGlobalMiddleware(), EnterHttpFrame::class, true));
+    }
+
+    /**
+     * A kernel that is not Laravel's resolves without the frame middleware.
+     *
+     * @return void
+     */
+    public function testAKernelThatIsNotLaravelsGetsNoFrameMiddleware(): void
+    {
+        $kernel = new PlainHttpKernel(app());
+
+        $this->app?->singleton(HttpKernel::class, static fn (): PlainHttpKernel => $kernel);
+
+        $this->app?->make(HttpKernel::class);
+
+        self::assertNotEmpty($kernel->globalMiddleware);
+        self::assertNotContains(EnterHttpFrame::class, $kernel->globalMiddleware);
     }
 
     /**

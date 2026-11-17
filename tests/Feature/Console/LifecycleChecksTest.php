@@ -22,6 +22,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\Hold;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldKeeper;
+use SineMacula\Laravel\AuditLog\Lifecycle\HoldProjection;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\WritesTheJournal;
@@ -61,6 +62,9 @@ final class LifecycleChecksTest extends TestCase
     /** @var string The note on import batches that stopped moving, after their ids. */
     private const string STALE_NOTE = '; close an interrupted one with `audit-log:import --close=<batch>`.';
 
+    /** @var ?string A file a test created, removed when it ends. */
+    private ?string $file = null;
+
     /**
      * Freeze the clock and bind the default policy, whether or not it is bound.
      *
@@ -77,13 +81,18 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * Put the clock back and drop the other installation's state.
+     * Put the clock back, drop the other installation's state and remove the
+     * test's file.
      *
      * @return void
      */
     #[\Override]
     protected function tearDown(): void
     {
+        if ($this->file !== null && is_file($this->file)) {
+            unlink($this->file);
+        }
+
         if (app(ConfigRepository::class)->has('database.connections.' . self::OTHER)) {
             DB::connection(self::OTHER)->getSchemaBuilder()->dropIfExists(IntegrityTables::stateTable());
         }
@@ -227,6 +236,28 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
+     * An unreadable lock row is named by its exception class alone.
+     *
+     * @return void
+     */
+    public function testALockRowThatCannotBeReadIsNamedByItsClass(): void
+    {
+        $gate = new \ArrayObject(['armed' => true]);
+
+        DB::connection(self::CONNECTION)->beforeExecuting(static function (string $query) use ($gate): void {
+            if ($gate['armed'] === true && preg_match('/from [`"]audit_log_lifecycle_lock[`"] where/', $query) === 1) {
+                throw new \DomainException('secret-detail');
+            }
+        });
+
+        $problems = $this->checks()->problems();
+
+        $gate['armed'] = false;
+
+        self::assertSame(['The lifecycle lock row could not be read (DomainException).'], $problems);
+    }
+
+    /**
      * Rows of `[the version a policy gives]` that are invalid.
      *
      * @return iterable<string, array{0: string}>
@@ -350,6 +381,10 @@ final class LifecycleChecksTest extends TestCase
         $config->set('audit-log.storage.maintenance_connection', 'elsewhere');
 
         self::assertSame([], $this->checks()->problems());
+
+        $config->set('audit-log.storage.maintenance_connection', 5);
+
+        self::assertSame([], $this->checks()->problems());
     }
 
     /**
@@ -416,6 +451,18 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
+     * A journal that cannot be read is named by its exception class alone.
+     *
+     * @return void
+     */
+    public function testAJournalThatCannotBeReadIsNamedByItsClass(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.integrity.log_id', 'not a log id!');
+
+        self::assertSame(['The lifecycle journal could not be read (InvalidArgumentException).'], $this->checks()->problems());
+    }
+
+    /**
      * The journal is verified read-only, outside any lock.
      *
      * @return void
@@ -451,6 +498,20 @@ final class LifecycleChecksTest extends TestCase
             [sprintf('The holds projection differs from the journal for `%s`, `%s`; rebuild it with `audit-log:holds --rebuild`.', ...$drifted)],
             $this->checks()->problems(),
         );
+    }
+
+    /**
+     * A projection that cannot be read is named by its exception class alone.
+     *
+     * @return void
+     */
+    public function testAProjectionThatCannotBeReadIsNamedByItsClass(): void
+    {
+        $this->placeHold();
+
+        app()->bind(HoldProjection::class, static fn (): never => throw new \RuntimeException('secret-detail'));
+
+        self::assertSame(['The holds projection could not be read (RuntimeException).'], $this->checks()->problems());
     }
 
     /**
@@ -539,6 +600,26 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
+     * Stale batch ids that are no lower-case UUID are counted, never printed.
+     *
+     * @return void
+     */
+    public function testStaleIdsThatAreNoUuidAreOnlyCounted(): void
+    {
+        if (DB::connection(self::CONNECTION)->getDriverName() === 'pgsql') {
+            self::markTestSkipped('A PostgreSQL uuid column holds nothing but a UUID, which reads back in lower case.');
+        }
+
+        DB::table('audit_log_import_batches')->insert(self::batchRow('01932B4E-B000-7000-8000-000000000001', 'running', '2026-11-02 07:00:00.000000'));
+
+        self::assertSame(['1 import batch is running with nothing written for over an hour: 1 id' . self::STALE_NOTE], $this->checks()->notes());
+
+        DB::table('audit_log_import_batches')->insert(self::batchRow('01932B4E-B000-7000-8000-000000000002', 'running', '2026-11-02 07:00:00.000000'));
+
+        self::assertSame(['2 import batches are running with nothing written for over an hour: 2 ids' . self::STALE_NOTE], $this->checks()->notes());
+    }
+
+    /**
      * A batch that last moved exactly an hour ago is not yet stale.
      *
      * @return void
@@ -582,6 +663,28 @@ final class LifecycleChecksTest extends TestCase
 
         self::assertSame([], $this->checks()->problems());
         self::assertSame([], $this->checks()->notes());
+    }
+
+    /**
+     * An unreadable storage connection is named by its exception class alone.
+     *
+     * @return void
+     */
+    public function testAStorageConnectionThatCannotBeReadIsNamedByItsClass(): void
+    {
+        $this->file = sys_get_temp_dir() . '/audit-log-garbage-storage-' . getmypid() . '.sqlite';
+
+        file_put_contents($this->file, str_repeat('not a database ', 512));
+
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.garbage', ['driver' => 'sqlite', 'database' => $this->file, 'prefix' => '']);
+        $config->set('audit-log.storage.connection', 'garbage');
+
+        $problems = $this->checks()->problems();
+
+        self::assertSame(['The storage connection [garbage] could not be read (Illuminate\Database\QueryException).'], $problems);
+        self::assertStringNotContainsString($this->file, implode("\n", $problems));
     }
 
     /**

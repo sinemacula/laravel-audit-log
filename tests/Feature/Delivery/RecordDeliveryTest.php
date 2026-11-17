@@ -15,6 +15,7 @@ use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Database\DeadlockException;
+use Illuminate\Database\Events\TransactionCommitting;
 use Illuminate\Database\QueryException;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Log\LogManager;
@@ -27,6 +28,7 @@ use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Delivery\CaptureSignal;
+use SineMacula\Laravel\AuditLog\Delivery\CommitQueue;
 use SineMacula\Laravel\AuditLog\Delivery\FailedWrite;
 use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Delivery\PackageWrite;
@@ -240,6 +242,40 @@ final class RecordDeliveryTest extends TestCase
         $connection->rollBack();
 
         self::assertSame(0, $fake->count());
+    }
+
+    /**
+     * An after-commit record whose commit proves a rollback is reported, not
+     * written, and notifies nothing.
+     *
+     * @return void
+     */
+    public function testAfterCommitAbandonsAnAbortedCommit(): void
+    {
+        $reporter   = $this->reporter();
+        $connection = DB::connection(self::CONNECTION);
+        $record     = RecordFactory::captured();
+
+        Event::fake([AuditRecorded::class]);
+
+        $connection->beginTransaction();
+
+        $this->delivery()->deliver($record, Timing::AFTER_COMMIT, null);
+
+        app(CommitQueue::class)->probe(new TransactionCommitting(self::postgresAnswering('25P02')));
+
+        $connection->commit();
+
+        $report = self::reportOf($reporter);
+
+        self::assertSame(0, $this->entryCount());
+        self::assertCount(1, $reporter->reports());
+        self::assertSame($record->id, $report->recordId);
+        self::assertSame('25P02', $report->sqlState);
+        self::assertSame(FailedOperation::STORE->value, $report->operation);
+        self::assertNull($report->getPrevious());
+        $this->assertSpilled(0);
+        Event::assertNotDispatched(AuditRecorded::class);
     }
 
     /**
@@ -3235,6 +3271,27 @@ final class RecordDeliveryTest extends TestCase
         self::assertInstanceOf(AuditWriteFailedException::class, $report);
 
         return $report;
+    }
+
+    /**
+     * A PostgreSQL storage connection whose `select 1` fails with the SQLSTATE.
+     *
+     * @param  string  $state
+     * @return \Illuminate\Database\Connection
+     */
+    private static function postgresAnswering(string $state): Connection
+    {
+        $previous = new \PDOException("SQLSTATE[{$state}]: Failed.");
+
+        $previous->errorInfo = [$state, 7, ''];
+
+        $connection = \Mockery::mock(Connection::class);
+
+        $connection->allows('getName')->andReturn(self::CONNECTION);
+        $connection->allows('getDriverName')->andReturn('pgsql');
+        $connection->expects('scalar')->with('select 1', [], false)->andThrow(new QueryException(self::CONNECTION, 'select 1', [], $previous));
+
+        return $connection;
     }
 
     /**

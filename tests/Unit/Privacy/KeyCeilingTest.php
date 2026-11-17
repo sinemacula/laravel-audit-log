@@ -176,7 +176,16 @@ final class KeyCeilingTest extends TestCase
      */
     public function testConstructorIsPrivate(): void
     {
-        self::assertTrue((new \ReflectionMethod(KeyCeiling::class, '__construct'))->isPrivate());
+        $reflection  = new \ReflectionClass(KeyCeiling::class);
+        $constructor = $reflection->getConstructor();
+
+        self::assertNotNull($constructor);
+        self::assertTrue($constructor->isPrivate());
+
+        $instance = $reflection->newInstanceWithoutConstructor();
+        $constructor->invoke($instance);
+
+        self::assertInstanceOf(KeyCeiling::class, $instance);
     }
 
     /**

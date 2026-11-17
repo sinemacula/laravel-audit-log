@@ -137,8 +137,10 @@ final readonly class Reinstater
         $floor   = $marker->generationFloor;
         $payload = ['owner_fingerprint' => $fingerprint, 'fingerprint_key' => $fingerprintKey, 'generation_floor' => $floor];
         $row     = $this->journal->append($connection, $replay, JournalKind::REINSTATE, $operationId, $authority, $payload)->lastAppended()
+            // append() always returns a replay holding the appended row
+            // @codeCoverageIgnoreStart
             ?? throw new \LogicException('The journal accepted a reinstatement its replay does not hold.');
-
+        // @codeCoverageIgnoreEnd
         $this->markers->insert($connection, new OwnerMarker($row->id, $owner, MarkerTransition::REINSTATED, $floor, $row->sequence, $row->occurredAt));
 
         return new ReinstateResult($operationId, $row->id, $fingerprint, $fingerprintKey, $floor);

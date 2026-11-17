@@ -553,6 +553,166 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
+     * An erasure row that cannot be read proves nothing: the key put back after
+     * it is not found restored, and the run goes on.
+     *
+     * @return void
+     */
+    public function testAnUnreadableErasureRowProvesNothing(): void
+    {
+        $owner = self::owner('42');
+
+        [$key] = $this->makeSubjectKey($owner);
+
+        $before  = $this->storedKey($key->id);
+        $erasure = $this->eraseByHand($owner);
+
+        $this->changeKey($key->id, $before);
+        $this->tamperJournal($erasure->sequence, ['hmac' => 'not-a-digest']);
+
+        [$summary, $tally] = $this->verify();
+
+        self::assertSame([], self::findingsOf($tally));
+        self::assertSame(1, $summary->keys);
+        self::assertSame(0, $summary->erased);
+    }
+
+    /**
+     * An erasure row signed under a key the ring does not hold is not believed:
+     * it restores nothing in the fold, and its tombstones are
+     * `key_destroyed_unjournalled`.
+     *
+     * @return void
+     */
+    public function testAnErasureRowUnderAnUnheldKeyIsNotBelieved(): void
+    {
+        $restored = self::owner('42');
+        $erased   = self::owner('43');
+
+        [$live]      = $this->makeSubjectKey($restored);
+        [$tombstone] = $this->makeSubjectKey($erased);
+
+        $before = $this->storedKey($live->id);
+        $first  = $this->eraseByHand($restored);
+        $second = $this->eraseByHand($erased);
+
+        $this->changeKey($live->id, $before);
+        $this->tamperJournal($first->sequence, ['key_id' => 'retired']);
+        $this->tamperJournal($second->sequence, ['key_id' => 'retired']);
+
+        [$summary, $tally] = $this->verify();
+
+        self::assertSame([Finding::KEY_DESTROYED_UNJOURNALLED->value => [$tombstone->id, 1]], self::findingsOf($tally));
+        self::assertSame(1, $summary->erased);
+    }
+
+    /**
+     * A believed row naming a fingerprint key the ring does not hold matches no
+     * owner, and the owner's genuine erasure is still judged.
+     *
+     * @return void
+     */
+    public function testAFingerprintKeyTheRingDoesNotHoldIsSkipped(): void
+    {
+        $owner = self::owner('42');
+
+        [$key] = $this->makeSubjectKey($owner);
+
+        $before = $this->storedKey($key->id);
+
+        $this->eraseByHand($owner);
+        $this->changeKey($key->id, $before);
+        $this->journalRow(JournalKind::REINSTATE, ['owner_fingerprint' => str_repeat('a', 64), 'fingerprint_key' => 'retired', 'generation_floor' => 1]);
+
+        [, $tally] = $this->verify();
+
+        self::assertSame([Finding::KEY_RESTORED->value => [$key->id, 1]], self::findingsOf($tally));
+    }
+
+    /**
+     * Rows of `[fields]`: a reinstatement's payload field given a value of the
+     * wrong type.
+     *
+     * @return iterable<string, array{0: array<string, int|string>}>
+     */
+    public static function provideMistypedTransitions(): iterable
+    {
+        yield from [
+            'a numeric fingerprint key'   => [['fingerprint_key' => 7]],
+            'a numeric owner fingerprint' => [['owner_fingerprint' => 7]],
+            'a string floor'              => [['generation_floor' => '0']],
+        ];
+    }
+
+    /**
+     * A reinstatement whose payload does not name its owner and floor is not
+     * folded: the key put back after the erasure is still `key_restored`.
+     *
+     * @param  array<string, int|string>  $fields
+     * @return void
+     */
+    #[DataProvider('provideMistypedTransitions')]
+    public function testATransitionThatNamesNoOwnerIsNotFolded(array $fields): void
+    {
+        $owner = self::owner('42');
+
+        [$key] = $this->makeSubjectKey($owner);
+
+        $before = $this->storedKey($key->id);
+
+        $this->eraseByHand($owner);
+        $this->changeKey($key->id, $before);
+
+        [$fingerprintKey, $fingerprint] = app(OwnerFingerprint::class)->of($owner);
+
+        $payload = ['owner_fingerprint' => $fingerprint, 'fingerprint_key' => $fingerprintKey, 'generation_floor' => 0];
+
+        $this->journalRow(JournalKind::REINSTATE, array_replace($payload, $fields));
+
+        [, $tally] = $this->verify();
+
+        self::assertSame([Finding::KEY_RESTORED->value => [$key->id, 1]], self::findingsOf($tally));
+    }
+
+    /**
+     * Entries of an erasure's lists that are not maps with a string `key_id`
+     * name no key, so the keys named only by them are neither destroyed nor
+     * kept.
+     *
+     * @return void
+     */
+    public function testMalformedListingEntriesNameNoKey(): void
+    {
+        $owner = self::owner('42');
+
+        [$key]   = $this->makeSubjectKey($owner);
+        [$live]  = $this->makeSubjectKey($owner, category: self::BILLING);
+        [$other] = $this->makeSubjectKey(self::owner('43'));
+
+        [$fingerprintKey, $fingerprint] = app(OwnerFingerprint::class)->of($owner);
+
+        $erasure = $this->journalRow(JournalKind::ERASURE, [
+            'owner_fingerprint' => $fingerprint,
+            'fingerprint_key'   => $fingerprintKey,
+            'generation_floor'  => 1,
+            'destroyed'         => [['key_id' => 7], 'not an entry', ['id' => $other->id], ['key_id' => $key->id]],
+            'kept'              => [['key_id' => 7], 'not an entry', ['id' => $live->id]],
+        ]);
+
+        foreach ([$key->id, $other->id] as $id) {
+            $this->changeKey($id, ['state' => KeyState::ERASED->value, 'wrapped_key' => null, 'erasure_id' => $erasure->id]);
+        }
+
+        [$summary, $tally] = $this->verify();
+
+        self::assertSame([
+            Finding::KEY_DESTROYED_UNJOURNALLED->value => [$other->id, 1],
+            Finding::KEY_RESTORED->value               => [$live->id, 1],
+        ], self::findingsOf($tally));
+        self::assertSame(2, $summary->erased);
+    }
+
+    /**
      * The fold keeps no set of destroyed ids: four pages of erasure rows raise
      * the peak memory no more than one page does.
      *

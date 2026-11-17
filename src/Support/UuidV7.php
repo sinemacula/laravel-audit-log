@@ -68,8 +68,11 @@ final class UuidV7
     {
         try {
             $random = random_int(0, 0x3FFFFFFFFFFFFFFF);
+            // Only a failing system random source reaches this catch.
+            // @codeCoverageIgnoreStart
         } catch (RandomException) {
             throw new \UnexpectedValueException('A UUID could not be drawn.');
+            // @codeCoverageIgnoreEnd
         }
 
         $microseconds = (int) $time->format('Uu');

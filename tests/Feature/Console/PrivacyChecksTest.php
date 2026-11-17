@@ -64,6 +64,9 @@ final class PrivacyChecksTest extends TestCase
     /** @var string What a test's owner id carries, and the output must never hold. */
     private const string SENTINEL = 'sentinel-7f3a9c';
 
+    /** @var list<string> Files a test created, removed when it ends. */
+    private array $files = [];
+
     /**
      * Bind the package's key wrapper, whether or not the provider has.
      *
@@ -75,6 +78,26 @@ final class PrivacyChecksTest extends TestCase
         parent::setUp();
 
         $this->keyWrapper();
+    }
+
+    /**
+     * Remove the test's files.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function tearDown(): void
+    {
+        foreach ($this->files as $file) {
+
+            if (!is_file($file)) {
+                continue;
+            }
+
+            unlink($file);
+        }
+
+        parent::tearDown();
     }
 
     /**
@@ -117,6 +140,73 @@ final class PrivacyChecksTest extends TestCase
 
         self::assertNotSame([], $refusals);
         self::assertStringStartsWith("`audit-log.{$leaf}", $refusals[0]);
+    }
+
+    /**
+     * Rows of `[the settings changed, the refusals the readers give]`, each
+     * beside an explicit integrity ring and no wrapping ring.
+     *
+     * @return iterable<string, array{0: array<string, list<string>|string>, 1: list<string>}>
+     */
+    public static function provideDerivedRings(): iterable
+    {
+        yield from [
+            'an app key the redaction key falls back to' => [['app.key' => 'short'], []],
+            'previous keys too short'                    => [['app.previous_keys' => ['short']], [self::DERIVED_RING]],
+            'a malformed redaction key'                  => [['app.key' => 'short', 'audit-log.redaction.key' => 'short'], [self::DERIVED_RING]],
+            'an explicit redaction key'                  => [['app.key' => 'short', 'audit-log.redaction.key' => str_repeat('r', 32)], [self::DERIVED_RING]],
+        ];
+    }
+
+    /**
+     * The derived ring is refused unless the redaction reader lists `app.key`.
+     *
+     * @param  array<string, list<string>|string>  $settings
+     * @param  list<string>  $refusals
+     * @return void
+     */
+    #[DataProvider('provideDerivedRings')]
+    public function testTheDerivedRingIsRefusedUnlessListedByRedaction(array $settings, array $refusals): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set([
+            'audit-log.integrity.keys'    => ['k1' => str_repeat('k', 32)],
+            'audit-log.integrity.current' => 'k1',
+            'app.key'                     => 'base64:' . base64_encode(str_repeat('a', 32)),
+            ...$settings,
+        ]);
+
+        self::assertSame($refusals, self::refusalsOf(PrivacyChecks::readers($config)));
+    }
+
+    /**
+     * Rows of `[the settings that leave the privacy subject out]`.
+     *
+     * @return iterable<string, array{0: array<string, int>}>
+     */
+    public static function provideUnreadableSubjects(): iterable
+    {
+        yield from [
+            'a malformed privacy setting'    => [['audit-log.privacy.rewrap_batch' => 99]],
+            'a malformed storage connection' => [['audit-log.storage.connection' => 5]],
+        ];
+    }
+
+    /**
+     * The subject is left out while a setting it reads is malformed.
+     *
+     * @param  array<string, int>  $settings
+     * @return void
+     */
+    #[DataProvider('provideUnreadableSubjects')]
+    public function testTheSubjectIsLeftOutWhileASettingIsMalformed(array $settings): void
+    {
+        self::assertSame(['privacy'], array_keys($this->checks()->subject()));
+
+        app(ConfigRepository::class)->set($settings);
+
+        self::assertSame([], $this->checks()->subject());
     }
 
     /**
@@ -242,6 +332,47 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
+     * An unopenable storage connection is left to the `schema` subject.
+     *
+     * @return void
+     */
+    public function testAStorageConnectionThatCannotBeOpenedIsLeftToTheSchema(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $absent = sys_get_temp_dir() . '/audit-log-absent-' . getmypid() . '/none.sqlite';
+
+        $config->set('database.connections.unreachable', ['driver' => 'sqlite', 'database' => $absent, 'prefix' => '']);
+        $config->set('audit-log.storage.connection', 'unreachable');
+
+        self::assertSame([], $this->checks()->problems());
+    }
+
+    /**
+     * An unreadable storage connection is named by its exception class alone.
+     *
+     * @return void
+     */
+    public function testAStorageConnectionThatCannotBeReadIsNamedByItsClass(): void
+    {
+        $path = sys_get_temp_dir() . '/audit-log-garbage-privacy-' . getmypid() . '.sqlite';
+
+        file_put_contents($path, str_repeat('not a database ', 512));
+
+        $this->files[] = $path;
+
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.garbage', ['driver' => 'sqlite', 'database' => $path, 'prefix' => '']);
+        $config->set('audit-log.storage.connection', 'garbage');
+
+        $problems = $this->checks()->problems();
+
+        self::assertSame(['The storage connection [garbage] could not be read (Illuminate\Database\QueryException).'], $problems);
+        self::assertStringNotContainsString($path, implode("\n", $problems));
+    }
+
+    /**
      * A key table of the wrong shape is a problem naming what is wrong.
      *
      * @return void
@@ -361,6 +492,22 @@ final class PrivacyChecksTest extends TestCase
     }
 
     /**
+     * Unreadable wrapping key ids are named by the exception class alone.
+     *
+     * @return void
+     */
+    public function testWrappingKeyIdsThatCannotBeReadAreAProblem(): void
+    {
+        $this->keyConnection()->beforeExecuting(static function (string $query): void {
+            if (str_starts_with($query, 'select distinct') && str_contains($query, 'wrap_key_id')) {
+                throw new \DomainException(self::SENTINEL);
+            }
+        });
+
+        self::assertSame(['The subject keys\' wrapping key ids could not be read (DomainException).'], $this->checks()->problems());
+    }
+
+    /**
      * An explicit ring still holds keys wrapped under the derived ring.
      *
      * @return void
@@ -409,6 +556,37 @@ final class PrivacyChecksTest extends TestCase
         $this->reconcile(4, self::ANCHORED_DIGEST);
 
         self::assertSame([], $this->checks()->problems());
+    }
+
+    /**
+     * Rows of `[the columns a reconciliation is tampered with]`.
+     *
+     * @return iterable<string, array{0: array<string, string>}>
+     */
+    public static function provideUnbelievableReconciliations(): iterable
+    {
+        yield from [
+            'a malformed signature'  => [['hmac' => 'not-hex']],
+            'an unknown signing key' => [['key_id' => 'gone']],
+        ];
+    }
+
+    /**
+     * A reconciliation that cannot be verified is not believed.
+     *
+     * @param  array<string, string>  $tampering
+     * @return void
+     */
+    #[DataProvider('provideUnbelievableReconciliations')]
+    public function testAReconciliationThatCannotBeVerifiedIsNotBelieved(array $tampering): void
+    {
+        $this->app?->instance(CheckpointAnchor::class, (new RecordingAnchor)->holdInstead(4, self::ANCHORED_DIGEST));
+
+        $row = $this->reconcile(4, self::ANCHORED_DIGEST);
+
+        $this->tamperJournal($row->sequence, $tampering);
+
+        self::assertSame(['The database does not hold the seal its anchor holds at sequence 4' . self::RESTORED_DATABASE], $this->checks()->problems());
     }
 
     /**
@@ -486,6 +664,56 @@ final class PrivacyChecksTest extends TestCase
 
         self::assertSame([], $this->checks()->problems());
         self::assertSame(['latest'], $empty->calls());
+    }
+
+    /**
+     * Rows of `[the anchor settings that configure no anchor]`.
+     *
+     * @return iterable<string, array{0: array<string, string>}>
+     */
+    public static function provideUnconfiguredAnchors(): iterable
+    {
+        yield from [
+            'a disk anchor on an unconfigured disk' => [['audit-log.integrity.anchor.driver' => 'disk', 'audit-log.integrity.anchor.disk' => 'anchors']],
+            'a malformed anchor driver'             => [['audit-log.integrity.anchor.driver' => 'ftp']],
+        ];
+    }
+
+    /**
+     * An anchor that is not configured is never asked for its head.
+     *
+     * @param  array<string, string>  $settings
+     * @return void
+     */
+    #[DataProvider('provideUnconfiguredAnchors')]
+    public function testAnUnconfiguredAnchorIsNeverAsked(array $settings): void
+    {
+        $anchor = (new RecordingAnchor)->holdInstead(4, self::ANCHORED_DIGEST);
+
+        $this->app?->instance(CheckpointAnchor::class, $anchor);
+
+        app(ConfigRepository::class)->set($settings);
+
+        self::assertSame([], $this->checks()->problems());
+        self::assertSame([], $anchor->calls());
+    }
+
+    /**
+     * Unreadable seals are named by the exception class alone.
+     *
+     * @return void
+     */
+    public function testSealsThatCannotBeReadAreAProblem(): void
+    {
+        $this->app?->instance(CheckpointAnchor::class, (new RecordingAnchor)->holdInstead(4, self::ANCHORED_DIGEST));
+
+        $this->keyConnection()->beforeExecuting(static function (string $query): void {
+            if (preg_match('/select [`"]seal_digest[`"] from/', $query) === 1) {
+                throw new \DomainException(self::SENTINEL);
+            }
+        });
+
+        self::assertSame(['The seals or the lifecycle journal could not be read (DomainException).'], $this->checks()->problems());
     }
 
     /**

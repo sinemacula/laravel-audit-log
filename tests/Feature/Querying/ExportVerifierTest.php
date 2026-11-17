@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Querying;
 
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
@@ -33,6 +34,7 @@ use Tests\Concerns\FailsEntryReads;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\Concerns\SeedsArtifacts;
+use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
 /**
@@ -293,6 +295,22 @@ final class ExportVerifierTest extends TestCase
                     $test->entriesTable()->where('id', $test->entryId())->delete();
                 },
                 [ExportFinding::ENTRY_MISSING],
+            ],
+            'an entry that does not decode' => [
+                static function (self $test): void {
+                    if (DB::connection(StorageConnection::name())->getDriverName() !== 'sqlite') {
+                        self::markTestSkipped('Only SQLite stores text that is not JSON in a JSON column.');
+                    }
+
+                    $test->entriesTable()->where('id', $test->entryId())->update(['context' => '{not json']);
+                },
+                [ExportFinding::ENTRY_UNVERIFIABLE],
+            ],
+            'an entry holding a float' => [
+                static function (self $test): void {
+                    $test->entriesTable()->where('id', $test->entryId())->update(['context' => '{"rate":1.5}']);
+                },
+                [ExportFinding::ENTRY_UNVERIFIABLE, ExportFinding::ENTRY_SWAPPED],
             ],
             'an entry signed by an unknown key' => [
                 static fn (self $test) => $test->editEntry(['key_id' => self::UNKNOWN_KEY]),
@@ -655,6 +673,53 @@ final class ExportVerifierTest extends TestCase
         $this->expectExceptionObject(AuditReadRefusedException::unrecorded());
 
         $this->verify();
+    }
+
+    /**
+     * Rows of `[whether the reporter throws]`.
+     *
+     * @return iterable<string, array{0: bool}>
+     */
+    public static function provideReporters(): iterable
+    {
+        yield from [
+            'a working reporter'  => [false],
+            'a throwing reporter' => [true],
+        ];
+    }
+
+    /**
+     * A failure whose record cannot be written is reported, then thrown.
+     *
+     * @param  bool  $throwsOnReport
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    #[DataProvider('provideReporters')]
+    public function testAFailureWhoseRecordFailsIsStillThrown(bool $throwsOnReport): void
+    {
+        $reporter = new RecordingExceptionHandler($throwsOnReport);
+        $thrown   = new \RuntimeException('The directory could not be reached.');
+
+        app()->instance(ExceptionHandler::class, $reporter);
+
+        $this->export();
+        $this->usePolicy(static fn (): never => throw $thrown);
+        $this->pointAtProbeTable();
+
+        try {
+            $this->verify();
+
+            self::fail('Expected the policy\'s exception.');
+        } catch (\RuntimeException $caught) {
+            self::assertSame($thrown, $caught);
+        }
+
+        $reports = array_map(static fn (\Throwable $report): string => $report->getMessage(), $reporter->reports());
+
+        self::assertContains(AuditReadRefusedException::unrecorded()->getMessage(), $reports);
+        self::assertSame(0, $this->probeCount());
     }
 
     /**

@@ -114,6 +114,22 @@ final class OcsfFormatterTest extends TestCase
     }
 
     /**
+     * A record whose event is not a code at all is a Base Event, not a failure.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAMalformedCodeIsABaseEvent(): void
+    {
+        $event = $this->event(self::record(['event' => 'Not A Code']), self::mapped());
+
+        self::assertSame(self::BASE_EVENT, array_intersect_key($event, self::BASE_EVENT));
+        self::assertSame('Not A Code', $event['message']);
+        self::assertArrayHasKey('unmapped', $event);
+    }
+
+    /**
      * A package code is classified by its definition's mapper, and one whose
      * definition names none is a Base Event.
      *

@@ -61,6 +61,7 @@ final class ChoosesDeliveryTest extends TestCase
         yield from [
             'after commit'                  => [static fn (PendingRecord $pending): PendingRecord => $pending->afterCommit(), Timing::AFTER_COMMIT, null],
             'after commit on a connection'  => [static fn (PendingRecord $pending): PendingRecord => $pending->afterCommit('business'), Timing::AFTER_COMMIT, 'business'],
+            'after transaction'             => [static fn (PendingRecord $pending): PendingRecord => $pending->afterTransaction(), Timing::AFTER_TRANSACTION, null],
             'immediately'                   => [static fn (PendingRecord $pending): PendingRecord => $pending->immediately(), Timing::IMMEDIATE, null],
             'transactional'                 => [static fn (PendingRecord $pending): PendingRecord => $pending->transactional(), Timing::TRANSACTIONAL, null],
             'transactional on a connection' => [static fn (PendingRecord $pending): PendingRecord => $pending->transactional('business'), Timing::TRANSACTIONAL, 'business'],
@@ -133,6 +134,11 @@ final class ChoosesDeliveryTest extends TestCase
                 static fn (PendingRecord $pending): PendingRecord => $pending->immediately(),
                 static fn (PendingRecord $pending): PendingRecord => $pending->transactional(),
                 'immediate',
+            ],
+            'after transaction, then after commit' => [
+                static fn (PendingRecord $pending): PendingRecord => $pending->afterTransaction(),
+                static fn (PendingRecord $pending): PendingRecord => $pending->afterCommit(),
+                'after_transaction',
             ],
             'after commit, then on another' => [
                 static fn (PendingRecord $pending): PendingRecord => $pending->afterCommit(),
@@ -242,6 +248,30 @@ final class ChoosesDeliveryTest extends TestCase
 
         self::assertSame([Timing::IMMEDIATE, true], [$failClosed->snapshot()->timing, $failClosed->snapshot()->failClosed]);
         self::assertSame([Timing::AFTER_COMMIT, false], [$afterCommit->snapshot()->timing, $afterCommit->snapshot()->failClosed]);
+    }
+
+    /**
+     * A fail-closed record is never written after the transaction, whichever is
+     * called first, and the refusal leaves the record as it was.
+     *
+     * @return void
+     */
+    public function testFailClosedAfterTransactionIsALogicError(): void
+    {
+        $failClosed = (new PendingRecord)->failClosed();
+        $deferred   = (new PendingRecord)->afterTransaction();
+
+        foreach ([static fn (): PendingRecord => $failClosed->afterTransaction(), static fn (): PendingRecord => $deferred->failClosed()] as $call) {
+            try {
+                $call();
+                self::fail('Expected after the transaction and fail-closed to be refused together.');
+            } catch (\LogicException $exception) {
+                self::assertSame(self::FAIL_CLOSED, $exception->getMessage());
+            }
+        }
+
+        self::assertSame([Timing::IMMEDIATE, true], [$failClosed->snapshot()->timing, $failClosed->snapshot()->failClosed]);
+        self::assertSame([Timing::AFTER_TRANSACTION, false], [$deferred->snapshot()->timing, $deferred->snapshot()->failClosed]);
     }
 
     /**

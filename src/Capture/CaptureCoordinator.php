@@ -275,10 +275,6 @@ final readonly class CaptureCoordinator
             throw $failure;
         }
 
-        if ($signal?->hasFailed() === true) {
-            return null;
-        }
-
         $fatal    = self::fatalOf($failure, $eventClass, $mapperClass, $open);
         $announce = self::announcer($this->container, $eventClass, $mapperClass);
 

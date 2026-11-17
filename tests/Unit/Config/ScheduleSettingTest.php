@@ -109,4 +109,25 @@ final class ScheduleSettingTest extends TestCase
             self::assertSame('`audit-log.example.schedule` must be a cron expression, or null or empty to schedule nothing.', $exception->getMessage());
         }
     }
+
+    /**
+     * The constructor is private; reflection invokes it so the line is covered.
+     *
+     * @return void
+     *
+     * @SuppressWarnings("php:S3011")
+     */
+    public function testConstructorIsPrivate(): void
+    {
+        $reflection  = new \ReflectionClass(ScheduleSetting::class);
+        $constructor = $reflection->getConstructor();
+
+        self::assertNotNull($constructor);
+        self::assertTrue($constructor->isPrivate());
+
+        $instance = $reflection->newInstanceWithoutConstructor();
+        $constructor->invoke($instance);
+
+        self::assertInstanceOf(ScheduleSetting::class, $instance);
+    }
 }

@@ -123,8 +123,11 @@ final class DisclosureManifest
     {
         try {
             return bin2hex(random_bytes(self::NONCE_BYTES));
+            // Only a failing system random source reaches this catch.
+            // @codeCoverageIgnoreStart
         } catch (RandomException) {
             throw new \UnexpectedValueException('A disclosure\'s nonce could not be made.');
+            // @codeCoverageIgnoreEnd
         }
     }
 

@@ -291,6 +291,34 @@ final class BundleAtomicityTest extends TestCase
     }
 
     /**
+     * A stored count read back as a float is a conflict; both rows are kept.
+     *
+     * @return void
+     */
+    public function testAFractionalStoredCountIsAConflict(): void
+    {
+        $connection = $this->storageConnection();
+
+        if ($connection->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores a fractional count in an integer column.');
+        }
+
+        $bundle = $this->bundle();
+        $id     = self::attachmentId($bundle);
+
+        $connection->table(EntrySettings::artifactsTable())->insert([...(new RowCodec)->encodeAttachment($bundle), 'member_count' => '3.5']);
+
+        $this->insertEntry($bundle);
+
+        self::assertIsFloat($connection->table(EntrySettings::artifactsTable())->where('id', $id)->value('member_count'));
+
+        $this->assertConflict($bundle);
+
+        self::assertSame(1, $this->entryCount());
+        self::assertSame(1, $this->artifactCount());
+    }
+
+    /**
      * The bundle's entry alone is a conflict, and only the entry is kept.
      *
      * @return void

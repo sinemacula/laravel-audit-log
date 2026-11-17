@@ -7,6 +7,7 @@ namespace Tests\Feature\Lifecycle;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportRejection;
 use SineMacula\Laravel\AuditLog\Lifecycle\ImportFile;
+use Tests\Fixtures\Lifecycle\UnreadableStreamWrapper;
 use Tests\TestCase;
 
 /**
@@ -24,13 +25,15 @@ final class ImportFileTest extends TestCase
     private array $files = [];
 
     /**
-     * Remove the files this test wrote.
+     * Remove the files this test wrote, and the unreadable wrapper.
      *
      * @return void
      */
     #[\Override]
     protected function tearDown(): void
     {
+        UnreadableStreamWrapper::unregister();
+
         foreach ($this->files as $file) {
             if (!is_file($file)) {
                 continue;
@@ -209,6 +212,35 @@ final class ImportFileTest extends TestCase
         $this->expectExceptionMessage(sprintf('The import file `%s` could not be opened for reading.', $path));
 
         (new ImportFile($path))->sha256();
+    }
+
+    /**
+     * A file that opens but cannot be read is refused, naming the path, and
+     * leaves the read digest unknown.
+     *
+     * @return void
+     */
+    public function testAFileThatCannotBeReadIsRefused(): void
+    {
+        UnreadableStreamWrapper::register();
+
+        $path    = UnreadableStreamWrapper::SCHEME . '://file';
+        $file    = new ImportFile($path);
+        $message = sprintf('The import file `%s` could not be read.', $path);
+
+        foreach ([$file->sha256(...), static fn () => iterator_to_array($file->lines(1024))] as $read) {
+            try {
+                $read();
+                self::fail('Expected the read to be refused.');
+            } catch (\UnexpectedValueException $exception) {
+                self::assertSame($message, $exception->getMessage());
+            }
+        }
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('An import file\'s read digest is known only once its lines have all been read.');
+
+        $file->readDigest();
     }
 
     /**

@@ -610,16 +610,17 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Rows of `[how the retention policy fails to answer]`.
+     * Rows of `[how the retention policy fails to answer, how its report
+     * starts]`.
      *
-     * @return iterable<string, array{0: \Closure(): void}>
+     * @return iterable<string, array{0: \Closure(): void, 1: non-empty-string}>
      */
     public static function provideFailingRetention(): iterable
     {
         yield from [
             'a malformed schedule' => [static function (): void {
                 app(ConfigRepository::class)->set('audit-log.retention.schedule', 'every night');
-            }],
+            }, 'Counting an import\'s lines past retention did not complete: '],
             'a throwing policy' => [static function (): void {
                 app()->instance(RetentionPolicy::class, new class implements RetentionPolicy {
                     /**
@@ -661,7 +662,10 @@ final class AuditImporterTest extends TestCase
                         return null;
                     }
                 });
-            }],
+            }, 'Counting an import\'s lines past retention did not complete: '],
+            'an unresolvable policy' => [static function (): void {
+                app()->bind(RetentionPolicy::class, static fn (): never => throw new \RuntimeException('org_01 is under review'));
+            }, 'Resolving the retention policy an import counts the lines past retention with did not complete: '],
         ];
     }
 
@@ -670,10 +674,11 @@ final class AuditImporterTest extends TestCase
      * reported once by class.
      *
      * @param  \Closure(): void  $fail
+     * @param  non-empty-string  $report
      * @return void
      */
     #[DataProvider('provideFailingRetention')]
-    public function testAFailingRetentionPolicyNeverFailsTheImport(\Closure $fail): void
+    public function testAFailingRetentionPolicyNeverFailsTheImport(\Closure $fail, string $report): void
     {
         $fail();
 
@@ -690,9 +695,9 @@ final class AuditImporterTest extends TestCase
         self::assertSame('complete', $this->batch((string) $result->batchId)['status']);
         self::assertCount(2, $reporter->reports());
 
-        foreach ($reporter->reports() as $report) {
-            self::assertStringStartsWith('Counting an import\'s lines past retention did not complete: ', $report->getMessage());
-            self::assertStringNotContainsString('org_01', $report->getMessage());
+        foreach ($reporter->reports() as $reported) {
+            self::assertStringStartsWith($report, $reported->getMessage());
+            self::assertStringNotContainsString('org_01', $reported->getMessage());
         }
     }
 

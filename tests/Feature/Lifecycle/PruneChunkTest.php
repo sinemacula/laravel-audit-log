@@ -10,6 +10,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
@@ -41,6 +42,7 @@ use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SealsEntries;
+use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\Fixtures\Support\FrozenClock;
 use Tests\TestCase;
@@ -56,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(PruneChunk::class)]
 final class PruneChunkTest extends TestCase
 {
-    use ConnectsSecondDatabases, InteractsWithOutbox, SealsEntries;
+    use ConnectsSecondDatabases, InteractsWithOutbox, SealsEntries, WritesTheJournal;
 
     /** @var string When every chunk runs. */
     private const string NOW = '2026-11-04 15:00:00';
@@ -380,6 +382,106 @@ final class PruneChunkTest extends TestCase
     }
 
     /**
+     * Rows of `[stored columns that leave the HMAC alone]`.
+     *
+     * @return iterable<string, array{0: array<string, string>}>
+     */
+    public static function provideUnverifiableColumns(): iterable
+    {
+        yield from [
+            'an unknown key'      => [['key_id' => 'retired']],
+            'undecodable details' => [['properties' => '{not json']],
+        ];
+    }
+
+    /**
+     * A candidate that cannot be decoded or names an unknown key deletes
+     * nothing.
+     *
+     * @param  array<string, string>  $columns
+     * @return void
+     */
+    #[DataProvider('provideUnverifiableColumns')]
+    public function testAnUnverifiableCandidateDeletesNothing(array $columns): void
+    {
+        $ids = [$this->seedEntry(self::OLD), $this->seedEntry(self::OLD)];
+
+        $this->sealAll();
+
+        if ($this->dataName() === 'undecodable details' && $this->maintenance()->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores text that is not JSON in a JSON column.');
+        }
+
+        $this->maintenance()->table(EntrySettings::table())->where('id', $ids[1])->update($columns);
+
+        $outcome = $this->runChunk($ids);
+
+        self::assertTrue($outcome->sealFailed);
+        self::assertSame([], $outcome->deleted);
+        self::assertCount(2, $this->present($ids));
+        self::assertSame(0, $this->maintenance()->table(LifecycleTables::journalTable())->count());
+    }
+
+    /**
+     * A prune record of the seal that cannot be read skips the seal.
+     *
+     * @return void
+     */
+    public function testAnUnreadablePruneRecordSkipsTheSeal(): void
+    {
+        $ids = [$this->seedEntry(self::OLD), $this->seedEntry(self::OLD)];
+
+        $this->sealAll();
+
+        $this->journalRow(JournalKind::PRUNE, ['run_id' => self::RUN], sealId: $this->loadSeal()->envelope->id);
+
+        $outcome = $this->runChunk($ids);
+
+        self::assertTrue($outcome->sealFailed);
+        self::assertSame([], $outcome->deleted);
+        self::assertCount(2, $this->present($ids));
+        self::assertSame(1, $this->maintenance()->table(LifecycleTables::journalTable())->where('kind', JournalKind::PRUNE->value)->count());
+    }
+
+    /**
+     * Rows of `[tenant columns over the captured record's]`.
+     *
+     * @return iterable<string, array{0: array<string, ?string>}>
+     */
+    public static function provideUnusableTenants(): iterable
+    {
+        yield from [
+            'a type without its id'  => [['tenant_type' => 'App\Models\Team', 'tenant_id' => null]],
+            'an id without its type' => [['tenant_type' => null, 'tenant_id' => '1']],
+            'an empty type'          => [['tenant_type' => '', 'tenant_id' => '1']],
+            'an unclean type'        => [['tenant_type' => "App\x07Team", 'tenant_id' => '1']],
+        ];
+    }
+
+    /**
+     * A verified entry whose tenant is half a pair or not a reference is never
+     * eligible.
+     *
+     * @param  array<string, ?string>  $tenant
+     * @return void
+     */
+    #[DataProvider('provideUnusableTenants')]
+    public function testAnUnusableTenantIsNeverEligible(array $tenant): void
+    {
+        $unusable = $this->seedEntry(self::OLD, $tenant);
+        $eligible = $this->seedEntry(self::OLD);
+
+        $this->sealAll();
+
+        $outcome = $this->runChunk([$unusable, $eligible]);
+
+        self::assertFalse($outcome->sealFailed);
+        self::assertSame([$eligible], $outcome->deleted);
+        self::assertSame(1, $outcome->ineligible);
+        self::assertSame([$unusable], $this->present([$unusable, $eligible]));
+    }
+
+    /**
      * Run a chunk of the first seal's ids in a lifecycle transaction.
      *
      * @param  list<string>  $ids
@@ -465,7 +567,7 @@ final class PruneChunkTest extends TestCase
      * id.
      *
      * @param  string  $occurredAt
-     * @param  array<string, string>  $fields
+     * @param  array<string, ?string>  $fields
      * @return string
      */
     private function seedEntry(string $occurredAt, array $fields = []): string

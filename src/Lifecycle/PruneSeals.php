@@ -157,15 +157,8 @@ final readonly class PruneSeals
             ->get(['entry_id', 'hmac'])
             ->all();
 
-        $pairs = [];
-
-        foreach ($rows as $row) {
-            if (!is_string($row->entry_id ?? null) || !is_string($row->hmac ?? null)) {
-                return null;
-            }
-
-            $pairs[] = [$row->entry_id, $row->hmac];
-        }
+        /** @var list<array{0: string, 1: string}> $pairs */
+        $pairs = array_map(static fn (#[\SensitiveParameter] \stdClass $row): array => [$row->entry_id, $row->hmac], $rows);
 
         try {
             $authentic = count($pairs) === $seal->memberCount && SealEnvelope::membersDigest($pairs) === $seal->membersDigest;

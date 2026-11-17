@@ -237,7 +237,16 @@ final class ExportBundleTest extends TestCase
      */
     public function testConstructorIsPrivate(): void
     {
-        self::assertTrue((new \ReflectionMethod(ExportBundle::class, '__construct'))->isPrivate());
+        $reflection  = new \ReflectionClass(ExportBundle::class);
+        $constructor = $reflection->getConstructor();
+
+        self::assertNotNull($constructor);
+        self::assertTrue($constructor->isPrivate());
+
+        $instance = $reflection->newInstanceWithoutConstructor();
+        $constructor->invoke($instance);
+
+        self::assertInstanceOf(ExportBundle::class, $instance);
     }
 
     /**

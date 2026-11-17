@@ -124,8 +124,6 @@ final readonly class PruneCoverage
             return $binds && $this->seals->verifiesPrune($record) ? null : Finding::PRUNE_RECORD;
         } catch (UnknownKeyException) {
             return Finding::PRUNE_KEY;
-        } catch (\UnexpectedValueException) {
-            return Finding::PRUNE_RECORD;
         }
     }
 

@@ -6,6 +6,7 @@ namespace Tests\Feature\Lifecycle;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -184,12 +185,15 @@ final class ReinstaterTest extends TestCase
     public static function provideForgedMarkers(): iterable
     {
         yield from [
-            'a row that is not there'       => ['missing', Finding::JOURNAL_GAP],
-            'a row at another sequence'     => ['sequence', Finding::JOURNAL_GAP],
-            'a row whose payload changed'   => ['payload', Finding::JOURNAL_SIGNATURE],
-            'a row of another kind'         => ['kind', Finding::JOURNAL_TRANSITION],
-            'another owner\'s erasure'      => ['owner', Finding::JOURNAL_TRANSITION],
-            'another floor than the row\'s' => ['floor', Finding::JOURNAL_TRANSITION],
+            'a row that is not there'         => ['missing', Finding::JOURNAL_GAP],
+            'a row at another sequence'       => ['sequence', Finding::JOURNAL_GAP],
+            'a row whose payload changed'     => ['payload', Finding::JOURNAL_SIGNATURE],
+            'a row of another kind'           => ['kind', Finding::JOURNAL_TRANSITION],
+            'another owner\'s erasure'        => ['owner', Finding::JOURNAL_TRANSITION],
+            'another floor than the row\'s'   => ['floor', Finding::JOURNAL_TRANSITION],
+            'a row whose payload is unread'   => ['unreadable', Finding::JOURNAL_GAP],
+            'an erasure printing no owner'    => ['unprinted', Finding::JOURNAL_TRANSITION],
+            'an erasure under an unknown key' => ['unknown key', Finding::JOURNAL_TRANSITION],
         ];
     }
 
@@ -225,6 +229,42 @@ final class ReinstaterTest extends TestCase
 
         self::assertSame($journal, $this->journalRows());
         self::assertSame($markers, $this->markerCount());
+    }
+
+    /**
+     * An erasure row moved under an unheld key after the chain verified it is
+     * refused as unsigned.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnErasureRowChangedAfterTheChainIsReadIsRefused(): void
+    {
+        $this->makeSubjectKey(self::owner());
+
+        $erasure = $this->eraseByHand(self::owner());
+        $changed = false;
+
+        DB::listen(function (QueryExecuted $query) use ($erasure, &$changed): void {
+            if ($changed || !str_contains($query->sql, KeyTables::ownerErasuresTable())) {
+                return;
+            }
+
+            $changed = true;
+
+            $this->tamperJournal($erasure->sequence, ['key_id' => 'k1999']);
+        });
+
+        try {
+            $this->reinstater()->reinstate(self::OPERATION, self::owner(), self::authority());
+
+            self::fail('Expected the reinstatement to be refused.');
+        } catch (JournalBrokenException $exception) {
+            self::assertSame([Finding::JOURNAL_SIGNATURE, $erasure->id], [$exception->finding, $exception->rowId]);
+        }
+
+        self::assertTrue($changed);
     }
 
     /**
@@ -373,25 +413,36 @@ final class ReinstaterTest extends TestCase
         $marker = $this->keyConnection()->table(KeyTables::ownerErasuresTable())->where('id', $erasure->id);
 
         match ($forgery) {
-            'missing'  => $marker->update(['id' => Str::uuid7()->toString()]),
-            'sequence' => $marker->update(['journal_sequence' => $erasure->sequence + 5]),
-            'payload'  => $this->tamperJournal($erasure->sequence, ['payload' => CanonicalEncoder::encode(['generation_floor' => 1])]),
-            'kind'     => $this->pointAt($marker, $this->journalRow(JournalKind::REWRAP, ['run_id' => self::OPERATION, 'rotate' => false, 'keys' => [], 'skipped' => []])),
-            'owner'    => $this->pointAt($marker, $this->otherOwnersErasure()),
-            'floor'    => $marker->update(['generation_floor' => 5]),
-            default    => self::fail(sprintf('No forgery is called `%s`.', $forgery)),
+            'missing'    => $marker->update(['id' => Str::uuid7()->toString()]),
+            'sequence'   => $marker->update(['journal_sequence' => $erasure->sequence + 5]),
+            'payload'    => $this->tamperJournal($erasure->sequence, ['payload' => CanonicalEncoder::encode(['generation_floor' => 1])]),
+            'unreadable' => $this->tamperJournal($erasure->sequence, ['payload' => 'not json']),
+            'floor'      => $marker->update(['generation_floor' => 5]),
+            default      => $this->pointAt($marker, $forgery, $erasure),
         };
     }
 
     /**
-     * Point the marker at the journal row, by its id and sequence.
+     * Point the marker, by id and sequence, at a signed journal row forged as
+     * the case says.
      *
      * @param  \Illuminate\Database\Query\Builder  $marker
-     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $row
+     * @param  string  $forgery
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $erasure
      * @return int
      */
-    private function pointAt(Builder $marker, JournalRow $row): int
+    private function pointAt(Builder $marker, string $forgery, JournalRow $erasure): int
     {
+        $payload = $erasure->payloadMap() ?? [];
+
+        $row = match ($forgery) {
+            'kind'        => $this->journalRow(JournalKind::REWRAP, ['run_id' => self::OPERATION, 'rotate' => false, 'keys' => [], 'skipped' => []]),
+            'owner'       => $this->otherOwnersErasure(),
+            'unprinted'   => $this->journalRow(JournalKind::ERASURE, ['generation_floor' => $payload['generation_floor'] ?? null]),
+            'unknown key' => $this->journalRow(JournalKind::ERASURE, [...$payload, 'fingerprint_key' => 'k1999']),
+            default       => self::fail(sprintf('No forgery is called `%s`.', $forgery)),
+        };
+
         return $marker->update(['id' => $row->id, 'journal_sequence' => $row->sequence]);
     }
 
