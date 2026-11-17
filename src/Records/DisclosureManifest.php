@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Records;
 
-use Random\RandomException;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\Enums\ArtifactKind;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
@@ -62,6 +61,7 @@ final class DisclosureManifest
      * @return \SineMacula\Laravel\AuditLog\Records\Manifest
      *
      * @throws \InvalidArgumentException
+     * @throws \Random\RandomException
      */
     public static function of(array $filters, ?array $scope, #[\SensitiveParameter] array $members, ?array $page = null): Manifest
     {
@@ -117,15 +117,11 @@ final class DisclosureManifest
      *
      * @return string
      *
-     * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      */
     private static function nonce(): string
     {
-        try {
-            return bin2hex(random_bytes(self::NONCE_BYTES));
-        } catch (RandomException) {
-            throw new \UnexpectedValueException('A disclosure\'s nonce could not be made.');
-        }
+        return bin2hex(random_bytes(self::NONCE_BYTES));
     }
 
     /**

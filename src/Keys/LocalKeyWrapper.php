@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Keys;
 
-use Random\RandomException;
 use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 
 /**
@@ -74,7 +73,7 @@ final readonly class LocalKeyWrapper implements KeyWrapper
      * @return string
      *
      * @throws \InvalidArgumentException
-     * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      * @throws \SineMacula\Laravel\AuditLog\Keys\UnknownWrappingKeyException
      */
     #[\Override]
@@ -112,7 +111,7 @@ final readonly class LocalKeyWrapper implements KeyWrapper
      * @return string
      *
      * @throws \InvalidArgumentException
-     * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      */
     private static function encrypt(#[\SensitiveParameter] string $dataKey, #[\SensitiveParameter] WrappingKey $key, string $context): string
     {
@@ -120,14 +119,10 @@ final readonly class LocalKeyWrapper implements KeyWrapper
             throw new \InvalidArgumentException(sprintf('A data key must be %d bytes.', self::DATA_KEY_BYTES));
         }
 
-        $nonce = self::nonce();
+        $nonce = random_bytes(self::NONCE_BYTES);
         $tag   = '';
 
         $ciphertext = openssl_encrypt($dataKey, self::CIPHER, self::aesKey($key), OPENSSL_RAW_DATA, $nonce, $tag, $context, self::TAG_BYTES);
-
-        if ($ciphertext === false) {
-            throw new \UnexpectedValueException('The data key could not be wrapped.');
-        }
 
         return self::base64url($nonce . $ciphertext . $tag);
     }
@@ -186,22 +181,6 @@ final readonly class LocalKeyWrapper implements KeyWrapper
         }
 
         return $sealed;
-    }
-
-    /**
-     * A fresh nonce from the system's random source.
-     *
-     * @return string
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function nonce(): string
-    {
-        try {
-            return random_bytes(self::NONCE_BYTES);
-        } catch (RandomException) {
-            throw new \UnexpectedValueException('A nonce could not be drawn.');
-        }
     }
 
     /**

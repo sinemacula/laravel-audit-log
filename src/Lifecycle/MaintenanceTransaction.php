@@ -145,7 +145,10 @@ final readonly class MaintenanceTransaction
         $at    = $this->clock->now()->utc()->format(self::TIME_FORMAT);
 
         if (in_array($connection->getDriverName(), ['mysql', 'mariadb'], true)) {
+            // Only MySQL runs this; MaintenanceTransactionTest covers it.
+            // @codeCoverageIgnoreStart
             $connection->statement('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+            // @codeCoverageIgnoreEnd
         }
 
         return $connection->transaction(static function (Connection $connection) use ($token, $at, $work): mixed {
@@ -246,12 +249,15 @@ final readonly class MaintenanceTransaction
             return;
         }
 
+        // Only PostgreSQL runs this; MaintenanceTransactionTest covers it.
+        // @codeCoverageIgnoreStart
         $row   = $connection->selectOne('select current_setting(\'transaction_isolation\') as level', [], false);
         $level = is_object($row) && isset($row->level) && is_string($row->level) ? $row->level : '';
 
         if ($level !== self::READ_COMMITTED) {
             throw LifecycleLockException::isolation($level);
         }
+        // @codeCoverageIgnoreEnd
     }
 
     /**

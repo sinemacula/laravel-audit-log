@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Support;
 
-use Random\RandomException;
-
 /**
  * Lower-case UUID v7s of a given time, kept apart from Laravel's process-wide
  * generator, which a given time would move for the host's own ids.
@@ -27,7 +25,7 @@ final class UuidV7
      * @param  \DateTimeInterface  $time
      * @return string
      *
-     * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      */
     public function next(\DateTimeInterface $time): string
     {
@@ -49,7 +47,7 @@ final class UuidV7
      * @param  \DateTimeInterface  $time
      * @return string
      *
-     * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      */
     public static function at(\DateTimeInterface $time): string
     {
@@ -62,16 +60,11 @@ final class UuidV7
      * @param  \DateTimeInterface  $time
      * @return string
      *
-     * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      */
     private static function bytesOf(\DateTimeInterface $time): string
     {
-        try {
-            $random = random_int(0, 0x3FFFFFFFFFFFFFFF);
-        } catch (RandomException) {
-            throw new \UnexpectedValueException('A UUID could not be drawn.');
-        }
-
+        $random       = random_int(0, 0x3FFFFFFFFFFFFFFF);
         $microseconds = (int) $time->format('Uu');
 
         return substr(pack('J', intdiv($microseconds, 1000)), 2) . pack('n', 0x7000 | $microseconds % 1000) . pack('J', PHP_INT_MIN | $random);

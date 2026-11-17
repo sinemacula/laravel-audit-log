@@ -92,6 +92,8 @@ final readonly class KeyStoreVerifier
      * @return \SineMacula\Laravel\AuditLog\Integrity\KeyStoreSummary
      *
      * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \UnexpectedValueException
      */
     public function verify(VerificationTally $tally, bool $packageKeys, bool $unwrap = true): KeyStoreSummary
     {
@@ -124,6 +126,7 @@ final readonly class KeyStoreVerifier
      * @return array<int|string, array<string, array{erased: bool, sequence: int, floor: int, kept: array<string, true>, keptAt: int}>>
      *
      * @throws \InvalidArgumentException
+     * @throws \JsonException
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -223,6 +226,8 @@ final readonly class KeyStoreVerifier
      * @return array{0: int, 1: int}
      *
      * @throws \InvalidArgumentException
+     * @throws \JsonException
+     * @throws \UnexpectedValueException
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -264,6 +269,7 @@ final readonly class KeyStoreVerifier
      * @return array<string, true>
      *
      * @throws \InvalidArgumentException
+     * @throws \JsonException
      */
     private function listed(#[\SensitiveParameter] array $page): array
     {
@@ -301,6 +307,8 @@ final readonly class KeyStoreVerifier
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $erasure
      * @param  string  $logId
      * @return array<string, true>
+     *
+     * @throws \JsonException
      */
     private function destroyedBy(#[\SensitiveParameter] JournalRow $erasure, string $logId): array
     {
@@ -308,12 +316,7 @@ final readonly class KeyStoreVerifier
             return [];
         }
 
-        try {
-            return self::keyIdsIn(($erasure->payloadMap() ?? [])['destroyed'] ?? null);
-        } catch (\JsonException) {
-            // A payload that cannot be read lists nothing
-            return [];
-        }
+        return self::keyIdsIn(($erasure->payloadMap() ?? [])['destroyed'] ?? null);
     }
 
     /**
@@ -332,6 +335,9 @@ final readonly class KeyStoreVerifier
      * @param  array{0: array<int|string, array<string, array{erased: bool, sequence: int, floor: int, kept: array<string, true>, keptAt: int}>>, 1: \SineMacula\Laravel\AuditLog\Integrity\RewrapCommitments}  $journal
      * @param  bool  $unwrap
      * @return list<\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding>
+     *
+     * @throws \InvalidArgumentException
+     * @throws \UnexpectedValueException
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -362,12 +368,13 @@ final readonly class KeyStoreVerifier
 
     /**
      * The finding the key row's signature gives, or `null` when it is the row's
-     * own under the key it names: one that does not match, or is malformed, is
-     * `key_substituted`, and one under a key the ring does not hold
-     * `key_unverifiable`.
+     * own under the key it names: one that does not match is `key_substituted`,
+     * and one under a key the ring does not hold `key_unverifiable`.
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $keyRow
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
+     *
+     * @throws \UnexpectedValueException
      */
     private function signatureFinding(#[\SensitiveParameter] SubjectKeyRow $keyRow): ?Finding
     {
@@ -375,8 +382,6 @@ final readonly class KeyStoreVerifier
             return $this->keySigner->verifies($keyRow) ? null : Finding::KEY_SUBSTITUTED;
         } catch (UnknownKeyException) {
             return Finding::KEY_UNVERIFIABLE;
-        } catch (\UnexpectedValueException) {
-            return Finding::KEY_SUBSTITUTED;
         }
     }
 
@@ -422,6 +427,8 @@ final readonly class KeyStoreVerifier
      * @param  array<int|string, array<string, array{erased: bool, sequence: int, floor: int, kept: array<string, true>, keptAt: int}>>  $owners
      * @return ?\SineMacula\Laravel\AuditLog\Integrity\Enums\Finding
      *
+     * @throws \InvalidArgumentException
+     *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
      * @formatter:on
@@ -450,19 +457,15 @@ final readonly class KeyStoreVerifier
      * @param  array<int|string, array<string, array{erased: bool, sequence: int, floor: int, kept: array<string, true>, keptAt: int}>>  $owners
      * @return ?array{erased: bool, floor: int, kept: array<string, true>}
      *
+     * @throws \InvalidArgumentException
+     *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
      * @formatter:on
      */
     private function stateOf(#[\SensitiveParameter] SubjectKeyRow $keyRow, #[\SensitiveParameter] array $owners): ?array
     {
-        try {
-            $owner = Reference::of($keyRow->ownerType, $keyRow->ownerId);
-        } catch (\InvalidArgumentException) {
-            // A verified row names a well-formed owner, so this one has none
-            return null;
-        }
-
+        $owner  = Reference::of($keyRow->ownerType, $keyRow->ownerId);
         $states = [];
 
         foreach ($owners as $fingerprintKey => $fingerprints) {
@@ -518,6 +521,8 @@ final readonly class KeyStoreVerifier
      * @param  ?\SineMacula\Laravel\AuditLog\Integrity\JournalRow  $journalRow
      * @return void
      *
+     * @throws \JsonException
+     *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
      * @formatter:on
@@ -550,16 +555,12 @@ final readonly class KeyStoreVerifier
      *
      * @param  \SineMacula\Laravel\AuditLog\Integrity\JournalRow  $journalRow
      * @return ?array{0: string, 1: string, 2: int, 3: ?array<string, true>}
+     *
+     * @throws \JsonException
      */
     private static function transitionOf(#[\SensitiveParameter] JournalRow $journalRow): ?array
     {
-        try {
-            $payload = $journalRow->payloadMap() ?? [];
-        } catch (\JsonException) {
-            // A payload that cannot be read names no owner
-            return null;
-        }
-
+        $payload        = $journalRow->payloadMap()     ?? [];
         $fingerprintKey = $payload['fingerprint_key']   ?? null;
         $fingerprint    = $payload['owner_fingerprint'] ?? null;
         $floor          = $payload['generation_floor']  ?? null;

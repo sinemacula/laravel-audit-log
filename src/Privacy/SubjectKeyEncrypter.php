@@ -60,6 +60,7 @@ final class SubjectKeyEncrypter implements FieldEncrypter
      * @throws \InvalidArgumentException
      * @throws \LogicException
      * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      * @throws \Throwable
      */
     #[\Override]
@@ -120,6 +121,7 @@ final class SubjectKeyEncrypter implements FieldEncrypter
      * @throws \InvalidArgumentException
      * @throws \LogicException
      * @throws \UnexpectedValueException
+     * @throws \Random\RandomException
      * @throws \Throwable
      */
     private function keyOf(#[\SensitiveParameter] KeyUnit $unit): ?array

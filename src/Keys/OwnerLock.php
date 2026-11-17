@@ -68,13 +68,7 @@ final readonly class OwnerLock
      */
     public static function key(#[\SensitiveParameter] Reference $owner): int
     {
-        $unpacked = unpack('J', substr(self::digest($owner, true), 0, self::KEY_BYTES));
-
-        if (!is_array($unpacked) || !is_int($unpacked[1] ?? null)) {
-            throw new \UnexpectedValueException('An owner\'s lock key could not be read.');
-        }
-
-        return $unpacked[1];
+        return unpack('J', substr(self::digest($owner, true), 0, self::KEY_BYTES))[1];
     }
 
     /**

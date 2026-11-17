@@ -445,10 +445,8 @@ final class ExportFile
 
         $linked = @link($temp, $place);
 
-        if ($linked && !@unlink($temp)) {
-            self::remove($place);
-
-            return false;
+        if ($linked) {
+            @unlink($temp);
         }
 
         return $linked;
