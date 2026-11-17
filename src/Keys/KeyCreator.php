@@ -106,13 +106,13 @@ final readonly class KeyCreator
      */
     private function createOn(Connection $connection, #[\SensitiveParameter] KeyUnit $unit): ?array
     {
+        // Only MySQL takes this lock; KeySessionEnginesTest covers it there.
+        // @codeCoverageIgnoreStart
         if (self::locksTheSession($connection)) {
-            // Only MySQL runs this; KeySessionEnginesTest covers it there.
-            // @codeCoverageIgnoreStart
             $this->lock->acquire($connection, $unit->owner, true);
-            // @codeCoverageIgnoreEnd
         }
 
+        // @codeCoverageIgnoreEnd
         try {
             $made = $connection->transaction(fn (Connection $connection): ?array => $this->createWithin($connection, $unit), 1);
         } catch (UniqueConstraintViolationException) {
