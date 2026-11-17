@@ -445,8 +445,13 @@ final class ExportFile
 
         $linked = @link($temp, $place);
 
-        if ($linked) {
-            @unlink($temp);
+        if ($linked && !@unlink($temp)) {
+            // Only a filesystem that allows a link but denies the unlink.
+            // @codeCoverageIgnoreStart
+            self::remove($place);
+
+            return false;
+            // @codeCoverageIgnoreEnd
         }
 
         return $linked;

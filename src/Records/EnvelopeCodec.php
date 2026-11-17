@@ -469,7 +469,8 @@ final readonly class EnvelopeCodec
     {
         ['recorded_at' => $recordedAt, 'integrity_version' => $integrityVersion, 'key_id' => $keyId, 'hmac' => $hmac, 'context' => $context, 'properties' => $properties] = $fields;
 
-        assert(is_string($recordedAt) && is_int($integrityVersion) && is_string($keyId) && is_string($hmac) && self::isJsonColumn($context) && self::isJsonColumn($properties));
+        assert(is_string($recordedAt) && is_int($integrityVersion) && is_string($keyId) && is_string($hmac));
+        assert(self::isJsonColumn($context) && self::isJsonColumn($properties));
 
         try {
             return FinalisedRecord::decoded($record(), $recordedAt, $integrityVersion, $keyId, $hmac, $context, $properties);

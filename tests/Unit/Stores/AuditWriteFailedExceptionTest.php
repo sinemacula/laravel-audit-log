@@ -34,8 +34,8 @@ final class AuditWriteFailedExceptionTest extends TestCase
     private const string STORE = 'SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore';
 
     /**
-     * Rows of `[diagnostics, message]`: all optional fields, none, each
-     * alone and no record read.
+     * Rows of `[diagnostics, message]`: all optional fields, none, each alone
+     * and no record read.
      *
      * @return iterable<string, array{0: \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics, 1: string}>
      */

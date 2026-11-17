@@ -62,17 +62,8 @@ jobs:
             -   name: PHPUnit
                 run: composer test:coverage
 
-            -   name: Upload coverage report
-                if: ${{ matrix.php == '8.3' }}
-                uses: actions/upload-artifact@v7
-                with:
-                    name: clover
-                    path: clover.xml
-                    retention-days: 1
-
             -   name: Coverage gate
-                run: |
-                    php -r '$m = simplexml_load_file("clover.xml")->project->metrics; $s = (int) $m["statements"]; $c = (int) $m["coveredstatements"]; echo "Lines covered: {$c}/{$s}\n"; exit($c < $s ? 1 : 0);'
+                uses: sinemacula/.github/.github/actions/coverage-gate@v3.1.0
 
             -   name: Publish code coverage
                 if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.php == '8.3' }}

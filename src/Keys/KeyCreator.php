@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\AuditLog\Keys;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Random\RandomException;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\KeyWrapper;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
@@ -76,7 +77,6 @@ final readonly class KeyCreator
      * @throws \UnexpectedValueException
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \SineMacula\Laravel\AuditLog\Keys\OwnerLockTimeoutException
-     * @throws \Random\RandomException
      * @throws \Throwable
      */
     public function create(#[\SensitiveParameter] KeyUnit $unit): ?array
@@ -145,7 +145,6 @@ final readonly class KeyCreator
      * @throws \UnexpectedValueException
      * @throws \Illuminate\Database\QueryException
      * @throws \SineMacula\Laravel\AuditLog\Keys\OwnerLockTimeoutException
-     * @throws \Random\RandomException
      * @throws \Throwable
      */
     private function createWithin(Connection $connection, #[\SensitiveParameter] KeyUnit $unit): ?array
@@ -184,7 +183,6 @@ final readonly class KeyCreator
      *
      * @throws \InvalidArgumentException
      * @throws \UnexpectedValueException
-     * @throws \Random\RandomException
      * @throws \Throwable
      */
     private function insert(Connection $connection, #[\SensitiveParameter] KeyUnit $unit, int $generation): array
@@ -264,7 +262,6 @@ final readonly class KeyCreator
             return;
         }
 
-        // PostgreSQL in an outer transaction only; no engine test runs it.
         $row   = $connection->selectOne('select current_setting(\'transaction_isolation\') as level', [], false);
         $level = is_object($row) && isset($row->level) && is_string($row->level) ? $row->level : '';
 
@@ -291,10 +288,17 @@ final readonly class KeyCreator
      *
      * @return string
      *
-     * @throws \Random\RandomException
+     * @throws \UnexpectedValueException
      */
     private static function dataKey(): string
     {
-        return random_bytes(self::DATA_KEY_BYTES);
+        try {
+            return random_bytes(self::DATA_KEY_BYTES);
+            // Only a failing system random source reaches this catch.
+            // @codeCoverageIgnoreStart
+        } catch (RandomException) {
+            throw new \UnexpectedValueException('A data key could not be drawn.');
+            // @codeCoverageIgnoreEnd
+        }
     }
 }

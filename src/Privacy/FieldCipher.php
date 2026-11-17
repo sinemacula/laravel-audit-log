@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Privacy;
 
+use Random\RandomException;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 
 /**
@@ -59,7 +60,7 @@ final class FieldCipher
      * @return array{v: int, k: string, c: string}
      *
      * @throws \InvalidArgumentException
-     * @throws \Random\RandomException
+     * @throws \UnexpectedValueException
      */
     public static function seal(
         #[\SensitiveParameter]
@@ -78,10 +79,17 @@ final class FieldCipher
 
         $fieldKey       = self::fieldKey($dataKey, $entryId);
         $additionalData = self::additionalData($logId, $keyId, self::VERSION, $entryId, $path);
-        $nonce          = random_bytes(self::NONCE_BYTES);
+        $nonce          = self::nonce();
         $tag            = '';
 
         $ciphertext = openssl_encrypt($plaintext, self::CIPHER, $fieldKey, OPENSSL_RAW_DATA, $nonce, $tag, $additionalData, self::TAG_BYTES);
+
+        if ($ciphertext === false) {
+            // Only an OpenSSL build without AES-256-GCM fails here.
+            // @codeCoverageIgnoreStart
+            throw new \UnexpectedValueException('The plaintext could not be sealed.');
+            // @codeCoverageIgnoreEnd
+        }
 
         return ['v' => self::VERSION, 'k' => $keyId, 'c' => self::base64url($nonce . $ciphertext . $tag)];
     }
@@ -195,6 +203,25 @@ final class FieldCipher
         }
 
         return $sealed;
+    }
+
+    /**
+     * A fresh nonce from the system's random source.
+     *
+     * @return string
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function nonce(): string
+    {
+        try {
+            return random_bytes(self::NONCE_BYTES);
+            // Only a failing system random source reaches this catch.
+            // @codeCoverageIgnoreStart
+        } catch (RandomException) {
+            throw new \UnexpectedValueException('A nonce could not be drawn.');
+            // @codeCoverageIgnoreEnd
+        }
     }
 
     /**

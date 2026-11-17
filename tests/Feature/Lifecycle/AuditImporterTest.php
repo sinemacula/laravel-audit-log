@@ -613,7 +613,7 @@ final class AuditImporterTest extends TestCase
      * Rows of `[how the retention policy fails to answer, how its report
      * starts]`.
      *
-     * @return iterable<string, array{0: \Closure(): void, 1: string}>
+     * @return iterable<string, array{0: \Closure(): void, 1: non-empty-string}>
      */
     public static function provideFailingRetention(): iterable
     {
@@ -674,7 +674,7 @@ final class AuditImporterTest extends TestCase
      * reported once by class.
      *
      * @param  \Closure(): void  $fail
-     * @param  string  $report
+     * @param  non-empty-string  $report
      * @return void
      */
     #[DataProvider('provideFailingRetention')]

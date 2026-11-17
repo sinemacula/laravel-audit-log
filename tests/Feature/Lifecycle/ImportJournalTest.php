@@ -257,7 +257,7 @@ final class ImportJournalTest extends TestCase
                 return;
             }
 
-            $log->append(array_map(static fn (mixed $binding): int|string|null => is_int($binding) || is_string($binding) ? $binding : null, $query->bindings));
+            $log->append(array_values(array_map(static fn (mixed $binding): int|string|null => is_int($binding) || is_string($binding) ? $binding : null, $query->bindings)));
         });
 
         return $log;
