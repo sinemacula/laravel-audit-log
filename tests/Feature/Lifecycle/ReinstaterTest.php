@@ -6,6 +6,7 @@ namespace Tests\Feature\Lifecycle;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -228,6 +229,42 @@ final class ReinstaterTest extends TestCase
 
         self::assertSame($journal, $this->journalRows());
         self::assertSame($markers, $this->markerCount());
+    }
+
+    /**
+     * An erasure row moved under an unheld key after the chain verified it is
+     * refused as unsigned.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnErasureRowChangedAfterTheChainIsReadIsRefused(): void
+    {
+        $this->makeSubjectKey(self::owner());
+
+        $erasure = $this->eraseByHand(self::owner());
+        $changed = false;
+
+        DB::listen(function (QueryExecuted $query) use ($erasure, &$changed): void {
+            if ($changed || !str_contains($query->sql, KeyTables::ownerErasuresTable())) {
+                return;
+            }
+
+            $changed = true;
+
+            $this->tamperJournal($erasure->sequence, ['key_id' => 'k1999']);
+        });
+
+        try {
+            $this->reinstater()->reinstate(self::OPERATION, self::owner(), self::authority());
+
+            self::fail('Expected the reinstatement to be refused.');
+        } catch (JournalBrokenException $exception) {
+            self::assertSame([Finding::JOURNAL_SIGNATURE, $erasure->id], [$exception->finding, $exception->rowId]);
+        }
+
+        self::assertTrue($changed);
     }
 
     /**
