@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Performance;
 
 use Illuminate\Auth\Events\Authenticated;
+use Illuminate\Auth\Events\Failed;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Schema\Blueprint;
@@ -155,6 +156,20 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     {
         $this->assertStatementBudget(0, 1, 0, 0, function (): void {
             Auth::guard('web')->login($this->user);
+        });
+
+        $this->assertWritten(1);
+    }
+
+    /**
+     * A failed sign-in is one insert.
+     *
+     * @return void
+     */
+    public function testAFailedSignInIsOneInsert(): void
+    {
+        $this->assertStatementBudget(0, 1, 0, 0, static function (): void {
+            Event::dispatch(new Failed('web', null, ['email' => 'alice@example.com']));
         });
 
         $this->assertWritten(1);

@@ -7,6 +7,7 @@ namespace Tests\Feature\Capture;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Application;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Listeners\CaptureMappedEvent;
 use SineMacula\Laravel\AuditLog\Models\AuditEntry;
 use SineMacula\Laravel\AuditLog\Recorder;
+use Tests\Concerns\CreatesSigningInUsers;
 use Tests\Concerns\CreatesWatchedModels;
 use Tests\Concerns\SearchesForSecrets;
 use Tests\Fixtures\Capture\Events\AccountEvent;
@@ -33,6 +35,7 @@ use Tests\Fixtures\Capture\Events\PortalEvent;
 use Tests\Fixtures\Capture\Events\PortalSignedIn;
 use Tests\Fixtures\Capture\Events\RenewedPortalSession;
 use Tests\Fixtures\Capture\Events\SignedInToPortal;
+use Tests\Fixtures\Capture\Mappers\AttributingMapper;
 use Tests\Fixtures\Capture\Mappers\CodelessMapper;
 use Tests\Fixtures\Capture\Mappers\ConsumingMapper;
 use Tests\Fixtures\Capture\Mappers\CoveringMapper;
@@ -50,6 +53,8 @@ use Tests\Fixtures\Capture\Mappers\ThrowingMapper;
 use Tests\Fixtures\Capture\Mappers\TimingMapper;
 use Tests\Fixtures\Capture\Mappers\TransactionalMapper;
 use Tests\Fixtures\Capture\Models\PlainLine;
+use Tests\Fixtures\Contributors\ActorFillingContributor;
+use Tests\Fixtures\Contributors\TenantContributor;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\TestCase;
 
@@ -67,7 +72,7 @@ use Tests\TestCase;
 #[CoversClass(MapperRegistry::class)]
 final class MappedEventsTest extends TestCase
 {
-    use CreatesWatchedModels, SearchesForSecrets;
+    use CreatesSigningInUsers, CreatesWatchedModels, SearchesForSecrets;
 
     /** @var string What a mapping of the package's own events is refused with. */
     private const string PACKAGE_EVENTS_REFUSAL = 'The package\'s own events are never mapped.';
@@ -404,6 +409,42 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
+     * A mapper naming an actor, and one naming none.
+     *
+     * @return iterable<string, array{object, ?string, ?string}>
+     */
+    public static function provideMappedActors(): iterable
+    {
+        yield 'a named actor' => [new SignedInToPortal, 'user', '42'];
+        yield 'no actor' => [new PortalSignedIn, null, null];
+    }
+
+    /**
+     * A mapper's actor and tenant, `null` included, beat a contributor's and
+     * the signed-in user.
+     *
+     * @param  object  $event
+     * @param  ?string  $actorType
+     * @param  ?string  $actorId
+     * @return void
+     */
+    #[DataProvider('provideMappedActors')]
+    #[DefineEnvironment('mapThePortalEventsToAttributing')]
+    public function testAMapperBeatsAContributorAndTheSignedInUser(object $event, ?string $actorType, ?string $actorId): void
+    {
+        $this->createUsersTable();
+
+        Auth::guard('web')->login(self::newUser('alice@example.com'));
+
+        Event::dispatch($event);
+
+        $entry = AuditEntry::query()->where('event', AttributingMapper::CODE)->sole();
+
+        self::assertSame([$actorType, $actorId, 'organisation', AttributingMapper::TENANT], [$entry->actor_type, $entry->actor_id, $entry->tenant_type, $entry->tenant_id]);
+        self::assertSame([], $this->failures);
+    }
+
+    /**
      * Map the portal interface to the portal mapper while the application
      * boots.
      *
@@ -499,6 +540,23 @@ final class MappedEventsTest extends TestCase
     {
         self::mapWhileBooting($app, static function (): void {
             AuditLog::map(PortalEvent::class, CoveringMapper::class);
+        });
+    }
+
+    /**
+     * Map the portal interface to the attributing mapper, with a tenant and an
+     * actor contributor, while the application boots.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function mapThePortalEventsToAttributing(Application $app): void
+    {
+        self::mapWhileBooting($app, static function (): void {
+            AuditLog::map(PortalEvent::class, AttributingMapper::class);
+            AuditLog::map(PortalSignedIn::class, AttributingMapper::class);
+            AuditLog::contribute(TenantContributor::class);
+            AuditLog::contribute(ActorFillingContributor::class);
         });
     }
 
