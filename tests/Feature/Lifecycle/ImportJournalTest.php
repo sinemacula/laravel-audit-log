@@ -216,6 +216,10 @@ final class ImportJournalTest extends TestCase
     {
         $started = $this->journalRow(JournalKind::IMPORT_STARTED, ['batch_id' => self::BATCH]);
 
+        if ($this->dataName() === 'an unreadable time' && DB::connection(StorageConnection::name())->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores text that is no time in a timestamp column.');
+        }
+
         $this->tamperJournal($started->sequence, $columns);
 
         try {

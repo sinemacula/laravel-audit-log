@@ -158,7 +158,7 @@ final readonly class PruneSeals
             ->all();
 
         /** @var list<array{0: string, 1: string}> $pairs */
-        $pairs = array_map(static fn (\stdClass $row): array => [$row->entry_id, $row->hmac], $rows);
+        $pairs = array_map(static fn (#[\SensitiveParameter] \stdClass $row): array => [$row->entry_id, $row->hmac], $rows);
 
         try {
             $authentic = count($pairs) === $seal->memberCount && SealEnvelope::membersDigest($pairs) === $seal->membersDigest;

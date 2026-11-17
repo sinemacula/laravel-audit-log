@@ -408,6 +408,10 @@ final class PruneChunkTest extends TestCase
 
         $this->sealAll();
 
+        if ($this->dataName() === 'undecodable details' && $this->maintenance()->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores text that is not JSON in a JSON column.');
+        }
+
         $this->maintenance()->table(EntrySettings::table())->where('id', $ids[1])->update($columns);
 
         $outcome = $this->runChunk($ids);

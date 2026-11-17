@@ -1271,6 +1271,11 @@ final class PrunerTest extends TestCase
         $id = $this->storeEntry(self::OLD);
 
         $this->sealAll();
+
+        if ($this->dataName() === 'an unreadable time' && $this->maintenance()->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores text that is no time in a timestamp column.');
+        }
+
         $this->maintenance()->table(EntrySettings::table())->where('id', $id)->update($columns);
 
         $result = $this->prune();

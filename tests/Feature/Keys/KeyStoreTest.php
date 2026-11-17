@@ -343,6 +343,10 @@ final class KeyStoreTest extends TestCase
 
         [$key] = $this->makeSubjectKey($owner);
 
+        if ($this->keyConnection()->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores text in an integer column.');
+        }
+
         $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['generation' => 'x']);
 
         $this->expectException(\UnexpectedValueException::class);

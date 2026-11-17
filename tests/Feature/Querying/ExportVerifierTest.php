@@ -298,6 +298,10 @@ final class ExportVerifierTest extends TestCase
             ],
             'an entry that does not decode' => [
                 static function (self $test): void {
+                    if (DB::connection(StorageConnection::name())->getDriverName() !== 'sqlite') {
+                        self::markTestSkipped('Only SQLite stores text that is not JSON in a JSON column.');
+                    }
+
                     $test->entriesTable()->where('id', $test->entryId())->update(['context' => '{not json']);
                 },
                 [ExportFinding::ENTRY_UNVERIFIABLE],
