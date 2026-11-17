@@ -105,7 +105,7 @@ budgets, so run it serially with `phpunit`, never with `paratest`.
 
 ### Standards
 
-- PHPStan level 8 compliance
+- PHPStan level 9 compliance
 - Full type hints on all public method parameters and return types
 - PHPDoc on all methods and classes
 - Namespaces keep to the dependency rules in `tests/Unit/Architecture/NamespaceDependenciesTest.php`: each rule in
