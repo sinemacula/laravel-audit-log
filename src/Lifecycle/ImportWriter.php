@@ -463,24 +463,21 @@ final readonly class ImportWriter
         $size  = $connection->getDriverName() === 'sqlite' ? self::SQLITE_ROWS_PER_INSERT : self::ROWS_PER_INSERT;
         $table = EntrySettings::table();
         $group = [];
-        $bytes = 0;
+        $left  = $this->bytesPerInsert;
 
+        // Laravel sends no query for an empty group.
         foreach ($rows as $row) {
             $length = array_sum(array_map(static fn (int|string|null $value): int => strlen((string) $value), $row));
 
-            if ($group !== [] && (count($group) === $size || $bytes + $length > $this->bytesPerInsert)) {
+            if (count($group) === $size || $length > $left) {
                 $connection->table($table)->insert($group);
 
                 $group = [];
-                $bytes = 0;
+                $left  = $this->bytesPerInsert;
             }
 
             $group[] = $row;
-            $bytes += $length;
-        }
-
-        if ($group === []) {
-            return;
+            $left -= $length;
         }
 
         $connection->table($table)->insert($group);
