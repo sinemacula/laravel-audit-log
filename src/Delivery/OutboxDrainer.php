@@ -180,10 +180,20 @@ final readonly class OutboxDrainer
      */
     private function processSafely(#[\SensitiveParameter] OutboxClaim $claim, StringEncrypter $encrypter, EnvelopeCodec $codec, DrainResult $result): void
     {
+        $code = null;
+
         try {
-            $this->process($claim, $encrypter, $codec, $result);
+            $record = $this->recordOf($claim, $encrypter, $codec, $result);
+
+            if ($record === null) {
+                return;
+            }
+
+            $code = $record->record->event;
+
+            $this->process($record, $claim, $result);
         } catch (\Throwable $exception) {
-            $this->recover($claim, $this->diagnosticsOf($exception, $claim), $result);
+            $this->recover($claim, $this->diagnosticsOf($exception, $claim, $code), $result);
         }
     }
 
@@ -221,13 +231,12 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Work the claimed row: abandon it past its attempts, else complete it as
-     * pruned or deliver it. Every row is checked against the tombstones, since
-     * a requeued row may hold a record pruned since.
+     * Complete the row as pruned or deliver its record. Every row is checked
+     * against the tombstones, since a requeued row may hold a record pruned
+     * since.
      *
+     * @param  \SineMacula\Laravel\AuditLog\Records\FinalisedRecord  $record
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
-     * @param  \Illuminate\Contracts\Encryption\StringEncrypter  $encrypter
-     * @param  \SineMacula\Laravel\AuditLog\Records\EnvelopeCodec  $codec
      * @param  \SineMacula\Laravel\AuditLog\Delivery\DrainResult  $result
      * @return void
      *
@@ -236,20 +245,8 @@ final readonly class OutboxDrainer
      * @throws \LogicException
      * @throws \Throwable
      */
-    private function process(#[\SensitiveParameter] OutboxClaim $claim, StringEncrypter $encrypter, EnvelopeCodec $codec, DrainResult $result): void
+    private function process(#[\SensitiveParameter] FinalisedRecord $record, #[\SensitiveParameter] OutboxClaim $claim, DrainResult $result): void
     {
-        if ($claim->attempts > $this->settings->maxAttempts()) {
-            $this->fail($claim, self::ABANDONED, $this->abandoned($claim), $result);
-
-            return;
-        }
-
-        $record = $this->recordOf($claim, $encrypter, $codec, $result);
-
-        if ($record === null) {
-            return;
-        }
-
         if ($this->tombstones->isPruned($claim->id)) {
             $this->completePruned($claim, $result);
 
@@ -261,7 +258,7 @@ final readonly class OutboxDrainer
 
     /**
      * The row's record once decrypted and verified, or `null` once the row is
-     * failed because it was not.
+     * failed as abandoned past its attempts or because it was not.
      *
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
      * @param  \Illuminate\Contracts\Encryption\StringEncrypter  $encrypter
@@ -274,12 +271,18 @@ final readonly class OutboxDrainer
      */
     private function recordOf(#[\SensitiveParameter] OutboxClaim $claim, StringEncrypter $encrypter, EnvelopeCodec $codec, DrainResult $result): ?FinalisedRecord
     {
+        if ($claim->attempts > $this->settings->maxAttempts()) {
+            $this->fail($claim, self::ABANDONED, $this->abandoned($claim), $result);
+
+            return null;
+        }
+
         try {
             return $codec->decode($encrypter->decryptString($claim->payload), $claim->id);
         } catch (DecryptException $exception) {
-            $this->fail($claim, self::UNDECRYPTABLE, $this->diagnosticsOf($exception, $claim), $result);
+            $this->fail($claim, self::UNDECRYPTABLE, $this->diagnosticsOf($exception, $claim, null), $result);
         } catch (EnvelopeRejectedException $exception) {
-            $this->fail($claim, $exception->failure->value, $this->diagnosticsOf($exception, $claim), $result);
+            $this->fail($claim, $exception->failure->value, $this->diagnosticsOf($exception, $claim, null), $result);
         }
 
         return null;
@@ -471,16 +474,16 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Payload-free diagnostics of a failure working the row, whose record, and
-     * so its code, is unknown.
+     * Payload-free diagnostics of a failure working the row.
      *
      * @param  \Throwable  $exception
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
+     * @param  ?string  $code  the record's event code, or `null` before it is read
      * @return \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics
      */
-    private function diagnosticsOf(#[\SensitiveParameter] \Throwable $exception, #[\SensitiveParameter] OutboxClaim $claim): WriteDiagnostics
+    private function diagnosticsOf(#[\SensitiveParameter] \Throwable $exception, #[\SensitiveParameter] OutboxClaim $claim, ?string $code): WriteDiagnostics
     {
-        return WriteDiagnostics::of($exception, $claim->id, null, FailedOperation::DRAIN, get_debug_type($this->outbox));
+        return WriteDiagnostics::of($exception, $claim->id, $code, FailedOperation::DRAIN, get_debug_type($this->outbox));
     }
 
     /**
