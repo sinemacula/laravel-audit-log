@@ -479,9 +479,11 @@ final readonly class ImportWriter
             $bytes += $length;
         }
 
-        if ($group !== []) {
-            $connection->table($table)->insert($group);
+        if ($group === []) {
+            return;
         }
+
+        $connection->table($table)->insert($group);
     }
 
     /**

@@ -124,9 +124,11 @@ final class ImportInsertPacketTest extends TestCase
         $inserts    = [];
 
         DB::listen(static function (QueryExecuted $query) use (&$inserts): void {
-            if (str_starts_with(strtolower($query->sql), 'insert') && str_contains($query->sql, EntrySettings::table())) {
-                $inserts[] = array_sum(array_map(static fn (mixed $value): int => is_scalar($value) ? strlen((string) $value) : 0, $query->bindings));
+            if (!str_starts_with(strtolower($query->sql), 'insert') || !str_contains($query->sql, EntrySettings::table())) {
+                return;
             }
+
+            $inserts[] = array_sum(array_map(static fn (mixed $value): int => is_scalar($value) ? strlen((string) $value) : 0, $query->bindings));
         });
 
         $result = app(AuditImporter::class)->import(ImportSource::fromFile($this->importFile(), 'crm-eu'), new Authority(Reference::of('App\Models\User', '7'), 'case.review'));
@@ -134,7 +136,7 @@ final class ImportInsertPacketTest extends TestCase
 
         self::assertIsNumeric($packet);
         self::assertGreaterThan((int) $packet, array_sum($inserts));
-        self::assertLessThanOrEqual(ImportWriter::BYTES_PER_INSERT, max($inserts));
+        self::assertLessThanOrEqual(ImportWriter::BYTES_PER_INSERT, max(0, ...$inserts));
         self::assertSame(ImportStatus::COMPLETE, $result->status);
         self::assertSame(self::LINES, $result->imported);
         self::assertSame(self::LINES, $connection->table(EntrySettings::table())->count());
