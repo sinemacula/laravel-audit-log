@@ -206,6 +206,7 @@ final class AuditRecordedDispatchTest extends TestCase
     public function testAQueuedListenerFollowsLaravelsHandling(): void
     {
         Queue::fake();
+        Exceptions::fake();
 
         $listener = new class implements ShouldQueue {
             /**
@@ -226,6 +227,7 @@ final class AuditRecordedDispatchTest extends TestCase
         AuditLog::record(self::CODE);
 
         Queue::assertPushed(CallQueuedListener::class, static fn (CallQueuedListener $job): bool => $job->class === $listener::class);
+        Exceptions::assertNothingReported();
 
         self::assertSame(1, $this->entryCount());
     }
