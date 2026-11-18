@@ -67,20 +67,19 @@ final class StackRecoveryTest extends TestCase
     public function testAFailedDestinationSpillsTheRecordAndEachReplayCallsItAgain(): void
     {
         $reporter = new RecordingExceptionHandler;
-        $down     = true;
         $calls    = 0;
         $failed   = [];
-        $recorded = 0;
+
+        /** @var \ArrayObject<int, string> $recorded */
+        $recorded = new \ArrayObject;
 
         app()->instance(ExceptionHandler::class, $reporter);
         app()->instance(AuditStore::class, new StackAuditStore([
             'database' => $this->store(),
-            'siem'     => new CallbackStore(static function () use (&$down, &$calls): void {
-                if ($down) {
+            'siem'     => new CallbackStore(static function () use (&$calls): void {
+                if (++$calls === 1) {
                     throw new \RuntimeException('The siem is down.');
                 }
-
-                $calls++;
             }),
         ]));
 
@@ -88,8 +87,8 @@ final class StackRecoveryTest extends TestCase
             $failed[] = $event->id;
         });
 
-        Event::listen(AuditRecorded::class, static function () use (&$recorded): void {
-            $recorded++;
+        Event::listen(AuditRecorded::class, static function (AuditRecorded $event) use ($recorded): void {
+            $recorded->append($event->id);
         });
 
         $this->captureLogLines();
@@ -103,18 +102,17 @@ final class StackRecoveryTest extends TestCase
         self::assertInstanceOf(AuditWriteFailedException::class, $reports[0]);
         self::assertSame('siem', $reports[0]->destination);
         self::assertSame([$record->id], $failed);
-        self::assertSame(0, $recorded);
+        self::assertCount(0, $recorded);
 
-        $down       = false;
         $this->path = (string) tempnam(sys_get_temp_dir(), 'audit-log-spill');
 
         file_put_contents($this->path, $this->spillLines()[0] . "\n");
 
         self::assertSame(1, app(Replayer::class)->spill($this->path, false)->replayed());
-        self::assertSame([1, 1, 1], [$this->entryCount(), $calls, $recorded]);
+        self::assertSame([1, 2, [$record->id]], [$this->entryCount(), $calls, $recorded->getArrayCopy()]);
 
         app(Replayer::class)->spill($this->path, false);
 
-        self::assertSame([1, 2], [$this->entryCount(), $calls]);
+        self::assertSame([1, 3], [$this->entryCount(), $calls]);
     }
 }
