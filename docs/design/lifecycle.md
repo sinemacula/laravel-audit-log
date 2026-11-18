@@ -482,7 +482,7 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
   `testAFileChangedDuringTheRunFails`
 - `tests/Feature/Console/EraseCommandTest.php` `testAFailurePrintsItsClassNotItsMessage`,
   `testAReapplyReconcilesTheRestore`
-- `tests/Unit/Querying/Enums/PackageActivityTest.php` `testOnlyTheExportIsProtected`, `testNoLifecycleCodeIsARead`
+- `tests/Unit/Querying/Enums/PackageActivityTest.php` `testOnlyTheExportIsProtected`
 - `tests/Feature/Lifecycle/AuditImporterTest.php` `testADryRunWritesNothing`, `testEveryColumnOfAnImportedRow`,
   `testTheBatchIsNotExternallyVerified`, `testImportedRowsAreNotDispatchedOrDelivered`,
   `testTheHoldIsPlacedBeforeTheFirstEntry`, `testTheStartAndTheHoldCommitTogether`,
