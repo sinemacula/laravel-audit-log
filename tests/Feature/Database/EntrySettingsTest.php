@@ -182,8 +182,7 @@ final class EntrySettingsTest extends TestCase
     }
 
     /**
-     * A table setting that is `null` or empty names its default table, the
-     * same for every table.
+     * Every table setting that is `null` or empty names its default table.
      *
      * @param  string  $key
      * @param  ?string  $value
