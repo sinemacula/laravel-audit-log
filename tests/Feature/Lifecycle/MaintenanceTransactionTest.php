@@ -246,15 +246,7 @@ final class MaintenanceTransactionTest extends TestCase
      */
     public function testAMismatchedInstallationRefusesBeforeTheLock(): void
     {
-        $this->otherDatabase();
-
-        DB::connection(self::OTHER)->table(IntegrityTables::stateTable())->insert([
-            'name'       => InstallationIdentity::NAME,
-            'value'      => json_encode(['id' => '01932b4e-9000-7000-8000-00000000abcd']),
-            'updated_at' => '2026-10-01 00:00:00.000000',
-        ]);
-
-        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
+        $this->anotherInstallation();
 
         $log = $this->statements();
 
