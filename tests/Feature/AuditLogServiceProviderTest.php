@@ -723,6 +723,28 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * An extender on a resolved shared default is seen only by the class it
+     * returns.
+     *
+     * @return void
+     */
+    public function testIsPackageDefaultSeesAnExtenderOnAResolvedSharedDefaultByItsClass(): void
+    {
+        $app = $this->app;
+
+        self::assertInstanceOf(Container::class, $app);
+
+        app(AuditAccessPolicy::class);
+        $app->extend(AuditAccessPolicy::class, static fn (AuditAccessPolicy $policy): AuditAccessPolicy => $policy);
+
+        self::assertTrue(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class));
+
+        $app->extend(AuditAccessPolicy::class, static fn (): AuditAccessPolicy => new ClosurePolicy(static fn (): AccessScope => AccessScope::all()));
+
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class));
+    }
+
+    /**
      * The runtime state is scoped: one instance per scope, forgotten as Octane
      * and queue workers do.
      *
