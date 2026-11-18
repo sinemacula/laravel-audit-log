@@ -206,8 +206,8 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * `--max-seconds` bounds the run in place of `retention.max_seconds`, and
-     * a run without it takes the configured budget.
+     * `--max-seconds` bounds the run in place of `retention.max_seconds`, and a
+     * run without it takes the configured budget.
      *
      * @return void
      */
@@ -219,9 +219,11 @@ final class PruneCommandTest extends TestCase
         }
 
         DB::listen(static function (QueryExecuted $query): void {
-            if (str_starts_with($query->sql, 'insert') && in_array(JournalKind::PRUNE->value, $query->bindings, true)) {
-                CarbonImmutable::setTestNow(CarbonImmutable::now()->addSeconds(61));
+            if (!str_starts_with($query->sql, 'insert') || !in_array(JournalKind::PRUNE->value, $query->bindings, true)) {
+                return;
             }
+
+            CarbonImmutable::setTestNow(CarbonImmutable::now()->addSeconds(61));
         });
 
         self::assertSame(0, $this->prune(['--max-seconds' => '60']));

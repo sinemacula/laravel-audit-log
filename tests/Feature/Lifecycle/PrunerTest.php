@@ -227,6 +227,7 @@ final class PrunerTest extends TestCase
             'org_a' => 30,
             'org_b' => 365,
             null    => 90,
+            default => throw new \UnexpectedValueException('The policy was asked of an unknown tenant.'),
         });
 
         $orgA = $this->storeEntry(self::OLD, ['tenant_id' => 'org_a']);
@@ -1109,7 +1110,7 @@ final class PrunerTest extends TestCase
         $this->sealAll();
         $this->anotherInstallation();
 
-        // The storage connection is the odd one out, so the maintenance connection still reaches the log a dry run reads
+        // The storage side is the odd one, so a dry run still reads the log
         app(ConfigRepository::class)->set(['audit-log.storage.connection' => self::OTHER, 'audit-log.storage.maintenance_connection' => self::CONNECTION]);
 
         $planned = app(Pruner::class)->run(true);
@@ -1121,7 +1122,9 @@ final class PrunerTest extends TestCase
         self::assertSame([PruneStatus::FAILED, 'prune_failed', false, 0], [$refused->status, $refused->failure, $refused->committed, $refused->deleted]);
         self::assertSame([$id], $this->present([$id]));
         self::assertSame([], $this->kinds());
-        self::assertSame([sprintf('The prune run `%s` stopped with %s; the chunks it committed stand.', $refused->operationId, InstallationMismatchException::class)], $this->reported());
+        $stopped = sprintf('The prune run `%s` stopped with %s; the chunks it committed stand.', $refused->operationId, InstallationMismatchException::class);
+
+        self::assertSame([$stopped], $this->reported());
     }
 
     /**

@@ -136,6 +136,8 @@ final class HoldKeeperTest extends TestCase
      * another installation are refused, and the hold stays active.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testAHoldAndAReleaseRefuseAnotherInstallation(): void
     {
