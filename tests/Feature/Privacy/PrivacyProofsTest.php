@@ -86,6 +86,12 @@ final class PrivacyProofsTest extends TestCase
     /** @var string Another wrapping secret of 32 bytes. */
     private const string SECOND_SECRET = 'second-wrapping-secret-of-32-byt';
 
+    /** @var string The address a call is captured from. */
+    private const string ADDRESS = '203.0.113.7';
+
+    /** @var string The note a call carries for the customer. */
+    private const string NOTE = 'Called about a refund.';
+
     /**
      * Freeze the clock, record reports, and define the charge and the call.
      *
@@ -194,14 +200,7 @@ final class PrivacyProofsTest extends TestCase
 
         self::assertSame([self::ERASED, self::IBAN], self::fragmentsOf($this->shown($id)));
 
-        self::assertSame(0, Artisan::call('audit-log:seal', ['--sweep' => true]));
-
-        $exit    = Artisan::call('audit-log:verify');
-        $printed = Artisan::output();
-
-        self::assertSame(0, $exit, $printed);
-        self::assertMatchesRegularExpression('/^Keys: 2 verified, 1 erased, 0 findings\.$/m', $printed);
-        self::assertStringContainsString('Verification passed.', $printed);
+        self::assertMatchesRegularExpression('/^Keys: 2 verified, 1 erased, 0 findings\.$/m', $this->assertVerifies());
     }
 
     /**
@@ -234,6 +233,37 @@ final class PrivacyProofsTest extends TestCase
 
         self::assertSame(self::CARD, $this->shown($charge)->properties['card'] ?? null);
         self::assertSame(self::ERASED, $this->shown($call)->properties['summary'] ?? null);
+    }
+
+    /**
+     * A rotation supersedes a kept key, so its unit drops new fields.
+     *
+     * @return void
+     */
+    public function testARotationStopsTheUnitAPartialErasureKept(): void
+    {
+        $owner = self::customer('42');
+
+        $this->charge($owner);
+        AuditLog::event(self::CALL)->by($owner)->withProperties(['summary' => 'Asked about a refund.'])->record();
+        AuditLog::lifecycle()->hold(HoldScope::all()->categories('billing'), self::authority(), HoldBasis::LEGAL_CLAIM);
+        $this->later();
+
+        self::assertSame(ErasureStatus::PARTIAL, AuditLog::lifecycle()->erase($owner, self::authority(), partial: true)->status);
+        self::assertSame(0, Artisan::call('audit-log:rewrap', [...self::AUTHORITY, '--reason' => 'keys.rotated', '--rotate' => true]));
+
+        $id = $this->charge($owner, '5555');
+
+        $this->revealEverything();
+
+        $properties = $this->shown($id)->properties;
+        $keys       = $this->keysOf(new KeyUnit($owner, null, 'billing'));
+
+        self::assertArrayNotHasKey('card', $properties);
+        self::assertSame([['card'], self::IBAN], [$properties['_audit']['omitted']['paths'] ?? null, $properties['iban'] ?? null]);
+        self::assertSame([[1, KeyState::SUPERSEDED]], array_map(static fn (SubjectKeyRow $key): array => [$key->generation, $key->state], $keys));
+
+        $this->assertVerifies();
     }
 
     /**
@@ -327,7 +357,7 @@ final class PrivacyProofsTest extends TestCase
 
         $this->useRing(['w2' => self::SECOND_SECRET], 'w2');
 
-        self::assertSame(['w2'], array_values(array_unique(array_map(static fn (SubjectKeyRow $key): ?string => $key->wrapKeyId, $this->storedSubjectKeys()))));
+        self::assertSame(['w2'], $this->wrapKeyIds());
 
         self::assertSame(0, Artisan::call('audit-log:rewrap', [...self::AUTHORITY, '--reason' => 'keys.rotated', '--rotate' => true]));
 
@@ -340,6 +370,62 @@ final class PrivacyProofsTest extends TestCase
 
         self::assertSame(self::CARD, $this->shown($first)->properties['card'] ?? null);
         self::assertSame('6666', $this->shown($second)->properties['card'] ?? null);
+    }
+
+    /**
+     * Keys wrapped under the key derived from `app.key` survive its rotation.
+     *
+     * @return void
+     */
+    public function testDerivedWrappingKeysSurviveAnAppKeyRotation(): void
+    {
+        $id     = $this->charge(self::customer('42'));
+        $config = app(ConfigRepository::class);
+        $before = app(KeyWrapper::class)->currentKeyId();
+
+        $config->set(['app.previous_keys' => [$config->get('app.key')], 'app.key' => 'base64:' . base64_encode('rotated audit-log test key!!!!!!')]);
+
+        $after = app(KeyWrapper::class)->currentKeyId();
+
+        self::assertNotSame($before, $after);
+        self::assertStringStartsWith('d-', $after);
+        self::assertSame([$before], $this->wrapKeyIds());
+
+        $this->revealEverything();
+
+        self::assertSame([self::CARD, self::IBAN], self::fragmentsOf($this->shown($id)));
+
+        $this->assertVerifies();
+
+        self::assertSame(0, Artisan::call('audit-log:rewrap', [...self::AUTHORITY, '--reason' => 'keys.rotated']));
+        self::assertSame([$after], $this->wrapKeyIds());
+    }
+
+    /**
+     * An owned note and an encrypted address reveal; erasing the note's owner
+     * erases the note alone.
+     *
+     * @return void
+     */
+    public function testAnOwnedNoteAndAnEncryptedAddressRevealAndOnlyTheNoteIsErased(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.redaction.ip', 'encrypt');
+
+        $customer = self::customer('42');
+        $pending  = AuditLog::event(self::CALL)->by(Reference::of('App\Models\User', '3'))->withNote(self::NOTE, $customer);
+
+        $pending->fillClient(self::ADDRESS, null);
+
+        $id = $pending->record()->id;
+
+        $this->later();
+        $this->revealEverything();
+
+        self::assertSame([self::NOTE, self::ADDRESS], $this->noteAndAddressOf($id));
+
+        AuditLog::lifecycle()->erase($customer, self::authority());
+
+        self::assertSame([self::ERASED, self::ADDRESS], $this->noteAndAddressOf($id));
     }
 
     /**
@@ -418,6 +504,47 @@ final class PrivacyProofsTest extends TestCase
         usort($keys, static fn (SubjectKeyRow $one, SubjectKeyRow $other): int => $one->generation <=> $other->generation);
 
         return $keys;
+    }
+
+    /**
+     * The distinct wrapping key ids of the stored keys.
+     *
+     * @return list<?string>
+     */
+    private function wrapKeyIds(): array
+    {
+        return array_values(array_unique(array_map(static fn (SubjectKeyRow $key): ?string => $key->wrapKeyId, $this->storedSubjectKeys())));
+    }
+
+    /**
+     * The note and the address of the entry, as a page shows them.
+     *
+     * @param  string  $id
+     * @return array{0: mixed, 1: ?string}
+     */
+    private function noteAndAddressOf(string $id): array
+    {
+        $entry = $this->shown($id);
+
+        return [$entry->properties['_audit']['note'] ?? null, $entry->ip];
+    }
+
+    /**
+     * Seal every entry, assert the log verifies, and return what it printed.
+     *
+     * @return string
+     */
+    private function assertVerifies(): string
+    {
+        self::assertSame(0, Artisan::call('audit-log:seal', ['--sweep' => true]));
+
+        $exit    = Artisan::call('audit-log:verify');
+        $printed = Artisan::output();
+
+        self::assertSame(0, $exit, $printed);
+        self::assertStringContainsString('Verification passed.', $printed);
+
+        return $printed;
     }
 
     /**

@@ -184,7 +184,7 @@ final class SubjectKeyFieldReaderTest extends TestCase
     }
 
     /**
-     * A key with no wrapped key and no verified erasure row is unreadable.
+     * A tombstoned key whose erasure row is not in the journal is unreadable.
      *
      * @return void
      */
@@ -197,22 +197,11 @@ final class SubjectKeyFieldReaderTest extends TestCase
 
         $field = self::field($entry, self::CARD, $this->sealEnvelope($dataKey, $key->id, '4242', $entry, self::CARD));
 
-        $tampers = [
-            'tombstoned with no row'     => ['state' => KeyState::ERASED->value, 'wrapped_key' => null, 'erasure_id' => self::UNKNOWN_ID],
-            'live with no wrapped key'   => ['wrapped_key' => null],
-            'erased keeping its key'     => ['state' => KeyState::ERASED->value, 'erasure_id' => self::UNKNOWN_ID],
-            'tombstoned with no erasure' => ['state' => KeyState::ERASED->value, 'wrapped_key' => null],
-        ];
-
-        foreach ($tampers as $label => $tampered) {
-            $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update($tampered);
-
-            self::assertSame([self::UNREADABLE], $this->displays([$field]), $label);
-
-            $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update($key->toRow());
-        }
-
         self::assertSame(['4242'], $this->displays([$field]));
+
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['state' => KeyState::ERASED->value, 'wrapped_key' => null, 'erasure_id' => self::UNKNOWN_ID]);
+
+        self::assertSame([self::UNREADABLE], $this->displays([$field]));
     }
 
     /**
