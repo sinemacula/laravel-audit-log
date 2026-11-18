@@ -699,6 +699,30 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * A default with an extender is not the package's default, resolved or not.
+     *
+     * @return void
+     */
+    public function testIsPackageDefaultIsFalseForAnExtendedDefault(): void
+    {
+        $app = $this->app;
+
+        self::assertInstanceOf(Container::class, $app);
+
+        $app->extend(AuditAccessPolicy::class, static fn (AuditAccessPolicy $policy): AuditAccessPolicy => $policy);
+        $app->extend(FieldReader::class, static fn (FieldReader $reader): FieldReader => $reader);
+
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class));
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class));
+
+        app(AuditAccessPolicy::class);
+        app(FieldReader::class);
+
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, AuditAccessPolicy::class));
+        self::assertFalse(AuditLogServiceProvider::isPackageDefault($app, FieldReader::class));
+    }
+
+    /**
      * The runtime state is scoped: one instance per scope, forgotten as Octane
      * and queue workers do.
      *
