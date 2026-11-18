@@ -99,14 +99,18 @@ final class CommitQueue
      */
     public function deferToEnd(DatabaseTransactionRecord $transaction, #[\SensitiveParameter] \Closure $onCommit, #[\SensitiveParameter] \Closure $onRollback): void
     {
-        $outermost = $this->outermostOf($transaction);
-        $flush     = $this->flushOf($outermost);
+        $outermost  = $this->outermostOf($transaction);
+        $flush      = $this->flushOf($outermost);
+        $connection = $outermost->connection;
+        $level      = $outermost->level - 1;
 
         $flush->expect();
         $flush->add($onCommit, $onRollback);
 
-        $outermost->addCallbackForRollback(function () use ($outermost, $onRollback): void {
-            $this->rolledBack[] = ['connection' => $outermost->connection, 'level' => $outermost->level - 1, 'work' => $onRollback];
+        // Capturing the transaction in its own callback would keep it, and its
+        // flush, until the cycle collector runs
+        $outermost->addCallbackForRollback(function () use ($connection, $level, $onRollback): void {
+            $this->rolledBack[] = ['connection' => $connection, 'level' => $level, 'work' => $onRollback];
         });
     }
 

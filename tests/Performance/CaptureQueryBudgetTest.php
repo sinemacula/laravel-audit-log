@@ -147,6 +147,48 @@ final class CaptureQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * A denied Gate check in a transaction costs nothing until the commit, then
+     * one insert, plus the commit's question on PostgreSQL.
+     *
+     * @return void
+     */
+    public function testADeniedGateCheckInATransactionIsOneInsertAtCommit(): void
+    {
+        DB::connection()->beginTransaction();
+
+        $this->assertStatementBudget(0, 0, 0, 0, fn (): bool => Gate::forUser($this->user)->denies(self::DENIED));
+
+        $this->assertStatementBudget($this->commitQuestionReads(), 1, 0, 0, static function (): void {
+            DB::connection()->commit();
+        });
+
+        self::assertStringContainsString(EntrySettings::table(), $this->capturedWrites()[0]);
+        $this->assertWritten(1);
+    }
+
+    /**
+     * A denied Gate check in a transaction that rolls back is one plain insert
+     * once the rollback ends, with no savepoint or transaction.
+     *
+     * @return void
+     */
+    public function testADeniedGateCheckInARolledBackTransactionIsOnePlainInsert(): void
+    {
+        DB::connection()->beginTransaction();
+
+        $this->assertStatementBudget(0, 0, 0, 0, fn (): bool => Gate::forUser($this->user)->denies(self::DENIED));
+
+        $rollBack = static function (): void {
+            DB::connection()->rollBack();
+        };
+
+        $this->assertTransactionBudget(0, 0, fn () => $this->assertStatementBudget(0, 1, 0, 1, $rollBack));
+
+        self::assertStringContainsString(EntrySettings::table(), $this->capturedWrites()[0]);
+        $this->assertWritten(1);
+    }
+
+    /**
      * A sign-in of a user already held is one insert; the session guard reads
      * nothing.
      *
