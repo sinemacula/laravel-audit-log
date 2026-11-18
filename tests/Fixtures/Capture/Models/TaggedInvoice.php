@@ -9,7 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
  * An invoice that belongs to many tags through a plain pivot table with no
- * `using()` model, so attaching a tag dispatches no model event.
+ * `using()` model, so attaching a tag dispatches no model event, and through
+ * the custom pivot models, which do.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,5 +46,25 @@ final class TaggedInvoice extends Model
     public function tags(): BelongsToMany
     {
         return $this->belongsToMany(Tag::class, self::PIVOT_TABLE);
+    }
+
+    /**
+     * The tags the invoice is attached to through the keyed pivot model.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\Tests\Fixtures\Capture\Models\Tag, $this, \Tests\Fixtures\Capture\Models\TagLink>
+     */
+    public function linkedTags(): BelongsToMany
+    {
+        return $this->belongsToMany(Tag::class, TagLink::TABLE)->using(TagLink::class);
+    }
+
+    /**
+     * The tags the invoice is attached to through the keyless pivot model.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\Tests\Fixtures\Capture\Models\Tag, $this, \Tests\Fixtures\Capture\Models\KeylessTagLink>
+     */
+    public function keylessLinkedTags(): BelongsToMany
+    {
+        return $this->belongsToMany(Tag::class, self::PIVOT_TABLE)->using(KeylessTagLink::class);
     }
 }

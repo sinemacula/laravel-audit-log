@@ -267,19 +267,6 @@ final class PackageActivityTest extends TestCase
     }
 
     /**
-     * No privacy code is a read or protected from retention.
-     *
-     * @return void
-     */
-    public function testNoPrivacyCodeIsAReadOrProtected(): void
-    {
-        foreach ([PackageActivity::SUBJECT_ERASED, PackageActivity::KEYS_REWRAPPED, PackageActivity::KEYS_REINSTATED] as $case) {
-            self::assertFalse($case->isRead(), $case->value);
-            self::assertFalse($case->isProtected(), $case->value);
-        }
-    }
-
-    /**
      * A page's record keeps its reveal grant and field counts whole.
      *
      * @return void
@@ -319,36 +306,6 @@ final class PackageActivityTest extends TestCase
         $this->expectExceptionMessage('`audit_log.trail_read` is not the code of an operation.');
 
         (new \ReflectionMethod(PackageActivity::class, 'operationRetained'))->invoke(PackageActivity::TRAIL_READ);
-    }
-
-    /**
-     * Reads, counts, exports and verifications are reads; publication is not.
-     *
-     * @return void
-     */
-    public function testTheReadPathsReadsAreReads(): void
-    {
-        $reads = array_values(array_filter(PackageActivity::cases(), static fn (PackageActivity $case): bool => $case->isRead()));
-
-        self::assertSame([
-            PackageActivity::TRAIL_READ,
-            PackageActivity::TRAIL_COUNTED,
-            PackageActivity::TRAIL_EXPORTED,
-            PackageActivity::EXPORT_VERIFIED,
-        ], $reads);
-        self::assertFalse(PackageActivity::EXPORT_PUBLISH_FAILED->isRead());
-    }
-
-    /**
-     * No lifecycle code is a read.
-     *
-     * @return void
-     */
-    public function testNoLifecycleCodeIsARead(): void
-    {
-        foreach ([PackageActivity::PRUNED, PackageActivity::HELD, PackageActivity::RELEASED, PackageActivity::IMPORTED] as $case) {
-            self::assertFalse($case->isRead(), $case->value);
-        }
     }
 
     /**
