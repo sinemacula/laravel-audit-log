@@ -267,8 +267,8 @@ whose HMAC verified, and answers each, in order and in number; it keeps no state
 the ciphertext. One that throws, or answers another count or anything but readings, costs the page's fields, each
 `unreadable`, and is reported once, by its class alone.
 
-Any map of exactly `v`, `k` and `c` in the properties or the context is read as an encryption envelope, even one an
-application stored itself.
+Any map of exactly `v`, `k` and `c`, with `v` an integer from 1 and `k` and `c` non-empty strings, in the properties or
+the context is read as an encryption envelope, even one an application stored itself.
 
 ## Audited reads
 
@@ -353,6 +353,10 @@ AuditLog::trail()->visibleTo($auditor)->count();
 
 $this->assertAudited('audit_log.trail_counted');
 ```
+
+An export under the fake publishes its file and bundle and is asserted as `audit_log.trail_exported`, but its journal
+is held by the fake, never the database, so `verifyExport()` finds it `entry_missing`. Verify an export against the
+database store.
 
 ## Package codes
 

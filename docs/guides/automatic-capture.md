@@ -158,6 +158,10 @@ AuditLog::watch(Invoice::class, as: 'invoice', fields: ['status', 'amount', 'app
   subject.
 - The class is watched exactly. Eloquent names each event after the model's own class, so a subclass is not watched
   through its parent: watch it too. The package's own models are never watched.
+- A `belongsToMany()` relation's `using()` pivot model is watched like any model: attaching saves it and detaching
+  deletes it, one row each, naming the pivot row by its own key. So the pivot model needs a key, such as an
+  incrementing id: one with `Pivot`'s defaults has none and fails each capture as the last section says, while the
+  attach or detach goes on.
 - A field the instance hides, through `$hidden` or a `$visible` list that leaves it out, or casts encrypted
   (`encrypted`, `encrypted:*` or an `AsEncrypted*` class) refuses the capture unless the watch gives it an explicit
   handling; `RETAIN` is not explicit. It is checked on the instance itself, before any value is read: the capture fails

@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Integration\Capture;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DeadlockException;
@@ -53,6 +54,12 @@ final class CaptureHostFatalTest extends TestCase
 
     /** @var int The code of the sanitised deadlock. */
     private const int SANITISED_CODE = 40001;
+
+    /** @var string What a driver says of a deadlock. */
+    private const string DEADLOCK = 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction';
+
+    /** @var string A second connection, on which no transaction is open. */
+    private const string SECOND = 'audit_second';
 
     /** @var \SineMacula\Laravel\AuditLog\Testing\FakeAuditStore The store records reach unless a test binds another. */
     private FakeAuditStore $fake;
@@ -205,18 +212,70 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * Rows of `[failure, before the write]`: a deadlock and a lost connection,
-     * raised by the store or by a contributor.
+     * A deadlock naming a connection with no transaction open is contained,
+     * though the host has one open on another.
      *
-     * @return iterable<string, array{0: \Closure(): \Illuminate\Database\QueryException, 1: bool}>
+     * @return void
+     */
+    public function testADeadlockNamingAConnectionWithoutATransactionIsContained(): void
+    {
+        $config = app(ConfigRepository::class);
+        $host   = $this->host();
+
+        $config->set('database.connections.' . self::SECOND, $config->array('database.connections.' . self::CONNECTION));
+
+        self::assertSame(0, DB::connection(self::SECOND)->transactionLevel());
+
+        $this->contributeRaising(static function (): never {
+            throw self::queryFailure(self::DEADLOCK, self::SECOND);
+        });
+
+        $host->beginTransaction();
+
+        self::assertNull(self::capture());
+        self::assertSame(1, $host->transactionLevel());
+        self::assertCount(1, $this->reporter->reports());
+        self::assertInstanceOf(CaptureFailedException::class, $this->reporter->reports()[0]);
+        $this->assertSaidOnce(QueryException::class);
+    }
+
+    /**
+     * A deadlock naming no connection, raised while the host has a transaction
+     * open, propagates sanitised.
+     *
+     * @return void
+     */
+    public function testAnUnnamedDeadlockInsideAHostTransactionPropagatesSanitised(): void
+    {
+        $host = $this->host();
+
+        $this->contributeRaising(static function (): never {
+            throw self::unnamedDeadlock();
+        });
+
+        $host->beginTransaction();
+
+        self::assertSanitisedDeadlock($this->thrownBy(static fn () => self::capture()));
+        self::assertSame(1, $host->transactionLevel());
+        $this->assertNothingSpilledOrReported();
+        $this->assertSaidOnce(\PDOException::class);
+    }
+
+    /**
+     * Rows of `[failure, before the write]`: a deadlock and a lost connection,
+     * raised by the store or by a contributor, and a contributor's deadlock
+     * naming no connection.
+     *
+     * @return iterable<string, array{0: \Closure(): \Throwable, 1: bool}>
      */
     public static function provideFailures(): iterable
     {
         yield from [
-            'a store\'s deadlock'              => [self::deadlock(...), false],
-            'a store\'s lost connection'       => [self::lostConnection(...), false],
-            'a contributor\'s deadlock'        => [self::deadlock(...), true],
-            'a contributor\'s lost connection' => [self::lostConnection(...), true],
+            'a store\'s deadlock'               => [self::deadlock(...), false],
+            'a store\'s lost connection'        => [self::lostConnection(...), false],
+            'a contributor\'s deadlock'         => [self::deadlock(...), true],
+            'a contributor\'s lost connection'  => [self::lostConnection(...), true],
+            'a contributor\'s unnamed deadlock' => [self::unnamedDeadlock(...), true],
         ];
     }
 
@@ -224,7 +283,7 @@ final class CaptureHostFatalTest extends TestCase
      * With no transaction open the failure ends nothing, so the capture
      * contains it, returns `null` and reports it once.
      *
-     * @param  \Closure(): \Illuminate\Database\QueryException  $failure
+     * @param  \Closure(): \Throwable  $failure
      * @param  bool  $beforeTheWrite
      * @return void
      */
@@ -396,7 +455,17 @@ final class CaptureHostFatalTest extends TestCase
      */
     private static function deadlock(): QueryException
     {
-        return self::queryFailure('SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction');
+        return self::queryFailure(self::DEADLOCK);
+    }
+
+    /**
+     * A driver's deadlock that names no connection.
+     *
+     * @return \PDOException
+     */
+    private static function unnamedDeadlock(): \PDOException
+    {
+        return new \PDOException(self::DEADLOCK);
     }
 
     /**
@@ -411,14 +480,16 @@ final class CaptureHostFatalTest extends TestCase
     }
 
     /**
-     * A query failure on the worker's connection with the driver's message,
-     * holding the secret in its bindings and its message.
+     * A query failure on the connection, the worker's unless another is given,
+     * with the driver's message, holding the secret in its bindings and its
+     * message.
      *
      * @param  string  $message
+     * @param  string  $connection
      * @return \Illuminate\Database\QueryException
      */
-    private static function queryFailure(string $message): QueryException
+    private static function queryFailure(string $message, string $connection = self::CONNECTION): QueryException
     {
-        return new QueryException(self::CONNECTION, 'insert into "audit_log_entries" ("note") values (?)', [self::SECRET], new \PDOException($message . ' ' . self::SECRET));
+        return new QueryException($connection, 'insert into "audit_log_entries" ("note") values (?)', [self::SECRET], new \PDOException($message . ' ' . self::SECRET));
     }
 }
