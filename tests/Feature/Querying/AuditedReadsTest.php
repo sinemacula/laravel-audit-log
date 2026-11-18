@@ -18,6 +18,9 @@ use SineMacula\Laravel\AuditLog\Querying\AccessEvidence;
 use SineMacula\Laravel\AuditLog\Querying\AccessRecorder;
 use SineMacula\Laravel\AuditLog\Querying\AuditReadRefusedException;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
+use SineMacula\Laravel\AuditLog\Querying\Enums\Acknowledgement;
+use SineMacula\Laravel\AuditLog\Querying\Enums\ExportFinding;
+use SineMacula\Laravel\AuditLog\Querying\ExportFile;
 use SineMacula\Laravel\AuditLog\Querying\TrailEntry;
 use SineMacula\Laravel\AuditLog\Querying\TrailFilters;
 use SineMacula\Laravel\AuditLog\Querying\TrailReader;
@@ -357,6 +360,42 @@ final class AuditedReadsTest extends TestCase
             ->assertAuditedTimes('audit_log.trail_counted', 1)
             ->assertAudited('audit_log.trail_read', static fn (AuditRecord $record): bool => $record->outcome === 'success' && $record->actorId === '7')
             ->assertNotAudited('audit_log.trail_exported');
+    }
+
+    /**
+     * Under the fake an export publishes and is assertable, and its
+     * verification finds the journal missing, as the fake holds it.
+     *
+     * @return void
+     */
+    public function testUnderTheFakeAnExportAndItsVerificationAreAssertable(): void
+    {
+        $this->allowEverything();
+        $this->seedEntries(2);
+
+        AuditLog::fake();
+
+        $path = uniqid(sys_get_temp_dir() . '/audit-log-fake-', true) . '.ndjson';
+
+        try {
+            $result       = $this->financeTrail()->export($path);
+            $lines        = file($path);
+            $verification = $this->financeTrail()->verifyExport($path);
+        } finally {
+            foreach ([$path, $path . ExportFile::MANIFEST_SUFFIX] as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
+        }
+
+        self::assertSame(Acknowledgement::STORED, $result->acknowledgement);
+        self::assertIsArray($lines);
+        self::assertCount(2, $lines);
+        self::assertSame([ExportFinding::ENTRY_MISSING], $verification->findings);
+
+        $this->assertAudited('audit_log.trail_exported', static fn (AuditRecord $record): bool => $record->id === $result->entryId && $record->outcome === 'success')
+            ->assertAudited('audit_log.export_verified');
     }
 
     /**

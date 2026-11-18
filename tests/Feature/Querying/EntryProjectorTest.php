@@ -270,11 +270,12 @@ final class EntryProjectorTest extends TestCase
     }
 
     /**
-     * An envelope-shaped map is always read, so its ciphertext is never shown.
+     * Only a map of an integer `v` from 1 and non-empty string `k` and `c` is
+     * read as an envelope; any other `v`, `k` and `c` map is shown as stored.
      *
      * @return void
      */
-    public function testAnEnvelopeShapedPropertyIsAlwaysRead(): void
+    public function testOnlyAWellTypedEnvelopeShapedPropertyIsRead(): void
     {
         $reader = new RevealingFieldReader;
         $stored = self::signed('{"own":{"k":"mine","c":"plain words","v":2},"dirty":{"v":1,"k":"key\u0007","c":"x"},"unsafe":{"v":9007199254740992,"k":"k","c":"x"},'

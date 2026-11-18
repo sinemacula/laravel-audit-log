@@ -787,6 +787,35 @@ final class TrailReaderTest extends TestCase
     }
 
     /**
+     * A malformed `read.max_per_page` refuses a page before anything is read,
+     * and a count still reads.
+     *
+     * @return void
+     */
+    public function testAMalformedMostPerPageRefusesOnlyPages(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.read.max_per_page', 0);
+
+        $policy = $this->usePolicy(static fn (): AccessScope => AccessScope::all());
+
+        $this->seedEntries(2);
+        $this->captureQueries();
+
+        try {
+            $this->financeTrail()->cursorPaginate();
+
+            self::fail('Expected the page to be refused.');
+        } catch (\InvalidArgumentException $refusal) {
+            self::assertStringContainsString('`audit-log.read.max_per_page`', $refusal->getMessage());
+        }
+
+        self::assertSame([], $this->capturedQueries());
+        self::assertSame([], $policy->asked());
+        self::assertSame([], $this->readRecords());
+        self::assertSame(2, $this->financeTrail()->count());
+    }
+
+    /**
      * A page that holds the last entry has no cursor, even when it is full.
      *
      * @return void

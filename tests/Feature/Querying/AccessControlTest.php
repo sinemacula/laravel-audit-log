@@ -191,7 +191,8 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * No filter escapes a multi-tenant scope, on any page or in the count.
+     * A filter narrows within a multi-tenant scope and never escapes it, on any
+     * page or in the count.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
      * @return void
@@ -208,6 +209,7 @@ final class AccessControlTest extends TestCase
 
         $this->seedEntry(self::inTenant('org_03', ['actor_id' => '7']), self::at(2));
         $this->seedEntry(self::inTenant(null, ['actor_id' => '7']), self::at(3));
+        $this->seedEntry(self::inTenant('org_01', ['actor_id' => '8', 'event' => 'payment.captured', 'correlation_id' => 'app:ticket-456']), self::at(4));
 
         $trail = $narrow($this->financeTrail());
 
