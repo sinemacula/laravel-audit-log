@@ -32,11 +32,15 @@ use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Http\Kernel as FoundationHttpKernel;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
+use Illuminate\Foundation\Http\Middleware\ValidatePostSize;
 use Illuminate\Log\Context\Events\ContextDehydrating;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -972,6 +976,29 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * A kernel resolved before the provider boots, as a real request's is, is
+     * given the frame middleware first and once.
+     *
+     * @return void
+     */
+    public function testAKernelResolvedEarlierIsGivenTheFrameMiddlewareFirst(): void
+    {
+        $app = $this->app;
+
+        assert($app instanceof Application);
+
+        $kernel = new FoundationHttpKernel($app, $app->make(Router::class));
+
+        $kernel->setGlobalMiddleware([ValidatePostSize::class, TrimStrings::class]);
+
+        $app->instance(HttpKernel::class, $kernel);
+
+        (new \ReflectionMethod(AuditLogServiceProvider::class, 'registerHttpFrame'))->invoke(new AuditLogServiceProvider($app));
+
+        self::assertSame([EnterHttpFrame::class, ValidatePostSize::class, TrimStrings::class], $app->make(HttpKernel::class)->getGlobalMiddleware());
+    }
+
+    /**
      * A kernel that is not Laravel's resolves without the frame middleware.
      *
      * @return void
@@ -1207,6 +1234,19 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
+     * A `booted()` callback registered before the package boots runs ahead of
+     * the freeze, so its definition is kept.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('defineInAnEarlierBootedCallback')]
+    public function testABootedCallbackRegisteredBeforeThePackageBootsMayDefine(): void
+    {
+        self::assertTrue(app(EventCatalogue::class)->isFrozen());
+        self::assertTrue(app(EventCatalogue::class)->isRegistered(EventCode::of(InvoiceActivity::APPROVED)));
+    }
+
+    /**
      * Booting reads no setting that could stop it.
      *
      * @return void
@@ -1240,6 +1280,20 @@ final class AuditLogServiceProviderTest extends TestCase
                 $recorder->define(InvoiceActivity::class);
                 $recorder->contribute(TenantContributor::class);
             }
+        });
+    }
+
+    /**
+     * Define an enum from a `booted()` callback registered before the package's
+     * provider boots.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function defineInAnEarlierBootedCallback(Application $app): void
+    {
+        $app->booted(static function (Application $app): void {
+            $app->make(Recorder::class)->define(InvoiceActivity::class);
         });
     }
 
@@ -1288,27 +1342,85 @@ final class AuditLogServiceProviderTest extends TestCase
     }
 
     /**
-     * Give each setting the provider could trip over a malformed value.
+     * Give every setting the package reads a malformed value.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
      */
     protected function malformEverySetting(Application $app): void
     {
+        $this->malformEveryCaptureSetting($app);
+
         $app->make(ConfigRepository::class)->set([
-            'audit-log.actor.guards'                   => 'web',
-            'audit-log.context.trust_request_id'       => 'yes',
-            'audit-log.context.request_id_header'      => 'X Request',
-            'audit-log.context.trust_traceparent'      => 'yes',
-            'audit-log.definitions.require_registered' => 'yes',
-            'audit-log.source.id'                      => 42,
-            'audit-log.source.region'                  => 42,
-            'audit-log.integrity.log_id'               => '../escape',
-            'audit-log.integrity.checkpoints_table'    => 'Seals',
-            'audit-log.integrity.seal.schedule'        => 'often',
-            'audit-log.integrity.seal.batch'           => 'many',
-            'audit-log.integrity.anchor.driver'        => 's3',
-            'audit-log.integrity.anchor.path'          => '../anchors',
+            'audit-log.storage.connection'                        => 42,
+            'audit-log.storage.maintenance_connection'            => 42,
+            'audit-log.entries.table'                             => 'Entries',
+            'audit-log.entries.artifacts_table'                   => 'Artifacts',
+            'audit-log.integrity.keys'                            => 'k2026',
+            'audit-log.integrity.current'                         => 42,
+            'audit-log.integrity.log_id'                          => '../escape',
+            'audit-log.integrity.checkpoints_table'               => 'Seals',
+            'audit-log.integrity.members_table'                   => 'Members',
+            'audit-log.integrity.state_table'                     => 'State',
+            'audit-log.integrity.seal.schedule'                   => 'often',
+            'audit-log.integrity.seal.sweep_schedule'             => 'often',
+            'audit-log.integrity.seal.batch'                      => 'many',
+            'audit-log.integrity.seal.max_batches'                => 'many',
+            'audit-log.integrity.seal.lookback_seconds'           => 'long',
+            'audit-log.integrity.seal.settle_seconds'             => 'long',
+            'audit-log.integrity.seal.max_attempts'               => 'many',
+            'audit-log.integrity.verify.schedule'                 => 'often',
+            'audit-log.integrity.verify.max_unsealed_age_seconds' => 'long',
+            'audit-log.integrity.anchor.driver'                   => 's3',
+            'audit-log.integrity.anchor.disk'                     => 42,
+            'audit-log.integrity.anchor.path'                     => '../anchors',
+            'audit-log.integrity.anchor.batch'                    => 'many',
+            'audit-log.lifecycle.journal_table'                   => 'Journal',
+            'audit-log.lifecycle.holds_table'                     => 'Holds',
+            'audit-log.lifecycle.lock_table'                      => 'Lock',
+            'audit-log.retention.after_days'                      => 'forever',
+            'audit-log.retention.categories'                      => 'security',
+            'audit-log.retention.preserve'                        => 'security',
+            'audit-log.retention.batch'                           => 'many',
+            'audit-log.retention.max_seconds'                     => 'long',
+            'audit-log.retention.schedule'                        => 'often',
+            'audit-log.import.batches_table'                      => 'Batches',
+            'audit-log.import.chunk'                              => 'many',
+            'audit-log.import.max_skew_seconds'                   => 'long',
+            'audit-log.import.max_line_bytes'                     => 'many',
+            'audit-log.actor.guards'                              => 'web',
+            'audit-log.context.trust_request_id'                  => 'yes',
+            'audit-log.context.request_id_header'                 => 'X Request',
+            'audit-log.context.trust_traceparent'                 => 'yes',
+            'audit-log.definitions.require_registered'            => 'yes',
+            'audit-log.read.max_per_page'                         => 0,
+            'audit-log.export.chunk'                              => 0,
+            'audit-log.source.id'                                 => 42,
+            'audit-log.source.region'                             => 42,
+            'audit-log.redaction.keys'                            => 'password',
+            'audit-log.redaction.key'                             => 'short',
+            'audit-log.redaction.identifiers'                     => 'plain',
+            'audit-log.redaction.ip'                              => 'some',
+            'audit-log.redaction.max_bytes'                       => 'many',
+            'audit-log.redaction.max_context_bytes'               => 'many',
+            'audit-log.privacy.keys'                              => 'w2026',
+            'audit-log.privacy.current'                           => 42,
+            'audit-log.privacy.subject_keys_table'                => 'Keys',
+            'audit-log.privacy.owner_erasures_table'              => 'Erasures',
+            'audit-log.privacy.key_uses_table'                    => 'Uses',
+            'audit-log.privacy.rewrap_batch'                      => 'many',
+            'audit-log.failure.mode'                              => 'sometimes',
+            'audit-log.failure.log_channel'                       => 42,
+            'audit-log.delivery.mode'                             => 'carrier',
+            'audit-log.delivery.outbox.connection'                => 42,
+            'audit-log.delivery.outbox.table'                     => 'Outbox',
+            'audit-log.delivery.outbox.lease_seconds'             => 'long',
+            'audit-log.delivery.outbox.max_attempts'              => 'many',
+            'audit-log.delivery.outbox.backoff_seconds'           => 'long',
+            'audit-log.delivery.deliveries_table'                 => 'Deliveries',
+            'audit-log.monitor.seal_minutes'                      => 'long',
+            'audit-log.monitor.daily_minutes'                     => 'long',
+            'audit-log.monitor.outbox_minutes'                    => 'long',
         ]);
     }
 
