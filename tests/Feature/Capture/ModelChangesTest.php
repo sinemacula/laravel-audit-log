@@ -23,9 +23,11 @@ use SineMacula\Laravel\AuditLog\Privacy\Redactor;
 use SineMacula\Laravel\AuditLog\Recorder;
 use Tests\Concerns\CreatesWatchedModels;
 use Tests\Fixtures\Capture\Models\HaltingInvoice;
+use Tests\Fixtures\Capture\Models\KeylessTagLink;
 use Tests\Fixtures\Capture\Models\PlainLine;
 use Tests\Fixtures\Capture\Models\Tag;
 use Tests\Fixtures\Capture\Models\TaggedInvoice;
+use Tests\Fixtures\Capture\Models\TagLink;
 use Tests\Fixtures\Capture\Models\WatchedInvoice;
 use Tests\Fixtures\Capture\Models\WatchedInvoiceRevision;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
@@ -240,6 +242,63 @@ final class ModelChangesTest extends TestCase
     }
 
     /**
+     * A watched `using()` pivot with a key of its own records an attach and a
+     * detach, naming the pivot row.
+     *
+     * @return void
+     */
+    public function testAWatchedPivotModelRecordsAttachAndDetach(): void
+    {
+        $tagged  = TaggedInvoice::query()->create(['number' => 'TAG-1']);
+        $tag     = Tag::query()->create(['name' => 'urgent']);
+        $written = count($this->entries());
+
+        $tagged->linkedTags()->attach($tag->id);
+
+        $link = TagLink::query()->sole();
+
+        $tagged->linkedTags()->detach($tag->id);
+
+        $entries = array_slice($this->entries(), $written);
+
+        self::assertSame(
+            [['tag_link.created', TagLink::class, (string) $link->id], ['tag_link.deleted', TagLink::class, (string) $link->id]],
+            array_map(static fn (AuditEntry $entry): array => [$entry->event, $entry->subject_type, $entry->subject_id], $entries),
+        );
+        self::assertSame(['tag_id' => $tag->id, 'tagged_invoice_id' => $tagged->id], self::sorted($entries[0]->properties));
+        self::assertSame(0, TagLink::query()->count());
+        self::assertSame([], $this->failures);
+    }
+
+    /**
+     * A watched `using()` pivot with no key of its own fails each capture,
+     * contained, and the attach and the detach still happen.
+     *
+     * @return void
+     */
+    public function testAWatchedPivotModelWithoutAKeyFailsItsCapturesContained(): void
+    {
+        $tagged  = TaggedInvoice::query()->create(['number' => 'TAG-1']);
+        $tag     = Tag::query()->create(['name' => 'urgent']);
+        $written = count($this->entries());
+        $pivot   = DB::connection(self::CONNECTION)->table(TaggedInvoice::PIVOT_TABLE);
+
+        $tagged->keylessLinkedTags()->attach($tag->id);
+
+        self::assertSame(1, $pivot->count());
+
+        $tagged->keylessLinkedTags()->detach($tag->id);
+
+        self::assertSame(0, $pivot->count());
+        self::assertCount($written, $this->entries());
+        self::assertSame(
+            array_fill(0, 2, [KeylessTagLink::class, RecordModelChange::class, \InvalidArgumentException::class]),
+            array_map(static fn (AuditCaptureFailed $failure): array => [$failure->eventClass, $failure->mapperClass, $failure->exceptionClass], $this->failures),
+        );
+        self::assertCount(2, $this->reporter->reports());
+    }
+
+    /**
      * A custom event that answers in place of Eloquent's writes nothing.
      *
      * @return void
@@ -355,6 +414,8 @@ final class ModelChangesTest extends TestCase
             AuditLog::watch(HaltingInvoice::class, as: 'halting_invoice', fields: ['number']);
             AuditLog::watch(TaggedInvoice::class, as: 'tagged_invoice', fields: ['number']);
             AuditLog::watch(Tag::class, as: 'tag', fields: ['name']);
+            AuditLog::watch(TagLink::class, as: 'tag_link', fields: ['tagged_invoice_id', 'tag_id']);
+            AuditLog::watch(KeylessTagLink::class, as: 'keyless_tag_link', fields: ['tagged_invoice_id', 'tag_id']);
 
             try {
                 $app->make(Recorder::class)->watch(AuditEntry::class, as: 'audit_entry', fields: ['event']);
@@ -458,6 +519,12 @@ final class ModelChangesTest extends TestCase
             $table->primary(['tagged_invoice_id', 'tag_id']);
         });
 
+        $schema->create(TagLink::TABLE, static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->unsignedInteger('tagged_invoice_id');
+            $table->unsignedInteger('tag_id');
+        });
+
         $this->beforeApplicationDestroyed(function (): void {
             $this->dropTaggedInvoiceTables();
         });
@@ -472,6 +539,7 @@ final class ModelChangesTest extends TestCase
     {
         $schema = Schema::connection(self::CONNECTION);
 
+        $schema->dropIfExists(TagLink::TABLE);
         $schema->dropIfExists(TaggedInvoice::PIVOT_TABLE);
         $schema->dropIfExists(Tag::TABLE);
         $schema->dropIfExists(TaggedInvoice::TABLE);
