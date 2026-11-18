@@ -26,7 +26,7 @@ loses, repeats or invents a record changes what the log is evidence of, so each 
   (`Stores\Enums\FailedOperation`): `finalise`, `store`, `outbox`, `spill`, `notify` or `drain`. A `QueryException`'s
   message holds the row, so it is never chained, never reported and never read, and inside a savepoint Laravel is handed
   it masked, so a record's value cannot read as a deadlock and cost the savepoint its rollback. The destination names
-  every destination that failed in a sync stack, its ids separated by commas, and the one that failed in a drain.
+  every destination that failed in a sync stack, its ids separated by commas, and the last one that failed in a drain.
 - The outbox row holds the envelope's canonical JSON encrypted with `Illuminate\Contracts\Encryption\StringEncrypter`,
   through `encryptString()` and `decryptString()`, never PHP serialisation. The row's id is the record's id, and a row
   whose envelope holds another is refused as `id_mismatch`.
@@ -300,8 +300,8 @@ $this->app->singleton(AuditStore::class, static fn ($app): AuditStore => new Sta
   for `transactional()` in sync mode, and the outbox is the remedy.
 - A stack tries every destination in order. One that fails stops none of the others and undoes nothing. In sync mode a
   single `StackDeliveryException` names each one that failed, once all are tried, and it follows the failure policy.
-- In outbox mode a failing destination is tracked on its receipt and reported at its final attempt, and a retry reaches
-  only the destinations without the record.
+- In outbox mode each failing destination keeps its failure's class on its receipt. At the final attempt the row is
+  reported once, naming the last destination that failed, and a retry reaches only the destinations without the record.
 - In sync mode there are no receipts, so a replay can repeat a log destination's line.
 - `LogAuditStore` writes one line per record at `info`: the marker `audit-log:v1` and a space, then its formatter's
   output with any carriage return, line feed or Unicode line or paragraph separator escaped. The marker is there because

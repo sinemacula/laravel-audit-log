@@ -80,7 +80,7 @@ final class ScheduleSettingTest extends TestCase
     {
         yield from [
             'not a cron' => ['every night at org_01'],
-            'six fields' => ['* * * * * * *'],
+            'six fields' => ['* * * * * *'],
             'an integer' => [5],
             'false'      => [false],
             'a list'     => [[1, 2]],
