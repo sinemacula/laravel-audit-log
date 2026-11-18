@@ -137,6 +137,41 @@ final class LocalKeyWrapperTest extends TestCase
     }
 
     /**
+     * Rows of `[the offset of the byte flipped in the golden wrapped key]`.
+     *
+     * @return iterable<string, array{0: int}>
+     */
+    public static function provideTamperedBytes(): iterable
+    {
+        yield from [
+            'a ciphertext byte' => [LocalKeyWrapper::NONCE_BYTES],
+            'the last tag byte' => [LocalKeyWrapper::NONCE_BYTES + LocalKeyWrapper::DATA_KEY_BYTES + LocalKeyWrapper::TAG_BYTES - 1],
+        ];
+    }
+
+    /**
+     * The golden wrapped key with one byte flipped does not unwrap.
+     *
+     * @param  int  $offset
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    #[DataProvider('provideTamperedBytes')]
+    public function testAFlippedByteFailsToUnwrap(int $offset): void
+    {
+        $golden = self::golden();
+        $sealed = self::decode($golden['wrapped']);
+
+        $sealed[$offset] = chr(ord($sealed[$offset]) ^ 1);
+
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage(self::UNWRAPPED);
+
+        self::wrapper()->unwrap(self::base64url($sealed), 'w2026', $golden['context']);
+    }
+
+    /**
      * A key wrapped under one wrapping key does not unwrap under another, even
      * with the same context.
      *
