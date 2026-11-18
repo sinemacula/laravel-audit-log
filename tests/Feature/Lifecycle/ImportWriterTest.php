@@ -411,7 +411,7 @@ final class ImportWriterTest extends TestCase
      */
     public function testTheCountsCommitWithTheRows(): void
     {
-        app(ImportBatches::class)->close(self::BATCH);
+        self::assertTrue(app(ImportBatches::class)->settles(self::BATCH, ImportStatus::INTERRUPTED));
 
         $log = $this->statements();
 

@@ -1186,7 +1186,7 @@ COMMIT;
 - `tests/Integration/Stores/DatabaseAuditStoreTest.php` `testStoresAnImportedRecordWithItsSourceDigest`
 - `tests/Integration/Database/IntegrityProgressTest.php` `testEveryOwnNameIsAccepted`
 - `tests/Feature/Lifecycle/ImportBatchesTest.php` `testStartInsertsARunningBatch`,
-  `testProgressUpdatesCountsInTheChunksTransaction`, `testCloseOnlyClosesARunningBatch`,
+  `testProgressUpdatesCountsInTheChunksTransaction`, `testSettlesOnlyARunningBatch`,
   `testItWritesTheStorageConnectionsWriter`
 - `tests/Feature/Lifecycle/ImportWriterTest.php` `testAChunkIsOneTransactionWithNoSavepoint`,
   `testItRefusesInsideATransaction`, `testRowsPerInsertFollowTheEngine`, `testAUniqueViolationReclassifiesOnce`,
