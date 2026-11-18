@@ -113,7 +113,7 @@ final class EntrySettingsTest extends TestCase
     {
         yield from [
             '48 characters'         => [str_repeat('a', 48)],
-            'a space'               => [' '],
+            'a space alone'         => [' '],
             'an integer'            => [42],
             'a list'                => [['audit_log_entries']],
             'a hyphen'              => ['audit-log'],
