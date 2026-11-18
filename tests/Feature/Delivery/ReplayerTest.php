@@ -507,6 +507,24 @@ final class ReplayerTest extends TestCase
     }
 
     /**
+     * An empty file replays nothing, and a non-empty file with no spill line is
+     * refused.
+     *
+     * @return void
+     */
+    public function testOnlyAnEmptyFileMayHoldNoSpillLine(): void
+    {
+        self::assertSame([0, 0, 0, 0, []], self::tally($this->replayer()->spill($this->file(''), false)));
+
+        $path = $this->file("\n");
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(sprintf('The spill file [%s] holds no spill line.', $path));
+
+        $this->replayer()->spill($path, false);
+    }
+
+    /**
      * A failed row is requeued and drained: its record reaches the store and
      * the row goes.
      *
