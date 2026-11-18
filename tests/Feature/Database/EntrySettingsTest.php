@@ -7,7 +7,11 @@ namespace Tests\Feature\Database;
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\KeyTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use Tests\TestCase;
 
 /**
@@ -103,14 +107,13 @@ final class EntrySettingsTest extends TestCase
      * Rows of `[table]`: values refused as a table name; a capital is refused
      * because every engine reports index names in lower case.
      *
-     * @return iterable<string, array{0: int|list<string>|string|null}>
+     * @return iterable<string, array{0: int|list<string>|string}>
      */
     public static function provideRefusedTables(): iterable
     {
         yield from [
             '48 characters'         => [str_repeat('a', 48)],
-            'empty'                 => [''],
-            'null'                  => [null],
+            'a space alone'         => [' '],
             'an integer'            => [42],
             'a list'                => [['audit_log_entries']],
             'a hyphen'              => ['audit-log'],
@@ -133,11 +136,11 @@ final class EntrySettingsTest extends TestCase
      * Each refused value fails closed, naming the setting and the names it
      * takes.
      *
-     * @param  int|list<string>|string|null  $table
+     * @param  int|list<string>|string  $table
      * @return void
      */
     #[DataProvider('provideRefusedTables')]
-    public function testRefusesATableThatCannotNameEveryIndex(array|int|string|null $table): void
+    public function testRefusesATableThatCannotNameEveryIndex(array|int|string $table): void
     {
         app(ConfigRepository::class)->set(self::KEY, $table);
 
@@ -145,6 +148,54 @@ final class EntrySettingsTest extends TestCase
         $this->expectExceptionMessage(self::MESSAGE);
 
         EntrySettings::table();
+    }
+
+    /**
+     * Rows of `[key, value, read, default]`: every table setting, `null` and
+     * empty, as an unset or empty environment variable leaves it.
+     *
+     * @return iterable<string, array{0: string, 1: ?string, 2: \Closure(): string, 3: string}>
+     */
+    public static function provideUnsetTableSettings(): iterable
+    {
+        $tables = [
+            'audit-log.entries.table'                => [EntrySettings::table(...), EntrySettings::DEFAULT_TABLE],
+            'audit-log.entries.artifacts_table'      => [EntrySettings::artifactsTable(...), EntrySettings::DEFAULT_ARTIFACTS_TABLE],
+            'audit-log.integrity.checkpoints_table'  => [IntegrityTables::checkpointsTable(...), IntegrityTables::DEFAULT_CHECKPOINTS],
+            'audit-log.integrity.members_table'      => [IntegrityTables::membersTable(...), IntegrityTables::DEFAULT_MEMBERS],
+            'audit-log.integrity.state_table'        => [IntegrityTables::stateTable(...), IntegrityTables::DEFAULT_STATE],
+            'audit-log.lifecycle.journal_table'      => [LifecycleTables::journalTable(...), LifecycleTables::DEFAULT_JOURNAL],
+            'audit-log.lifecycle.holds_table'        => [LifecycleTables::holdsTable(...), LifecycleTables::DEFAULT_HOLDS],
+            'audit-log.lifecycle.lock_table'         => [LifecycleTables::lockTable(...), LifecycleTables::DEFAULT_LOCK],
+            'audit-log.import.batches_table'         => [LifecycleTables::importBatchesTable(...), LifecycleTables::DEFAULT_IMPORT_BATCHES],
+            'audit-log.privacy.subject_keys_table'   => [KeyTables::subjectKeysTable(...), KeyTables::DEFAULT_SUBJECT_KEYS],
+            'audit-log.privacy.owner_erasures_table' => [KeyTables::ownerErasuresTable(...), KeyTables::DEFAULT_OWNER_ERASURES],
+            'audit-log.privacy.key_uses_table'       => [KeyTables::keyUsesTable(...), KeyTables::DEFAULT_KEY_USES],
+            'audit-log.delivery.outbox.table'        => [DeliveryTables::outboxTable(...), DeliveryTables::DEFAULT_OUTBOX],
+            'audit-log.delivery.deliveries_table'    => [DeliveryTables::deliveriesTable(...), DeliveryTables::DEFAULT_DELIVERIES],
+        ];
+
+        foreach ($tables as $key => [$read, $default]) {
+            yield $key . ': null' => [$key, null, $read, $default];
+            yield $key . ': empty' => [$key, '', $read, $default];
+        }
+    }
+
+    /**
+     * Every table setting that is `null` or empty names its default table.
+     *
+     * @param  string  $key
+     * @param  ?string  $value
+     * @param  \Closure(): string  $read
+     * @param  string  $default
+     * @return void
+     */
+    #[DataProvider('provideUnsetTableSettings')]
+    public function testANullOrEmptyTableSettingIsItsDefault(string $key, ?string $value, \Closure $read, string $default): void
+    {
+        app(ConfigRepository::class)->set($key, $value);
+
+        self::assertSame($default, $read());
     }
 
     /**
@@ -220,11 +271,11 @@ final class EntrySettingsTest extends TestCase
      * A value the entries table refuses is refused for the artifacts table too,
      * naming the artifacts table's key.
      *
-     * @param  int|list<string>|string|null  $table
+     * @param  int|list<string>|string  $table
      * @return void
      */
     #[DataProvider('provideRefusedTables')]
-    public function testAMalformedArtifactsTableIsRefusedNamingItsKey(array|int|string|null $table): void
+    public function testAMalformedArtifactsTableIsRefusedNamingItsKey(array|int|string $table): void
     {
         app(ConfigRepository::class)->set(self::ARTIFACTS_KEY, $table);
 

@@ -92,10 +92,12 @@ each contract must keep to is in its docblock and in the extending guide's table
 
 - A binding made after a default has resolved still replaces it for every later resolution, as the container drops
   the resolved instance; an object that was given the default before keeps it.
-- A registration made after the application has booted, from a `booted()` callback, a request or a job, throws a
-  `\LogicException`. Repeating an identical registration changes nothing; a conflicting definition of a code, a
-  second mapper for one class or a conflicting watch is refused, whichever provider makes it first. A definition of one
-  of the package's own codes that differs from the package's is refused at boot.
+- A registration made after the application has booted, from a request or a job, throws a `\LogicException`. Freezing
+  is itself a `booted()` callback, and those run in the order they were registered, so a registration from one
+  registered after the package's provider booted throws and one from a callback registered earlier is accepted.
+  Repeating an identical registration changes nothing; a conflicting definition of a code, a second mapper for one class
+  or a conflicting watch is refused, whichever provider makes it first. A definition of one of the package's own codes
+  that differs from the package's is refused at boot.
 - A custom `Contracts\RetentionPolicy` makes the package schedule `audit-log:prune` at `retention.schedule` whatever the
   retention days say, since only the policy knows whether anything is kept for less than forever.
 - A `Contracts\PruneLedger` that does not return the records the pruner journals makes verification report every
@@ -141,7 +143,8 @@ each contract must keep to is in its docblock and in the extending guide's table
   `testIsPackageDefaultTellsThePackagesDefaultFromAnyOther`, `testRegistrationIsFrozenOnceBooted`,
   `testMappingAndWatchingAreFrozenOnceBooted`, `testRegistrationInAProvidersBootIsAccepted`,
   `testMappingAndWatchingInAProvidersBootAreAccepted`, `testADifferentDefinitionOfAPackageCodeIsRefusedAtBoot`,
-  `testAMalformedSettingDoesNotStopBoot`, `testTheHttpFrameMiddlewareIsFirstAndOnce`
+  `testABootedCallbackRegisteredBeforeThePackageBootsMayDefine`, `testAMalformedSettingDoesNotStopBoot`,
+  `testTheHttpFrameMiddlewareIsFirstAndOnce`, `testAKernelResolvedEarlierIsGivenTheFrameMiddlewareFirst`
 - `tests/Feature/RecorderTest.php` `testAContributorIsResolvedPerCapture`, `testDefineIsRefusedAfterBoot`,
   `testContributeIsRefusedAfterBoot`, `testAnIdenticalDefinitionRepeatedIsIdempotent`,
   `testAConflictingDefinitionThrowsInEitherOrder`
