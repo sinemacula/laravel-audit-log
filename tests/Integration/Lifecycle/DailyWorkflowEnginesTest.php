@@ -24,9 +24,8 @@ use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\TestCase;
 
 /**
- * Integration test for the daily run of seal, prune, erase and strict verify
- * on every engine, through the commands on the default bindings and a disk
- * anchor.
+ * Integration test for the daily run of seal, prune, erase and strict verify on
+ * every engine, through the commands on the default bindings and a disk anchor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -153,7 +152,11 @@ final class DailyWorkflowEnginesTest extends TestCase
      */
     private function charge(string $customer): void
     {
-        AuditLog::event(self::CHARGE)->by(Reference::of('App\Models\Customer', $customer))->on(Reference::of('App\Models\Account', '7'))->withProperties(['amount' => '12.00', 'card' => '4242'])->record();
+        AuditLog::event(self::CHARGE)
+            ->by(Reference::of('App\Models\Customer', $customer))
+            ->on(Reference::of('App\Models\Account', '7'))
+            ->withProperties(['amount' => '12.00', 'card' => '4242'])
+            ->record();
     }
 
     /**

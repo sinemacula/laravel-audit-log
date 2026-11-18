@@ -139,20 +139,51 @@ final class SealPlansTest extends TestCase
     private static function mysqlPlan(Connection $connection, array $statement): array
     {
         $text    = self::explain($connection, 'EXPLAIN FORMAT=TREE ', $statement);
-        $entries = '(?:e|' . preg_quote($connection->getTablePrefix() . EntrySettings::table(), '/') . ')';
+        $entries = '(?:e|' . preg_quote(self::entriesTable($connection), '/') . ')';
         $range   = '/index range scan on ' . $entries . ' using ' . preg_quote(self::recordedIndex(), '/') . ' over (.*?)(?:, with index condition|  \(cost=|$)/im';
 
         preg_match_all($range, $text, $ranges);
-        preg_match_all('/-> Sort\b[^\n]*?\brows=([0-9.e+]+)\)/', $text, $sorts);
-
-        $bounded = array_filter($ranges[1], static fn (string $over): bool => preg_match('/\'[^\']*\' <=? recorded_at\\b/', $over) === 1 && preg_match('/\\brecorded_at <= \'/', $over) === 1);
 
         return [
-            'bounded' => $bounded !== [],
+            'bounded' => array_filter($ranges[1], self::isMysqlRangeBounded(...)) !== [],
             'scanned' => preg_match('/(?:table scan|index scan) on ' . $entries . '\b/i', $text) === 1,
-            'sorted'  => max([0.0, ...array_map(floatval(...), $sorts[1])]),
+            'sorted'  => self::mysqlSortRows($text),
             'text'    => $text,
         ];
+    }
+
+    /**
+     * Whether a range of MySQL's tree plan bounds `recorded_at` from below and
+     * from above.
+     *
+     * @param  string  $over
+     * @return bool
+     */
+    private static function isMysqlRangeBounded(string $over): bool
+    {
+        return preg_match('/\'[^\']*\' <=? recorded_at\b/', $over) === 1 && preg_match('/\brecorded_at <= \'/', $over) === 1;
+    }
+
+    /**
+     * The most rows a sort of MySQL's tree plan is estimated to give or take
+     * from the line below it, since a limited sort's own estimate is capped at
+     * its limit; infinite when an estimate cannot be read.
+     *
+     * @param  string  $text
+     * @return float
+     */
+    private static function mysqlSortRows(string $text): float
+    {
+        $lines = explode("\n", $text);
+        $most  = 0.0;
+
+        foreach (preg_grep('/-> Sort\b/', $lines) ?: [] as $number => $line) {
+            foreach ([$line, $lines[$number + 1] ?? ''] as $step) {
+                $most = max($most, preg_match('/\brows=([0-9.e+]+)\)/', $step, $match) === 1 ? (float) $match[1] : INF);
+            }
+        }
+
+        return $most;
     }
 
     /**
@@ -170,26 +201,64 @@ final class SealPlansTest extends TestCase
     {
         [$tree, $text] = self::jsonExplain($connection, $statement);
 
-        $table = $connection->getTablePrefix() . EntrySettings::table();
+        $table = self::entriesTable($connection);
         $plan  = ['bounded' => false, 'scanned' => false, 'sorted' => 0.0, 'text' => $text];
 
         foreach (new \RecursiveIteratorIterator(new \RecursiveArrayIterator($tree), \RecursiveIteratorIterator::SELF_FIRST) as $node) {
-            if (!is_array($node) || !isset($node['Node Type'])) {
+            if (!is_array($node) || !is_string($node['Node Type'] ?? null)) {
                 continue;
             }
 
-            $type      = $node['Node Type'];
             $condition = is_string($node['Index Cond'] ?? null) ? $node['Index Cond'] : '';
 
-            $plan['bounded'] = $plan['bounded'] || (($node['Index Name'] ?? null) === self::recordedIndex() && preg_match('/recorded_at <= /', $condition) === 1 && preg_match('/recorded_at >=? /', $condition) === 1);
-            $plan['scanned'] = $plan['scanned'] || (($node['Relation Name'] ?? null) === $table && ($type === 'Seq Scan' || (in_array($type, ['Index Scan', 'Index Only Scan'], true) && $condition === '')));
-
-            if (in_array($type, ['Sort', 'Incremental Sort'], true) && is_numeric($node['Plan Rows'] ?? null)) {
-                $plan['sorted'] = max($plan['sorted'], (float) $node['Plan Rows']);
-            }
+            $plan['bounded'] = $plan['bounded'] || (($node['Index Name'] ?? null) === self::recordedIndex() && self::isPgsqlRangeBounded($condition));
+            $plan['scanned'] = $plan['scanned'] || (($node['Relation Name'] ?? null) === $table && self::isPgsqlScanWhole($node['Node Type'], $condition));
+            $plan['sorted']  = max($plan['sorted'], self::pgsqlSortRows($node));
         }
 
         return $plan;
+    }
+
+    /**
+     * Whether a PostgreSQL index condition bounds `recorded_at` from below and
+     * from above.
+     *
+     * @param  string  $condition
+     * @return bool
+     */
+    private static function isPgsqlRangeBounded(string $condition): bool
+    {
+        return preg_match('/recorded_at <= /', $condition) === 1 && preg_match('/recorded_at >=? /', $condition) === 1;
+    }
+
+    /**
+     * Whether a PostgreSQL plan node of the type reads its table whole.
+     *
+     * @param  string  $type
+     * @param  string  $condition
+     * @return bool
+     */
+    private static function isPgsqlScanWhole(string $type, string $condition): bool
+    {
+        return $type === 'Seq Scan' || (in_array($type, ['Index Scan', 'Index Only Scan'], true) && $condition === '');
+    }
+
+    /**
+     * The rows a PostgreSQL plan node sorts: none when it is no sort, and
+     * infinite when its estimate cannot be read.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $node
+     * @return float
+     */
+    private static function pgsqlSortRows(array $node): float
+    {
+        if (!in_array($node['Node Type'] ?? null, ['Sort', 'Incremental Sort'], true)) {
+            return 0.0;
+        }
+
+        return is_numeric($node['Plan Rows'] ?? null) ? (float) $node['Plan Rows'] : INF;
     }
 
     /**
@@ -203,7 +272,7 @@ final class SealPlansTest extends TestCase
     {
         /** @var \ArrayObject<int, array{sql: string, bindings: array<array-key, scalar|null>}> $reads */
         $reads = new \ArrayObject;
-        $table = self::connection()->getTablePrefix() . EntrySettings::table();
+        $table = self::entriesTable(self::connection());
 
         self::connection()->listen(static function (QueryExecuted $query) use ($reads, $table): void {
             if (!str_starts_with($query->sql, 'select') || !str_contains($query->sql, $table)) {
@@ -265,6 +334,17 @@ final class SealPlansTest extends TestCase
     private static function recordedIndex(): string
     {
         return EntrySettings::table() . '_recorded_index';
+    }
+
+    /**
+     * The entries table's name on the connection, with its prefix.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @return string
+     */
+    private static function entriesTable(Connection $connection): string
+    {
+        return $connection->getTablePrefix() . EntrySettings::table();
     }
 
     /**
