@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Integrity;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Str;
@@ -61,6 +62,12 @@ final class KeyStoreVerifierTest extends TestCase
 
     /** @var list<string> The columns that hold a key, and that an erasure changes. */
     private const array KEY_COLUMNS = ['state', 'wrapped_key', 'wrap_key_id', 'erasure_id'];
+
+    /** @var string The secret of the integrity ring's 2025 key. */
+    private const string SECRET_2025 = 'audit-log key store test key 2025 0123456789';
+
+    /** @var string The secret of the integrity ring's 2026 key. */
+    private const string SECRET_2026 = 'audit-log key store test key 2026 0123456789';
 
     /**
      * A key a verified erasure row lists as destroyed is clean: the owner's
@@ -276,6 +283,35 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
+     * Key uses naming more missing keys than one page holds are each counted
+     * once, at the least id.
+     *
+     * @return void
+     */
+    public function testEveryMissingKeyPastOnePageIsCounted(): void
+    {
+        $count = KeyStoreVerifier::PAGE + 1;
+        $uses  = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            $uses[] = ['key_id' => Str::uuid7()->toString(), 'entry_id' => self::entryId()];
+        }
+
+        foreach (array_chunk($uses, 500) as $chunk) {
+            $this->keyConnection()->table(KeyTables::keyUsesTable())->insert($chunk);
+        }
+
+        $ids = array_column($uses, 'key_id');
+
+        sort($ids, SORT_STRING);
+
+        [$summary, $tally] = $this->verify();
+
+        self::assertSame([Finding::KEY_MISSING->value => [$ids[0], $count]], self::findingsOf($tally));
+        self::assertSame($count, $summary->findings);
+    }
+
+    /**
      * Rows of `[column, value]`: each immutable column of a key row edited, as
      * an attacker with the database's credentials could.
      *
@@ -315,8 +351,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * A wrapped key copied from another row does not unwrap under its own
-     * context, so the row is `key_substituted`; the source is clean.
+     * A wrapped key copied from another row onto a key also flipped to
+     * superseded is `key_substituted` once; the source is clean.
      *
      * @return void
      */
@@ -325,11 +361,12 @@ final class KeyStoreVerifierTest extends TestCase
         [$source] = $this->makeSubjectKey(self::owner('42'));
         [$target] = $this->makeSubjectKey(self::owner('43'));
 
-        $this->changeKey($target->id, ['wrapped_key' => $source->wrappedKey]);
+        $this->changeKey($target->id, ['wrapped_key' => $source->wrappedKey, 'state' => KeyState::SUPERSEDED->value]);
 
-        [, $tally] = $this->verify();
+        [$summary, $tally] = $this->verify();
 
         self::assertSame([Finding::KEY_SUBSTITUTED->value => [$target->id, 1]], self::findingsOf($tally));
+        self::assertSame(1, $summary->findings);
     }
 
     /**
@@ -630,6 +667,78 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
+     * An owner erased under one integrity key and reinstated under the next is
+     * judged by both: before the reinstatement and after it, the key put back
+     * is `key_restored`, while the next generation and the kept key are clean.
+     *
+     * @return void
+     */
+    public function testARestoredKeyIsFoundAcrossAnIntegrityKeyRotation(): void
+    {
+        $this->useRing('k2025');
+
+        $owner = self::owner('42');
+
+        [$key]  = $this->makeSubjectKey($owner);
+        [$kept] = $this->makeSubjectKey($owner, category: self::BILLING);
+
+        $before = $this->storedKey($key->id);
+
+        $this->eraseByHand($owner, [$kept->id => ['held:' . self::HOLD_ID]], true);
+
+        $erased = $this->storedKey($key->id);
+
+        $this->useRing('k2026');
+        $this->changeKey($key->id, $before);
+
+        [, $unreinstated] = $this->verify();
+
+        $this->changeKey($key->id, $erased);
+        $this->reinstateByHand($owner);
+
+        [$next] = $this->makeSubjectKey($owner);
+
+        $this->changeKey($key->id, $before);
+
+        [, $reinstated] = $this->verify();
+
+        self::assertSame(2, $next->generation);
+        self::assertSame([Finding::KEY_RESTORED->value => [$key->id, 1]], self::findingsOf($unreinstated));
+        self::assertSame([Finding::KEY_RESTORED->value => [$key->id, 1]], self::findingsOf($reinstated));
+    }
+
+    /**
+     * An owner reinstated under one integrity key and erased again under the
+     * next is judged by the later erasure: a key above the first floor that it
+     * did not keep is `key_restored`.
+     *
+     * @return void
+     */
+    public function testAnErasureAfterARotationOutranksTheEarlierReinstatement(): void
+    {
+        $this->useRing('k2025');
+
+        $owner = self::owner('42');
+
+        $this->makeSubjectKey($owner);
+        $this->eraseByHand($owner);
+        $this->reinstateByHand($owner);
+
+        [$next] = $this->makeSubjectKey($owner);
+
+        $before = $this->storedKey($next->id);
+
+        $this->useRing('k2026');
+        $this->eraseByHand($owner);
+        $this->changeKey($next->id, $before);
+
+        [, $tally] = $this->verify();
+
+        self::assertSame(2, $next->generation);
+        self::assertSame([Finding::KEY_RESTORED->value => [$next->id, 1]], self::findingsOf($tally));
+    }
+
+    /**
      * Rows of `[fields]`: a reinstatement's payload field given a value of the
      * wrong type.
      *
@@ -710,6 +819,32 @@ final class KeyStoreVerifierTest extends TestCase
             Finding::KEY_RESTORED->value               => [$live->id, 1],
         ], self::findingsOf($tally));
         self::assertSame(2, $summary->erased);
+    }
+
+    /**
+     * An erasure past the first page of the journal is folded: the key put
+     * back after it is `key_restored`.
+     *
+     * @return void
+     */
+    public function testAnErasurePastTheFirstJournalPageIsFolded(): void
+    {
+        $owner = self::owner('42');
+
+        [$key] = $this->makeSubjectKey($owner);
+
+        $before = $this->storedKey($key->id);
+
+        $this->appendErasures(self::owner('43'), KeyStoreVerifier::JOURNAL_PAGE);
+
+        $erasure = $this->eraseByHand($owner);
+
+        $this->changeKey($key->id, $before);
+
+        [, $tally] = $this->verify();
+
+        self::assertGreaterThan(KeyStoreVerifier::JOURNAL_PAGE, $erasure->sequence);
+        self::assertSame([Finding::KEY_RESTORED->value => [$key->id, 1]], self::findingsOf($tally));
     }
 
     /**
@@ -899,6 +1034,21 @@ final class KeyStoreVerifierTest extends TestCase
         $verifier->verify($tally, true);
 
         return memory_get_peak_usage() - $before;
+    }
+
+    /**
+     * Make the integrity ring the 2025 and 2026 keys, signing under the one
+     * named.
+     *
+     * @param  string  $current
+     * @return void
+     */
+    private function useRing(string $current): void
+    {
+        app(ConfigRepository::class)->set([
+            'audit-log.integrity.keys'    => ['k2025' => self::SECRET_2025, 'k2026' => self::SECRET_2026],
+            'audit-log.integrity.current' => $current,
+        ]);
     }
 
     /**
