@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -17,6 +18,7 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
@@ -204,14 +206,34 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A time budget within its range is taken.
+     * `--max-seconds` bounds the run in place of `retention.max_seconds`, and a
+     * run without it takes the configured budget.
      *
      * @return void
      */
-    public function testATimeBudgetWithinItsRangeIsTaken(): void
+    public function testTheTimeBudgetOptionOverridesTheConfiguredOne(): void
     {
+        for ($seal = 1; $seal <= 3; $seal++) {
+            $this->storeOld(1);
+            $this->sealAll();
+        }
+
+        DB::listen(static function (QueryExecuted $query): void {
+            if (!str_starts_with($query->sql, 'insert') || !in_array(JournalKind::PRUNE->value, $query->bindings, true)) {
+                return;
+            }
+
+            CarbonImmutable::setTestNow(CarbonImmutable::now()->addSeconds(61));
+        });
+
         self::assertSame(0, $this->prune(['--max-seconds' => '60']));
-        self::assertSame(0, $this->prune(['--max-seconds' => '86400']));
+        self::assertStringContainsString(': partial.', $this->printed);
+        self::assertStringContainsString('Deleted 1 entries from 1 seals.', $this->printed);
+        self::assertSame(2, $this->entries());
+
+        self::assertSame(0, $this->prune());
+        self::assertStringContainsString(': complete.', $this->printed);
+        self::assertStringContainsString('Deleted 2 entries from 2 seals.', $this->printed);
     }
 
     /**
