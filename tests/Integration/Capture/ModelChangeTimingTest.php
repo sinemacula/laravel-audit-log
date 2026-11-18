@@ -14,13 +14,17 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Capture\CaptureCoordinator;
 use SineMacula\Laravel\AuditLog\Capture\CapturedEvents;
 use SineMacula\Laravel\AuditLog\Capture\MapperRegistry;
 use SineMacula\Laravel\AuditLog\Capture\ModelChangeDescriber;
 use SineMacula\Laravel\AuditLog\Capture\ModelWatcher;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\FailureClassifier;
 use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
+use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Events\AuditCaptureFailed;
 use SineMacula\Laravel\AuditLog\Listeners\RecordModelChange;
 use SineMacula\Laravel\AuditLog\Stores\AuditWriteFailedException;
@@ -42,6 +46,7 @@ use Tests\Unit\Stubs\StubAuthUser;
  *
  * @internal
  */
+#[CoversClass(CaptureCoordinator::class)]
 #[CoversClass(ModelChangeDescriber::class)]
 #[CoversClass(RecordModelChange::class)]
 final class ModelChangeTimingTest extends TestCase
@@ -324,6 +329,55 @@ final class ModelChangeTimingTest extends TestCase
         self::assertSame(66, $this->outboxCount());
         self::assertSame([], $this->failures);
         self::assertSame([], $this->reporter->reports());
+    }
+
+    /**
+     * In outbox mode a deadlocked outbox insert fails the save with the
+     * sanitised deadlock, and the host's retry records the change once.
+     *
+     * @return void
+     */
+    public function testInOutboxModeADeadlockedInsertFailsTheSaveAndTheRetryRecordsItOnce(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.delivery.mode', DeliveryMode::OUTBOX->value);
+
+        $connection = $this->outboxConnection();
+        $deadlock   = new QueryException(self::CONNECTION, 'insert into outbox values (?)', ['INV-1'], new \PDOException(self::DEADLOCK));
+        $insert     = '/^insert into \S*' . preg_quote(DeliveryTables::outboxTable(), '/') . '/';
+        $pending    = true;
+        $thrown     = [];
+
+        $connection->beforeExecuting(static function (string $query) use ($deadlock, $insert, &$pending): void {
+            if ($pending && preg_match($insert, $query) === 1) {
+                $pending = false;
+
+                throw $deadlock;
+            }
+        });
+
+        $connection->transaction(static function () use (&$thrown): void {
+            try {
+                self::invoice();
+            } catch (\Throwable $failure) {
+                $thrown[] = $failure;
+
+                throw $failure;
+            }
+        }, 2);
+
+        self::assertCount(1, $thrown);
+        self::assertInstanceOf(DeadlockException::class, $thrown[0]);
+        self::assertSame([FailureClassifier::sanitisedDeadlock()->getMessage(), 40001], [$thrown[0]->getMessage(), $thrown[0]->getCode()]);
+        self::assertNull($thrown[0]->getPrevious());
+        self::assertSame([], $this->spillLines());
+        self::assertSame([], $this->reporter->reports());
+        self::assertSame([[WatchedInvoice::class, RecordModelChange::class]], array_map(static fn (AuditCaptureFailed $failure): array => [$failure->eventClass, $failure->mapperClass], $this->failures));
+        self::assertSame(1, $connection->table(WatchedInvoice::TABLE)->count());
+        self::assertSame(1, $this->outboxCount());
+
+        app(OutboxDrainer::class)->drain(100, true);
+
+        self::assertSame([['invoice.created', ['amount' => 1250, 'number' => 'INV-1']]], $this->entries());
     }
 
     /**
