@@ -253,7 +253,8 @@ Accepted is not always durable, and `outcomes.md` says when it is. Every package
 
 - `tests/Feature/RecorderTest.php` `testContributorsRunInOrderDefaultsFirst`, `testADefaultBeatsALaterContributor`,
   `testAnApplicationContributorFillsAGap`, `testAContributorNeverReplacesAnExplicitValue`,
-  `testTheFirstContributorToFillWins`, `testAContributorIsResolvedPerCapture`, `testAThrowingContributorPropagates`,
+  `testTheFirstContributorToFillWins`, `testAContributorIsResolvedPerCapture`,
+  `testAThrowingContributorPropagatesAndLeavesTheBuilderUsable`,
   `testATimingRefusalRunsNoContributor`, `testHoldsOnlyRegistrationData`, `testDefineIsRefusedAfterBoot`,
   `testContributeIsRefusedAfterBoot`, `testAFakeBoundAfterTheRecorderIsResolvedIsUsed`,
   `testMinimisingSeesWhatTheContributorsFilled`, `testAMinimiserFailureFailsTheWriteAndStoresNothing`,
