@@ -310,7 +310,8 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
 - Entries and the batch row are written on the storage connection's writer; the journal rows and the hold through the
   maintenance connection. The lines are written in chunks of `import.chunk`, each one storage transaction with the
   batch's counts, refused inside a host transaction, so no savepoint is ever opened: built first, then classified,
-  then inserted, 24 rows to a statement on SQLite and up to 1,000 on MySQL and PostgreSQL.
+  then inserted, 24 rows to a statement on SQLite and up to 1,000 on MySQL and PostgreSQL, within 16 MiB of values
+  (`BYTES_PER_INSERT`), a quarter of MySQL's default `max_allowed_packet`; a row larger than that is inserted alone.
 - The batch state machine, `Lifecycle\Enums\ImportStatus`: a batch starts `running` and ends `complete`, `partial`,
   `failed` or `interrupted`, and a final status never changes. The batch row is inserted before its `import_started`
   row, and the start commits with the hold `--hold` asks for, so the hold is on the batch before its first entry; a
@@ -368,8 +369,9 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
   `src/Lifecycle/ImportFile.php`, `src/Lifecycle/ImportLineParser.php`: `REQUIRED`, `OPTIONAL`,
   `isEnvelopeShaped()`; `src/Lifecycle/ExportLineAdapter.php`; `src/Lifecycle/SourceDigest.php`: `DERIVATION_INFO`;
   `src/Lifecycle/ImportRecordBuilder.php`, `src/Lifecycle/ImportClassifier.php`, `src/Lifecycle/ImportWriter.php`:
-  `SQLITE_ROWS_PER_INSERT`, `ROWS_PER_INSERT`; `src/Lifecycle/ImportBatches.php`, `src/Lifecycle/ImportTally.php`:
-  `MAX_CONFLICT_IDS`; `src/Lifecycle/ImportSettings.php`: `STALE_SECONDS`; `src/Records/ImportedSource.php`.
+  `SQLITE_ROWS_PER_INSERT`, `ROWS_PER_INSERT`, `BYTES_PER_INSERT`; `src/Lifecycle/ImportBatches.php`,
+  `src/Lifecycle/ImportTally.php`: `MAX_CONFLICT_IDS`; `src/Lifecycle/ImportSettings.php`: `STALE_SECONDS`;
+  `src/Records/ImportedSource.php`.
 - `src/Lifecycle/Enums/ImportFormat.php`, `src/Lifecycle/Enums/ImportStatus.php`,
   `src/Lifecycle/Enums/ImportRejection.php`.
 - `src/Console/PruneCommand.php`, `src/Console/HoldCommand.php`, `src/Console/ReleaseCommand.php`,
@@ -500,11 +502,13 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
 - `tests/Feature/Lifecycle/ImportClassifierTest.php` `testDuplicatesWithinOneChunk`, `testAConflictWithinOneChunk`,
   `testADefinitionChangedBetweenImportsStillFindsTheDuplicate`
 - `tests/Feature/Lifecycle/ImportWriterTest.php` `testAChunkIsOneTransactionWithNoSavepoint`,
-  `testARejectedLineIsNeverTheCandidateOfItsPair`, `testRowsPerInsertFollowTheEngine`
+  `testARejectedLineIsNeverTheCandidateOfItsPair`, `testRowsPerInsertFollowTheEngine`, `testInsertsAreBoundedByBytes`,
+  `testARowOverTheBytesPerInsertGoesAlone`
 - `tests/Feature/Lifecycle/ImportRecordBuilderTest.php` `testADryRunEncryptsNothing`
 - `tests/Integration/Lifecycle/ImportUniquenessEnginesTest.php` `testTwoConcurrentImportsStoreEachRecordOnce`,
   `testAUniqueViolationRollsTheChunkBackAndReclassifies`, `testASecondViolationMakesTheBatchPartial`,
   `testAnInterruptedImportIsReportedAndClosed`
+- `tests/Integration/Lifecycle/ImportInsertPacketTest.php` `testAChunkOfLargeRowsFitsThePacket`
 - `tests/Unit/Lifecycle/Enums/ImportStatusTest.php` `testEveryStatusButRunningIsFinal`
 - `tests/Feature/Console/LifecycleChecksTest.php` `testProjectionDriftIsAProblemNamingTheHolds`,
   `testAPassedReviewDateIsANoteNotAProblem`, `testAStaleRunningImportIsANote`, `testAMismatchedInstallationIsAProblem`
