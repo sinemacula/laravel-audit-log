@@ -676,6 +676,8 @@ final class AuditLifecycleTest extends TestCase
 
         DB::listen(static function (QueryExecuted $query) use (&$crashing): void {
             if ($crashing && str_starts_with(strtolower($query->sql), 'insert') && in_array(JournalKind::IMPORT_FINISHED->value, $query->bindings, true)) {
+                $crashing = false;
+
                 throw new \RuntimeException('The journal could not be written.');
             }
         });
@@ -688,10 +690,9 @@ final class AuditLifecycleTest extends TestCase
             self::assertSame('The second chunk could not be written.', $exception->getMessage());
         }
 
-        $crashing = false;
-        $batch    = (array) DB::connection(StorageConnection::name())->table(LifecycleTables::importBatchesTable())->first();
-        $holdId   = $batch['hold_id'];
-        $entries  = static fn (): int => DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('import_batch_id', $batch['id'])->count();
+        $batch   = (array) DB::connection(StorageConnection::name())->table(LifecycleTables::importBatchesTable())->first();
+        $holdId  = $batch['hold_id'];
+        $entries = static fn (): int => DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('import_batch_id', $batch['id'])->count();
 
         self::assertSame('running', $batch['status']);
         self::assertIsString($holdId);

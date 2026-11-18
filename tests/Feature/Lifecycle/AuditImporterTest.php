@@ -464,8 +464,8 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * A failure in a later chunk keeps the chunks before it and fails the
-     * batch with their counts.
+     * A failure in a later chunk keeps the chunks before it and fails the batch
+     * with their counts.
      *
      * @return void
      *
@@ -928,12 +928,14 @@ final class AuditImporterTest extends TestCase
         self::assertSame([150, 97, 1, 2, 3], [$result->linesRead, $result->imported, $result->duplicates, $result->conflicts, $result->rejected]);
         self::assertSame([['rec-7', 'rec-9'], $holdId], [$result->conflictIds, $result->holdId]);
         self::assertIsArray($finish);
-        self::assertSame([150, 97, 1, 2, 3], [$finish['lines_read'] ?? null, $finish['imported'] ?? null, $finish['duplicates'] ?? null, $finish['conflicts'] ?? null, $finish['rejected'] ?? null]);
+        self::assertSame([150, 97, 1, 2, 3], [
+            $finish['lines_read'] ?? null, $finish['imported'] ?? null, $finish['duplicates'] ?? null, $finish['conflicts'] ?? null, $finish['rejected'] ?? null,
+        ]);
     }
 
     /**
-     * Closing a batch while its import is still writing fails the import
-     * before any entry and leaves one finish.
+     * Closing a batch while its import is still writing fails the import before
+     * any entry and leaves one finish.
      *
      * @return void
      *
