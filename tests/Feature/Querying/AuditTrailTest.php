@@ -537,6 +537,59 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
+     * Rows of `[filter, fields of the entry it matches, fields of one it does
+     * not]`.
+     *
+     * @formatter:off
+     *
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
+     * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail, 1: array<string, string>, 2: array<string, string>}>
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
+     *
+     * @formatter:on
+     */
+    public static function provideNarrowingFilters(): iterable
+    {
+        yield from [
+            'correlation' => [
+                static fn (AuditTrail $trail): AuditTrail => $trail->correlatedWith('app:ticket-123'),
+                [],
+                ['correlation_id' => 'app:ticket-456'],
+            ],
+            'principal' => [
+                static fn (AuditTrail $trail): AuditTrail => $trail->forPrincipal(Reference::of('team', 't_1')),
+                ['principal_type' => 'team', 'principal_id' => 't_1'],
+                ['principal_type' => 'team', 'principal_id' => 't_2'],
+            ],
+        ];
+    }
+
+    /**
+     * The filter keeps the matching entry and excludes the other.
+     *
+     * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $filter
+     * @param  array<string, string>  $matching
+     * @param  array<string, string>  $other
+     * @return void
+     */
+    #[DataProvider('provideNarrowingFilters')]
+    public function testAFilterExcludesNonMatchingEntries(\Closure $filter, array $matching, array $other): void
+    {
+        $this->allowEverything();
+
+        $kept = $this->seedEntry($matching, '2026-11-01T12:00:00.000001Z');
+
+        $this->seedEntry($other, '2026-11-01T12:00:00.000002Z');
+
+        $trail = $filter($this->financeTrail());
+
+        self::assertSame([$kept], self::idsOf($trail->cursorPaginate()));
+        self::assertSame(1, $trail->count());
+    }
+
+    /**
      * `holdingDataOf()` finds only entries holding the owner's fragments.
      *
      * @return void
